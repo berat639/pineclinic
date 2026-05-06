@@ -10,6 +10,29 @@ const ai = createAI()
 // Track active Gemini sessions per WebSocket connection
 const sessions = new Map<string, Awaited<ReturnType<typeof createLiveSession>>>()
 
+// Idle timeout: ses gelmezse session'ı kapat (token israfını önler)
+const IDLE_TIMEOUT_MS = 90_000
+const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function resetIdleTimer(id: string, ws: { close: () => void }) {
+  const existing = idleTimers.get(id)
+  if (existing) clearTimeout(existing)
+  idleTimers.set(id, setTimeout(() => {
+    console.log(`[${id}] Idle timeout — session kapatılıyor`)
+    const session = sessions.get(id)
+    try { session?.close() } catch {}
+    sessions.delete(id)
+    idleTimers.delete(id)
+    ws.close()
+  }, IDLE_TIMEOUT_MS))
+}
+
+function clearIdleTimer(id: string) {
+  const t = idleTimers.get(id)
+  if (t) clearTimeout(t)
+  idleTimers.delete(id)
+}
+
 const app = new Elysia()
   .use(cors({ origin: 'http://localhost:3000' }))
 
@@ -57,6 +80,8 @@ const app = new Elysia()
           turns: [{ role: 'user', parts: [{ text: '[KULLANICI BAĞLANDI]' }] }],
           turnComplete: true,
         })
+
+        resetIdleTimer(id, ws)
       } catch (err) {
         console.error(`[${id}] Failed to start session:`, err)
         ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))
@@ -78,11 +103,13 @@ const app = new Elysia()
             mimeType: 'audio/pcm;rate=16000',
           },
         })
+        resetIdleTimer(id, ws)
       }
     },
 
     close(ws) {
       const id = (ws.data as Record<string, unknown>).sessionId as string
+      clearIdleTimer(id)
       const session = sessions.get(id)
       try { session?.close() } catch {}
       sessions.delete(id)
