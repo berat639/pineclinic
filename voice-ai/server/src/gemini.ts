@@ -101,8 +101,8 @@ export async function createLiveSession(ai: GoogleGenAI, callbacks: SessionCallb
       // Context birikimini sınırla: 1500 token eşiğinde sıkıştır, 600 token tut
       // Her turn önceki tüm context'i yeniden faturalar — bu %50-60 tasarruf sağlar
       contextWindowCompression: {
-        triggerTokens: 1500,
-        slidingWindow: { targetTokens: 600 },
+        triggerTokens: 5000, // min 5000, max 128000
+        slidingWindow: { targetTokens: 2000 },
       },
     },
     callbacks: {
