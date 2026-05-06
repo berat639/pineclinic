@@ -51,6 +51,12 @@ const app = new Elysia()
         // Store session keyed by a stable ID attached to ws
         ;(ws.data as Record<string, unknown>).sessionId = id
         sessions.set(id, session)
+
+        // Auto-greet: trigger Gemini to speak first without waiting for user
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: '[KULLANICI BAĞLANDI]' }] }],
+          turnComplete: true,
+        })
       } catch (err) {
         console.error(`[${id}] Failed to start session:`, err)
         ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))

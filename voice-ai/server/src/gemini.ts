@@ -68,7 +68,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
 
 export function createAI() {
   const encoded = process.env.GOOGLE_CREDENTIALS_JSON
-  if (!encoded) throw new Error('GOOGLE_CREDENTIALS_JSON is required')
+  if (!encoded) throw new Error('GOOGLE_CREDENTIALS_JSON tanımlı değil')
   const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'))
   return new GoogleGenAI({
     vertexai: true,
@@ -166,7 +166,10 @@ export async function createLiveSession(ai: GoogleGenAI, callbacks: SessionCallb
         }
       },
       onerror: (e) => callbacks.onError(e),
-      onclose: () => callbacks.onClose(),
+      onclose: (e: unknown) => {
+        if (e) console.error('[Gemini] Close event:', e)
+        callbacks.onClose()
+      },
     },
   })
 
