@@ -100,6 +100,22 @@ async function getCalendarAuth(): Promise<CalendarAuth | null> {
   }
 }
 
+// ── Shared event body builder ──────────────────────────────────────────────
+
+function buildEventBody(input: CalendarEventInput) {
+  const [year, month, day] = input.date.split('-').map(Number)
+  const [hour, minute] = input.time.split(':').map(Number)
+  const durationMs = (input.durationMinutes ?? 60) * 60 * 1000
+  const startDateTime = new Date(Date.UTC(year!, month! - 1, day!, hour! - 3, minute!))
+  const endDateTime = new Date(startDateTime.getTime() + durationMs)
+  return {
+    summary: input.title,
+    description: input.description,
+    start: { dateTime: startDateTime.toISOString(), timeZone: 'Europe/Istanbul' },
+    end: { dateTime: endDateTime.toISOString(), timeZone: 'Europe/Istanbul' },
+  }
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -134,49 +150,60 @@ export async function createCalendarEvent(
   }
 
   try {
-    // Build event datetime (assume Istanbul timezone UTC+3)
-    const [year, month, day] = input.date.split('-').map(Number)
-    const [hour, minute] = input.time.split(':').map(Number)
-    const durationMs = (input.durationMinutes ?? 60) * 60 * 1000
-
-    const startDateTime = new Date(
-      Date.UTC(year!, month! - 1, day!, hour! - 3, minute!)
-    )
-    const endDateTime = new Date(startDateTime.getTime() + durationMs)
-
-    const event = {
-      summary: input.title,
-      description: input.description,
-      start: {
-        dateTime: startDateTime.toISOString(),
-        timeZone: 'Europe/Istanbul',
-      },
-      end: {
-        dateTime: endDateTime.toISOString(),
-        timeZone: 'Europe/Istanbul',
-      },
-    }
-
     const response = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
       {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(event),
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildEventBody(input)),
       }
     )
-
     if (!response.ok) {
       const err = await response.text()
       console.error('[Calendar] API hatası:', err)
       return { success: false, reason: `API hatası: ${response.status}` }
     }
-
     const data = await response.json() as { id: string; htmlLink?: string }
     console.log('[Calendar] Etkinlik oluşturuldu:', data.id)
+    return { success: true, eventId: data.id, eventLink: data.htmlLink }
+  } catch (err) {
+    console.error('[Calendar] Hata:', err)
+    return { success: false, reason: 'Beklenmeyen hata' }
+  }
+}
+
+/**
+ * Update an existing Google Calendar event by eventId.
+ * No-op if integration is not configured or eventId is missing.
+ */
+export async function updateCalendarEvent(
+  eventId: string,
+  input: CalendarEventInput,
+): Promise<CalendarEventResult> {
+  const auth = await getCalendarAuth()
+  if (!auth) return { success: false, reason: 'Google Calendar yapılandırılmamış' }
+
+  const { calendarId } = auth
+  const accessToken = auth.type === 'oauth2'
+    ? auth.accessToken
+    : await getServiceAccountToken(auth.credentials, ['https://www.googleapis.com/auth/calendar.events'])
+
+  try {
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildEventBody(input)),
+      }
+    )
+    if (!response.ok) {
+      const err = await response.text()
+      console.error('[Calendar] Güncelleme hatası:', err)
+      return { success: false, reason: `API hatası: ${response.status}` }
+    }
+    const data = await response.json() as { id: string; htmlLink?: string }
+    console.log('[Calendar] Etkinlik güncellendi:', data.id)
     return { success: true, eventId: data.id, eventLink: data.htmlLink }
   } catch (err) {
     console.error('[Calendar] Hata:', err)

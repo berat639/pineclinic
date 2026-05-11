@@ -49,6 +49,7 @@ export async function createAppointment(data: {
   date: string
   time: string
   sessionId?: string
+  calendarEventId?: string
 }): Promise<Appointment> {
   if (data.sessionId) {
     // Check if appointment already exists for this session
@@ -68,6 +69,7 @@ export async function createAppointment(data: {
           issueOrRequest: data.issueOrRequest ?? null,
           date: data.date,
           time: data.time,
+          calendarEventId: data.calendarEventId ?? existing[0]!.calendarEventId,
         })
         .where(eq(appointments.sessionId, data.sessionId))
         .returning()
@@ -86,9 +88,32 @@ export async function createAppointment(data: {
     date: data.date,
     time: data.time,
     sessionId: data.sessionId ?? null,
+    calendarEventId: data.calendarEventId ?? null,
   }).returning()
   broadcastSSE('new_appointment', row)
   return row
+}
+
+/** Update an existing appointment by ID. Returns null if not found. */
+export async function updateAppointment(
+  id: string,
+  data: Partial<{
+    customerName: string
+    phone: string
+    type: string
+    vehicleInfo: string | null
+    issueOrRequest: string | null
+    date: string
+    time: string
+    calendarEventId: string | null
+  }>
+): Promise<Appointment | null> {
+  const [row] = await db.update(appointments)
+    .set(data)
+    .where(eq(appointments.id, id))
+    .returning()
+  if (row) broadcastSSE('new_appointment', row)
+  return row ?? null
 }
 
 /**

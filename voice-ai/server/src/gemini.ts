@@ -1,6 +1,6 @@
 import { GoogleGenAI, Modality, Type, type FunctionDeclaration } from '@google/genai'
-import { createAppointment } from './db'
-import { createCalendarEvent } from './integrations/google-calendar'
+import { createAppointment, updateAppointment } from './db'
+import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import { searchKnowledge } from './services/knowledge'
 
 const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'
@@ -26,6 +26,25 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         saat: { type: Type.STRING, description: 'Randevu saati (HH:MM)' },
       },
       required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
+    },
+  },
+  {
+    name: 'randevuGuncelle',
+    description: 'Daha önce oluşturulan randevuyu günceller. Eksik bilgi tamamlandığında, tarih/saat değiştiğinde veya araç/talep bilgisi eklendiğinde kullan. randevuOlustur sonrasında dönen randevu_id zorunludur.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        randevu_id: { type: Type.STRING, description: 'randevuOlustur ile oluşturulan randevunun ID\'si' },
+        calendar_event_id: { type: Type.STRING, description: 'randevuOlustur ile dönen Google Calendar event ID\'si (varsa)' },
+        musteri_adi: { type: Type.STRING, description: 'Güncellenecek müşteri adı soyadı' },
+        telefon: { type: Type.STRING, description: 'Güncellenecek telefon numarası' },
+        randevu_turu: { type: Type.STRING, enum: ['service', 'test_drive', 'gallery_visit', 'other'] },
+        arac_bilgisi: { type: Type.STRING, description: 'Güncellenecek araç bilgisi' },
+        sorun_veya_talep: { type: Type.STRING, description: 'Güncellenecek talep/şikayet' },
+        tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
+        saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
+      },
+      required: ['randevu_id'],
     },
   },
   {
@@ -85,7 +104,7 @@ export async function createLiveSession(
         other: 'Randevu',
       }
       const typeLabel = TYPE_LABELS[appointment.type] ?? 'Randevu'
-      void createCalendarEvent({
+      const calendarResult = await createCalendarEvent({
         title: `${typeLabel} — ${appointment.customerName}`,
         description: [
           `Müşteri: ${appointment.customerName}`,
@@ -97,14 +116,64 @@ export async function createLiveSession(
         date: appointment.date,
         time: appointment.time,
         attendeePhone: appointment.phone,
-      }).then(result => {
-        if (result.success) console.log('[Calendar] Etkinlik oluşturuldu:', result.eventId)
-      }).catch(() => {})
+      }).catch(() => ({ success: false as const, reason: 'calendar error' }))
+
+      // Store calendarEventId in DB for future updates
+      if (calendarResult.success) {
+        await updateAppointment(appointment.id, { calendarEventId: calendarResult.eventId }).catch(() => {})
+        console.log('[Calendar] Etkinlik oluşturuldu:', calendarResult.eventId)
+      }
 
       return {
         success: true,
         message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`,
         id: appointment.id,
+        calendar_event_id: calendarResult.success ? calendarResult.eventId : null,
+      }
+    }
+
+    if (name === 'randevuGuncelle') {
+      const appointmentId = args.randevu_id as string
+      const calendarEventId = args.calendar_event_id as string | undefined
+
+      const updateData: Parameters<typeof updateAppointment>[1] = {}
+      if (args.musteri_adi) updateData.customerName = args.musteri_adi as string
+      if (args.telefon) updateData.phone = args.telefon as string
+      if (args.randevu_turu) updateData.type = args.randevu_turu as string
+      if (args.arac_bilgisi !== undefined) updateData.vehicleInfo = args.arac_bilgisi as string
+      if (args.sorun_veya_talep !== undefined) updateData.issueOrRequest = args.sorun_veya_talep as string
+      if (args.tarih) updateData.date = args.tarih as string
+      if (args.saat) updateData.time = args.saat as string
+
+      const updated = await updateAppointment(appointmentId, updateData)
+      if (!updated) return { success: false, message: 'Randevu bulunamadı.' }
+
+      // Update Google Calendar event if we have an eventId
+      const eventId = calendarEventId ?? updated.calendarEventId ?? null
+      if (eventId && (args.tarih || args.saat || args.musteri_adi || args.randevu_turu)) {
+        const TYPE_LABELS: Record<string, string> = {
+          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+        }
+        const typeLabel = TYPE_LABELS[updated.type] ?? 'Randevu'
+        void updateCalendarEvent(eventId, {
+          title: `${typeLabel} — ${updated.customerName}`,
+          description: [
+            `Müşteri: ${updated.customerName}`,
+            `Telefon: ${updated.phone}`,
+            `Randevu Türü: ${typeLabel}`,
+            updated.vehicleInfo ? `Araç: ${updated.vehicleInfo}` : null,
+            updated.issueOrRequest ? `Talep/Sorun: ${updated.issueOrRequest}` : null,
+          ].filter(Boolean).join('\n'),
+          date: updated.date,
+          time: updated.time,
+          attendeePhone: updated.phone,
+        }).then(r => { if (r.success) console.log('[Calendar] Etkinlik güncellendi:', r.eventId) }).catch(() => {})
+      }
+
+      return {
+        success: true,
+        message: `Randevu güncellendi: ${updated.date} ${updated.time}.`,
+        id: updated.id,
       }
     }
     if (name === 'searchKnowledgeBase') {

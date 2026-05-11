@@ -77,6 +77,12 @@ async function runMigrations() {
     ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES sessions(id)
   `
 
+  // Add calendar_event_id to appointments if not exists (idempotent)
+  await sql`
+    ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS calendar_event_id TEXT
+  `
+
   await sql`
     CREATE TABLE IF NOT EXISTS business_settings (
       key        TEXT PRIMARY KEY,

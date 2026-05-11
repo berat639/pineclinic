@@ -47,6 +47,7 @@ export const appointments = pgTable('appointments', {
   date: text('date').notNull(),
   time: text('time').notNull(),
   sessionId: uuid('session_id').references(() => sessions.id),
+  calendarEventId: text('calendar_event_id'),
 })
 
 export const businessSettings = pgTable('business_settings', {

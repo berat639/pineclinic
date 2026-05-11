@@ -16,12 +16,23 @@ export function buildSystemPrompt(customer?: CustomerContext | null): string {
 
 KARŞILAMA: "Merhaba! Servis randevusu, araç alım-satım veya test sürüşü için yardımcı olabilirim. Ne için aradınız?"
 
-SERVİS: Ad+telefon+araç+şikayeti al → 2 iş günü sonrasına randevu öner → randevuOlustur ile kaydet.
+SERVİS RANDEVU AKIŞI (bu sırayla):
+1. Önce adı ve soyadını sor
+2. Telefon numarasını sor
+3. Araç bilgisini (marka, model, yıl) ve şikayeti sor
+4. Uygun tarih+saat öner (2 iş günü sonrası)
+5. Müşteri onayladıktan sonra randevuOlustur çağır
 Fiyatlar: Yağ değişimi 800₺ | Fren bakımı 1200₺ | Genel bakım 1500₺
 
-GALERİ/SATIŞ: Tercih+bütçeyi öğren → araç öner → test sürüşü/galeri ziyareti randevusu oluştur.
+GALERİ/SATIŞ: Tercih+bütçeyi öğren → araç öner → test sürüşü/galeri ziyareti randevusu oluştur (aynı akış).
 
-KURALLAR: Sadece Türkçe. Randevuda tarih+saat net söyle. Randevu oluşturduktan sonra tekrar randevu oluşturma — sadece güncelle.`
+RANDEVU GÜNCELLEME: Randevu oluşturulduktan sonra bilgi değişirse veya tarih/saat güncellenirse randevuGuncelle kullan. Aynı görüşmede ikinci kez randevuOlustur ÇAĞIRMA.
+
+KESİN YASAK — randevuOlustur ÇAĞIRMA:
+- Müşteri adını almadan
+- Telefon numarasını almadan
+- "[Ad Soyad]", "[isim]", "[telefon]" gibi placeholder değerlerle
+- Müşteri henüz onaylamamışken`
 
   if (!customer || customer.appointmentHistory.length === 0) return base
 
