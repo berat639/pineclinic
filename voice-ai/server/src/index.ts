@@ -13,6 +13,7 @@ import { enqueueSession, dequeueSession, closeQueue } from './queue/session-queu
 import { db, checkDbHealth, closeDb } from './db/client'
 import { sql } from 'drizzle-orm'
 import { checkRedisHealth, closeRedis } from './db/redis'
+import { sseClients, broadcastSSE } from './events'
 
 const PORT = Number(process.env.PORT) || 3001
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000'
@@ -178,6 +179,73 @@ const app = new Elysia()
   .use(adminPlugin)
 
   .get('/api/appointments', async () => readAppointments())
+
+  .delete('/api/appointments/:id', async ({ params }) => {
+    const { eq } = await import('drizzle-orm')
+    const { appointments } = await import('./db/schema')
+    const [deleted] = await db.delete(appointments)
+      .where(eq(appointments.id, params.id))
+      .returning({ id: appointments.id })
+    if (!deleted) return new Response('Not found', { status: 404 })
+    sseClients.forEach(send => send('appointment_deleted', { id: params.id }))
+    return { success: true }
+  })
+
+  .get('/api/events', ({ set }) => {
+    set.headers['Content-Type'] = 'text/event-stream'
+    set.headers['Cache-Control'] = 'no-cache'
+    set.headers['Connection'] = 'keep-alive'
+
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (event: string, data: unknown) => {
+          controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        }
+        sseClients.add(send)
+        const timer = setInterval(() => {
+          try { controller.enqueue(new TextEncoder().encode(': keepalive\n\n')) }
+          catch { clearInterval(timer); sseClients.delete(send) }
+        }, 15000)
+        return () => { clearInterval(timer); sseClients.delete(send) }
+      }
+    })
+    return new Response(stream)
+  })
+
+  .get('/api/recordings', async () => {
+    const { existsSync, readdirSync, statSync } = await import('fs')
+    const { resolve } = await import('path')
+    const dir = resolve(process.cwd(), 'data/recordings')
+    if (!existsSync(dir)) return []
+    const files = readdirSync(dir).filter(f => f.endsWith('.wav') || f.endsWith('.webm') || f.endsWith('.ogg'))
+    return files.map(filename => {
+      const stat = statSync(resolve(dir, filename))
+      const id = filename.replace(/\.[^.]+$/, '')
+      return { id, filename, startedAt: stat.birthtime.toISOString(), endedAt: stat.mtime.toISOString(), durationMs: 0, sizeBytes: stat.size }
+    }).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+  })
+
+  .get('/api/recordings/:filename', async ({ params, set }) => {
+    const { existsSync, createReadStream } = await import('fs')
+    const { resolve } = await import('path')
+    const dir = resolve(process.cwd(), 'data/recordings')
+    const filePath = resolve(dir, params.filename)
+    if (!filePath.startsWith(dir) || !existsSync(filePath)) {
+      set.status = 404; return 'Not found'
+    }
+    set.headers['Content-Type'] = 'audio/wav'
+    return createReadStream(filePath)
+  })
+
+  .delete('/api/recordings/:id', async ({ params, set }) => {
+    const { existsSync, unlinkSync, readdirSync } = await import('fs')
+    const { resolve } = await import('path')
+    const dir = resolve(process.cwd(), 'data/recordings')
+    const files = existsSync(dir) ? readdirSync(dir).filter(f => f.startsWith(params.id + '.')) : []
+    if (files.length === 0) { set.status = 404; return { error: 'Not found' } }
+    unlinkSync(resolve(dir, files[0]!))
+    return { success: true }
+  })
 
   .ws('/ws', {
     async open(ws) {

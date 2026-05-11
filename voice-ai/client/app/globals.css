@@ -43,3 +43,67 @@ body {
 .phone-input::placeholder {
   color: rgba(255, 255, 255, 0.35);
 }
+
+/* ── Admin panel shared utilities ─────────────────────────────────────── */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  color: #f0f4ff;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.badge-service  { background: rgba(59,130,246,0.12);  color: #60a5fa;  border-color: rgba(59,130,246,0.25); }
+.badge-test     { background: rgba(16,185,129,0.12);  color: #34d399;  border-color: rgba(16,185,129,0.25); }
+.badge-gallery  { background: rgba(245,158,11,0.12);  color: #fbbf24;  border-color: rgba(245,158,11,0.25); }
+.badge-other    { background: rgba(107,114,128,0.12); color: #9ca3af;  border-color: rgba(107,114,128,0.25); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 500;
+  transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+}
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary {
+  background: #0369A1;
+  color: #fff;
+  border-color: transparent;
+}
+.btn-primary:hover:not(:disabled) { background: #0284c7; }
+
+.btn-danger {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+.btn-ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }

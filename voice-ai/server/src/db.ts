@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 import { appointments } from './db/schema'
 import { eq } from 'drizzle-orm'
 import type { Appointment, NewAppointment } from './db/schema'
+import { broadcastSSE } from './events'
 
 export type { Appointment }
 
@@ -70,6 +71,7 @@ export async function createAppointment(data: {
         })
         .where(eq(appointments.sessionId, data.sessionId))
         .returning()
+      broadcastSSE('new_appointment', row)
       return row
     }
   }
@@ -85,6 +87,7 @@ export async function createAppointment(data: {
     time: data.time,
     sessionId: data.sessionId ?? null,
   }).returning()
+  broadcastSSE('new_appointment', row)
   return row
 }
 

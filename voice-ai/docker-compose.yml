@@ -66,6 +66,7 @@ services:
     environment:
       NODE_ENV: production
       SERVER_URL: http://server:3001
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
     depends_on:
       - server
 
