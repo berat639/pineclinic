@@ -4,6 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
     "types": ["bun-types"]
-  }
+  },
+  "exclude": ["node_modules", "../node_modules"]
 }

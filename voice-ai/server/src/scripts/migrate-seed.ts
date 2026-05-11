@@ -1,0 +1,113 @@
+/**
+ * Migration seed script — run once after database is initialized.
+ * Seeds:
+ *   1. Default Google Cloud account from .env
+ *   2. Existing appointments from data/appointments.json
+ *
+ * Usage: bun run server/src/scripts/migrate-seed.ts
+ * Safe to run multiple times (uses upsert/skip-if-exists logic)
+ */
+
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+import postgres from 'postgres'
+
+const DATABASE_URL = process.env.DATABASE_URL
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL tanımlı değil')
+  process.exit(1)
+}
+
+const sql = postgres(DATABASE_URL, { max: 1 })
+
+async function seedDefaultAccount() {
+  const credentials = process.env.GOOGLE_CREDENTIALS_JSON
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT
+  const location = process.env.GOOGLE_VERTEX_LOCATION || 'europe-west1'
+
+  if (!credentials || !projectId) {
+    console.log('[Seed] GOOGLE_CREDENTIALS_JSON veya GOOGLE_CLOUD_PROJECT eksik — hesap seed atlandı')
+    return
+  }
+
+  // Insert only if no accounts exist yet
+  const existing = await sql`SELECT COUNT(*) AS count FROM accounts`
+  if (Number(existing[0]?.count) > 0) {
+    console.log('[Seed] Hesap zaten mevcut — atlandı')
+    return
+  }
+
+  await sql`
+    INSERT INTO accounts (name, credentials, project_id, location, is_active, priority)
+    VALUES ('Varsayılan Hesap', ${credentials}, ${projectId}, ${location}, true, 0)
+  `
+  console.log('[Seed] Varsayılan hesap eklendi:', projectId)
+}
+
+async function seedAppointments() {
+  // Path relative to project root
+  const jsonPath = resolve(process.cwd(), 'data/appointments.json')
+
+  let appointments: Array<{
+    id: string
+    createdAt: string
+    customerName: string
+    phone: string
+    type: string
+    vehicleInfo?: string
+    issueOrRequest?: string
+    date: string
+    time: string
+  }>
+
+  try {
+    appointments = JSON.parse(readFileSync(jsonPath, 'utf-8'))
+  } catch {
+    console.log('[Seed] appointments.json bulunamadı — atlandı')
+    return
+  }
+
+  if (!appointments.length) {
+    console.log('[Seed] appointments.json boş — atlandı')
+    return
+  }
+
+  // Check if appointments table is already seeded
+  const existing = await sql`SELECT COUNT(*) AS count FROM appointments`
+  if (Number(existing[0]?.count) > 0) {
+    console.log(`[Seed] ${existing[0]?.count} randevu zaten mevcut — atlandı`)
+    return
+  }
+
+  for (const appt of appointments) {
+    await sql`
+      INSERT INTO appointments (customer_name, phone, type, vehicle_info, issue_or_request, date, time)
+      VALUES (
+        ${appt.customerName},
+        ${appt.phone},
+        ${appt.type},
+        ${appt.vehicleInfo ?? null},
+        ${appt.issueOrRequest ?? null},
+        ${appt.date},
+        ${appt.time}
+      )
+    `
+  }
+  console.log(`[Seed] ${appointments.length} randevu aktarıldı`)
+}
+
+async function main() {
+  console.log('[Seed] Başlıyor...')
+  try {
+    await seedDefaultAccount()
+    await seedAppointments()
+    console.log('[Seed] Tamamlandı')
+  } catch (err) {
+    console.error('[Seed] Hata:', err)
+    process.exit(1)
+  } finally {
+    await sql.end()
+  }
+}
+
+main()

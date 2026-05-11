@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useVoiceAI, type VoiceStatus } from '@/hooks/useVoiceAI'
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws'
@@ -22,6 +23,7 @@ const STATUS_COLOR: Record<VoiceStatus, string> = {
 
 export default function Home() {
   const { status, transcript, start, stop } = useVoiceAI(WS_URL)
+  const [phone, setPhone] = useState('')
   const isActive = status !== 'idle' && status !== 'error'
 
   return (
@@ -49,6 +51,18 @@ export default function Home() {
         <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
           Servis randevusu ve araç danışmanlığı
         </p>
+      </div>
+
+      {/* Phone Input */}
+      <div className="phone-input-container">
+        <input
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Telefon numaranızı girin"
+          disabled={status !== 'idle'}
+          className="phone-input"
+        />
       </div>
 
       {/* Voice Button */}
@@ -79,7 +93,8 @@ export default function Home() {
 
         {/* Main button */}
         <button
-          onClick={isActive ? stop : start}
+          onClick={isActive ? stop : () => start(phone)}
+          disabled={!isActive && !phone}
           style={{
             width: 120,
             height: 120,
@@ -88,7 +103,7 @@ export default function Home() {
             background: status === 'idle'
               ? 'radial-gradient(circle, #1e293b, #0f172a)'
               : `radial-gradient(circle, ${STATUS_COLOR[status]}22, #0f172a)`,
-            cursor: 'pointer',
+            cursor: (!isActive && !phone) ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -96,6 +111,7 @@ export default function Home() {
             boxShadow: isActive ? `0 0 30px ${STATUS_COLOR[status]}44` : 'none',
             fontSize: '2.5rem',
             outline: 'none',
+            opacity: (!isActive && !phone) ? 0.4 : 1,
           }}
         >
           {status === 'speaking' ? '🔊' : status === 'listening' ? '🎙️' : status === 'connecting' ? '⏳' : '🎙️'}

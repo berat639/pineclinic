@@ -69,7 +69,7 @@ export function useVoiceAI(wsUrl: string) {
     }
   }, [])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (phone: string) => {
     if (statusRef.current !== 'idle') return
     setStatusBoth('connecting')
 
@@ -88,7 +88,7 @@ export function useVoiceAI(wsUrl: string) {
       await micCtx.audioWorklet.addModule('/mic-worklet.js')
 
       // WebSocket
-      const ws = new WebSocket(wsUrl)
+      const ws = new WebSocket(`${wsUrl}?phone=${encodeURIComponent(phone)}`)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
