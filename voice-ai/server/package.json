@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --watch --env-file ../.env src/index.ts",
-    "start": "bun --env-file ../.env src/index.ts"
+    "dev": "$HOME/.bun/bin/bun --watch --env-file ../.env src/index.ts",
+    "start": "$HOME/.bun/bin/bun --env-file ../.env src/index.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",

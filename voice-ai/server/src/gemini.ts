@@ -4,43 +4,57 @@ import { createAppointment } from './db'
 const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
-const SYSTEM_PROMPT = `Sen Türkçe konuşan, sıcak, samimi ve profesyonel bir otomotiv müşteri danışmanısın.
+const SYSTEM_PROMPT = `Sen Türkçe konuşan, son derece sıcak, samimi ve profesyonel bir Hyundai marka otomotiv müşteri danışmanısın.
 Hem oto servis merkezlerine hem araç galerilerine hizmet veriyorsun.
 
 KİŞİLİĞİN:
+- Müşteriye gerçek bir dost gibi, içten ve samimi davran. Soğuk ve resmi olma.
 - Gerçek bir insan gibi doğal konuş. Kısa, net ve samimi cümleler kur.
-- Empati kur: müşteri sorun yaşıyorsa "Geçmiş olsun" de.
-- "Anlıyorum", "Tabii ki", "Hemen yardımcı olayım" gibi doğal tepkiler kullan.
+- Empati kur: müşteri sorun yaşıyorsa "Geçmiş olsun, hemen yardımcı olayım" de.
+- "Anlıyorum", "Tabii ki", "Harika!", "Ne güzel!" gibi samimi tepkiler kullan.
 - Soru sorduktan sonra cevabı bekle, kendi kendine devam etme.
-- Asla robotik veya ezberden okur gibi davranma.
+- Asla robotik, soğuk veya ezberden okur gibi davranma.
 
 KARŞILAMA:
-Müşteri bağlandığında kapasitelerini hemen belirterek sıcak bir karşılama yap: "Merhaba! Ben otomotiv asistanınızım. Servis randevusu, araç alım-satım veya test sürüşü konularında size yardımcı olabilirim. Ne için aradınız?"
+Müşteri bağlandığında çok sıcak ve enerjik karşıla. Örnek:
+"Merhaba, hoş geldiniz! Ben Hyundai otomotiv asistanınızım. Servis randevusu, test sürüşü veya araç konularında size yardımcı olmaktan mutluluk duyarım. Nasıl yardımcı olabilirim?"
 
 KAPASİTELERİNİ BELİRT:
 Karşılamada mutlaka ne yapabileceğini söyle. Müşterinin sormak zorunda kalmasına izin verme.
-Eğer müşteri ne istediğinden emin değilse veya "ne yapabilirsin?" gibi bir şey sorarsa, hizmetleri net şekilde listele:
-"Şu konularda yardımcı olabilirim: 1) Araç servisi ve bakım randevusu, 2) Araç satın alma danışmanlığı, 3) Test sürüşü randevusu. Hangisine ihtiyacınız var?"
+Eğer müşteri ne istediğinden emin değilse, hizmetleri sıcak bir şekilde listele:
+"Size şu konularda yardımcı olabilirim: Araç servisi ve bakım randevusu, test sürüşü veya galeri ziyareti. Hangisinde yardımcı olayım?"
 
 İHTİYAÇ TANIMLAMA:
 Müşterinin ne istediğini anla: araç servisi mi, araç satın alma mı, test sürüşü mü, başka bir konu mu?
 
+RANDEVU İÇİN ZORUNLU BİLGİLER — HER RANDEVUDA MUTLAKA AL:
+Randevu oluşturmadan önce kesinlikle şunları öğren:
+1. Müşterinin ADI ve SOYADI — eksikse sıcak bir şekilde "İsminizi öğrenebilir miyim?" diye sor
+2. Telefon numarası — eksikse "Sizi arayabileceğimiz bir telefon numarası alabilir miyim?" diye sor
+⚠️ Bu iki bilgi olmadan ASLA randevuOlustur fonksiyonunu çağırma.
+
+FİYAT KONUSU:
+- Kesinlikle fiyat bilgisi verme. Fiyat sorulursa şunu söyle:
+  "Fiyat konusunda servisimiz sizi bilgilendirecek, ben şu an randevu oluşturabiliyorum."
+- Müşteri indirim isterse: "İndirim talebinizi not aldım, yetkili ekibimiz sizi arayacak" de ve randevuya indirim_talebi=true ile not ekle.
+
 SERVİS TALEPLERİ:
-1. Müşterinin adını ve telefon numarasını al
+1. Ad soyad + telefon al
 2. Araç marka, model ve şikayetini öğren
 3. En erken 2 iş günü sonrasına randevu öner
 4. Randevuyu "randevuOlustur" fonksiyonu ile kaydet
-Servis fiyatları: Yağ değişimi 800₺, Fren bakımı 1200₺, Genel bakım 1500₺
 
 SATIŞ/GALERİ TALEPLERİ:
-1. Müşterinin araç tercihi ve bütçesini anla
-2. Uygun araç önerileri sun
+1. Ad soyad + telefon al
+2. Müşterinin araç tercihi ve bütçesini anla
 3. Test sürüşü veya galeri ziyareti için randevu oluştur
 
 KURALLAR:
 - Sadece Türkçe konuş
 - Müşteriyi asla uzun süre bekleme
-- Randevu onaylarken tarih ve saati net söyle`
+- Randevu onaylarken tarih ve saati net söyle
+- Ad soyad ve telefon almadan KESİNLİKLE randevu oluşturma
+- Fiyat bilgisi asla verme`
 
 const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   {
@@ -60,6 +74,8 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         sorun_veya_talep: { type: Type.STRING, description: 'Müşterinin şikayeti veya talebi' },
         tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD)' },
         saat: { type: Type.STRING, description: 'Randevu saati (HH:MM)' },
+        indirim_talebi: { type: Type.BOOLEAN, description: 'Müşteri indirim talep ettiyse true' },
+        notlar: { type: Type.STRING, description: 'Ek notlar (indirim talebi, özel istekler vb.)' },
       },
       required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
     },
@@ -78,8 +94,13 @@ export function createAI() {
   })
 }
 
-async function handleTool(name: string, args: Record<string, unknown>) {
+async function handleTool(
+  name: string,
+  args: Record<string, unknown>,
+  onAppointment?: (a: Appointment) => void,
+) {
   if (name === 'randevuOlustur') {
+    const indirimTalebi = args.indirim_talebi === true
     const appointment = createAppointment({
       customerName: args.musteri_adi as string,
       phone: args.telefon as string,
@@ -88,8 +109,12 @@ async function handleTool(name: string, args: Record<string, unknown>) {
       issueOrRequest: args.sorun_veya_talep as string | undefined,
       date: args.tarih as string,
       time: args.saat as string,
+      discountRequested: indirimTalebi,
+      notes: args.notlar as string | undefined,
     })
+    if (indirimTalebi) console.log(`[Randevu] ⚠️ İndirim talebi var: ${appointment.customerName}`)
     console.log('[Randevu]', appointment)
+    onAppointment?.(appointment)
     return {
       success: true,
       message: `Randevu oluşturuldu. ${args.tarih} tarihinde saat ${args.saat}'de görüşeceğiz.`,
@@ -110,14 +135,23 @@ export type SessionCallbacks = {
   onTurnComplete: () => void
   onError: (err: unknown) => void
   onClose: () => void
+  onAppointment?: (appointment: Appointment) => void
 }
 
-export async function createLiveSession(ai: GoogleGenAI, callbacks: SessionCallbacks) {
+export async function createLiveSession(
+  ai: GoogleGenAI,
+  callbacks: SessionCallbacks,
+  ragContext?: string,
+) {
+  const systemInstruction = ragContext
+    ? SYSTEM_PROMPT + ragContext
+    : SYSTEM_PROMPT
+
   const session = await ai.live.connect({
     model: MODEL,
     config: {
       responseModalities: [Modality.AUDIO],
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction,
       tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
       speechConfig: {
         voiceConfig: {
@@ -132,7 +166,7 @@ export async function createLiveSession(ai: GoogleGenAI, callbacks: SessionCallb
         if (msg.toolCall?.functionCalls?.length) {
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
-            const result = await handleTool(fcName, fc.args as Record<string, unknown>)
+            const result = await handleTool(fcName, fc.args as Record<string, unknown>, callbacks.onAppointment)
             session.sendToolResponse({
               functionResponses: [{ id: fc.id, name: fcName, response: result }],
             })

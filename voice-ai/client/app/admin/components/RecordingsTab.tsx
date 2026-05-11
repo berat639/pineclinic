@@ -1,0 +1,157 @@
+'use client'
+import { useState, useEffect, useCallback } from 'react'
+
+interface RecordingMeta {
+  id: string
+  filename: string
+  startedAt: string
+  endedAt: string
+  durationMs: number
+  sizeBytes: number
+}
+
+function fmtDuration(ms: number) {
+  const s = Math.round(ms / 1000)
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return m > 0 ? `${m}d ${sec}s` : `${sec}s`
+}
+function fmtSize(bytes: number) {
+  return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`
+}
+function fmtDate(d: string) {
+  try { return new Date(d).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+  catch { return d }
+}
+
+export default function RecordingsTab() {
+  const [recordings, setRecordings] = useState<RecordingMeta[]>([])
+  const [loading, setLoading] = useState(true)
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [audio, setAudio] = useState<HTMLAudioElement | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/recordings')
+      setRecordings(await r.json())
+    } catch {}
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const play = (rec: RecordingMeta) => {
+    if (audio) { audio.pause(); audio.src = '' }
+    if (playingId === rec.id) { setPlayingId(null); setAudio(null); return }
+    const a = new Audio(`/api/recordings/${rec.filename}`)
+    a.play()
+    a.onended = () => { setPlayingId(null); setAudio(null) }
+    setAudio(a)
+    setPlayingId(rec.id)
+  }
+
+  const del = async (id: string) => {
+    if (!confirm('Bu kaydı silmek istediğinizden emin misiniz?')) return
+    setDeleting(id)
+    await fetch(`/api/recordings/${id}`, { method: 'DELETE' })
+    setRecordings(prev => prev.filter(r => r.id !== id))
+    if (playingId === id && audio) { audio.pause(); setPlayingId(null); setAudio(null) }
+    setDeleting(null)
+  }
+
+  const download = (rec: RecordingMeta) => {
+    const a = document.createElement('a')
+    a.href = `/api/recordings/${rec.filename}`
+    a.download = rec.filename
+    a.click()
+  }
+
+  if (loading) return <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>⏳ Yükleniyor...</div>
+
+  if (recordings.length === 0) return (
+    <div className="glass-card" style={{ padding: '4rem', textAlign: 'center', color: '#64748b' }}>
+      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🎙️</div>
+      <div style={{ fontWeight: 500 }}>Henüz ses kaydı yok</div>
+      <div style={{ fontSize: '0.85rem', marginTop: '0.4rem' }}>Görüşmeler tamamlandıkça buraya eklenecek</div>
+    </div>
+  )
+
+  return (
+    <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+          {recordings.length} kayıt
+        </span>
+        <button onClick={load} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>↺ Yenile</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {recordings.map((rec, i) => {
+          const isPlaying = playingId === rec.id
+          return (
+            <div key={rec.id} style={{
+              display: 'flex', alignItems: 'center', gap: '1rem',
+              padding: '0.9rem 1.25rem',
+              borderBottom: i < recordings.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+              background: isPlaying ? 'rgba(167,139,250,0.06)' : 'transparent',
+              transition: 'background 0.2s',
+            }}>
+              {/* Play button */}
+              <button onClick={() => play(rec)} style={{
+                width: 40, height: 40, borderRadius: '50%', flexShrink: 0, cursor: 'pointer',
+                background: isPlaying ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.06)',
+                border: `1px solid ${isPlaying ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                color: isPlaying ? '#a78bfa' : '#94a3b8', fontSize: '1rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {isPlaying ? '⏸' : '▶'}
+              </button>
+
+              {/* Waveform visual */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 30 }}>
+                {Array.from({ length: 20 }).map((_, j) => (
+                  <div key={j} style={{
+                    width: 2, borderRadius: 2,
+                    height: `${20 + Math.sin((j + (rec.id.charCodeAt(0) || 0)) * 0.8) * 12}px`,
+                    background: isPlaying ? '#a78bfa' : 'rgba(255,255,255,0.15)',
+                    transition: 'background 0.3s',
+                    animation: isPlaying ? `pulse-bar 0.8s ease-in-out ${j * 0.05}s infinite alternate` : 'none',
+                  }} />
+                ))}
+              </div>
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 500, color: '#e2e8f0', fontFamily: 'monospace' }}>
+                  {rec.id}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                  {fmtDate(rec.startedAt)}
+                </div>
+              </div>
+
+              {/* Duration + size */}
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#94a3b8' }}>{fmtDuration(rec.durationMs)}</div>
+                <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 1 }}>{fmtSize(rec.sizeBytes)}</div>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button onClick={() => download(rec)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '0.75rem' }} title="İndir">⬇</button>
+                <button onClick={() => del(rec.id)} disabled={!!deleting} className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.75rem', opacity: deleting === rec.id ? 0.5 : 1 }} title="Sil">🗑</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <style>{`
+        @keyframes pulse-bar {
+          from { transform: scaleY(0.6); }
+          to { transform: scaleY(1.2); }
+        }
+      `}</style>
+    </div>
+  )
+}
