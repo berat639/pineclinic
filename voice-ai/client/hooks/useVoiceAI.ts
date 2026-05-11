@@ -9,7 +9,6 @@ export function useVoiceAI(wsUrl: string) {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
 
-  // Refs (avoid re-renders)
   const wsRef = useRef<WebSocket | null>(null)
   const micCtxRef = useRef<AudioContext | null>(null)
   const playCtxRef = useRef<AudioContext | null>(null)
@@ -19,12 +18,15 @@ export function useVoiceAI(wsUrl: string) {
   const nextTimeRef = useRef(0)
   const statusRef = useRef<VoiceStatus>('idle')
 
+  // Mic başlatma — AI'ın ilk selamlaması bitene kadar beklenir
+  const micStartedRef = useRef(false)
+  const micPendingRef = useRef<{ ctx: AudioContext; stream: MediaStream; ws: WebSocket } | null>(null)
+
   const setStatusBoth = (s: VoiceStatus) => {
     statusRef.current = s
     setStatus(s)
   }
 
-  // Stop all queued audio playback immediately (barge-in)
   const stopPlayback = useCallback(() => {
     for (const src of sourcesRef.current) {
       try { src.stop(0) } catch { /* ignore */ }
@@ -33,34 +35,23 @@ export function useVoiceAI(wsUrl: string) {
     nextTimeRef.current = 0
   }, [])
 
-  // Schedule a PCM 24kHz chunk for playback
   const schedulePCM = useCallback((buffer: ArrayBuffer) => {
     const ctx = playCtxRef.current
     if (!ctx) return
-
     const int16 = new Int16Array(buffer)
     if (int16.length === 0) return
-
     const float32 = new Float32Array(int16.length)
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / 32768
-    }
-
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768
     const audioBuffer = ctx.createBuffer(1, float32.length, 24000)
     audioBuffer.getChannelData(0).set(float32)
-
     const source = ctx.createBufferSource()
     source.buffer = audioBuffer
     source.connect(ctx.destination)
-
-    // Schedule seamlessly after previous chunk
     const startAt = Math.max(ctx.currentTime + 0.05, nextTimeRef.current)
     source.start(startAt)
     nextTimeRef.current = startAt + audioBuffer.duration
-
     sourcesRef.current.push(source)
     setStatusBoth('speaking')
-
     source.onended = () => {
       sourcesRef.current = sourcesRef.current.filter(s => s !== source)
       if (sourcesRef.current.length === 0 && statusRef.current === 'speaking') {
@@ -69,26 +60,23 @@ export function useVoiceAI(wsUrl: string) {
     }
   }, [])
 
-  const start = useCallback(async (phone: string) => {
+  const start = useCallback(async () => {
     if (statusRef.current !== 'idle') return
     setStatusBoth('connecting')
+    micStartedRef.current = false
 
     try {
-      // Mic permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       streamRef.current = stream
 
-      // Two AudioContexts: mic (native rate) + playback (24kHz)
       const micCtx = new AudioContext()
       const playCtx = new AudioContext({ sampleRate: 24000 })
       micCtxRef.current = micCtx
       playCtxRef.current = playCtx
 
-      // Load mic worklet
       await micCtx.audioWorklet.addModule('/mic-worklet.js')
 
-      // WebSocket
-      const ws = new WebSocket(`${wsUrl}?phone=${encodeURIComponent(phone)}`)
+      const ws = new WebSocket(wsUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 
@@ -101,8 +89,8 @@ export function useVoiceAI(wsUrl: string) {
             switch (msg.type) {
               case 'ready':
                 setStatusBoth('listening')
-                // Start streaming mic audio
-                startMicStreaming(micCtx, stream, ws)
+                // Mic'i hemen açma — AI selam bitirsin, sonra aç
+                micPendingRef.current = { ctx: micCtx, stream, ws }
                 break
               case 'interrupted':
                 stopPlayback()
@@ -116,7 +104,13 @@ export function useVoiceAI(wsUrl: string) {
                 }])
                 break
               case 'turn_complete':
-                // Audio onended handles status
+                // İlk tur tamamlandı → artık mikrofonu başlat
+                if (!micStartedRef.current && micPendingRef.current) {
+                  micStartedRef.current = true
+                  const { ctx, stream: s, ws: w } = micPendingRef.current
+                  micPendingRef.current = null
+                  startMicStreaming(ctx, s, w)
+                }
                 break
               case 'error':
                 console.error('Server error:', msg.message)
@@ -143,11 +137,8 @@ export function useVoiceAI(wsUrl: string) {
     const worklet = new AudioWorkletNode(ctx, 'mic-processor')
     source.connect(worklet)
     workletRef.current = worklet
-
     worklet.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(e.data)
-      }
+      if (ws.readyState === WebSocket.OPEN) ws.send(e.data)
     }
   }
 
@@ -164,6 +155,8 @@ export function useVoiceAI(wsUrl: string) {
     playCtxRef.current = null
     wsRef.current = null
     nextTimeRef.current = 0
+    micStartedRef.current = false
+    micPendingRef.current = null
   }
 
   const stop = useCallback(() => {
