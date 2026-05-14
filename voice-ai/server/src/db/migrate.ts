@@ -16,6 +16,7 @@ async function runMigrations() {
   console.log('[Migration] Başlıyor...')
 
   await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`
+  await sql`CREATE EXTENSION IF NOT EXISTS vector`
 
   await sql`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -71,16 +72,39 @@ async function runMigrations() {
     )
   `
 
-  // Add session_id to appointments if not exists (idempotent)
   await sql`
     ALTER TABLE appointments
-    ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES sessions(id)
+    ADD COLUMN IF NOT EXISTS session_id TEXT
+  `
+  // If the column existed previously as UUID, drop FK and convert to TEXT (idempotent)
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'appointments' AND column_name = 'session_id'
+          AND udt_name = 'uuid'
+      ) THEN
+        ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_session_id_sessions_id_fk;
+        ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_session_id_fkey;
+        ALTER TABLE appointments ALTER COLUMN session_id TYPE TEXT USING session_id::text;
+      END IF;
+    END $$
   `
 
-  // Add calendar_event_id to appointments if not exists (idempotent)
   await sql`
     ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS calendar_event_id TEXT
+  `
+
+  await sql`
+    ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS discount_requested BOOLEAN DEFAULT false
+  `
+
+  await sql`
+    ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS notes TEXT
   `
 
   await sql`
@@ -91,48 +115,57 @@ async function runMigrations() {
     )
   `
 
-  await sql`CREATE EXTENSION IF NOT EXISTS vector`
+  // ── Knowledge: single-doc model with vector(768) embedding ──────────────
+  // If old chunk-model tables exist, drop them safely.
+  await sql`DROP TABLE IF EXISTS knowledge_chunks CASCADE`
 
+  // Recreate knowledge_documents in single-doc shape (idempotent on fresh DB).
+  // For existing DBs with the old shape, we add missing columns and ignore
+  // legacy ones (name/file_type/original_text/chunk_count remain harmless).
   await sql`
     CREATE TABLE IF NOT EXISTS knowledge_documents (
       id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name          TEXT NOT NULL,
-      file_type     TEXT NOT NULL DEFAULT 'txt',
-      original_text TEXT NOT NULL,
-      chunk_count   INTEGER DEFAULT 0,
-      created_at    TIMESTAMPTZ DEFAULT now()
+      category      TEXT NOT NULL DEFAULT 'genel',
+      title         TEXT NOT NULL DEFAULT '',
+      content       TEXT NOT NULL DEFAULT '',
+      active        BOOLEAN NOT NULL DEFAULT true,
+      embedding     vector(768),
+      embedded_at   TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ DEFAULT now(),
+      updated_at    TIMESTAMPTZ DEFAULT now()
     )
   `
 
+  // Add columns for legacy databases that had different shape
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS category   TEXT NOT NULL DEFAULT 'genel'`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS title      TEXT NOT NULL DEFAULT ''`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS content    TEXT NOT NULL DEFAULT ''`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS active     BOOLEAN NOT NULL DEFAULT true`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedding  vector(768)`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedded_at TIMESTAMPTZ`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`
+
   await sql`
-    CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    CREATE INDEX IF NOT EXISTS knowledge_documents_embedding_idx
+      ON knowledge_documents USING hnsw (embedding vector_cosine_ops)
+  `
+  await sql`
+    CREATE INDEX IF NOT EXISTS knowledge_documents_active_idx
+      ON knowledge_documents (active)
+  `
+
+  // ── Recordings (metadata only — .wav files stay on disk) ───────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS recordings (
       id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      document_id  UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
-      chunk_index  INTEGER NOT NULL,
-      chunk_text   TEXT NOT NULL,
-      embedding    vector(768),
+      session_id   TEXT,
+      filename     TEXT NOT NULL,
+      started_at   TIMESTAMPTZ NOT NULL,
+      ended_at     TIMESTAMPTZ NOT NULL,
+      duration_ms  BIGINT NOT NULL,
+      size_bytes   BIGINT NOT NULL,
       created_at   TIMESTAMPTZ DEFAULT now()
     )
-  `
-
-  // Migrate existing embedding column to vector(768) for text-embedding-004
-  await sql`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'knowledge_chunks' AND column_name = 'embedding'
-          AND udt_name = 'vector'
-      ) THEN
-        ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector(768) USING NULL;
-        DROP INDEX IF EXISTS knowledge_chunks_embedding_idx;
-      END IF;
-    END $$
-  `
-
-  await sql`
-    CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
-      ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)
   `
 
   // Bump existing accounts still at old default (5) to new default (20)
@@ -141,7 +174,7 @@ async function runMigrations() {
     WHERE max_concurrent_sessions = 5
   `
 
-  console.log('[Migration] Tamamlandı — 7 tablo hazır')
+  console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }
 

@@ -1,11 +1,14 @@
 import type { NextConfig } from 'next'
 
+// Server-side proxy her zaman localhost:3001 — ngrok sadece client-side (WS/direct) için
+const BACKEND_PROXY_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:3001'
+
 const config: NextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
-        destination: 'http://localhost:3005/api/:path*',
+        source: '/api/:path((?!admin-auth).*)',
+        destination: `${BACKEND_PROXY_URL}/api/:path*`,
       },
     ]
   },

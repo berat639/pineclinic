@@ -1,10 +1,22 @@
 import { GoogleGenAI, Modality, Type, type FunctionDeclaration } from '@google/genai'
-import { createAppointment, updateAppointment } from './db'
+import { createAppointment, updateAppointment } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import { searchKnowledge } from './services/knowledge'
 
-const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
+
+/** randevuOlustur'a şablon/placeholder sızmasını engelle */
+function validateLiveCustomerIdentity(customerName: string, phone: string): string | null {
+  const name = customerName.trim()
+  const tel = phone.trim()
+  if (name.length < 3) return 'Ad soyad en az 3 karakter olmalı; müşteriden net ad soyad al ve onaylat.'
+  if (/[\[\]]/.test(name) || /[\[\]]/.test(tel)) return 'Köşeli parantez veya şablon kullanılamaz; müşterinin gerçekten söylediği ad ve telefonu al, tekrar okutup onaylat.'
+  if (/KULLANICI/i.test(name) || /\bADI\s+SOYADI\b/i.test(name)) return 'Bu ifade gerçek bir ad değil; müşteriden adını soyadını söylemesini iste, sesli tekrar edip onaylat.'
+  if (/placeholder|şablon|örnek\s*(isim|telefon)|\[Ad/i.test(name)) return 'Şablon/örnek metin kullanılamaz; gerçek bilgi ve net onay gerekir.'
+  const digits = tel.replace(/\D/g, '')
+  if (digits.length < 10) return 'Telefon en az 10 hane olmalı; müşteriden numarayı tekrar söylemesini iste ve onaylat.'
+  return null
+}
 
 const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   {
@@ -13,8 +25,8 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        musteri_adi: { type: Type.STRING, description: 'Müşterinin adı soyadı' },
-        telefon: { type: Type.STRING, description: 'Müşterinin telefon numarası' },
+        musteri_adi: { type: Type.STRING, description: 'Müşterinin AÇIKÇA SÖYLEDİĞİ gerçek ad soyadı. Köşeli parantez, KULLANICI, şablon veya uydurma isim YASAK. Önce bilgileri sesli tekrar edip müşteri onayı al.' },
+        telefon: { type: Type.STRING, description: 'Müşterinin AÇIKÇA SÖYLEDİĞİ gerçek telefonu (rakamlar). Şablon veya köşeli parantez YASAK.' },
         randevu_turu: {
           type: Type.STRING,
           enum: ['service', 'test_drive', 'gallery_visit', 'other'],
@@ -80,13 +92,20 @@ export async function createLiveSession(
   options: {
     dbSessionId: string
     systemPrompt: string
+    model: string
   }
 ) {
   async function handleTool(name: string, args: Record<string, unknown>) {
     if (name === 'randevuOlustur') {
+      const rawName = args.musteri_adi as string
+      const rawPhone = args.telefon as string
+      const invalid = validateLiveCustomerIdentity(rawName, rawPhone)
+      if (invalid) {
+        return { success: false, message: invalid }
+      }
       const appointment = await createAppointment({
-        customerName: args.musteri_adi as string,
-        phone: args.telefon as string,
+        customerName: rawName.trim(),
+        phone: rawPhone.trim(),
         type: args.randevu_turu as string,
         vehicleInfo: args.arac_bilgisi as string | undefined,
         issueOrRequest: args.sorun_veya_talep as string | undefined,
@@ -195,7 +214,7 @@ export async function createLiveSession(
   }
 
   const session = await ai.live.connect({
-    model: MODEL,
+    model: options.model,
     config: {
       responseModalities: [Modality.AUDIO],
       systemInstruction: options.systemPrompt,

@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type CSSProperties } from 'react'
 import AppointmentsTab from './components/AppointmentsTab'
 import StatsBar from './components/StatsBar'
 import ToastContainer from './components/ToastContainer'
 import RecordingsTab from './components/RecordingsTab'
+import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,14 @@ type CalendarStatus = {
 type CalendarItem = { id: string; name: string; isPrimary: boolean }
 
 type KnowledgeDoc = {
-  id: string; name: string; fileType: string; chunkCount: number; createdAt: string
+  id: string
+  category: string
+  title: string
+  content: string
+  active: boolean
+  embeddedAt: string
+  createdAt: string
+  updatedAt: string
 }
 
 // ── SVG Icons ──────────────────────────────────────────────────────────────
@@ -87,6 +95,26 @@ function IconTrash() {
   )
 }
 
+function IconEye() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function IconEyeOff() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.71 19.71 0 0 1 4.22-5.19" />
+      <path d="M22.54 16.88A19.62 19.62 0 0 0 23 12s-4-8-11-8a10.94 10.94 0 0 0-4 .77" />
+      <path d="M9.88 9.88a3 3 0 0 0 4.24 4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
+
 function IconLogout() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -123,12 +151,225 @@ function Spinner() {
 
 // ── Tab definitions ────────────────────────────────────────────────────────
 
+const KB_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac'] as const
+type KbCategory = typeof KB_CATEGORIES[number]
+
+const KB_CATEGORY_LABEL: Record<KbCategory, string> = {
+  genel: 'Genel', servis: 'Servis', galeri: 'Galeri', kampanya: 'Kampanya', sss: 'SSS', arac: 'Araç',
+}
+
+const KB_CATEGORY_COLOR: Record<KbCategory, string> = {
+  genel:    '#60a5fa',
+  servis:   '#34d399',
+  galeri:   '#a78bfa',
+  kampanya: '#fb923c',
+  sss:      '#f59e0b',
+  arac:     '#38bdf8',
+}
+
+function kbCategoryLabel(cat: string) {
+  return KB_CATEGORY_LABEL[cat as KbCategory] ?? cat
+}
+
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `${r}, ${g}, ${b}`
+}
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'appointments', label: 'Randevular' },
   { id: 'knowledge',    label: 'Bilgi Tabanı' },
   { id: 'recordings',   label: 'Kayıtlar' },
   { id: 'settings',     label: 'Ayarlar' },
 ]
+
+// ── Gemini Live model meta ─────────────────────────────────────────────────
+const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
+  'gemini-live-2.5-flash-native-audio': {
+    label: 'Flash (Native Audio)',
+    tagline: 'En doğal ses, düşük gecikme; en yüksek kalite ve birim maliyet.',
+    tier: 'Premium',
+  },
+  'gemini-live-2.5-flash-preview': {
+    label: 'Live (Cascaded)',
+    tagline: 'Cascaded ses katmanı; kalite/maliyet dengeli seçenek.',
+    tier: 'Dengeli',
+  },
+  'gemini-2.0-flash-live-001': {
+    label: 'Live Eco',
+    tagline: 'Live en düşük birim maliyet, daha eski model.',
+    tier: 'Ekonomik',
+  },
+}
+
+const AI_TIER_COLOR: Record<'Premium' | 'Dengeli' | 'Ekonomik', string> = {
+  Premium:  '#a78bfa',
+  Dengeli:  '#60a5fa',
+  Ekonomik: '#34d399',
+}
+
+// ── VoIP / Call Center meta ────────────────────────────────────────────────
+type VoipMode = 'local' | 'cloud'
+type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
+type SipTransport = 'UDP' | 'TCP' | 'TLS' | 'WS' | 'WSS'
+type DtmfMode = 'rfc2833' | 'info' | 'inband'
+type AfterHours = 'voicemail' | 'mobile' | 'close'
+
+const SIP_TRANSPORTS: SipTransport[] = ['UDP', 'TCP', 'TLS', 'WS', 'WSS']
+const SIP_CODECS = ['OPUS', 'G.722', 'G.711 (PCMU)', 'G.711 (PCMA)', 'G.729'] as const
+
+const voipLabelStyle: CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: 'var(--foreground-3)',
+  letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6,
+}
+
+const voipInputStyle: CSSProperties = {
+  width: '100%',
+  padding: '9px 12px',
+  background: 'var(--input-bg)',
+  border: '1px solid var(--input-border)',
+  borderRadius: 8,
+  color: 'var(--foreground)',
+  fontSize: 13,
+  outline: 'none',
+  fontFamily: 'inherit',
+}
+
+const voipGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+  gap: 12,
+}
+
+const voipTwoColPanels: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
+  gap: 16,
+  alignItems: 'stretch',
+}
+
+const voipPanelStyle: CSSProperties = {
+  padding: 14,
+  background: 'var(--glass-bg)',
+  border: '1px solid var(--glass-border)',
+  borderRadius: 10,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  minWidth: 0,
+}
+
+const voipSectionTitleStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--foreground-3)',
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  marginBottom: 2,
+  paddingBottom: 8,
+  borderBottom: '1px solid var(--divider)',
+}
+
+const voipEyeBtnStyle: CSSProperties = {
+  position: 'absolute',
+  right: 8,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  color: 'var(--foreground-3)',
+  padding: 4,
+  display: 'inline-flex',
+  alignItems: 'center',
+}
+
+function VoipToggle({
+  label, value, onChange, hint,
+}: {
+  label: string
+  value: boolean
+  onChange: (v: boolean) => void
+  hint?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 10,
+        padding: '8px 12px',
+        background: 'var(--glass-bg)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 10,
+        cursor: 'pointer',
+        color: 'inherit',
+      }}
+    >
+      <span style={{
+        width: 36, height: 20, borderRadius: 10, position: 'relative',
+        background: value ? '#22c55e' : 'var(--input-border)',
+        transition: 'background 0.2s',
+        flexShrink: 0,
+      }}>
+        <span style={{
+          position: 'absolute', top: 2, left: value ? 18 : 2,
+          width: 16, height: 16, borderRadius: '50%',
+          background: 'white', transition: 'left 0.2s',
+        }} />
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: value ? 'var(--foreground)' : 'var(--foreground-2)' }}>
+          {label}
+        </span>
+        {hint && (
+          <span style={{ fontSize: 10.5, color: 'var(--foreground-3)', marginTop: 2 }}>
+            {hint}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
+const CLOUD_PROVIDER_META: Record<CloudProvider, {
+  label: string
+  baseUrl: string
+  userLabel: string
+  passLabel: string
+  fromHint: string
+}> = {
+  netgsm: {
+    label: 'Netgsm',
+    baseUrl: 'https://api.netgsm.com.tr/voice/v1/',
+    userLabel: 'Kullanıcı kodu (usercode)',
+    passLabel: 'API parolası',
+    fromHint: 'örn. 8503xxxxxxx',
+  },
+  twilio: {
+    label: 'Twilio',
+    baseUrl: 'https://api.twilio.com/2010-04-01/',
+    userLabel: 'Account SID',
+    passLabel: 'Auth Token',
+    fromHint: 'örn. +14155551234',
+  },
+  vonage: {
+    label: 'Vonage',
+    baseUrl: 'https://api.nexmo.com/',
+    userLabel: 'API Key',
+    passLabel: 'API Secret',
+    fromHint: 'örn. 905551234567',
+  },
+  custom: {
+    label: 'Diğer (Özel)',
+    baseUrl: 'https://api.ornek.com/',
+    userLabel: 'Kullanıcı / Account ID',
+    passLabel: 'Parola / Token',
+    fromHint: 'Caller ID / numara',
+  },
+}
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
@@ -145,12 +386,78 @@ export default function AdminPage() {
   const [calLoading, setCalLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  // AI Model (Ayarlar tab)
+  const [aiModel, setAiModel] = useState<string>('')
+  const [aiAvailable, setAiAvailable] = useState<string[]>([])
+  const [aiDefault, setAiDefault] = useState<string>('')
+  const [aiLoading, setAiLoading] = useState(true)
+  const [aiSaving, setAiSaving] = useState(false)
+
+  // VoIP / Call Center (Ayarlar tab — sadece UI, backend yok)
+  const [voipMode, setVoipMode] = useState<VoipMode>('cloud')
+
+  // Lokal SIP
+  const [localLabel, setLocalLabel] = useState('Ofis Santrali')
+  const [localHost, setLocalHost] = useState('')
+  const [localPort, setLocalPort] = useState('5060')
+  const [localTransport, setLocalTransport] = useState<SipTransport>('UDP')
+  const [localUser, setLocalUser] = useState('')
+  const [localPass, setLocalPass] = useState('')
+  const [localShowPass, setLocalShowPass] = useState(false)
+  const [localRealm, setLocalRealm] = useState('')
+  const [localOutboundProxy, setLocalOutboundProxy] = useState('')
+  const [localRegister, setLocalRegister] = useState(true)
+  const [localCallerId, setLocalCallerId] = useState('')
+  const [localCodecs, setLocalCodecs] = useState<string[]>(['OPUS', 'G.711 (PCMU)'])
+  const [localDtmf, setLocalDtmf] = useState<DtmfMode>('rfc2833')
+  const [localStun, setLocalStun] = useState('stun:stun.l.google.com:19302')
+  const [localIce, setLocalIce] = useState(false)
+  const [localTurnUrl, setLocalTurnUrl] = useState('')
+  const [localTurnUser, setLocalTurnUser] = useState('')
+  const [localTurnPass, setLocalTurnPass] = useState('')
+  const [localMaxConcurrent, setLocalMaxConcurrent] = useState('10')
+  const [localRecPath, setLocalRecPath] = useState('/var/spool/asterisk/recordings')
+
+  // Bulut sağlayıcı
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>('netgsm')
+  const [cloudLabel, setCloudLabel] = useState('Netgsm Bulut Santral')
+  const [cloudBaseUrl, setCloudBaseUrl] = useState(CLOUD_PROVIDER_META.netgsm.baseUrl)
+  const [cloudUser, setCloudUser] = useState('')
+  const [cloudPass, setCloudPass] = useState('')
+  const [cloudShowPass, setCloudShowPass] = useState(false)
+  const [cloudAppKey, setCloudAppKey] = useState('')
+  const [cloudFromNumber, setCloudFromNumber] = useState('')
+  const [cloudCountryCode, setCloudCountryCode] = useState('+90')
+  const [cloudWebhookInbound, setCloudWebhookInbound] = useState('')
+  const [cloudWebhookStatus, setCloudWebhookStatus] = useState('')
+  const [cloudTrunkOpen, setCloudTrunkOpen] = useState(false)
+  const [cloudTrunkHost, setCloudTrunkHost] = useState('')
+  const [cloudTrunkPort, setCloudTrunkPort] = useState('5060')
+  const [cloudTrunkTransport, setCloudTrunkTransport] = useState<SipTransport>('UDP')
+  const [cloudTrunkUser, setCloudTrunkUser] = useState('')
+  const [cloudTrunkPass, setCloudTrunkPass] = useState('')
+  const [cloudMaxLines, setCloudMaxLines] = useState('10')
+  const [cloudRecording, setCloudRecording] = useState(true)
+  const [cloudRecMonths, setCloudRecMonths] = useState('3')
+  const [cloudUseTranscript, setCloudUseTranscript] = useState(false)
+
+  // Ortak (her iki mod)
+  const [voipTestNumber, setVoipTestNumber] = useState('')
+  const [voipTimezone, setVoipTimezone] = useState('Europe/Istanbul')
+  const [voipWorkStart, setVoipWorkStart] = useState('09:00')
+  const [voipWorkEnd, setVoipWorkEnd] = useState('18:00')
+  const [voipAfterHours, setVoipAfterHours] = useState<AfterHours>('voicemail')
+  const [voipSaving, setVoipSaving] = useState(false)
+
   // Knowledge (Bilgi Tabanı tab)
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([])
+  const [kbLoading, setKbLoading] = useState(false)
   const [kbName, setKbName] = useState('')
+  const [kbCategory, setKbCategory] = useState<KbCategory>('genel')
   const [kbText, setKbText] = useState('')
   const [kbFile, setKbFile] = useState<File | null>(null)
   const [kbUploading, setKbUploading] = useState(false)
+  const [openKbId, setOpenKbId] = useState<string | null>(null)
 
   // Inline action toast (for KB / calendar actions)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -209,6 +516,43 @@ export default function AdminPage() {
     if (calStatus?.connected && calStatus.authType === 'oauth2') fetchCalendars()
   }, [calStatus, fetchCalendars])
 
+  // ── AI Model ──────────────────────────────────────────────────────────────
+
+  const fetchAiSettings = useCallback(async () => {
+    setAiLoading(true)
+    try {
+      const res = await fetch('/api/admin/settings/ai')
+      const data = await res.json() as { current?: string; default?: string; available?: string[] }
+      if (data.current) setAiModel(data.current)
+      if (data.default) setAiDefault(data.default)
+      if (Array.isArray(data.available)) setAiAvailable(data.available)
+    } catch { showToast('error', 'Yapay zeka ayarı alınamadı') }
+    finally { setAiLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchAiSettings() }, [fetchAiSettings])
+
+  const handleSaveAiModel = async (model: string) => {
+    if (!model || aiSaving || model === aiModel) return
+    setAiSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/ai', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error || 'Kaydedilemedi')
+      }
+      setAiModel(model)
+      showToast('success', 'Yapay zeka modeli güncellendi (sonraki çağrılarda devreye girer)')
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : 'Model kaydedilemedi')
+    }
+    finally { setAiSaving(false) }
+  }
+
   const handleCalConnect = async () => {
     const res = await fetch('/api/admin/settings/calendar/auth')
     const data = await res.json()
@@ -240,14 +584,28 @@ export default function AdminPage() {
   // ── Knowledge ─────────────────────────────────────────────────────────────
 
   const fetchKnowledgeDocs = useCallback(async () => {
+    setKbLoading(true)
     try {
       const res = await fetch('/api/admin/knowledge')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       if (Array.isArray(data)) setKnowledgeDocs(data)
-    } catch { /* ignore */ }
+      else if (Array.isArray(data.docs)) setKnowledgeDocs(data.docs)
+      else setKnowledgeDocs([])
+    } catch (e) {
+      console.error('[KB] fetchKnowledgeDocs hatası:', e)
+      showToast('error', 'Belgeler yüklenemedi')
+    } finally {
+      setKbLoading(false)
+    }
   }, [])
 
   useEffect(() => { fetchKnowledgeDocs() }, [fetchKnowledgeDocs])
+
+  // Bilgi Tabanı sekmesi açıldığında veriyi tazele
+  useEffect(() => {
+    if (activeTab === 'knowledge') fetchKnowledgeDocs()
+  }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleKbUpload = async () => {
     if (!kbText.trim() && !kbFile) return
@@ -255,14 +613,20 @@ export default function AdminPage() {
     try {
       const form = new FormData()
       if (kbName.trim()) form.append('name', kbName.trim())
+      form.append('category', kbCategory)
       if (kbFile) form.append('file', kbFile)
       else form.append('text', kbText.trim())
       const res = await fetch('/api/admin/knowledge/upload', { method: 'POST', body: form })
-      if (!res.ok) throw new Error('Yükleme başarısız')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error || 'Yükleme başarısız')
+      }
       showToast('success', 'Belge başarıyla indekslendi')
-      setKbName(''); setKbText(''); setKbFile(null)
+      setKbName(''); setKbText(''); setKbFile(null); setKbCategory('genel')
       fetchKnowledgeDocs()
-    } catch { showToast('error', 'Belge yüklenemedi') }
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : 'Belge yüklenemedi')
+    }
     finally { setKbUploading(false) }
   }
 
@@ -270,6 +634,7 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/knowledge/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
+      setOpenKbId(prev => (prev === id ? null : prev))
       showToast('success', 'Belge silindi')
       fetchKnowledgeDocs()
     } catch { showToast('error', 'Belge silinemedi') }
@@ -289,7 +654,7 @@ export default function AdminPage() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-        .tab-btn:hover { color: #f0f4ff !important; }
+        .tab-btn:hover { color: var(--foreground) !important; }
         .btn-connect:hover { background: #f9fafb !important; }
         .cal-select:focus { border-color: rgba(3,105,161,0.5) !important; outline: none; }
         details summary::-webkit-details-marker { display: none; }
@@ -317,7 +682,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div style={{ minHeight: '100vh', padding: '32px 20px' }}>
+      <div className="admin-content" style={{ minHeight: '100vh', padding: '32px 20px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
 
           {/* ── Header ──────────────────────────────────────────────────── */}
@@ -326,30 +691,33 @@ export default function AdminPage() {
             marginBottom: 24,
           }}>
             <div>
-              <h1 style={{ fontSize: 20, fontWeight: 700, color: '#f0f4ff', margin: 0 }}>
+              <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
                 Admin Panel
               </h1>
-              <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.35)', margin: '3px 0 0' }}>
+              <p style={{ fontSize: 12, color: 'var(--foreground-3)', margin: '3px 0 0' }}>
                 Araç Servisi Yönetim Paneli
               </p>
             </div>
-            <button
-              onClick={handleLogout}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '7px 14px',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 8,
-                color: '#94a3b8',
-                cursor: 'pointer',
-                fontSize: 13, fontWeight: 500,
-                transition: 'background 0.2s',
-              }}
-            >
-              <IconLogout />
-              Çıkış Yap
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ThemeToggle />
+              <button
+                onClick={handleLogout}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 14px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 8,
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: 13, fontWeight: 500,
+                  transition: 'background 0.2s',
+                }}
+              >
+                <IconLogout />
+                Çıkış Yap
+              </button>
+            </div>
           </div>
 
           {/* ── Stats Bar ───────────────────────────────────────────────── */}
@@ -371,7 +739,7 @@ export default function AdminPage() {
                   background: 'transparent',
                   border: 'none',
                   borderBottom: `2px solid ${activeTab === tab.id ? '#60a5fa' : 'transparent'}`,
-                  color: activeTab === tab.id ? '#f0f4ff' : '#64748b',
+                  color: activeTab === tab.id ? 'var(--foreground)' : 'var(--muted)',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
                   fontWeight: activeTab === tab.id ? 600 : 400,
@@ -402,6 +770,43 @@ export default function AdminPage() {
                   Belge Ekle
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Category picker */}
+                  <div>
+                    <div style={{
+                      fontSize: 11, fontWeight: 600, color: 'rgba(240,244,255,0.45)',
+                      letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 7,
+                    }}>
+                      Kategori
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {KB_CATEGORIES.map(cat => {
+                        const isActive = kbCategory === cat
+                        const color = KB_CATEGORY_COLOR[cat]
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setKbCategory(cat)}
+                            disabled={kbUploading}
+                            style={{
+                              padding: '5px 12px',
+                              borderRadius: 20,
+                              border: '1px solid',
+                              cursor: kbUploading ? 'not-allowed' : 'pointer',
+                              fontSize: 12, fontWeight: 500,
+                              transition: 'all 0.15s',
+                              background: isActive ? `rgba(${hexToRgb(color)}, 0.18)` : 'rgba(255,255,255,0.04)',
+                              borderColor: isActive ? color : 'rgba(255,255,255,0.08)',
+                              color: isActive ? color : '#94a3b8',
+                              opacity: kbUploading ? 0.5 : 1,
+                            }}
+                          >
+                            {KB_CATEGORY_LABEL[cat]}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                   <input
                     type="text"
                     placeholder="Belge adı (opsiyonel)"
@@ -482,54 +887,162 @@ export default function AdminPage() {
 
               {/* Document list */}
               <div className="glass-card" style={{ overflow: 'hidden' }}>
-                {knowledgeDocs.length === 0 ? (
+                {kbLoading ? (
+                  <div style={{ padding: '28px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'rgba(240,244,255,0.35)', fontSize: 13 }}>
+                    <Spinner /> Belgeler yükleniyor…
+                  </div>
+                ) : knowledgeDocs.length === 0 ? (
                   <div style={{ padding: '28px 24px', textAlign: 'center', fontSize: 13, color: 'rgba(240,244,255,0.3)' }}>
                     Henüz belge yüklenmedi
                   </div>
                 ) : (
                   <>
-                    {knowledgeDocs.map((doc, idx) => (
-                      <div
-                        key={doc.id}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 12,
-                          padding: '12px 18px',
-                          borderBottom: idx < knowledgeDocs.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: '#f0f4ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {doc.name}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                            <span style={{
-                              fontSize: 10, fontWeight: 600, padding: '2px 7px',
-                              background: 'rgba(3,105,161,0.15)', border: '1px solid rgba(3,105,161,0.25)',
-                              borderRadius: 4, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.05em',
-                            }}>
-                              {doc.fileType}
-                            </span>
-                            <span style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)' }}>{doc.chunkCount} parça</span>
-                            <span style={{ fontSize: 11, color: 'rgba(240,244,255,0.25)' }}>
-                              {new Date(doc.createdAt).toLocaleDateString('tr-TR')}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => handleKbDelete(doc.id)}
+                    {knowledgeDocs.map((doc, idx) => {
+                      const expanded = openKbId === doc.id
+                      const indexed = !!doc.embeddedAt
+                      return (
+                        <div
+                          key={doc.id}
                           style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 30, height: 30,
-                            background: 'transparent', border: '1px solid rgba(248,113,113,0.2)',
-                            borderRadius: 7, color: 'rgba(248,113,113,0.6)', cursor: 'pointer',
-                            transition: 'background 0.2s', flexShrink: 0,
+                            borderBottom: idx < knowledgeDocs.length - 1 ? '1px solid var(--divider)' : 'none',
                           }}
-                          title="Sil"
                         >
-                          <IconTrash />
-                        </button>
-                      </div>
-                    ))}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'stretch',
+                              gap: 4,
+                              padding: '4px 8px 4px 4px',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              aria-expanded={expanded}
+                              onClick={() => setOpenKbId(expanded ? null : doc.id)}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 10,
+                                padding: '10px 12px',
+                                background: expanded ? 'rgba(3,105,161,0.08)' : 'transparent',
+                                border: 'none',
+                                borderRadius: 8,
+                                cursor: 'pointer',
+                                color: 'inherit',
+                                textAlign: 'left',
+                                transition: 'background 0.15s ease',
+                              }}
+                            >
+                              <span
+                                aria-hidden
+                                style={{
+                                  display: 'inline-flex',
+                                  marginTop: 3,
+                                  color: 'rgba(148,163,184,0.9)',
+                                  transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                                  transition: 'transform 0.2s ease',
+                                  fontSize: 9,
+                                  lineHeight: 1,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                ▶
+                              </span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  fontSize: 13,
+                                  fontWeight: 500,
+                                  color: 'var(--foreground)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
+                                  {doc.title}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                                  <span style={{
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    padding: '2px 7px',
+                                    background: 'rgba(3,105,161,0.15)',
+                                    border: '1px solid rgba(3,105,161,0.25)',
+                                    borderRadius: 4,
+                                    color: 'var(--accent)',
+                                    letterSpacing: '0.04em',
+                                  }}>
+                                    {kbCategoryLabel(doc.category)}
+                                  </span>
+                                  <span style={{
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    padding: '2px 7px',
+                                    borderRadius: 4,
+                                    background: doc.active ? 'rgba(22,163,74,0.12)' : 'rgba(148,163,184,0.1)',
+                                    border: `1px solid ${doc.active ? 'rgba(22,163,74,0.25)' : 'rgba(148,163,184,0.2)'}`,
+                                    color: doc.active ? 'var(--success)' : 'var(--muted)',
+                                  }}>
+                                    {doc.active ? 'Aktif' : 'Pasif'}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>
+                                    {indexed ? 'İndekslenmiş' : 'Gömme yok'}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>
+                                    {new Date(doc.createdAt).toLocaleDateString('tr-TR')}
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleKbDelete(doc.id)
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                alignSelf: 'center',
+                                width: 30,
+                                height: 30,
+                                background: 'transparent',
+                                border: '1px solid rgba(248,113,113,0.2)',
+                                borderRadius: 7,
+                                color: 'rgba(248,113,113,0.6)',
+                                cursor: 'pointer',
+                                transition: 'background 0.2s',
+                                flexShrink: 0,
+                              }}
+                              title="Sil"
+                            >
+                              <IconTrash />
+                            </button>
+                          </div>
+                          {expanded && (
+                            <div
+                              style={{
+                                margin: '0 12px 12px 38px',
+                                padding: '12px 14px',
+                                maxHeight: 280,
+                                overflowY: 'auto',
+                                fontSize: 12,
+                                lineHeight: 1.55,
+                                color: 'rgba(226,232,240,0.92)',
+                                background: 'rgba(0,0,0,0.25)',
+                                border: '1px solid rgba(255,255,255,0.06)',
+                                borderRadius: 8,
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {doc.content?.trim() ? doc.content : 'İçerik boş.'}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </>
                 )}
               </div>
@@ -542,16 +1055,22 @@ export default function AdminPage() {
 
           {/* ── Tab: Ayarlar ────────────────────────────────────────────── */}
           {activeTab === 'settings' && (
-            <div style={{ maxWidth: 520 }}>
-
-              <div className="glass-card" style={{ padding: 24, marginBottom: 12 }}>
+            <div style={{ maxWidth: 1100, width: '100%' }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))',
+                gap: 12,
+                marginBottom: 12,
+                alignItems: 'start',
+              }}>
+              <div className="glass-card" style={{ padding: 24, marginBottom: 0 }}>
                 {/* Card header */}
                 <div style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   marginBottom: 20, paddingBottom: 14,
                   borderBottom: '1px solid rgba(255,255,255,0.06)',
                 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(240,244,255,0.75)' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
                     Google Calendar
                   </span>
                   {calLoading ? (
@@ -676,6 +1195,574 @@ export default function AdminPage() {
                     )}
                   </>
                 )}
+              </div>
+
+              {/* AI Model card */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 0 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 18, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                    Yapay Zeka Modeli
+                  </span>
+                  {aiLoading ? <Spinner /> : (
+                    <span style={{
+                      fontSize: 11, color: 'rgba(240,244,255,0.45)',
+                      padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                    }}>
+                      Sesli AI API
+                    </span>
+                  )}
+                </div>
+
+                {!aiLoading && (
+                  <>
+                    <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      Yalnızca gerçek-zamanlı sesli oturumu destekleyen modeller listelenir.
+                    </p>
+
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
+                      gap: 10,
+                    }}>
+                      {aiAvailable.map(model => {
+                        const meta = AI_MODEL_META[model]
+                        const isActive = aiModel === model
+                        const tier = meta?.tier ?? 'Dengeli'
+                        const tierColor = AI_TIER_COLOR[tier]
+                        return (
+                          <button
+                            key={model}
+                            type="button"
+                            onClick={() => handleSaveAiModel(model)}
+                            disabled={aiSaving}
+                            style={{
+                              textAlign: 'left',
+                              display: 'flex', alignItems: 'flex-start', gap: 12,
+                              padding: '12px 14px',
+                              background: isActive ? `rgba(${hexToRgb(tierColor)}, 0.10)` : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${isActive ? `rgba(${hexToRgb(tierColor)}, 0.45)` : 'rgba(255,255,255,0.07)'}`,
+                              borderRadius: 10,
+                              cursor: aiSaving ? 'wait' : 'pointer',
+                              transition: 'background 0.15s, border-color 0.15s',
+                              opacity: aiSaving && !isActive ? 0.5 : 1,
+                              color: 'inherit',
+                            }}
+                          >
+                            <span style={{
+                              marginTop: 3, flexShrink: 0,
+                              width: 16, height: 16, borderRadius: '50%',
+                              border: `2px solid ${isActive ? tierColor : 'rgba(255,255,255,0.2)'}`,
+                              background: isActive ? tierColor : 'transparent',
+                              boxShadow: isActive ? `0 0 0 3px rgba(${hexToRgb(tierColor)}, 0.18)` : 'none',
+                              transition: 'all 0.15s',
+                            }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#f0f4ff' }}>
+                                  {meta?.label ?? model}
+                                </span>
+                                <span style={{
+                                  fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                                  padding: '2px 7px', borderRadius: 4,
+                                  background: `rgba(${hexToRgb(tierColor)}, 0.15)`,
+                                  border: `1px solid rgba(${hexToRgb(tierColor)}, 0.3)`,
+                                  color: tierColor,
+                                }}>
+                                  {tier.toUpperCase()}
+                                </span>
+                                {model === aiDefault && (
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                                    padding: '2px 7px', borderRadius: 4,
+                                    background: 'rgba(148,163,184,0.1)',
+                                    border: '1px solid rgba(148,163,184,0.2)',
+                                    color: 'rgba(148,163,184,0.85)',
+                                  }}>
+                                    VARSAYILAN
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.55)', lineHeight: 1.5 }}>
+                                {meta?.tagline ?? '—'}
+                              </div>
+                            </div>
+                            {aiSaving && isActive && <Spinner />}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
+                      Değişiklik yalnızca <strong>sonraki çağrılar</strong> için geçerlidir; o anki aktif oturumlar etkilenmez.
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* VoIP / Call Center card — sadece UI (backend yok) */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 12, gridColumn: '1 / -1' }}>
+                {/* Header */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 16, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(240,244,255,0.75)' }}>
+                    VoIP / Call Center
+                  </span>
+                  <span style={{
+                    fontSize: 11, color: '#fbbf24',
+                    padding: '3px 9px', background: 'rgba(251,191,36,0.1)',
+                    border: '1px solid rgba(251,191,36,0.25)', borderRadius: 20,
+                  }}>
+                     tam entegrasyon ileride aktifleşecek
+                  </span>
+                </div>
+
+                {/* Mode tabs */}
+                <div style={{
+                  display: 'flex', gap: 6, marginBottom: 18,
+                  padding: 4,
+                  background: 'var(--card-inner)',
+                  border: '1px solid var(--divider)',
+                  borderRadius: 10,
+                }}>
+                  {([
+                    { id: 'cloud', label: 'Bulut Sağlayıcı (Netgsm vb.)' },
+                    { id: 'local', label: 'Lokal SIP / Santral' },
+                  ] as { id: VoipMode; label: string }[]).map(t => {
+                    const isActive = voipMode === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setVoipMode(t.id)}
+                        style={{
+                          flex: 1,
+                          padding: '8px 14px',
+                          background: isActive ? 'rgba(96,165,250,0.15)' : 'transparent',
+                          border: `1px solid ${isActive ? 'rgba(96,165,250,0.4)' : 'transparent'}`,
+                          borderRadius: 7,
+                          color: isActive ? 'var(--foreground)' : 'var(--foreground-3)',
+                          cursor: 'pointer',
+                          fontSize: 12, fontWeight: isActive ? 600 : 500,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* ── Bulut Sağlayıcı formu ─────────────────────────────── */}
+                {voipMode === 'cloud' && (() => {
+                  const meta = CLOUD_PROVIDER_META[cloudProvider]
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <div style={voipTwoColPanels}>
+                        <div style={voipPanelStyle}>
+                          <div style={voipSectionTitleStyle}>Sağlayıcı ve kimlik</div>
+                          <div>
+                            <div style={voipLabelStyle}>Sağlayıcı</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {(Object.keys(CLOUD_PROVIDER_META) as CloudProvider[]).map(p => {
+                                const isActive = cloudProvider === p
+                                return (
+                                  <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => {
+                                      setCloudProvider(p)
+                                      setCloudBaseUrl(CLOUD_PROVIDER_META[p].baseUrl)
+                                    }}
+                                    style={{
+                                      padding: '5px 12px',
+                                      borderRadius: 20,
+                                      border: '1px solid',
+                                      cursor: 'pointer',
+                                      fontSize: 12, fontWeight: 500,
+                                      transition: 'all 0.15s',
+                                      background: isActive ? 'rgba(96,165,250,0.18)' : 'var(--glass-bg)',
+                                      borderColor: isActive ? '#60a5fa' : 'var(--glass-border)',
+                                      color: isActive ? 'var(--accent)' : 'var(--foreground-3)',
+                                    }}
+                                  >
+                                    {CLOUD_PROVIDER_META[p].label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                          <div style={voipGridStyle}>
+                            <div>
+                              <div style={voipLabelStyle}>Görünen ad</div>
+                              <input value={cloudLabel} onChange={e => setCloudLabel(e.target.value)} placeholder="Örn. Netgsm Bulut Santral" style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>API base URL</div>
+                              <input value={cloudBaseUrl} onChange={e => setCloudBaseUrl(e.target.value)} placeholder={meta.baseUrl} style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>{meta.userLabel}</div>
+                              <input value={cloudUser} onChange={e => setCloudUser(e.target.value)} placeholder={meta.userLabel} style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>{meta.passLabel}</div>
+                              <div style={{ position: 'relative' }}>
+                                <input
+                                  type={cloudShowPass ? 'text' : 'password'}
+                                  value={cloudPass}
+                                  onChange={e => setCloudPass(e.target.value)}
+                                  placeholder="••••••••"
+                                  style={{ ...voipInputStyle, paddingRight: 38 }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setCloudShowPass(v => !v)}
+                                  style={voipEyeBtnStyle}
+                                  title={cloudShowPass ? 'Gizle' : 'Göster'}
+                                >
+                                  {cloudShowPass ? <IconEyeOff /> : <IconEye />}
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>App key / Secret (opsiyonel)</div>
+                              <input value={cloudAppKey} onChange={e => setCloudAppKey(e.target.value)} placeholder="Twilio/Vonage için" style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>Caller ID / gönderici numara</div>
+                              <input value={cloudFromNumber} onChange={e => setCloudFromNumber(e.target.value)} placeholder={meta.fromHint} style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>Ülke kodu</div>
+                              <input value={cloudCountryCode} onChange={e => setCloudCountryCode(e.target.value)} placeholder="+90" style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>Maks. eşzamanlı dış hat</div>
+                              <input type="number" min={1} value={cloudMaxLines} onChange={e => setCloudMaxLines(e.target.value)} style={voipInputStyle} />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={voipPanelStyle}>
+                          <div style={voipSectionTitleStyle}>Webhook ve SIP trunk</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div>
+                              <div style={voipLabelStyle}>Webhook URL — Gelen çağrı</div>
+                              <input value={cloudWebhookInbound} onChange={e => setCloudWebhookInbound(e.target.value)} placeholder="https://uygulamaniz.com/api/voip/inbound" style={voipInputStyle} />
+                            </div>
+                            <div>
+                              <div style={voipLabelStyle}>Webhook URL — Durum / callback</div>
+                              <input value={cloudWebhookStatus} onChange={e => setCloudWebhookStatus(e.target.value)} placeholder="https://uygulamaniz.com/api/voip/status" style={voipInputStyle} />
+                            </div>
+                            <div style={{
+                              background: 'var(--card-inner)',
+                              border: '1px solid var(--divider)',
+                              borderRadius: 10,
+                            }}>
+                              <button
+                                type="button"
+                                onClick={() => setCloudTrunkOpen(v => !v)}
+                                style={{
+                                  width: '100%', textAlign: 'left',
+                                  padding: '11px 14px',
+                                  background: 'transparent', border: 'none',
+                                  color: 'var(--foreground-2)',
+                                  cursor: 'pointer', fontSize: 12, fontWeight: 500,
+                                  display: 'flex', alignItems: 'center', gap: 8,
+                                }}
+                              >
+                                <span style={{
+                                  fontSize: 10, lineHeight: 1,
+                                  transform: cloudTrunkOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                                  transition: 'transform 0.15s',
+                                }}>▶</span>
+                                SIP Trunk bilgileri (opsiyonel)
+                              </button>
+                              {cloudTrunkOpen && (
+                                <div style={{ ...voipGridStyle, padding: '0 14px 14px' }}>
+                                  <div>
+                                    <div style={voipLabelStyle}>Trunk host</div>
+                                    <input value={cloudTrunkHost} onChange={e => setCloudTrunkHost(e.target.value)} placeholder="sip.netgsm.com.tr" style={voipInputStyle} />
+                                  </div>
+                                  <div>
+                                    <div style={voipLabelStyle}>Port</div>
+                                    <input value={cloudTrunkPort} onChange={e => setCloudTrunkPort(e.target.value)} style={voipInputStyle} />
+                                  </div>
+                                  <div>
+                                    <div style={voipLabelStyle}>Transport</div>
+                                    <select className="cal-select" value={cloudTrunkTransport} onChange={e => setCloudTrunkTransport(e.target.value as SipTransport)} style={voipInputStyle}>
+                                      {SIP_TRANSPORTS.map(t => <option key={t} value={t} style={{ background: '#1e293b' }}>{t}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <div style={voipLabelStyle}>Trunk kullanıcı</div>
+                                    <input value={cloudTrunkUser} onChange={e => setCloudTrunkUser(e.target.value)} style={voipInputStyle} />
+                                  </div>
+                                  <div style={{ gridColumn: '1 / -1' }}>
+                                    <div style={voipLabelStyle}>Trunk şifre</div>
+                                    <input type="password" value={cloudTrunkPass} onChange={e => setCloudTrunkPass(e.target.value)} placeholder="••••••••" style={voipInputStyle} />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        ...voipPanelStyle,
+                        flexDirection: 'row',
+                        flexWrap: 'wrap',
+                        alignItems: 'flex-end',
+                        gap: 14,
+                      }}>
+                        <VoipToggle label="Görüşme kaydı" value={cloudRecording} onChange={setCloudRecording} />
+                        <div style={{ minWidth: 160 }}>
+                          <div style={voipLabelStyle}>Kayıt saklama (ay)</div>
+                          <input type="number" min={1} value={cloudRecMonths} onChange={e => setCloudRecMonths(e.target.value)} disabled={!cloudRecording} style={{ ...voipInputStyle, opacity: cloudRecording ? 1 : 0.5 }} />
+                        </div>
+                        <VoipToggle
+                          label="AI Transkript"
+                          value={cloudUseTranscript}
+                          onChange={setCloudUseTranscript}
+                          hint="Kapalıyken kendi STT'nizi kullanır"
+                        />
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* ── Lokal SIP / Santral formu ─────────────────────────── */}
+                {voipMode === 'local' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div style={voipTwoColPanels}>
+                      <div style={voipPanelStyle}>
+                        <div style={voipSectionTitleStyle}>SIP bağlantısı</div>
+                        <div style={voipGridStyle}>
+                          <div>
+                            <div style={voipLabelStyle}>Görünen ad</div>
+                            <input value={localLabel} onChange={e => setLocalLabel(e.target.value)} placeholder="Örn. Ofis Santrali" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>SIP host</div>
+                            <input value={localHost} onChange={e => setLocalHost(e.target.value)} placeholder="pbx.firma.local" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>Port</div>
+                            <input value={localPort} onChange={e => setLocalPort(e.target.value)} placeholder="5060" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>Transport</div>
+                            <select className="cal-select" value={localTransport} onChange={e => setLocalTransport(e.target.value as SipTransport)} style={voipInputStyle}>
+                              {SIP_TRANSPORTS.map(t => <option key={t} value={t} style={{ background: '#1e293b' }}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>SIP kullanıcı (extension)</div>
+                            <input value={localUser} onChange={e => setLocalUser(e.target.value)} placeholder="1001" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>SIP şifre</div>
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type={localShowPass ? 'text' : 'password'}
+                                value={localPass}
+                                onChange={e => setLocalPass(e.target.value)}
+                                placeholder="••••••••"
+                                style={{ ...voipInputStyle, paddingRight: 38 }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setLocalShowPass(v => !v)}
+                                style={voipEyeBtnStyle}
+                                title={localShowPass ? 'Gizle' : 'Göster'}
+                              >
+                                {localShowPass ? <IconEyeOff /> : <IconEye />}
+                              </button>
+                            </div>
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>Realm / Domain (opsiyonel)</div>
+                            <input value={localRealm} onChange={e => setLocalRealm(e.target.value)} placeholder="firma.local" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>Outbound proxy (opsiyonel)</div>
+                            <input value={localOutboundProxy} onChange={e => setLocalOutboundProxy(e.target.value)} placeholder="proxy.firma.local:5060" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>Maks. eşzamanlı çağrı</div>
+                            <input type="number" min={1} value={localMaxConcurrent} onChange={e => setLocalMaxConcurrent(e.target.value)} style={voipInputStyle} />
+                          </div>
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <div style={voipLabelStyle}>Yerel ses kayıt yolu</div>
+                            <input value={localRecPath} onChange={e => setLocalRecPath(e.target.value)} placeholder="/var/spool/asterisk/recordings" style={voipInputStyle} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={voipPanelStyle}>
+                        <div style={voipSectionTitleStyle}>Ses ve ağ</div>
+                        <div style={voipGridStyle}>
+                          <div>
+                            <div style={voipLabelStyle}>Caller ID</div>
+                            <input value={localCallerId} onChange={e => setLocalCallerId(e.target.value)} placeholder="Ad / numara" style={voipInputStyle} />
+                          </div>
+                          <div>
+                            <div style={voipLabelStyle}>DTMF modu</div>
+                            <select className="cal-select" value={localDtmf} onChange={e => setLocalDtmf(e.target.value as DtmfMode)} style={voipInputStyle}>
+                              <option value="rfc2833" style={{ background: '#1e293b' }}>RFC 2833</option>
+                              <option value="info" style={{ background: '#1e293b' }}>SIP INFO</option>
+                              <option value="inband" style={{ background: '#1e293b' }}>Inband</option>
+                            </select>
+                          </div>
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <div style={voipLabelStyle}>STUN sunucusu</div>
+                            <input value={localStun} onChange={e => setLocalStun(e.target.value)} placeholder="stun:stun.l.google.com:19302" style={voipInputStyle} />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={voipLabelStyle}>Codec tercihi</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {SIP_CODECS.map(c => {
+                              const isActive = localCodecs.includes(c)
+                              return (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setLocalCodecs(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}
+                                  style={{
+                                    padding: '5px 12px',
+                                    borderRadius: 20,
+                                    border: '1px solid',
+                                    cursor: 'pointer',
+                                    fontSize: 12, fontWeight: 500,
+                                    transition: 'all 0.15s',
+                                    background: isActive ? 'rgba(52,211,153,0.18)' : 'var(--glass-bg)',
+                                    borderColor: isActive ? '#34d399' : 'var(--glass-border)',
+                                    color: isActive ? 'var(--success)' : 'var(--foreground-3)',
+                                  }}
+                                >
+                                  {c}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                          <VoipToggle label="REGISTER atılsın" value={localRegister} onChange={setLocalRegister} />
+                          <VoipToggle label="ICE / TURN kullan" value={localIce} onChange={setLocalIce} />
+                        </div>
+
+                        {localIce && (
+                          <div style={{
+                            padding: 12,
+                            background: 'rgba(0,0,0,0.15)',
+                            border: '1px solid rgba(255,255,255,0.06)',
+                            borderRadius: 10,
+                          }}>
+                            <div style={voipLabelStyle}>TURN (ICE açıkken)</div>
+                            <div style={{ ...voipGridStyle, marginTop: 8 }}>
+                              <div style={{ gridColumn: '1 / -1' }}>
+                                <div style={voipLabelStyle}>TURN URL</div>
+                                <input value={localTurnUrl} onChange={e => setLocalTurnUrl(e.target.value)} placeholder="turn:turn.firma.local:3478" style={voipInputStyle} />
+                              </div>
+                              <div>
+                                <div style={voipLabelStyle}>TURN kullanıcı</div>
+                                <input value={localTurnUser} onChange={e => setLocalTurnUser(e.target.value)} style={voipInputStyle} />
+                              </div>
+                              <div>
+                                <div style={voipLabelStyle}>TURN şifre</div>
+                                <input type="password" value={localTurnPass} onChange={e => setLocalTurnPass(e.target.value)} placeholder="••••••••" style={voipInputStyle} />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Ortak alt blok ───────────────────────────────────── */}
+                <div style={{
+                  marginTop: 22, paddingTop: 18,
+                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                  display: 'flex', flexDirection: 'column', gap: 14,
+                }}>
+                  <div style={voipSectionTitleStyle}>Test ve çalışma saatleri</div>
+                  <div style={voipGridStyle}>
+                    <div>
+                      <div style={voipLabelStyle}>Test numarası</div>
+                      <input value={voipTestNumber} onChange={e => setVoipTestNumber(e.target.value)} placeholder="+90 555 555 5555" style={voipInputStyle} />
+                    </div>
+                    <div>
+                      <div style={voipLabelStyle}>Çağrı zaman dilimi</div>
+                      <select className="cal-select" value={voipTimezone} onChange={e => setVoipTimezone(e.target.value)} style={voipInputStyle}>
+                        {['Europe/Istanbul', 'Europe/London', 'UTC', 'Europe/Berlin', 'America/New_York'].map(tz => (
+                          <option key={tz} value={tz} style={{ background: '#1e293b' }}>{tz}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={voipLabelStyle}>Mesai başlangıç</div>
+                      <input type="time" value={voipWorkStart} onChange={e => setVoipWorkStart(e.target.value)} style={voipInputStyle} />
+                    </div>
+                    <div>
+                      <div style={voipLabelStyle}>Mesai bitiş</div>
+                      <input type="time" value={voipWorkEnd} onChange={e => setVoipWorkEnd(e.target.value)} style={voipInputStyle} />
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <div style={voipLabelStyle}>Mesai dışı yönlendirme</div>
+                      <select className="cal-select" value={voipAfterHours} onChange={e => setVoipAfterHours(e.target.value as AfterHours)} style={voipInputStyle}>
+                        <option value="voicemail" style={{ background: '#1e293b' }}>Sesli mesaja al</option>
+                        <option value="mobile"    style={{ background: '#1e293b' }}>Mobil numaraya yönlendir</option>
+                        <option value="close"     style={{ background: '#1e293b' }}>Kapat (otomatik mesaj)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoipSaving(true)
+                        showToast('success', voipTestNumber.trim()
+                          ? `Test çağrısı simüle edildi: ${voipTestNumber} (entegrasyon yok)`
+                          : 'Bu ekran şimdilik salt görsel; entegrasyon yapılınca aktifleşir')
+                        setTimeout(() => setVoipSaving(false), 400)
+                      }}
+                      className="btn btn-ghost"
+                      style={{ fontSize: 13 }}
+                      disabled={voipSaving}
+                    >
+                      Bağlantıyı Test Et
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoipSaving(true)
+                        showToast('success', 'Form alındı (salt görsel; backend bağlanınca kaydedilecek)')
+                        setTimeout(() => setVoipSaving(false), 400)
+                      }}
+                      className="btn btn-primary"
+                      style={{ fontSize: 13 }}
+                      disabled={voipSaving}
+                    >
+                      {voipSaving ? 'Kaydediliyor…' : 'Kaydet'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               </div>
 
               {/* Setup details (collapsed) */}

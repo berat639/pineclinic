@@ -46,8 +46,10 @@ export const appointments = pgTable('appointments', {
   issueOrRequest: text('issue_or_request'),
   date: text('date').notNull(),
   time: text('time').notNull(),
-  sessionId: uuid('session_id').references(() => sessions.id),
+  sessionId: text('session_id'),
   calendarEventId: text('calendar_event_id'),
+  discountRequested: boolean('discount_requested').default(false),
+  notes: text('notes'),
 })
 
 export const businessSettings = pgTable('business_settings', {
@@ -56,21 +58,27 @@ export const businessSettings = pgTable('business_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
+// Single-doc + single-embedding model (admin UI uses category/title/content/active)
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  name: text('name').notNull(),
-  fileType: text('file_type').notNull().default('txt'),
-  originalText: text('original_text').notNull(),
-  chunkCount: integer('chunk_count').default(0),
+  category: text('category').notNull().default('genel'),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  active: boolean('active').notNull().default(true),
+  // embedding vector(768) is managed via raw SQL — pgvector type not in drizzle-orm/pg-core
+  embeddedAt: timestamp('embedded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
-export const knowledgeChunks = pgTable('knowledge_chunks', {
+export const recordings = pgTable('recordings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  documentId: uuid('document_id').references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
-  chunkIndex: integer('chunk_index').notNull(),
-  chunkText: text('chunk_text').notNull(),
-  // embedding vector(768) is managed via raw SQL — pgvector type not in drizzle-orm/pg-core
+  sessionId: text('session_id'),
+  filename: text('filename').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  endedAt: timestamp('ended_at', { withTimezone: true }).notNull(),
+  durationMs: bigint('duration_ms', { mode: 'number' }).notNull(),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -84,3 +92,5 @@ export type Session = typeof sessions.$inferSelect
 export type Appointment = typeof appointments.$inferSelect
 export type NewAppointment = typeof appointments.$inferInsert
 export type BusinessSetting = typeof businessSettings.$inferSelect
+export type Recording = typeof recordings.$inferSelect
+export type NewRecording = typeof recordings.$inferInsert

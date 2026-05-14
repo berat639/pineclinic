@@ -8,6 +8,7 @@ export type TranscriptEntry = { role: 'user' | 'model'; text: string; id: string
 export function useVoiceAI(wsUrl: string) {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
+  const [serverError, setServerError] = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const micCtxRef = useRef<AudioContext | null>(null)
@@ -61,7 +62,8 @@ export function useVoiceAI(wsUrl: string) {
   }, [])
 
   const start = useCallback(async () => {
-    if (statusRef.current !== 'idle') return
+    if (statusRef.current !== 'idle' && statusRef.current !== 'error') return
+    setServerError(null)
     setStatusBoth('connecting')
     micStartedRef.current = false
 
@@ -112,21 +114,33 @@ export function useVoiceAI(wsUrl: string) {
                   startMicStreaming(ctx, s, w)
                 }
                 break
-              case 'error':
-                console.error('Server error:', msg.message)
+              case 'error': {
+                const detail =
+                  typeof msg.message === 'string' && msg.message.trim()
+                    ? msg.message
+                    : 'Sunucu hatası'
+                setServerError(detail)
+                cleanup()
                 setStatusBoth('error')
                 break
+              }
             }
           } catch { /* ignore parse errors */ }
         }
       }
 
-      ws.onerror = () => setStatusBoth('error')
+      ws.onerror = () => {
+        setServerError((prev) => prev ?? 'Bağlantı hatası')
+        cleanup()
+        setStatusBoth('error')
+      }
       ws.onclose = () => {
-        if (statusRef.current !== 'idle') setStatusBoth('idle')
+        cleanup()
+        if (statusRef.current !== 'error') setStatusBoth('idle')
       }
     } catch (err) {
-      console.error('Failed to start:', err)
+      const msg = err instanceof Error ? err.message : 'Başlatılamadı'
+      setServerError(msg)
       setStatusBoth('error')
       cleanup()
     }
@@ -161,9 +175,10 @@ export function useVoiceAI(wsUrl: string) {
 
   const stop = useCallback(() => {
     cleanup()
+    setServerError(null)
     setStatusBoth('idle')
     setTranscript([])
   }, [stopPlayback])
 
-  return { status, transcript, start, stop }
+  return { status, transcript, serverError, start, stop }
 }

@@ -80,8 +80,8 @@ export default function RecordingsTab() {
 
   return (
     <div className="glass-card" style={{ overflow: 'hidden' }}>
-      <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+      <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
           {recordings.length} kayıt
         </span>
         <button onClick={load} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>↺ Yenile</button>
@@ -93,25 +93,25 @@ export default function RecordingsTab() {
             <div key={rec.id} style={{
               display: 'flex', alignItems: 'center', gap: '1rem',
               padding: '0.9rem 1.25rem',
-              borderBottom: i < recordings.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+              borderBottom: i < recordings.length - 1 ? '1px solid var(--divider)' : 'none',
               background: isPlaying ? 'rgba(167,139,250,0.06)' : 'transparent',
             }}>
               <button onClick={() => play(rec)} style={{
                 width: 40, height: 40, borderRadius: '50%', flexShrink: 0, cursor: 'pointer',
-                background: isPlaying ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.06)',
-                border: `1px solid ${isPlaying ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                color: isPlaying ? '#a78bfa' : '#94a3b8', fontSize: '1rem',
+                background: isPlaying ? 'rgba(167,139,250,0.2)' : 'var(--glass-bg)',
+                border: `1px solid ${isPlaying ? 'rgba(167,139,250,0.4)' : 'var(--glass-border)'}`,
+                color: isPlaying ? '#a78bfa' : 'var(--muted)', fontSize: '1rem',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {isPlaying ? '⏸' : '▶'}
               </button>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.82rem', fontWeight: 500, color: '#e2e8f0', fontFamily: 'monospace' }}>{rec.id}</div>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>{fmtDate(rec.startedAt)}</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--foreground)', fontFamily: 'monospace' }}>{rec.id}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: 2 }}>{fmtDate(rec.startedAt)}</div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#94a3b8' }}>{fmtDuration(rec.durationMs)}</div>
-                <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 1 }}>{fmtSize(rec.sizeBytes)}</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground-2)' }}>{fmtDuration(rec.durationMs)}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: 1 }}>{fmtSize(rec.sizeBytes)}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                 <button onClick={() => download(rec)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '0.75rem' }}>⬇</button>

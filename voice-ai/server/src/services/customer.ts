@@ -1,4 +1,4 @@
-import type { CustomerContext } from '../db'
+import type { CustomerContext } from '../db/repositories/appointments'
 
 const APPOINTMENT_TYPE_LABELS: Record<string, string> = {
   service: 'Servis',
@@ -31,7 +31,7 @@ RANDEVU GÜNCELLEME: Randevu oluşturulduktan sonra bilgi değişirse veya tarih
 KESİN YASAK — randevuOlustur ÇAĞIRMA:
 - Müşteri adını almadan
 - Telefon numarasını almadan
-- "[Ad Soyad]", "[isim]", "[telefon]" gibi placeholder değerlerle
+- "[Ad Soyad]", "[isim]", "[telefon]", "[KULLANICI ADI SOYADI]" gibi placeholder değerlerle
 - Müşteri henüz onaylamamışken`
 
   if (!customer || customer.appointmentHistory.length === 0) return base

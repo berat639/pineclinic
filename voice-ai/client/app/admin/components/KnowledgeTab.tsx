@@ -205,6 +205,7 @@ export default function KnowledgeTab() {
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -427,13 +428,26 @@ export default function KnowledgeTab() {
                   </button>
                 </div>
 
-                {/* Content preview */}
-                <p style={{
-                  fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.55,
-                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                }}>
-                  {doc.content}
-                </p>
+                {/* Content accordion */}
+                <div>
+                  <p style={{
+                    fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.55, margin: 0,
+                    ...(expandedId === doc.id ? {} : {
+                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                    }),
+                  }}>
+                    {doc.content}
+                  </p>
+                  <button
+                    onClick={() => setExpandedId(expandedId === doc.id ? null : doc.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 0',
+                      fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    {expandedId === doc.id ? '▲ Küçült' : '▼ Tamamını gör'}
+                  </button>
+                </div>
 
                 {/* Footer */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>

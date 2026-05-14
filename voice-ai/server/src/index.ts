@@ -1,310 +1,730 @@
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { randomUUID } from 'crypto'
-import type { GoogleGenAI } from '@google/genai'
+import { createReadStream, writeFileSync } from 'fs'
+import { resolve } from 'path'
+import { GoogleGenAI } from '@google/genai'
 import { createLiveSession } from './gemini'
-import { readAppointments, getCustomerByPhone } from './db'
-import { buildSystemPrompt } from './services/customer'
-import { adminPlugin } from './api/admin'
-import { accountPool } from './accounts/pool'
-import { acquire, release } from './accounts/router'
-import { startSession, record, endSession, startFlushScheduler, shutdown as trackerShutdown } from './accounts/tracker'
-import { enqueueSession, dequeueSession, closeQueue } from './queue/session-queue'
-import { db, checkDbHealth, closeDb } from './db/client'
-import { sql } from 'drizzle-orm'
-import { checkRedisHealth, closeRedis } from './db/redis'
-import { sseClients, broadcastSSE } from './events'
+import {
+  readAppointments,
+  deleteAppointment,
+} from './db/repositories/appointments'
+import {
+  listRecordings,
+  saveRecording,
+  deleteRecording,
+  RECORDINGS_DIR,
+} from './db/repositories/recordings'
+import {
+  listDocs,
+  createDoc,
+  updateDoc,
+  deleteDoc,
+  toggleDoc,
+  updateDocEmbedding,
+  countEmbedded,
+  retrieveTopK as retrieveDocsByEmbedding,
+} from './db/repositories/knowledge'
+import {
+  getCalendarSettings,
+  setCalendarSettings,
+  disconnectCalendar,
+  getAiModel,
+  setAiModel,
+} from './db/repositories/settings'
+import { embedText, buildRagPrompt, PRE_WARM_QUERY } from './rag'
 
 const PORT = Number(process.env.PORT) || 3001
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000'
-const IDLE_TIMEOUT_MS = 90_000
 
-// Active Gemini sessions keyed by WS session ID
-const sessions = new Map<string, Awaited<ReturnType<typeof createLiveSession>>>()
-const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// ── Live API uyumlu modeller (admin panelden seçilebilir) ─────────────────────
+const ALLOWED_LIVE_MODELS = [
+  'gemini-live-2.5-flash-native-audio',
+  'gemini-live-2.5-flash-preview',
+  'gemini-2.0-flash-live-001',
+] as const
+const DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio'
 
-// In-process waiting queue: sessions waiting for an available account
-type WaitEntry = { id: string; ws: { send: (data: unknown) => void; close: () => void }; phone: string }
-const waitQueue: WaitEntry[] = []
-
-function resetIdleTimer(id: string, ws: { close: () => void }) {
-  const existing = idleTimers.get(id)
-  if (existing) clearTimeout(existing)
-  idleTimers.set(id, setTimeout(() => {
-    console.log(`[${id}] Idle timeout — session kapatılıyor`)
-    void cleanupSession(id)
-    ws.close()
-  }, IDLE_TIMEOUT_MS))
+async function resolveLiveModel(): Promise<string> {
+  const saved = await getAiModel()
+  if (saved && (ALLOWED_LIVE_MODELS as readonly string[]).includes(saved)) return saved
+  const fromEnv = process.env.GEMINI_LIVE_MODEL
+  if (fromEnv && (ALLOWED_LIVE_MODELS as readonly string[]).includes(fromEnv)) return fromEnv
+  return DEFAULT_LIVE_MODEL
 }
 
-function clearIdleTimer(id: string) {
-  const t = idleTimers.get(id)
-  if (t) clearTimeout(t)
-  idleTimers.delete(id)
+// ── GoogleGenAI client ────────────────────────────────────────────────────────
+function createAI(): GoogleGenAI {
+  const encoded = process.env.GOOGLE_CREDENTIALS_JSON
+  if (!encoded) throw new Error('GOOGLE_CREDENTIALS_JSON tanımlı değil')
+  const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'))
+  return new GoogleGenAI({
+    vertexai: true,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.GOOGLE_VERTEX_LOCATION || 'europe-west1',
+    googleAuthOptions: { credentials },
+  })
 }
 
-// Map WS session ID → account ID (for release on close)
-const sessionAccounts = new Map<string, string>()
+const ai = createAI()
 
-async function cleanupSession(id: string) {
-  clearIdleTimer(id)
-  const session = sessions.get(id)
-  try { session?.close() } catch {}
-  sessions.delete(id)
+// ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `Sen Türkçe konuşan, son derece sıcak, samimi ve profesyonel bir Hyundai marka otomotiv müşteri danışmanısın.
+Hem oto servis merkezlerine hem araç galerilerine hizmet veriyorsun.
 
-  const accountId = sessionAccounts.get(id)
-  if (accountId) {
-    sessionAccounts.delete(id)
-    await endSession(id).catch(() => {})
-    await release(accountId).catch(() => {})
-    // Wake up waiting queue after releasing a slot
-    processWaitQueue()
+KİŞİLİĞİN:
+- Müşteriye gerçek bir dost gibi, içten ve samimi davran. Soğuk ve resmi olma.
+- Gerçek bir insan gibi doğal konuş. Kısa, net ve samimi cümleler kur.
+- Empati kur: müşteri sorun yaşıyorsa "Geçmiş olsun, hemen yardımcı olayım" de.
+- "Anlıyorum", "Tabii ki", "Harika!", "Ne güzel!" gibi samimi tepkiler kullan.
+- Soru sorduktan sonra cevabı bekle, kendi kendine devam etme.
+- Asla robotik, soğuk veya ezberden okur gibi davranma.
+
+KARŞILAMA:
+Müşteri bağlandığında çok sıcak ve enerjik karşıla. Örnek:
+"Merhaba, hoş geldiniz! Ben Hyundai otomotiv asistanınızım. Servis randevusu, test sürüşü veya araç konularında size yardımcı olmaktan mutluluk duyarım. Nasıl yardımcı olabilirim?"
+
+KAPASİTELERİNİ BELİRT:
+Karşılamada mutlaka ne yapabileceğini söyle. Müşterinin sormak zorunda kalmasına izin verme.
+Eğer müşteri ne istediğinden emin değilse, hizmetleri sıcak bir şekilde listele:
+"Size şu konularda yardımcı olabilirim: Araç servisi ve bakım randevusu, test sürüşü veya galeri ziyareti. Hangisinde yardımcı olayım?"
+
+İHTİYAÇ TANIMLAMA:
+Müşterinin ne istediğini anla: araç servisi mi, araç satın alma mı, test sürüşü mü, başka bir konu mu?
+
+RANDEVU İÇİN ZORUNLU BİLGİLER — HER RANDEVUDA MUTLAKA AL:
+Randevu oluşturmadan önce kesinlikle şunları öğren:
+1. Müşterinin ADI ve SOYADI — eksikse sıcak bir şekilde "İsminizi öğrenebilir miyim?" diye sor
+2. Telefon numarası — eksikse "Sizi arayabileceğimiz bir telefon numarası alabilir miyim?" diye sor
+⚠️ Bu iki bilgi olmadan ASLA randevuOlustur fonksiyonunu çağırma.
+
+ONAY (ZORUNLU — randevuOlustur ÖNCESİ):
+- Tüm bilgileri (ad soyad, telefon, tarih, saat, randevu türü) TEK CÜMLEDE veya maddeler halinde SESLİ olarak tekrar et.
+- Ardından net sor: "Bilgiler doğru mu, onaylıyor musunuz?" veya "Randevuyu bu bilgilerle oluşturayım mı?"
+- Müşteri açıkça onay vermeden (ör. "evet", "onaylıyorum", "tamam oluştur", "doğru") randevuOlustur ÇAĞIRMA. Belirsiz "hm", "olur gibi" yeterli değil; net onay iste.
+
+KESİN YASAK — randevuOlustur parametrelerine ASLA YAZMA:
+- Köşeli parantez veya şablon: "[...]", "KULLANICI", "ADI SOYADI", "[Ad Soyad]", "[isim]", "[telefon]" vb.
+- Sistem/oturum satırları: "Sistem bildirimi", "bağlantı", "oturum" gibi senin veya arka plandan gelen metinleri müşteri adı sanma.
+- Uydurma veya örnek isim: Müşteri söylemedikçe gerçek dışı isim kullanma.
+- Sadece müşterinin AÇIKÇA SÖYLEDİĞİ ad soyad ve telefonu yaz; başka kaynaktan tahmin etme.
+
+FİYAT KONUSU:
+- Kesinlikle fiyat bilgisi verme. Fiyat sorulursa şunu söyle:
+  "Fiyat konusunda servisimiz sizi bilgilendirecek, ben şu an randevu oluşturabiliyorum."
+- Müşteri indirim isterse: "İndirim talebinizi not aldım, yetkili ekibimiz sizi arayacak" de.
+
+SERVİS TALEPLERİ:
+1. Ad soyad + telefon al
+2. Araç marka, model ve şikayetini öğren
+3. En erken 2 iş günü sonrasına randevu öner
+4. Randevuyu "randevuOlustur" fonksiyonu ile kaydet
+
+SATIŞ/GALERİ TALEPLERİ:
+1. Ad soyad + telefon al
+2. Müşterinin araç tercihi ve bütçesini anla
+3. Test sürüşü veya galeri ziyareti için randevu oluştur
+
+KURALLAR:
+- Sadece Türkçe konuş
+- Müşteriyi asla uzun süre bekleme
+- Randevu onaylarken tarih ve saati net söyle
+- Ad soyad ve telefon almadan KESİNLİKLE randevu oluşturma
+- Fiyat bilgisi asla verme`
+
+// ── Session tracking ──────────────────────────────────────────────────────────
+interface TimedChunk {
+  buffer: Buffer
+  offsetMs: number
+}
+
+interface SessionInfo {
+  session: Awaited<ReturnType<typeof createLiveSession>>
+  startedAt: Date
+  startedAtMs: number
+  audioChunks: TimedChunk[]      // AI (24 kHz)
+  userAudioChunks: TimedChunk[]  // User (16 kHz)
+  shortId: string
+}
+
+const sessions = new Map<string, SessionInfo>()
+
+// ── SSE: Admin real-time notifications ───────────────────────────────────────
+type SseClient = { id: string; send: (data: string) => void }
+const sseClients = new Set<SseClient>()
+
+function notifyAdmins(event: string, payload: unknown) {
+  const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
+  for (const client of sseClients) {
+    try { client.send(data) } catch { sseClients.delete(client) }
   }
 }
 
-// Try to process next entry in the wait queue
-function processWaitQueue() {
-  const entry = waitQueue[0]
-  if (!entry) return
-  // Attempt to create session for the first waiter
-  void (async () => {
-    try {
-      const { accountId, client } = await acquire()
-      waitQueue.shift() // remove from queue
-      await dequeueSession(entry.id).catch(() => {})
-      await initSession(entry.id, entry.ws, accountId, client, entry.phone)
-    } catch {
-      // Still no slot available — leave waiters in queue silently
+// ── WAV helper: time-aligned stereo (user=L, AI=R) ──────────────────────────
+/**
+ * 16 kHz → 24 kHz linear-interpolation upsampling.
+ */
+function upsample16to24(buf: Buffer): Buffer {
+  const inSamples = buf.length / 2
+  const outSamples = Math.ceil(inSamples * 24000 / 16000)
+  const out = Buffer.alloc(outSamples * 2)
+  for (let i = 0; i < outSamples; i++) {
+    const srcF = i * 16000 / 24000
+    const srcI = Math.floor(srcF)
+    const frac = srcF - srcI
+    const s0 = buf.readInt16LE(Math.min(srcI, inSamples - 1) * 2)
+    const s1 = buf.readInt16LE(Math.min(srcI + 1, inSamples - 1) * 2)
+    out.writeInt16LE(Math.round(s0 + (s1 - s0) * frac), i * 2)
+  }
+  return out
+}
+
+/**
+ * Build a stereo WAV (user=L, AI=R) at 24 kHz using offset-based placement.
+ * Each chunk is written at its real time offset; silences are zero-filled.
+ * This keeps the user/AI tracks SYNCHRONIZED with the actual conversation timeline,
+ * so playback reflects when each side actually spoke.
+ */
+function buildStereoWav(aiChunks: TimedChunk[], userChunks: TimedChunk[], totalDurationMs: number): Buffer {
+  const sampleRate = 24000
+  const numChannels = 2
+  const bitsPerSample = 16
+  const totalSamples = Math.ceil(totalDurationMs / 1000 * sampleRate)
+  const dataSize = totalSamples * numChannels * 2
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8
+  const blockAlign = numChannels * bitsPerSample / 8
+
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0); header.writeUInt32LE(36 + dataSize, 4)
+  header.write('WAVE', 8); header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(numChannels, 22); header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(byteRate, 28); header.writeUInt16LE(blockAlign, 32)
+  header.writeUInt16LE(bitsPerSample, 34); header.write('data', 36)
+  header.writeUInt32LE(dataSize, 40)
+
+  const data = Buffer.alloc(dataSize, 0)
+
+  // Place user chunks on left channel (offset 0 in each frame)
+  // User audio is 16 kHz PCM — upsample each chunk to 24 kHz before placing
+  for (const ch of userChunks) {
+    const pcm24 = upsample16to24(ch.buffer)
+    const startSample = Math.round(ch.offsetMs / 1000 * sampleRate)
+    const samples = pcm24.length / 2
+    for (let i = 0; i < samples; i++) {
+      const frame = startSample + i
+      if (frame >= totalSamples) break
+      const byteOffset = frame * 4 // 2 channels * 2 bytes
+      const s = pcm24.readInt16LE(i * 2)
+      data.writeInt16LE(s, byteOffset)
     }
-  })()
-}
-
-async function initSession(
-  id: string,
-  ws: { send: (data: unknown) => void; close: () => void },
-  accountId: string,
-  client: GoogleGenAI,
-  phone: string,
-) {
-  const dbSessionId = await startSession(id, accountId)
-  sessionAccounts.set(id, accountId)
-
-  // Look up customer history by phone for personalized greeting
-  const customer = phone ? await getCustomerByPhone(phone).catch(() => null) : null
-  const systemPrompt = buildSystemPrompt(customer)
-  if (customer) {
-    console.log(`[${id}] Müşteri bulundu: ${customer.name} (${customer.appointmentHistory.length} randevu)`)
   }
 
-  const session = await createLiveSession(client, {
-    onReady: () => {
-      console.log(`[${id}] Gemini Live hazır (hesap: ${accountId.slice(0, 8)})`)
-      ws.send(JSON.stringify({ type: 'ready' }))
-    },
-    onAudio: (pcm) => ws.send(pcm),
-    onTranscript: (role, text) => ws.send(JSON.stringify({ type: 'transcript', role, text })),
-    onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
-    onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
-    onUsage: (usage) => record(id, {
-      promptTokenCount: usage.promptTokenCount,
-      responseTokenCount: usage.candidatesTokenCount,
-      totalTokenCount: usage.totalTokenCount,
-    }),
-    onError: (e) => console.error(`[${id}] Gemini hata:`, e),
-    onClose: () => {
-      console.log(`[${id}] Gemini session kapandı`)
-      sessions.delete(id)
-    },
-  }, {
-    dbSessionId,
-    systemPrompt,
-  })
-
-  sessions.set(id, session)
-
-  // Auto-greet — context-aware for returning customers
-  const greetTrigger = customer
-    ? `[KAYITLI MÜŞTERİ BAĞLANDI: ${customer.name}, Tel: ${phone}]`
-    : '[KULLANICI BAĞLANDI]'
-
-  session.sendClientContent({
-    turns: [{ role: 'user', parts: [{ text: greetTrigger }] }],
-    turnComplete: true,
-  })
-
-  console.log(`[${id}] Session başlatıldı (db: ${dbSessionId})`)
-}
-
-// Initialize all services before starting the server
-async function bootstrap() {
-  console.log('\n[Bootstrap] Servisler başlatılıyor...')
-
-  const [dbOk, redisOk] = await Promise.all([checkDbHealth(), checkRedisHealth()])
-  if (!dbOk) throw new Error('PostgreSQL bağlantısı başarısız')
-  if (!redisOk) throw new Error('Redis bağlantısı başarısız')
-  console.log('[Bootstrap] DB ve Redis ✓')
-
-  // Reset stale concurrent_sessions counters from previous run (server crash/restart)
-  await db.execute(sql`UPDATE account_usage SET concurrent_sessions = 0`)
-  console.log('[Bootstrap] Stale concurrent_sessions sıfırlandı')
-
-  await accountPool.initialize()
-  if (accountPool.getAll().length === 0) {
-    console.warn('[Bootstrap] UYARI: Hiç aktif hesap yok. Lütfen admin API ile hesap ekleyin.')
+  // Place AI chunks on right channel (offset 2 in each frame)
+  // AI audio is already 24 kHz PCM
+  for (const ch of aiChunks) {
+    const startSample = Math.round(ch.offsetMs / 1000 * sampleRate)
+    const samples = ch.buffer.length / 2
+    for (let i = 0; i < samples; i++) {
+      const frame = startSample + i
+      if (frame >= totalSamples) break
+      const byteOffset = frame * 4 + 2 // right channel
+      const s = ch.buffer.readInt16LE(i * 2)
+      data.writeInt16LE(s, byteOffset)
+    }
   }
 
-  startFlushScheduler()
-  console.log('[Bootstrap] Tüm servisler hazır\n')
+  return Buffer.concat([header, data])
 }
 
-// Graceful shutdown
-async function gracefulShutdown() {
-  console.log('\n[Shutdown] Kapatılıyor...')
-  await trackerShutdown()
-  await closeQueue()
-  await closeDb()
-  await closeRedis()
-  console.log('[Shutdown] Tamamlandı')
-  process.exit(0)
-}
-
-process.on('SIGTERM', () => void gracefulShutdown())
-process.on('SIGINT', () => void gracefulShutdown())
-
-// Start bootstrap then listen
-await bootstrap()
+// ── Elysia app ────────────────────────────────────────────────────────────────
+const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:3001']
+const corsFromEnv = process.env.CORS_ORIGIN?.split(/[\s,]+/).map(s => s.trim()).filter(Boolean) ?? []
+const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
-  .use(cors({ origin: CORS_ORIGIN }))
-  .use(adminPlugin)
+  .use(cors({ origin: corsOrigins }))
 
-  .get('/api/appointments', async () => readAppointments())
+  .get('/api/appointments', async () => await readAppointments())
 
-  .delete('/api/appointments/:id', async ({ params }) => {
-    const { eq } = await import('drizzle-orm')
-    const { appointments } = await import('./db/schema')
-    const [deleted] = await db.delete(appointments)
-      .where(eq(appointments.id, params.id))
-      .returning({ id: appointments.id })
-    if (!deleted) return new Response('Not found', { status: 404 })
-    sseClients.forEach(send => send('appointment_deleted', { id: params.id }))
-    return { success: true }
+  .delete('/api/appointments/:id', async ({ params, set }) => {
+    const deleted = await deleteAppointment(params.id)
+    if (!deleted) { set.status = 404; return { error: 'Appointment not found' } }
+    return { success: true, id: params.id }
+  })
+
+  .get('/api/stats', async () => ({
+    activeSessions: sessions.size,
+    totalAppointments: (await readAppointments()).length,
+    totalRecordings: (await listRecordings()).length,
+  }))
+
+  // ── /api/admin/* aliases ─────────────────────────────────────────────────
+  .get('/api/admin/stats', async () => ({
+    concurrent: { active: sessions.size },
+    accounts:   { active: 1 },
+    tokens:     { today: 0 },
+    appointments: (await readAppointments()).length,
+    recordings: (await listRecordings()).length,
+  }))
+
+  .get('/api/admin/knowledge', async () => {
+    const docs = await listDocs()
+    const { total, embedded } = await countEmbedded()
+    return { docs, totalEmbedded: embedded, total }
+  })
+
+  /** FormData: name?, category?, file? | text? — admin panel quick upload */
+  .post('/api/admin/knowledge/upload', async ({ request, set }) => {
+    const ALLOWED_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac'] as const
+    type Category = typeof ALLOWED_CATEGORIES[number]
+
+    let content: string
+    let title: string
+    try {
+      const form = await request.formData()
+      const name = String(form.get('name') ?? '').trim()
+      const categoryRaw = String(form.get('category') ?? '').trim().toLowerCase()
+      const category: Category = (ALLOWED_CATEGORIES as readonly string[]).includes(categoryRaw)
+        ? (categoryRaw as Category)
+        : 'genel'
+      const textField = form.get('text')
+      const fileEntry = form.get('file')
+
+      if (fileEntry instanceof File && fileEntry.size > 0) {
+        title = (name || fileEntry.name || 'Yüklenen belge').slice(0, 200)
+        const mime = fileEntry.type || 'application/octet-stream'
+        const textMimes = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
+        if (textMimes.some(t => mime === t || mime.startsWith(`${t};`))) {
+          content = await fileEntry.text()
+        } else {
+          set.status = 400
+          return {
+            error:
+              'Bu dosya türü için şimdilik yalnızca düz metin desteklenir (.txt, .md, .csv, .json). PDF veya Word için metni kopyalayıp aşağıdaki kutuya yapıştırın.',
+          }
+        }
+      } else if (typeof textField === 'string' && textField.trim()) {
+        title = (name || 'Yüklenen metin').slice(0, 200)
+        content = textField.trim()
+      } else {
+        set.status = 400
+        return { error: 'Dosya veya metin gerekli' }
+      }
+
+      if (content.trim().length < 10) {
+        set.status = 400
+        return { error: 'İçerik en az 10 karakter olmalı' }
+      }
+
+      let embedding: number[] = []
+      try {
+        embedding = await embedText(content)
+      } catch (e) {
+        console.error('[RAG] knowledge/upload embedding:', e)
+        set.status = 500
+        return { error: 'Gömme (embedding) başarısız — Vertex / API anahtarlarını kontrol edin.' }
+      }
+
+      const doc = await createDoc(
+        { category, title, content, active: true },
+        embedding,
+      )
+      return { success: true, id: doc.id, name: doc.title, category: doc.category, message: 'Belge indekslendi' }
+    } catch (e) {
+      console.error('[Admin] knowledge/upload:', e)
+      set.status = 500
+      return { error: String(e) }
+    }
+  })
+
+  .post('/api/admin/knowledge', async ({ body, set }) => {
+    const { category, title, content, active } = body as any
+    if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
+    try {
+      let embedding: number[] = []
+      try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
+      const doc = await createDoc({ category, title, content, active: active !== false }, embedding)
+      return { success: true, doc }
+    } catch (e) { set.status = 500; return { error: String(e) } }
+  })
+
+  .delete('/api/admin/knowledge/:id', async ({ params, set }) => {
+    const deleted = await deleteDoc(params.id)
+    if (!deleted) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, id: params.id }
   })
 
   .get('/api/events', ({ set }) => {
+    const clientId = randomUUID().slice(0, 8)
     set.headers['Content-Type'] = 'text/event-stream'
     set.headers['Cache-Control'] = 'no-cache'
     set.headers['Connection'] = 'keep-alive'
-
-    const stream = new ReadableStream({
+    set.headers['Access-Control-Allow-Origin'] = '*'
+    return new ReadableStream({
       start(controller) {
-        const send = (event: string, data: unknown) => {
-          controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        const enc = new TextEncoder()
+        const send = (data: string) => controller.enqueue(enc.encode(data))
+        const client: SseClient = { id: clientId, send }
+        sseClients.add(client)
+        send(`: connected ${clientId}\n\n`)
+        const hb = setInterval(() => {
+          try { send(`: ping\n\n`) } catch { clearInterval(hb); sseClients.delete(client) }
+        }, 20000)
+        ;(client as any).hb = hb
+      },
+      cancel() {
+        for (const c of sseClients) {
+          if (c.id === clientId) { clearInterval((c as any).hb); sseClients.delete(c); break }
         }
-        sseClients.add(send)
-        const timer = setInterval(() => {
-          try { controller.enqueue(new TextEncoder().encode(': keepalive\n\n')) }
-          catch { clearInterval(timer); sseClients.delete(send) }
-        }, 15000)
-        return () => { clearInterval(timer); sseClients.delete(send) }
-      }
+      },
     })
-    return new Response(stream)
   })
 
-  .get('/api/recordings', async () => {
-    const { existsSync, readdirSync, statSync } = await import('fs')
-    const { resolve } = await import('path')
-    const dir = resolve(process.cwd(), 'data/recordings')
-    if (!existsSync(dir)) return []
-    const files = readdirSync(dir).filter(f => f.endsWith('.wav') || f.endsWith('.webm') || f.endsWith('.ogg'))
-    return files.map(filename => {
-      const stat = statSync(resolve(dir, filename))
-      const id = filename.replace(/\.[^.]+$/, '')
-      return { id, filename, startedAt: stat.birthtime.toISOString(), endedAt: stat.mtime.toISOString(), durationMs: 0, sizeBytes: stat.size }
-    }).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
-  })
+  .get('/api/recordings', async () => await listRecordings())
 
-  .get('/api/recordings/:filename', async ({ params, set }) => {
-    const { existsSync, createReadStream } = await import('fs')
-    const { resolve } = await import('path')
-    const dir = resolve(process.cwd(), 'data/recordings')
-    const filePath = resolve(dir, params.filename)
-    if (!filePath.startsWith(dir) || !existsSync(filePath)) {
-      set.status = 404; return 'Not found'
-    }
-    set.headers['Content-Type'] = 'audio/wav'
-    return createReadStream(filePath)
+  .get('/api/recordings/:filename', ({ params, set }) => {
+    try {
+      const filePath = resolve(RECORDINGS_DIR, params.filename)
+      if (!filePath.startsWith(RECORDINGS_DIR)) { set.status = 403; return 'Forbidden' }
+      set.headers['Content-Type'] = 'audio/wav'
+      set.headers['Content-Disposition'] = `inline; filename="${params.filename}"`
+      return createReadStream(filePath)
+    } catch { set.status = 404; return 'Not found' }
   })
 
   .delete('/api/recordings/:id', async ({ params, set }) => {
-    const { existsSync, unlinkSync, readdirSync } = await import('fs')
-    const { resolve } = await import('path')
-    const dir = resolve(process.cwd(), 'data/recordings')
-    const files = existsSync(dir) ? readdirSync(dir).filter(f => f.startsWith(params.id + '.')) : []
-    if (files.length === 0) { set.status = 404; return { error: 'Not found' } }
-    unlinkSync(resolve(dir, files[0]!))
+    const deleted = await deleteRecording(params.id)
+    if (!deleted) { set.status = 404; return { error: 'Recording not found' } }
+    return { success: true, id: params.id }
+  })
+
+  // ── Knowledge (RAG) endpoints ─────────────────────────────────────────────
+  .get('/api/knowledge', async () => {
+    const docs = await listDocs()
+    const { total, embedded } = await countEmbedded()
+    return { docs, totalEmbedded: embedded, total }
+  })
+
+  .post('/api/knowledge', async ({ body, set }) => {
+    const { category, title, content, active } = body as any
+    if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
+    try {
+      let embedding: number[] = []
+      try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
+      const doc = await createDoc({ category, title, content, active: active !== false }, embedding)
+      return { success: true, doc }
+    } catch (e) { set.status = 500; return { error: String(e) } }
+  })
+
+  .put('/api/knowledge/:id', async ({ params, body, set }) => {
+    const { category, title, content, active } = body as any
+    let newEmbedding: number[] | undefined
+    if (content) {
+      try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Re-embed hatası:', e); newEmbedding = [] }
+    }
+    const doc = await updateDoc(params.id, { category, title, content, active }, newEmbedding)
+    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, doc }
+  })
+
+  .delete('/api/knowledge/:id', async ({ params, set }) => {
+    const deleted = await deleteDoc(params.id)
+    if (!deleted) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, id: params.id }
+  })
+
+  .patch('/api/knowledge/:id/toggle', async ({ params, set }) => {
+    const doc = await toggleDoc(params.id)
+    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, doc }
+  })
+
+  .post('/api/knowledge/reindex', async () => {
+    const docs = await listDocs()
+    const results = { success: 0, failed: 0, total: docs.length }
+    for (const doc of docs) {
+      try {
+        const embedding = await embedText(doc.content)
+        await updateDocEmbedding(doc.id, embedding)
+        results.success++
+        console.log(`[RAG] Reindex: "${doc.title}" ✓`)
+      } catch (e) { results.failed++; console.error(`[RAG] "${doc.title}":`, e) }
+    }
+    return { success: true, results }
+  })
+
+  // ── Google Calendar OAuth ──────────────────────────────────────────────────
+  // Sabit callback URL (Google Console'a kayıtlı) + state parametresi ile
+  // dinamik geri dönüş orijini. Böylece kullanıcı localhost, ngrok-X, ngrok-Y
+  // gibi farklı kaynaklardan OAuth başlatsa bile flow tek bir kayıtlı URI ile
+  // çalışır ve sonunda geldiği yere döner.
+  .get('/api/admin/settings/calendar/auth', ({ request, set }) => {
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+    if (!clientId) {
+      set.status = 400
+      return { error: 'GOOGLE_OAUTH_CLIENT_ID tanımlı değil' }
+    }
+
+    const redirectUri =
+      process.env.OAUTH_REDIRECT_URI
+      || `${process.env.APP_URL || 'http://localhost:3001'}/api/admin/settings/calendar/callback`
+
+    // Kullanıcının geldiği orijini state'e koy (token alındıktan sonra dönüş için)
+    const referer = request.headers.get('referer') || request.headers.get('origin') || ''
+    let returnOrigin = process.env.CLIENT_APP_URL || 'http://localhost:3000'
+    try { if (referer) returnOrigin = new URL(referer).origin } catch {}
+    const state = Buffer.from(JSON.stringify({ returnOrigin })).toString('base64url')
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: [
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/userinfo.email',
+      ].join(' '),
+      access_type: 'offline',
+      prompt: 'consent',
+      state,
+    })
+    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` }
+  })
+
+  .get('/api/admin/settings/calendar/callback', async ({ query, redirect, set }) => {
+    const code = query.code as string
+    const stateRaw = query.state as string | undefined
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID!
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET!
+
+    // state'ten dönüş orijinini çöz, fallback olarak env'i kullan
+    let clientUrl = process.env.CLIENT_APP_URL || 'http://localhost:3000'
+    if (stateRaw) {
+      try {
+        const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString())
+        if (typeof parsed.returnOrigin === 'string') clientUrl = parsed.returnOrigin
+      } catch {}
+    }
+
+    const redirectUri =
+      process.env.OAUTH_REDIRECT_URI
+      || `${process.env.APP_URL || 'http://localhost:3001'}/api/admin/settings/calendar/callback`
+
+    if (!code) {
+      set.status = 400
+      return redirect(`${clientUrl}/admin?calendar=error`)
+    }
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }),
+      })
+      const tokens = await tokenRes.json() as { access_token: string; refresh_token?: string; error?: string; error_description?: string }
+      if (tokens.error) {
+        console.error('[Calendar] Token exchange hatası:', tokens.error, tokens.error_description)
+        return redirect(`${clientUrl}/admin?calendar=error&reason=${encodeURIComponent(tokens.error)}`)
+      }
+      const patch: { refreshToken?: string; email?: string } = {}
+      if (tokens.refresh_token) patch.refreshToken = tokens.refresh_token
+      try {
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        })
+        const userInfo = await userRes.json() as { email?: string }
+        if (userInfo.email) patch.email = userInfo.email
+      } catch {}
+      await setCalendarSettings(patch)
+      console.log('[Calendar] OAuth bağlantısı kuruldu:', patch.email)
+      return redirect(`${clientUrl}/admin?calendar=connected`)
+    } catch (e) {
+      console.error('[Calendar] OAuth callback hatası:', e)
+      return redirect(`${clientUrl}/admin?calendar=error`)
+    }
+  })
+
+  .get('/api/admin/settings/calendar/status', async () => {
+    const s = await getCalendarSettings()
+    return {
+      connected: !!s.refreshToken,
+      authType: s.refreshToken ? 'oauth2' : null,
+      email: s.email ?? null,
+      calendarId: s.calendarId ?? null,
+    }
+  })
+
+  .delete('/api/admin/settings/calendar/disconnect', async () => {
+    await disconnectCalendar()
     return { success: true }
   })
 
-  .ws('/ws', {
-    async open(ws) {
-      const id = randomUUID().slice(0, 8)
-      const phone = (ws.data as unknown as { query: { phone?: string } }).query?.phone ?? ''
-      console.log(`[${id}] Client bağlandı${phone ? ` (tel: ${phone})` : ''}`)
-      ;(ws.data as Record<string, unknown>).sessionId = id
+  .post('/api/admin/settings/calendar', async ({ body }) => {
+    const { calendarId } = body as { calendarId: string }
+    await setCalendarSettings({ calendarId })
+    return { success: true }
+  })
 
+  .put('/api/admin/settings/calendar', async ({ body }) => {
+    const { calendarId } = body as { calendarId: string }
+    await setCalendarSettings({ calendarId })
+    return { success: true }
+  })
+
+  .get('/api/admin/settings/calendar/calendars', async () => {
+    try {
+      const s = await getCalendarSettings()
+      if (!s.refreshToken) return { calendars: [] }
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: s.refreshToken,
+          client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
+          client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
+        }),
+      })
+      const { access_token } = await tokenRes.json() as { access_token: string }
+      const calRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+        headers: { Authorization: `Bearer ${access_token}` },
+      })
+      const data = await calRes.json() as { items?: Array<{ id: string; summary: string }> }
+      return { calendars: (data.items ?? []).map(c => ({ id: c.id, name: c.summary })) }
+    } catch { return { calendars: [] } }
+  })
+
+  // ── AI Model Settings ───────────────────────────────────────────────────────
+  .get('/api/admin/settings/ai', async () => {
+    return {
+      current: await resolveLiveModel(),
+      default: DEFAULT_LIVE_MODEL,
+      available: ALLOWED_LIVE_MODELS,
+    }
+  })
+
+  .put('/api/admin/settings/ai', async ({ body, set }) => {
+    const { model } = (body ?? {}) as { model?: string }
+    if (!model || !(ALLOWED_LIVE_MODELS as readonly string[]).includes(model)) {
+      set.status = 400
+      return { error: 'Geçersiz model. İzin verilen: ' + ALLOWED_LIVE_MODELS.join(', ') }
+    }
+    const saved = await setAiModel(model)
+    return { success: true, ...saved }
+  })
+
+  // ── WebSocket: Voice streaming ──────────────────────────────────────────────
+  .ws('/ws', {
+
+    async open(ws) {
+      const shortId = randomUUID().slice(0, 8)
+      console.log(`[${shortId}] Client connected`)
+      const startedAt = new Date()
+      const startedAtMs = Date.now()
+      const info: SessionInfo = {
+        session: null as any,
+        startedAt,
+        startedAtMs,
+        audioChunks: [],
+        userAudioChunks: [],
+        shortId,
+      }
       try {
-        const { accountId, client } = await acquire()
-        await initSession(id, ws, accountId, client, phone)
-        resetIdleTimer(id, ws)
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg === 'NO_ACCOUNT_AVAILABLE') {
-          console.warn(`[${id}] Tüm hesaplar dolu — kuyruğa ekleniyor`)
-          waitQueue.push({ id, ws, phone })
-          await enqueueSession(id).catch(() => {})
-        } else {
-          console.error(`[${id}] Session başlatma hatası:`, err)
-          ws.send(JSON.stringify({ type: 'error', message: 'Session başlatılamadı' }))
-          ws.close()
-        }
+        // RAG pre-warm
+        let ragContext = ''
+        try {
+          const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+          const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
+          if (topDocs.length > 0) {
+            ragContext = buildRagPrompt(topDocs)
+            console.log(`[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map(d => d.title).join(', ')}`)
+          }
+        } catch (e) { console.error(`[${shortId}] RAG hatası:`, e) }
+
+        const systemPrompt = SYSTEM_PROMPT + ragContext
+        const model = await resolveLiveModel()
+        console.log(`[${shortId}] Gemini Live model: ${model}`)
+
+        const session = await createLiveSession(ai, {
+          onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
+          onAudio: (pcm) => {
+            ws.send(pcm)
+            info.audioChunks.push({ buffer: pcm, offsetMs: Date.now() - startedAtMs })
+          },
+          onTranscript: (role, text) => ws.send(JSON.stringify({ type: 'transcript', role, text })),
+          onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
+          onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
+          onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
+          onClose: () => {
+            console.log(`[${shortId}] Gemini session closed`)
+            sessions.delete(shortId)
+            notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
+          },
+        }, { dbSessionId: shortId, systemPrompt, model })
+
+        info.session = session
+        ;(ws.data as any).sessionId = shortId
+        sessions.set(shortId, info)
+        notifyAdmins('session_start', { id: shortId, activeSessions: sessions.size })
+
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: 'Sistem bildirimi: Müşteri sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)' }] }],
+          turnComplete: true,
+        })
+      } catch (err) {
+        console.error(`[${shortId}] Session başlatılamadı:`, err)
+        ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))
+        ws.close()
       }
     },
 
     message(ws, message) {
-      const id = (ws.data as Record<string, unknown>).sessionId as string
-      const session = sessions.get(id)
-      if (!session) return
-
+      const shortId = (ws.data as any).sessionId as string
+      const info = sessions.get(shortId)
+      if (!info) return
       if (message instanceof Buffer || message instanceof Uint8Array) {
         const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
-        session.sendRealtimeInput({
-          media: { data: buf.toString('base64'), mimeType: 'audio/pcm;rate=16000' },
-        })
-        resetIdleTimer(id, ws)
+        info.session.sendRealtimeInput({ media: { data: buf.toString('base64'), mimeType: 'audio/pcm;rate=16000' } })
+        info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
       }
     },
 
-    close(ws) {
-      const id = (ws.data as Record<string, unknown>).sessionId as string
-      // Remove from wait queue if they were waiting
-      const waitIdx = waitQueue.findIndex(e => e.id === id)
-      if (waitIdx !== -1) {
-        waitQueue.splice(waitIdx, 1)
-        void dequeueSession(id).catch(() => {})
+    async close(ws) {
+      const shortId = (ws.data as any).sessionId as string
+      const info = sessions.get(shortId)
+      if (info) {
+        const hasAudio = info.audioChunks.length > 0 || info.userAudioChunks.length > 0
+        if (hasAudio) {
+          const endedAt = new Date()
+          const durationMs = endedAt.getTime() - info.startedAt.getTime()
+          const ts = info.startedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+          const filename = `session_${shortId}_${ts}.wav`
+          const filePath = resolve(RECORDINGS_DIR, filename)
+          try {
+            const wavBuf = buildStereoWav(info.audioChunks, info.userAudioChunks, durationMs)
+            writeFileSync(filePath, wavBuf)
+            await saveRecording({
+              filename,
+              startedAt: info.startedAt.toISOString(),
+              endedAt: endedAt.toISOString(),
+              durationMs,
+              sizeBytes: wavBuf.length,
+            })
+            console.log(`[${shortId}] Recording: ${filename}`)
+          } catch (e) { console.error(`[${shortId}] Recording hatası:`, e) }
+        }
+        try { info.session?.close() } catch {}
+        sessions.delete(shortId)
       }
-      void cleanupSession(id)
-      console.log(`[${id}] Bağlantı kesildi`)
+      console.log(`[${shortId}] Disconnected`)
     },
   })
 
-  .listen(PORT, () => {
-    console.log(` Voice AI Server`)
+  .listen(PORT, async () => {
+    console.log(`\n Voice AI Server`)
     console.log(`   http://localhost:${PORT}`)
     console.log(`   ws://localhost:${PORT}/ws`)
-    console.log(`   Admin: http://localhost:${PORT}/api/admin`)
-    console.log(`   Model: ${process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'}\n`)
+    console.log(`   Model: ${await resolveLiveModel()}`)
+    console.log(`   RAG: pgvector + HNSW (text-embedding-004)\n`)
   })
 
 export type App = typeof app

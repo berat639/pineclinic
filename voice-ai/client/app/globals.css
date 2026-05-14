@@ -1,10 +1,13 @@
 /* Tailwind not available - using plain CSS */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
+/* ── Dark (default) ────────────────────────────────────────────────────────── */
 :root {
   --background: #050a14;
   --background-2: #0a1220;
   --foreground: #f0f4ff;
+  --foreground-2: rgba(240,244,255,0.7);
+  --foreground-3: rgba(240,244,255,0.35);
   --muted: #64748b;
   --brand: #002C5F;
   --brand-light: #0047a0;
@@ -17,8 +20,52 @@
   --glass-bg: rgba(255,255,255,0.04);
   --glass-border: rgba(255,255,255,0.08);
   --glass-bg-hover: rgba(255,255,255,0.07);
+  --nav-bg: rgba(5,10,20,0.85);
+  --nav-border: rgba(255,255,255,0.06);
+  --card-inner: rgba(0,0,0,0.2);
+  --input-bg: rgba(255,255,255,0.06);
+  --input-border: rgba(255,255,255,0.1);
+  --divider: rgba(255,255,255,0.06);
+  --scrollbar: rgba(255,255,255,0.1);
+  --scrollbar-hover: rgba(255,255,255,0.2);
+  --logo-filter: brightness(0) invert(1);
+  --body-gradient-1: rgba(0,44,95,0.15);
+  --body-gradient-2: rgba(96,165,250,0.05);
 }
 
+/* ── Light ─────────────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --background: #eef2f8;
+  --background-2: #e0e7f0;
+  --foreground: #060d1a;
+  --foreground-2: #1e2d45;
+  --foreground-3: #475569;
+  --muted: #334155;
+  --brand: #002C5F;
+  --brand-light: #0047a0;
+  --brand-glow: #1a6dd4;
+  --accent: #1d4ed8;
+  --accent-2: #6d28d9;
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --glass-bg: rgba(255,255,255,0.75);
+  --glass-border: rgba(0,0,0,0.1);
+  --glass-bg-hover: rgba(0,0,0,0.05);
+  --nav-bg: rgba(220,228,240,0.95);
+  --nav-border: rgba(0,0,0,0.1);
+  --card-inner: rgba(0,0,0,0.05);
+  --input-bg: rgba(255,255,255,0.85);
+  --input-border: rgba(0,0,0,0.18);
+  --divider: rgba(0,0,0,0.09);
+  --scrollbar: rgba(0,0,0,0.2);
+  --scrollbar-hover: rgba(0,0,0,0.35);
+  --logo-filter: none;
+  --body-gradient-1: rgba(0,44,95,0.08);
+  --body-gradient-2: rgba(96,165,250,0.06);
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -27,17 +74,18 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   min-height: 100vh;
   background-image:
-    radial-gradient(ellipse at 20% 50%, rgba(0, 44, 95, 0.15) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 20%, rgba(96, 165, 250, 0.05) 0%, transparent 50%);
+    radial-gradient(ellipse at 20% 50%, var(--body-gradient-1) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, var(--body-gradient-2) 0%, transparent 50%);
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Scrollbar */
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 
-/* Animations */
+/* ── Animations ────────────────────────────────────────────────────────────── */
 @keyframes ping {
   75%, 100% { transform: scale(1.4); opacity: 0; }
 }
@@ -63,15 +111,18 @@ body {
   100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
 }
 
-/* Glass card */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Glass card ────────────────────────────────────────────────────────────── */
 .glass-card {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
   backdrop-filter: blur(12px);
+  transition: background 0.25s ease, border-color 0.25s ease;
 }
 
-/* Badge */
+/* ── Badge ─────────────────────────────────────────────────────────────────── */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -88,7 +139,7 @@ body {
 .badge-gallery { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.2); }
 .badge-other { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
 
-/* Btn */
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -124,3 +175,217 @@ body {
   border: 1px solid var(--glass-border);
 }
 .btn-ghost:hover { background: var(--glass-bg-hover); color: var(--foreground); }
+
+/* ── Light mode: component-level overrides ─────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* Nav */
+[data-theme="light"] nav {
+  background: var(--nav-bg) !important;
+  border-color: var(--nav-border) !important;
+}
+
+/* Inputs */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+  color: var(--foreground) !important;
+  color: var(--foreground) !important;
+}
+
+/* Glass card depth */
+[data-theme="light"] .glass-card {
+  box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+}
+
+/* Force text dark in light mode */
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3,
+[data-theme="light"] h4 {
+  color: var(--foreground) !important;
+}
+
+/* Override rgba(240,244,255) foreground references to dark */
+[data-theme="light"] {
+  --rgba-fg: #060d1a;
+}
+
+/* Restore specific colored elements */
+[data-theme="light"] .badge-service { color: #1d4ed8 !important; }
+[data-theme="light"] .badge-test    { color: #6d28d9 !important; }
+[data-theme="light"] .badge-gallery { color: #15803d !important; }
+[data-theme="light"] .badge-other   { color: #334155 !important; }
+
+/* Muted secondary text — keep lighter than primary */
+[data-theme="light"] [style*="rgba(240,244,255,0.3"],
+[data-theme="light"] [style*="rgba(240,244,255,0.4"],
+[data-theme="light"] [style*="rgba(240,244,255,0.5"],
+[data-theme="light"] [style*="rgba(240,244,255,0.6"],
+[data-theme="light"] [style*="rgba(240,244,255,0.7"] {
+  color: var(--foreground-3) !important;
+}
+
+/* Tab active text */
+[data-theme="light"] .tab-btn { color: var(--foreground-3) !important; }
+
+/* Btn ghost in light */
+[data-theme="light"] .btn-ghost {
+  background: rgba(0,0,0,0.05) !important;
+  border-color: rgba(0,0,0,0.12) !important;
+  color: var(--foreground) !important;
+}
+[data-theme="light"] .btn-ghost:hover {
+  background: rgba(0,0,0,0.09) !important;
+}
+
+/* Btn danger in light */
+[data-theme="light"] .btn-danger {
+  background: rgba(185,28,28,0.1) !important;
+  border-color: rgba(185,28,28,0.25) !important;
+  color: #b91c1c !important;
+}
+[data-theme="light"] .btn-danger:hover {
+  background: rgba(185,28,28,0.18) !important;
+}
+
+/* ── Light mode: admin panel comprehensive overrides ───────────────────────── */
+
+/* All text inside admin wrapper → dark */
+[data-theme="light"] .admin-content span,
+[data-theme="light"] .admin-content p,
+[data-theme="light"] .admin-content div,
+[data-theme="light"] .admin-content label,
+[data-theme="light"] .admin-content code,
+[data-theme="light"] .admin-content pre,
+[data-theme="light"] .admin-content summary,
+[data-theme="light"] .admin-content li {
+  color: var(--foreground) !important;
+}
+
+/* Button text: override hardcoded #94a3b8 / #f0f4ff on buttons */
+[data-theme="light"] .admin-content button {
+  color: var(--foreground) !important;
+}
+/* Keep primary save buttons white text */
+[data-theme="light"] .admin-content button.btn-primary,
+[data-theme="light"] .admin-content button[style*="background: var(--accent)"],
+[data-theme="light"] .admin-content button[style*="background: #0ea5e9"],
+[data-theme="light"] .admin-content button[style*="background: #2563eb"] {
+  color: #fff !important;
+}
+
+/* Keep specific semantic colors */
+[data-theme="light"] .admin-content .keep-accent  { color: var(--accent)   !important; }
+[data-theme="light"] .admin-content .keep-success { color: var(--success)  !important; }
+[data-theme="light"] .admin-content .keep-warning { color: var(--warning)  !important; }
+[data-theme="light"] .admin-content .keep-danger  { color: var(--danger)   !important; }
+[data-theme="light"] .admin-content .keep-muted   { color: var(--muted)    !important; }
+
+/* Backgrounds: rgba(255,255,255,0.02-0.08) panels → subtle light panels */
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.02)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.03)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.04)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.05)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.06)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.07)"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.08)"] {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+}
+
+/* hover states: force readable colors */
+[data-theme="light"] .admin-content button:hover,
+[data-theme="light"] .admin-content a:hover {
+  background: var(--glass-bg-hover) !important;
+  color: var(--foreground) !important;
+}
+
+/* nav item hover (HomeClient) */
+[data-theme="light"] .nav-item:hover,
+[data-theme="light"] nav li:hover,
+[data-theme="light"] nav a:hover {
+  background: rgba(0,0,0,0.06) !important;
+  color: var(--foreground) !important;
+}
+
+/* ghost/danger btn hover */
+[data-theme="light"] .btn-ghost:hover {
+  background: rgba(0,0,0,0.07) !important;
+  color: var(--foreground) !important;
+}
+[data-theme="light"] .btn-danger:hover {
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+/* Tab btn in admin – keep text dark on hover */
+[data-theme="light"] .tab-btn:hover {
+  background: rgba(0,0,0,0.05) !important;
+  color: var(--foreground) !important;
+}
+
+/* knowledge / recording list row hover */
+[data-theme="light"] .kb-item:hover,
+[data-theme="light"] .rec-item:hover {
+  background: rgba(0,0,0,0.03) !important;
+}
+
+/* Dark backgrounds used as card-inner panels */
+[data-theme="light"] .admin-content [style*="rgba(0,0,0,0.2"],
+[data-theme="light"] .admin-content [style*="rgba(0,0,0,0.15"],
+[data-theme="light"] .admin-content [style*="rgba(0,0,0,0.25"] {
+  background: rgba(0,0,0,0.04) !important;
+}
+
+/* Dark standalone backgrounds (#0d1829 etc.) */
+[data-theme="light"] .admin-content [style*="background: rgb(13"] {
+  background: var(--background-2) !important;
+}
+
+/* inline rgba(240,244,255,…) → dark foreground in light mode */
+[data-theme="light"] .admin-content [style*="rgba(240,244,255"] {
+  color: var(--foreground) !important;
+}
+/* inline rgba color for muted descriptions (0.4–0.6 alpha) */
+[data-theme="light"] .admin-content [style*="rgba(240,244,255,0.3"],
+[data-theme="light"] .admin-content [style*="rgba(240,244,255,0.4"],
+[data-theme="light"] .admin-content [style*="rgba(240,244,255,0.5"] {
+  color: var(--foreground-3) !important;
+}
+
+/* select options */
+[data-theme="light"] .admin-content select option {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+}
+
+/* Tab btn hover */
+[data-theme="light"] .tab-btn:hover {
+  color: var(--foreground) !important;
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  background: var(--glass-bg-hover);
+  color: var(--foreground);
+}

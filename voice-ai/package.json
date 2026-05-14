@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "concurrently \"bun run dev:server\" \"bun run dev:client\"",
     "dev:server": "cd server && bun run dev",
-    "dev:client": "cd client && bun run dev"
+    "dev:client": "cd client && bun run dev",
+    "ngrok": "bash scripts/ngrok-voice-ai.sh"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

@@ -1,19 +1,6 @@
-/**
- * Google Calendar integration.
- * Credentials and calendar ID are read from the `business_settings` DB table.
- *
- * Supported auth methods (in priority order):
- *   1. OAuth2 refresh token  (key: `google_calendar_oauth_refresh_token`)
- *   2. Service account JSON  (key: `google_calendar_credentials`, base64-encoded)
- *
- * Calendar ID key: `google_calendar_id`
- *
- * If the keys are missing, all operations are no-ops.
- */
-
-import { db } from '../db/client'
-import { businessSettings } from '../db/schema'
-import { sql } from 'drizzle-orm'
+// Google Calendar integration — DB'den OAuth refresh_token + calendarId okur,
+// access_token üretip API çağrılarını gerçekleştirir.
+import { getCalendarSettings } from '../db/repositories/settings'
 
 export type CalendarEventInput = {
   title: string          // e.g., "Servis Randevusu - Ahmet Yılmaz"
@@ -64,41 +51,21 @@ async function getOAuthAccessToken(refreshToken: string): Promise<string> {
 }
 
 async function getCalendarAuth(): Promise<CalendarAuth | null> {
-  const rows = await db
-    .select()
-    .from(businessSettings)
-    .where(sql`key IN ('google_calendar_id', 'google_calendar_credentials', 'google_calendar_oauth_refresh_token')`)
-
-  const map = Object.fromEntries(rows.map(r => [r.key, r.value]))
-
-  const calendarId = map['google_calendar_id']
-  if (!calendarId) return null
-
-  // OAuth2 takes priority
-  const refreshToken = map['google_calendar_oauth_refresh_token']
-  if (refreshToken) {
-    try {
-      const accessToken = await getOAuthAccessToken(refreshToken)
-      return { type: 'oauth2', accessToken, calendarId }
-    } catch (err) {
-      console.error('[Calendar] OAuth2 token yenileme hatası:', err)
-      return null
-    }
-  }
-
-  // Fall back to service account
-  const credentialsB64 = map['google_calendar_credentials']
-  if (!credentialsB64) return null
-
+  const settings = await getCalendarSettings()
+  if (!settings.refreshToken) return null
   try {
-    const credentials = JSON.parse(
-      Buffer.from(credentialsB64, 'base64').toString('utf-8')
-    ) as { client_email: string; private_key: string }
-    return { type: 'service_account', credentials, calendarId }
-  } catch {
+    const accessToken = await getOAuthAccessToken(settings.refreshToken)
+    return {
+      type: 'oauth2',
+      accessToken,
+      calendarId: settings.calendarId || 'primary',
+    }
+  } catch (err) {
+    console.error('[Calendar] OAuth token alınamadı:', err)
     return null
   }
 }
+
 
 // ── Shared event body builder ──────────────────────────────────────────────
 
