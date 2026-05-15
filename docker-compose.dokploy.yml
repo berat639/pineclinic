@@ -100,6 +100,7 @@ services:
       args:
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-wss://api.DOMAIN.com/ws}
         SERVER_URL: http://voiceai-server:3001
+        BACKEND_PROXY_URL: http://voiceai-server:3001
     container_name: voiceai-client
     restart: always
     environment:
