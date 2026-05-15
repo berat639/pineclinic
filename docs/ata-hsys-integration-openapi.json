@@ -1,0 +1,287 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ATA Hsys - Integration API",
+    "version": "1.0.0",
+    "description": ""
+  },
+  "servers": [
+    {
+      "url": "http://servis.ataotomotiv.com/integration",
+      "description": "ATA Hsys Integration Route Base URL"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "TokenRequest": {
+        "type": "object",
+        "required": ["app_key", "app_secret"],
+        "properties": {
+          "app_key": {
+            "type": "string",
+            "example": "hsys_app_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          "app_secret": {
+            "type": "string",
+            "example": "hsys_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        }
+      },
+      "AppointmentCreate": {
+        "type": "object",
+        "required": ["date", "time", "telefon", "arac", "musteriistegi"],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-16"
+          },
+          "time": {
+            "type": "string",
+            "example": "10:30"
+          },
+          "telefon": {
+            "type": "string",
+            "example": "5067060640",
+            "description": "Başında 0 olmadan 10 hane GSM/telefon numarası. Örnek: 5067060640"
+          },
+          "ad_soyad": {
+            "type": "string",
+            "example": "Şahin Yayılkan"
+          },
+          "plaka": {
+            "type": "string",
+            "example": "06BS8016"
+          },
+          "arac": {
+            "type": "string",
+            "example": "Hyundai Tucson"
+          },
+          "danisman_id": {
+            "type": "integer",
+            "nullable": true,
+            "example": 214,
+            "description": "Gönderilmezse 214 / Danışman Yok atanır."
+          },
+          "irtibat": {
+            "type": "string",
+            "example": "Web integration"
+          },
+          "musteriistegi": {
+            "type": "string",
+            "example": "Periyodik Bakım"
+          },
+          "fiyat_teklifi": {
+            "type": "string",
+            "example": "2500 TL"
+          },
+          "kampanya": {
+            "type": "string",
+            "example": "Hyundai Servis Kampanyası"
+          },
+          "gorusme_notu": {
+            "type": "string",
+            "example": "ATA Hsys üzerinden oluşturulan test randevusu"
+          }
+        }
+      },
+      "AppointmentPatch": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-17"
+          },
+          "time": {
+            "type": "string",
+            "example": "11:00"
+          },
+          "randevu_durumu": {
+            "type": "string",
+            "example": "Randevuya Geldi"
+          },
+          "gorusme_notu": {
+            "type": "string",
+            "example": "Müşteri saat değişikliği istedi"
+          },
+          "danisman_id": {
+            "type": "integer",
+            "example": 214
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/token": {
+      "post": {
+        "tags": ["Token"],
+        "summary": "App Key + App Secret ile kısa süreli access token al",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Token üretildi" },
+          "401": { "description": "App Key/App Secret geçersiz" },
+          "403": { "description": "IP yetkisi yok" }
+        }
+      }
+    },
+    "/randevu": {
+      "get": {
+        "tags": ["Randevu"],
+        "summary": "Randevu listele veya tek randevu getir",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "query", "schema": { "type": "integer" } },
+          { "name": "date", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+          {
+            "name": "telefon",
+            "in": "query",
+            "schema": { "type": "string" },
+            "example": "5067060640",
+            "description": "Başında 0 olmadan 10 hane GSM/telefon numarası."
+          },
+          { "name": "plaka", "in": "query", "schema": { "type": "string" } },
+          { "name": "danisman_id", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } }
+        ],
+        "responses": {
+          "200": { "description": "Başarılı" },
+          "401": { "description": "Token gerekli/geçersiz" },
+          "403": { "description": "Yetki yok" }
+        }
+      },
+      "post": {
+        "tags": ["Randevu"],
+        "summary": "Yeni randevu oluştur",
+        "description": "Bu işlem gerçek kayıt oluşturur. Test sayfasında ayrıca onay kutusu vardır.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointmentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Randevu oluşturuldu" },
+          "200": { "description": "Mükerrer kayıt varsa yeni kayıt açılmaz" },
+          "400": { "description": "Validasyon hatası" }
+        }
+      },
+      "patch": {
+        "tags": ["Randevu"],
+        "summary": "Randevu güncelle",
+        "description": "PATCH engellenirse POST + X-HTTP-Method-Override: PATCH kullanılabilir.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointmentPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Randevu güncellendi" },
+          "404": { "description": "Randevu bulunamadı" }
+        }
+      }
+    },
+    "/gecmis-randevular": {
+      "get": {
+        "tags": ["Geçmiş Randevular"],
+        "summary": "Müşteri veya araç için önceki randevuları getir",
+        "description": "randevu_id verilirse referans kaydın müşteri/plaka bilgisine göre önceki randevuları döndürür. mode=customer, plate veya both kullanılabilir.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "randevu_id",
+            "in": "query",
+            "schema": { "type": "integer" },
+            "description": "Referans randevu ID. Verilirse bu randevudan önceki kayıtlar çekilir."
+          },
+          { "name": "musteri_id", "in": "query", "schema": { "type": "integer" } },
+          {
+            "name": "telefon",
+            "in": "query",
+            "schema": { "type": "string" },
+            "example": "5067060640",
+            "description": "Başında 0 olmadan 10 hane GSM/telefon numarası."
+          },
+          {
+            "name": "plaka",
+            "in": "query",
+            "schema": { "type": "string" },
+            "example": "06BS8016"
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["customer", "plate", "both"], "default": "customer" }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "YYYY-MM-DD veya YYYY-MM-DD HH:MM:SS"
+          },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "Başarılı" },
+          "400": { "description": "Parametre hatası" },
+          "404": { "description": "Referans randevu bulunamadı" }
+        }
+      }
+    },
+    "/musteri": {
+      "get": {
+        "tags": ["Müşteri"],
+        "summary": "Müşteri bilgisi ve son randevu özeti al",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "telefon",
+            "in": "query",
+            "schema": { "type": "string" },
+            "example": "5067060640",
+            "description": "Başında 0 olmadan 10 hane GSM/telefon numarası."
+          },
+          { "name": "id", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Başarılı" },
+          "400": { "description": "telefon veya id gerekli" }
+        }
+      }
+    }
+  }
+}
