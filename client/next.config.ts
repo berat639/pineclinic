@@ -4,6 +4,7 @@ import type { NextConfig } from 'next'
 const BACKEND_PROXY_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:3001'
 
 const config: NextConfig = {
+  output: 'standalone',
   async rewrites() {
     return [
       {
