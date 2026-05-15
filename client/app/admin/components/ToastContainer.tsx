@@ -31,7 +31,7 @@ export default function ToastContainer({ onNewAppointment }: { onNewAppointment?
       const data = JSON.parse(e.data)
       addToast({ type: 'new_appointment', title: 'Yeni Randevu!', message: `${data.customerName || 'Müşteri'} · ${data.phone || ''}` })
       onNewAppointment?.()
-      if (Notification.permission === 'granted') {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification('Yeni Randevu', { body: `${data.customerName || 'Müşteri'} — ${data.date} ${data.time}` })
       }
     })
@@ -48,7 +48,7 @@ export default function ToastContainer({ onNewAppointment }: { onNewAppointment?
 
     es.onerror = () => {}
 
-    if (Notification.permission === 'default') {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission()
     }
 
