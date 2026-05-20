@@ -20,4 +20,8 @@ COPY data/ ./data/
 
 RUN chmod +x /app/server/docker-entrypoint.sh
 
+# HTTP/WS (3001) ve telephony AudioSocket TCP (12000) portları
+EXPOSE 3001
+EXPOSE 12000
+
 ENTRYPOINT ["/app/server/docker-entrypoint.sh"]

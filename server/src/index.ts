@@ -724,7 +724,28 @@ const app = new Elysia()
     console.log(`   http://localhost:${PORT}`)
     console.log(`   ws://localhost:${PORT}/ws`)
     console.log(`   Model: ${await resolveLiveModel()}`)
-    console.log(`   RAG: pgvector + HNSW (text-embedding-004)\n`)
+    console.log(`   RAG: pgvector + HNSW (text-embedding-004)`)
+
+    // ── Telephony (Netgsm SIP Trunk → AudioSocket) ─────────────────────────
+    if (process.env.TELEPHONY_ENABLED === '1') {
+      try {
+        const { startTelephony } = await import('./telephony')
+        await startTelephony({
+          ai,
+          port: Number(process.env.AUDIOSOCKET_PORT) || 12000,
+          resolveLiveModel,
+          systemPromptBase: SYSTEM_PROMPT,
+          sessions,
+          notifyAdmins,
+          buildStereoWav,
+        })
+      } catch (e) {
+        console.error('[Telephony] Başlatılamadı:', e)
+      }
+    } else {
+      console.log(`   Telephony: kapalı (TELEPHONY_ENABLED=1 ile aç)`)
+    }
+    console.log('')
   })
 
 export type App = typeof app

@@ -70,6 +70,26 @@ services:
     depends_on:
       - server
 
+  # Asterisk SIP gateway (Netgsm SIP Trunk → AudioSocket → server:12000)
+  # TELEPHONY_ENABLED=1 olduğunda kullanılır; lokalde NAT/RTP sorunlu olabilir,
+  # bu nedenle telephony testleri sunucuda yapılır.
+  asterisk:
+    profiles: ["telephony"]
+    build:
+      context: ./infra/asterisk
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AUDIOSOCKET_HOST: server
+      AUDIOSOCKET_PORT: ${AUDIOSOCKET_PORT:-12000}
+    ports:
+      - "5060:5060/tcp"
+      - "5060:5060/udp"
+      - "10000-10200:10000-10200/udp"
+    depends_on:
+      - server
+
 volumes:
   postgres_data:
   redis_data:

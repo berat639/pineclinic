@@ -1,0 +1,77 @@
+; ─────────────────────────────────────────────────────────────────────────────
+; Netgsm SIP Trunk (inbound) — render edilmiş template
+; entrypoint envsubst ile ${...} placeholder'larını .env değerleriyle değiştirir
+; ─────────────────────────────────────────────────────────────────────────────
+
+[global]
+type=global
+endpoint_identifier_order=ip,username,anonymous
+
+;
+; Transports
+;
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:5060
+external_signaling_address=${NETGSM_PUBLIC_IP}
+external_media_address=${NETGSM_PUBLIC_IP}
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+external_signaling_address=${NETGSM_PUBLIC_IP}
+external_media_address=${NETGSM_PUBLIC_IP}
+
+;
+; Outbound auth / register (Netgsm tarafına bağlanmak için)
+;
+[netgsm-auth]
+type=auth
+auth_type=userpass
+username=${NETGSM_SIP_USER}
+password=${NETGSM_SIP_PASSWORD}
+
+[netgsm-aor]
+type=aor
+contact=sip:${NETGSM_SIP_HOST}:${NETGSM_SIP_PORT}\;transport=${NETGSM_SIP_TRANSPORT}
+qualify_frequency=60
+
+[netgsm-registration]
+type=registration
+transport=transport-${NETGSM_SIP_TRANSPORT}
+outbound_auth=netgsm-auth
+server_uri=sip:${NETGSM_SIP_HOST}:${NETGSM_SIP_PORT}\;transport=${NETGSM_SIP_TRANSPORT}
+client_uri=sip:${NETGSM_SIP_USER}@${NETGSM_SIP_HOST}\;transport=${NETGSM_SIP_TRANSPORT}
+retry_interval=60
+expiration=3600
+
+;
+; Endpoint — gelen ve giden çağrılar için Netgsm ile köprü
+;
+[netgsm-endpoint]
+type=endpoint
+transport=transport-${NETGSM_SIP_TRANSPORT}
+context=from-netgsm
+disallow=all
+allow=alaw
+allow=ulaw
+allow=slin
+allow=slin16
+outbound_auth=netgsm-auth
+aors=netgsm-aor
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+from_user=${NETGSM_SIP_USER}
+from_domain=${NETGSM_SIP_HOST}
+
+;
+; Identify — Netgsm'den gelen INVITE'ları kaynak host'a göre netgsm-endpoint'e eşle
+;
+[netgsm-identify]
+type=identify
+endpoint=netgsm-endpoint
+match=${NETGSM_SIP_HOST}

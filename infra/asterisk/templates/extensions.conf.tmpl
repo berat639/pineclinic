@@ -1,0 +1,26 @@
+; ─────────────────────────────────────────────────────────────────────────────
+; Netgsm gelen çağrı dialplan
+; AudioSocket() ile sesi voiceai-server:12000 TCP soketine ham SLIN olarak akıt
+; ─────────────────────────────────────────────────────────────────────────────
+
+[general]
+static=yes
+writeprotect=no
+
+[globals]
+
+[from-netgsm]
+exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
+ same => n,Answer()
+ same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
+ same => n,Hangup()
+
+exten => s,1,Goto(from-netgsm,${EXTEN:-s},1)
+
+; Test extension (Asterisk CLI'dan: console dial Local/100@from-netgsm)
+exten => 100,1,NoOp(Test AudioSocket bridge)
+ same => n,Answer()
+ same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
+ same => n,Hangup()
