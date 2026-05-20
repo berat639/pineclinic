@@ -1,4 +1,4 @@
-FROM andrius/asterisk:22-current
+FROM andrius/asterisk:22
 
 USER root
 

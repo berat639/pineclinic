@@ -1,7 +1,9 @@
 node_modules/
 .env
 .env.dokploy
+.env.dokploy.*
 .omc/
 .serena/
 *.local
 data/
+temp/
