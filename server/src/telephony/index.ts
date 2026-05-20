@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { StartSensitivity, EndSensitivity } from '@google/genai'
 import type { GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
@@ -90,11 +91,22 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
         // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
         const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
-        const paceInterval = setInterval(() => {
-          if (state.closed) { clearInterval(paceInterval); return }
-          const frame = state.audioQueue.shift()
-          try { socket.write(frame ?? silenceFrame) } catch { clearInterval(paceInterval) }
-        }, 20)
+        let nextFrameAt = Date.now() + 20
+        function scheduleFrame() {
+          const delay = Math.max(0, nextFrameAt - Date.now())
+          setTimeout(() => {
+            if (state.closed) return
+            nextFrameAt += 20
+            const frame = state.audioQueue.shift()
+            try {
+              socket.write(frame ?? silenceFrame)
+              scheduleFrame()
+            } catch {
+              // socket error — stop scheduling
+            }
+          }, delay)
+        }
+        scheduleFrame()
 
         try {
           // RAG pre-warm (web /ws ile aynı)
@@ -161,7 +173,19 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 })
               },
             },
-            { dbSessionId: shortId, systemPrompt, model },
+            {
+              dbSessionId: shortId,
+              systemPrompt,
+              model,
+              realtimeInputConfig: {
+                automaticActivityDetection: {
+                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+                  prefixPaddingMs: 300,
+                  silenceDurationMs: 1200,
+                },
+              },
+            },
           )
 
           info.session = session

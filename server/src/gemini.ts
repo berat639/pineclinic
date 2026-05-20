@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality, Type, type FunctionDeclaration } from '@google/genai'
+import { GoogleGenAI, Modality, Type, StartSensitivity, EndSensitivity, type FunctionDeclaration, type RealtimeInputConfig } from '@google/genai'
 import { createAppointment, updateAppointment } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import { searchKnowledge } from './services/knowledge'
@@ -99,6 +99,7 @@ export async function createLiveSession(
     dbSessionId: string
     systemPrompt: string
     model: string
+    realtimeInputConfig?: RealtimeInputConfig
   }
 ) {
   async function handleTool(name: string, args: Record<string, unknown>) {
@@ -240,6 +241,7 @@ export async function createLiveSession(
         triggerTokens: 5000 as unknown as string,
         slidingWindow: { targetTokens: 2000 as unknown as string },
       },
+      ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
     },
     callbacks: {
       onopen: () => callbacks.onReady(),
