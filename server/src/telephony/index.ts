@@ -56,7 +56,7 @@ interface CallState {
   info: SharedSessionInfo
   parser: AudioSocketParser
   outChunker: FrameChunker
-  downsampleState: { last: number; phase: number }
+  downsampleState: { last1: number; last2: number; phase: number }
   closed: boolean
   callerId?: string
   audioQueue: Buffer[]
@@ -90,7 +90,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           info,
           parser: new AudioSocketParser(),
           outChunker: new FrameChunker(),
-          downsampleState: { last: 0, phase: 0 },
+          downsampleState: { last1: 0, last2: 0, phase: 0 },
           closed: false,
           audioQueue: [],
         }

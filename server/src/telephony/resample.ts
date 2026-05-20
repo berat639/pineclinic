@@ -26,29 +26,31 @@ export function upsample8to16(buf: Buffer): Buffer {
 }
 
 /**
- * 24 kHz → 8 kHz (3x downsample). 4 kHz üstü için tek-pole IIR low-pass + decimation.
- * State (lastSample) çağrılar arasında korunur; ardışık chunk'larda pop gürültüsü
- * olmaması için arayan, döndürülen state'i bir sonraki çağrıya iletmelidir.
+ * 24 kHz → 8 kHz (3x downsample). 4 kHz üstü için 2-pole cascade IIR low-pass + decimation.
+ * State çağrılar arasında korunur; ardışık chunk'larda pop gürültüsü olmaması için
+ * arayan, döndürülen state'i bir sonraki çağrıya iletmelidir.
  */
 export function downsample24to8(
   buf: Buffer,
-  state: { last: number; phase: number } = { last: 0, phase: 0 },
-): { pcm: Buffer; state: { last: number; phase: number } } {
+  state: { last1: number; last2: number; phase: number } = { last1: 0, last2: 0, phase: 0 },
+): { pcm: Buffer; state: { last1: number; last2: number; phase: number } } {
   const inSamples = buf.length >> 1
   if (inSamples === 0) return { pcm: Buffer.alloc(0), state }
-  // 24 kHz örnek başına ~6 dB/oktav tek-pole; α ≈ 1 - exp(-2π·fc/fs), fc=3500, fs=24000
-  // α ≈ 1 - exp(-0.916) ≈ 0.6
-  const ALPHA = 0.6
+  // Two cascaded first-order IIR poles — ~2nd-order Butterworth rolloff
+  // α=0.35 gives ~-16dB at 4kHz and ~-24dB at 8kHz (vs old: -3dB and -7dB)
+  const ALPHA = 0.35
   const outSamples = Math.ceil((inSamples + state.phase) / 3)
   const out = Buffer.alloc(outSamples * 2)
-  let last = state.last
+  let last1 = state.last1
+  let last2 = state.last2
   let phase = state.phase
   let outIdx = 0
   for (let i = 0; i < inSamples; i++) {
     const sample = buf.readInt16LE(i * 2)
-    last = last + ALPHA * (sample - last)
+    last1 = last1 + ALPHA * (sample - last1)
+    last2 = last2 + ALPHA * (last1 - last2)
     if (phase === 0) {
-      const v = Math.max(-32768, Math.min(32767, Math.round(last)))
+      const v = Math.max(-32768, Math.min(32767, Math.round(last2)))
       out.writeInt16LE(v, outIdx * 2)
       outIdx++
       phase = 2
@@ -57,7 +59,7 @@ export function downsample24to8(
     }
   }
   const trimmed = outIdx === outSamples ? out : out.subarray(0, outIdx * 2)
-  return { pcm: Buffer.from(trimmed), state: { last, phase } }
+  return { pcm: Buffer.from(trimmed), state: { last1, last2, phase } }
 }
 
 /**
