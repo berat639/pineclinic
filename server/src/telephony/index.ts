@@ -16,8 +16,16 @@ import type { GoogleGenAI } from '@google/genai'
 import { createLiveSession } from '../gemini'
 import { buildRagPrompt, embedText, PRE_WARM_QUERY } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding } from '../db/repositories/knowledge'
+import { getCustomerByPhone } from '../db/repositories/appointments'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
+
+function getTodayTurkish(): string {
+  const now = new Date()
+  const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
+  const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
+  return `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()} ${days[now.getDay()]}`
+}
 
 // SessionInfo arayüzü server/src/index.ts ile birebir uyumlu (referansla geçilir).
 interface TimedChunk {
@@ -41,6 +49,7 @@ export interface TelephonyDeps {
   resolveLiveModel: () => Promise<string>
   sessions: Map<string, SharedSessionInfo>
   notifyAdmins: (event: string, payload: unknown) => void
+  callerRegistry: Map<string, string>
 }
 
 /** Tek bir AudioSocket bağlantısı için durum. */
@@ -51,12 +60,14 @@ interface CallState {
   outChunker: FrameChunker
   downsampleState: { history: number[]; phase: number }
   closed: boolean
+  hangupPending: boolean
   callerId?: string
+  callerPhone?: string
   audioQueue: Buffer[]
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
-  const { ai, port, systemPromptBase, resolveLiveModel, sessions, notifyAdmins } = deps
+  const { ai, port, systemPromptBase, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
 
   const server = Bun.listen<CallState>({
     hostname: '0.0.0.0',
@@ -85,6 +96,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           outChunker: new FrameChunker(),
           downsampleState: { history: new Array(14).fill(0), phase: 0 },
           closed: false,
+          hangupPending: false,
           audioQueue: [],
         }
         socket.data = state
@@ -98,11 +110,16 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             if (state.closed) return
             nextFrameAt += 20
             const frame = state.audioQueue.shift()
-            try {
-              socket.write(frame ?? silenceFrame)
-              scheduleFrame()
-            } catch {
-              // socket error — stop scheduling
+            if (frame) {
+              try { socket.write(frame); scheduleFrame() } catch {}
+            } else if (state.hangupPending) {
+              // Ses kuyruğu boşaldı ve hangup bekleniyor — şimdi kapat
+              console.log(`[${shortId}] Ses kuyruğu boşaldı, bağlantı kapatılıyor`)
+              try { socket.write(encodeHangupFrame()) } catch {}
+              state.closed = true
+              try { socket.end() } catch {}
+            } else {
+              try { socket.write(silenceFrame); scheduleFrame() } catch {}
             }
           }, delay)
         }
@@ -126,7 +143,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             console.error(`[${shortId}] RAG hatası:`, e)
           }
 
-          const phoneInstructions = '\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri veda ettikten sonra, tüm istekler tamamlandıktan sonra) mutlaka cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra kısa bir kapanış yap ve cagriySonlandir çağır.'
+          const todayStr = getTodayTurkish()
+          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
           const model = await resolveLiveModel()
           console.log(`[${shortId}] Gemini Live model: ${model}`)
@@ -153,11 +171,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 state.outChunker = new FrameChunker()
               },
               onHangup: () => {
-                console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor`)
-                if (state.closed) return
-                try { socket.write(encodeHangupFrame()) } catch {}
-                state.closed = true
-                try { socket.end() } catch {}
+                console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
+                if (state.closed || state.hangupPending) return
+                state.hangupPending = true
               },
               onTurnComplete: () => {
                 // no-op (Asterisk RTP kendisi pacing yapıyor)
@@ -210,6 +226,49 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             ],
             turnComplete: true,
           })
+
+          // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
+          // session hazır olduğunda callerPhone zaten set olmuş olur.
+          if (state.callerPhone) {
+            try {
+              const customerCtx = await getCustomerByPhone(state.callerPhone)
+              if (customerCtx) {
+                const TYPE_LABELS: Record<string, string> = {
+                  service: 'Servis', test_drive: 'Test Sürüşü',
+                  gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+                }
+                const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
+                const past = customerCtx.appointmentHistory.filter(a => a.isPast)
+
+                let ctxMsg = `Sistem bildirimi: Arayan müşteri sistemde kayıtlı.\n`
+                ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
+                ctxMsg += `Telefon: ${customerCtx.phone}\n`
+
+                if (upcoming.length > 0) {
+                  ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
+                  upcoming.slice(0, 3).forEach(a => {
+                    ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}`
+                    if (a.vehicleInfo) ctxMsg += ` (${a.vehicleInfo})`
+                    ctxMsg += '\n'
+                  })
+                }
+
+                if (past.length > 0) {
+                  ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
+                }
+
+                ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+
+                session.sendClientContent({
+                  turns: [{ role: 'user', parts: [{ text: ctxMsg }] }],
+                  turnComplete: true,
+                })
+                console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
+              }
+            } catch (e) {
+              console.error(`[${shortId}] Müşteri context hatası:`, e)
+            }
+          }
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -223,8 +282,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         const events = state.parser.push(chunk)
         for (const ev of events) {
           if (ev.type === 'uuid') {
-            state.callerId = ev.uuid
-            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}`)
+            const channelUuid = ev.uuid
+            state.callerId = channelUuid
+            const phone = callerRegistry.get(channelUuid)
+            if (phone) {
+              state.callerPhone = phone
+              callerRegistry.delete(channelUuid)
+            }
+            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
             if (!info.session) continue

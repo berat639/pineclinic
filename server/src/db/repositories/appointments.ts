@@ -1,4 +1,4 @@
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 import { db } from '../client'
 import { appointments } from '../schema'
 import { broadcastSSE } from '../../events'
@@ -64,7 +64,7 @@ export async function createAppointment(data: {
     const existing = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.sessionId, data.sessionId))
+      .where(and(eq(appointments.sessionId, data.sessionId), eq(appointments.type, data.type)))
       .limit(1)
     if (existing.length > 0) {
       const [updated] = await db

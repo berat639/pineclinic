@@ -75,7 +75,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'cagriySonlandir',
-    description: 'Telefon görüşmesini sonlandırır. Müşterinin ihtiyacı tamamen giderildiğinde, vedalaşıldıktan sonra kullan. Web oturumlarında etkisizdir.',
+    description: 'Telefon görüşmesini sonlandırır. YALNIZCA müşteri açıkça veda edip aramayı bitirmek istediğini belirttiğinde kullan (örn: "iyi günler", "görüşürüz", "hoşça kalın"). Kısa bir veda cümlesi söyledikten SONRA çağır — cümle bitmeden çağırma. "Araştırıp döneceğim", "bir dakika bakayım", "kontrol edeyim" gibi geçici durumlar için ASLA çağırma. Web oturumlarında etkisizdir.',
     parameters: { type: Type.OBJECT, properties: {}, required: [] },
   },
 ]
