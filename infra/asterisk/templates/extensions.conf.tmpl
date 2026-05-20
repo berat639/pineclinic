@@ -10,13 +10,22 @@ writeprotect=no
 [globals]
 
 [from-netgsm]
+; Netgsm bazen DID/EXTEN'i bos birakir -> 's' default extension'a duser.
+; Bu yuzden hem _X. (DID ile gelen) hem de 's' (DID'siz) icin ayni handler
+; yazilir. Goto ile referans verirsek Asterisk degisken substitution'u
+; '${EXTEN:-s}' formunu desteklemedigi icin sonsuz donguye girer.
+
 exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
-exten => s,1,Goto(from-netgsm,${EXTEN:-s},1)
+exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
+ same => n,Answer()
+ same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
+ same => n,Hangup()
 
 ; Test extension (Asterisk CLI'dan: console dial Local/100@from-netgsm)
 exten => 100,1,NoOp(Test AudioSocket bridge)
