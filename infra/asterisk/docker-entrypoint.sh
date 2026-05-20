@@ -22,7 +22,17 @@ TARGET_DIR=/etc/asterisk
 
 for f in pjsip.conf extensions.conf rtp.conf; do
     if [ -f "${TEMPLATE_DIR}/${f}.tmpl" ]; then
-        envsubst < "${TEMPLATE_DIR}/${f}.tmpl" > "${TARGET_DIR}/${f}"
+        case "$f" in
+          extensions.conf)
+            envsubst '${AUDIOSOCKET_HOST}${AUDIOSOCKET_PORT}' < "${TEMPLATE_DIR}/${f}.tmpl" > "${TARGET_DIR}/${f}"
+            ;;
+          rtp.conf)
+            envsubst '${RTP_START}${RTP_END}' < "${TEMPLATE_DIR}/${f}.tmpl" > "${TARGET_DIR}/${f}"
+            ;;
+          *)
+            envsubst < "${TEMPLATE_DIR}/${f}.tmpl" > "${TARGET_DIR}/${f}"
+            ;;
+        esac
         echo "[entrypoint] Rendered ${TARGET_DIR}/${f}"
     fi
 done
