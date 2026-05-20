@@ -1,13 +1,13 @@
-#!/usr/bin/env bash
-# Asterisk entrypoint: pjsip.conf'u env değişkenleriyle render eder, sonra asterisk'i çalıştırır.
-set -euo pipefail
+#!/bin/sh
+# Asterisk entrypoint: pjsip.conf'u env degiskenleriyle render eder
+set -eu
 
 : "${NETGSM_SIP_HOST:=sip.netgsm.com.tr}"
 : "${NETGSM_SIP_PORT:=5060}"
 : "${NETGSM_SIP_TRANSPORT:=tcp}"
-: "${NETGSM_SIP_USER:?NETGSM_SIP_USER env değişkeni zorunlu (örn. 312XXXXXXX, başında 0 yok)}"
-: "${NETGSM_SIP_PASSWORD:?NETGSM_SIP_PASSWORD env değişkeni zorunlu}"
-: "${NETGSM_PUBLIC_IP:?NETGSM_PUBLIC_IP env değişkeni zorunlu (sunucunun public IP'si)}"
+: "${NETGSM_SIP_USER:?NETGSM_SIP_USER zorunlu (orn 3121234567)}"
+: "${NETGSM_SIP_PASSWORD:?NETGSM_SIP_PASSWORD zorunlu}"
+: "${NETGSM_PUBLIC_IP:?NETGSM_PUBLIC_IP zorunlu - sunucu public IP adresi}"
 : "${AUDIOSOCKET_HOST:=voiceai-server}"
 : "${AUDIOSOCKET_PORT:=12000}"
 : "${RTP_START:=10000}"
