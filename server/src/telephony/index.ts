@@ -59,6 +59,7 @@ interface CallState {
   downsampleState: { last: number; phase: number }
   closed: boolean
   callerId?: string
+  audioQueue: Buffer[]
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
@@ -91,14 +92,16 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           outChunker: new FrameChunker(),
           downsampleState: { last: 0, phase: 0 },
           closed: false,
+          audioQueue: [],
         }
         socket.data = state
 
-        // Gemini hazır olana kadar Asterisk bağlantısını canlı tut (2s timeout'u önler)
-        const silence = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
-        const keepalive = setInterval(() => {
-          if (state.closed || state.info.session) { clearInterval(keepalive); return }
-          try { socket.write(silence) } catch { clearInterval(keepalive) }
+        // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
+        const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
+        const paceInterval = setInterval(() => {
+          if (state.closed) { clearInterval(paceInterval); return }
+          const frame = state.audioQueue.shift()
+          try { socket.write(frame ?? silenceFrame) } catch { clearInterval(paceInterval) }
         }, 20)
 
         try {
@@ -134,7 +137,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
                 state.downsampleState = nextState
                 const frames = state.outChunker.chunk(pcm8)
-                for (const f of frames) socket.write(f)
+                for (const f of frames) state.audioQueue.push(f)
               },
               onTranscript: (_role, _text) => {
                 // Telefon kanalında transcript şu an UI'a iletilmiyor; ileride
