@@ -737,7 +737,6 @@ const app = new Elysia()
           systemPromptBase: SYSTEM_PROMPT,
           sessions,
           notifyAdmins,
-          buildStereoWav,
         })
       } catch (e) {
         console.error('[Telephony] Başlatılamadı:', e)

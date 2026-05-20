@@ -73,6 +73,11 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
       required: ['sorgu'],
     },
   },
+  {
+    name: 'cagriySonlandir',
+    description: 'Telefon görüşmesini sonlandırır. Müşterinin ihtiyacı tamamen giderildiğinde, vedalaşıldıktan sonra kullan. Web oturumlarında etkisizdir.',
+    parameters: { type: Type.OBJECT, properties: {}, required: [] },
+  },
 ]
 
 export type SessionCallbacks = {
@@ -81,6 +86,7 @@ export type SessionCallbacks = {
   onTranscript: (role: 'model', text: string) => void
   onInterrupted: () => void
   onTurnComplete: () => void
+  onHangup?: () => void
   onUsage?: (usage: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number }) => void
   onError: (err: unknown) => void
   onClose: () => void
@@ -209,6 +215,10 @@ export async function createLiveSession(
         console.error('[Knowledge] Arama hatası:', err)
         return { sonuc: 'Bilgi tabanı şu an kullanılamıyor.' }
       }
+    }
+    if (name === 'cagriySonlandir') {
+      callbacks.onHangup?.()
+      return { success: true }
     }
     return { error: 'Unknown function' }
   }
