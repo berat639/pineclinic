@@ -18,7 +18,7 @@ import { createLiveSession } from '../gemini'
 import { RECORDINGS_DIR, saveRecording } from '../db/repositories/recordings'
 import { buildRagPrompt, embedText, PRE_WARM_QUERY } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding } from '../db/repositories/knowledge'
-import { AudioSocketParser, FrameChunker } from './audiosocket'
+import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
 
 // SessionInfo arayüzü server/src/index.ts ile birebir uyumlu (referansla geçilir).
@@ -93,6 +93,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           closed: false,
         }
         socket.data = state
+
+        // Gemini hazır olana kadar Asterisk bağlantısını canlı tut (2s timeout'u önler)
+        const silence = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
+        const keepalive = setInterval(() => {
+          if (state.closed || state.info.session) { clearInterval(keepalive); return }
+          try { socket.write(silence) } catch { clearInterval(keepalive) }
+        }, 20)
 
         try {
           // RAG pre-warm (web /ws ile aynı)
