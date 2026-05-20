@@ -17,19 +17,19 @@ writeprotect=no
 
 exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
  same => n,Answer()
- same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
 exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
  same => n,Answer()
- same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
 ; Test extension (Asterisk CLI'dan: console dial Local/100@from-netgsm)
 exten => 100,1,NoOp(Test AudioSocket bridge)
  same => n,Answer()
- same => n,Set(AUDIOSOCKET_UUID=${UNIQUEID})
+ same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
