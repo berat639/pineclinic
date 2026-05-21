@@ -48,6 +48,7 @@ export const appointments = pgTable('appointments', {
   time: text('time').notNull(),
   sessionId: text('session_id'),
   calendarEventId: text('calendar_event_id'),
+  ataHsysId: text('ata_hsys_id'),
   discountRequested: boolean('discount_requested').default(false),
   notes: text('notes'),
 })

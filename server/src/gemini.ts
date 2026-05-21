@@ -1,7 +1,20 @@
 import { GoogleGenAI, Modality, Type, StartSensitivity, EndSensitivity, type FunctionDeclaration, type RealtimeInputConfig } from '@google/genai'
 import { createAppointment, updateAppointment } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
+import {
+  createAtaHsysAppointment,
+  getCustomerHistory as getAtaCustomerHistory,
+  updateAtaHsysAppointment,
+} from './integrations/ata-hsys'
 import { searchKnowledge } from './services/knowledge'
+
+/** randevu_turu → ATA Hsys "musteriistegi" fallback değeri */
+const RANDEVU_TURU_TO_TALEP: Record<string, string> = {
+  service: 'Periyodik Bakım',
+  test_drive: 'Test Sürüşü',
+  gallery_visit: 'Galeri Ziyareti',
+  other: 'Genel Randevu',
+}
 
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
@@ -72,6 +85,18 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         },
       },
       required: ['sorgu'],
+    },
+  },
+  {
+    name: 'gecmisRandevular',
+    description: 'Müşterinin telefonuna göre önceki servis/randevu kayıtlarını ATA Hsys sisteminden getirir. Müşteri "geçen sefer", "garantim", "önceki randevum", "ne zaman bakım yaptırmıştım" gibi konulara atıfta bulunduğunda kullan. Müşteri telefon numarasını AÇIKÇA söylemiş olmalı.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefonu (rakamlar, herhangi formatta — +90, 0 vb. olabilir, normalize edilir)' },
+        limit: { type: Type.INTEGER, description: 'En fazla kaç kayıt (default 5, max 20)' },
+      },
+      required: ['telefon'],
     },
   },
   {
@@ -159,11 +184,35 @@ export async function createLiveSession(
         console.log('[Calendar] Etkinlik oluşturuldu:', calendarResult.eventId)
       }
 
+      // ATA Hsys (fire-and-forget; env yoksa veya hata olursa randevu yine başarılı)
+      const ataResult = await createAtaHsysAppointment({
+        date: appointment.date,
+        time: appointment.time,
+        telefon: appointment.phone,
+        ad_soyad: appointment.customerName,
+        arac: appointment.vehicleInfo || 'Hyundai',
+        musteriistegi:
+          appointment.issueOrRequest ||
+          RANDEVU_TURU_TO_TALEP[appointment.type] ||
+          'Genel Randevu',
+        irtibat: 'Voice AI',
+        gorusme_notu: `Sesli AI üzerinden oluşturuldu (session: ${options.dbSessionId})`,
+      }).catch(() => ({ success: false as const, reason: 'ata error' }))
+
+      if (ataResult.success) {
+        await updateAppointment(appointment.id, { ataHsysId: String(ataResult.id) }).catch(() => {})
+        console.log(
+          `[ATA] Randevu ${ataResult.duplicate ? 'mevcut' : 'oluşturuldu'}:`,
+          ataResult.id,
+        )
+      }
+
       return {
         success: true,
         message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`,
         id: appointment.id,
         calendar_event_id: calendarResult.success ? calendarResult.eventId : null,
+        ata_hsys_id: ataResult.success ? ataResult.id : null,
       }
     }
 
@@ -205,6 +254,17 @@ export async function createLiveSession(
         }).then(r => { if (r.success) console.log('[Calendar] Etkinlik güncellendi:', r.eventId) }).catch(() => {})
       }
 
+      // ATA Hsys patch (yalnız tarih/saat değişimi veya görüşme notu için)
+      if (updated.ataHsysId && (args.tarih || args.saat)) {
+        const patch: { date?: string; time?: string; gorusme_notu?: string } = {}
+        if (args.tarih) patch.date = args.tarih as string
+        if (args.saat) patch.time = args.saat as string
+        patch.gorusme_notu = `Voice AI ile güncellendi (session: ${options.dbSessionId})`
+        void updateAtaHsysAppointment(updated.ataHsysId, patch)
+          .then((r) => { if (r.success) console.log('[ATA] Randevu güncellendi:', r.id) })
+          .catch(() => {})
+      }
+
       return {
         success: true,
         message: `Randevu güncellendi: ${updated.date} ${updated.time}.`,
@@ -224,6 +284,46 @@ export async function createLiveSession(
       } catch (err) {
         console.error('[Knowledge] Arama hatası:', err)
         return { sonuc: 'Bilgi tabanı şu an kullanılamıyor.' }
+      }
+    }
+    if (name === 'gecmisRandevular') {
+      const rawPhone = (args.telefon as string | undefined) ?? ''
+      const limitRaw = args.limit
+      const limit =
+        typeof limitRaw === 'number' && Number.isFinite(limitRaw) ? limitRaw : 5
+      if (!rawPhone.trim()) {
+        return { sonuc: 'Geçmiş sorgu için telefon numarası gerekli.' }
+      }
+      try {
+        const history = await getAtaCustomerHistory({
+          telefon: rawPhone,
+          mode: 'customer',
+          limit,
+        })
+        if (!history.success) {
+          console.error('[ATA] gecmisRandevular hatası:', history.reason)
+          return { sonuc: 'Geçmiş randevu sorgulanamadı.' }
+        }
+        if (history.appointments.length === 0) {
+          return { sonuc: 'Bu numara için kayıtlı önceki randevu bulunamadı.' }
+        }
+        const formatted = history.appointments
+          .map((r, i) => {
+            const parts = [
+              `[${i + 1}]`,
+              r.date,
+              r.time,
+              r.musteriistegi ? `— ${r.musteriistegi}` : '',
+              r.arac ? `(${r.arac}${r.plaka ? ` ${r.plaka}` : ''})` : '',
+              r.randevu_durumu ? `[durum: ${r.randevu_durumu}]` : '',
+            ]
+            return parts.filter(Boolean).join(' ')
+          })
+          .join('\n')
+        return { sonuc: formatted }
+      } catch (err) {
+        console.error('[ATA] gecmisRandevular exception:', err)
+        return { sonuc: 'Geçmiş randevu servisi şu an kullanılamıyor.' }
       }
     }
     if (name === 'cagriySonlandir') {

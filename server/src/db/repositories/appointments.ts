@@ -15,6 +15,7 @@ export interface Appointment {
   time: string
   sessionId?: string | null
   calendarEventId?: string | null
+  ataHsysId?: string | null
   discountRequested?: boolean
   notes?: string | null
 }
@@ -36,6 +37,7 @@ function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
     time: r.time,
     sessionId: r.sessionId,
     calendarEventId: r.calendarEventId,
+    ataHsysId: r.ataHsysId,
     discountRequested: r.discountRequested ?? false,
     notes: r.notes,
   }
@@ -125,6 +127,7 @@ export async function updateAppointment(
   if (data.time !== undefined) update.time = data.time
   if (data.sessionId !== undefined) update.sessionId = data.sessionId
   if (data.calendarEventId !== undefined) update.calendarEventId = data.calendarEventId
+  if (data.ataHsysId !== undefined) update.ataHsysId = data.ataHsysId
   if (data.discountRequested !== undefined) update.discountRequested = data.discountRequested
   if (data.notes !== undefined) update.notes = data.notes
 

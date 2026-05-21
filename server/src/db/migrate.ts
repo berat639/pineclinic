@@ -99,6 +99,11 @@ async function runMigrations() {
 
   await sql`
     ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS ata_hsys_id TEXT
+  `
+
+  await sql`
+    ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS discount_requested BOOLEAN DEFAULT false
   `
 

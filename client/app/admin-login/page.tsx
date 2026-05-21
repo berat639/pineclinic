@@ -1,9 +1,7 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 
 export default function AdminLoginPage() {
-  const router = useRouter()
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -18,14 +16,20 @@ export default function AdminLoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
+        credentials: 'same-origin',
       })
 
       if (res.ok) {
-        router.push('/admin')
-      } else {
-        const data = await res.json()
-        setError(data.error || 'Hata oluştu')
+        // Cookie'nin tarayıcıya yazıldığından ve middleware'in yeni
+        // cookie'yi alacağından emin olmak için soft navigation yerine
+        // full reload (router.push Chrome'da bazen cookie'yi okumadan
+        // redirect ediyor).
+        window.location.assign('/admin')
+        return
       }
+
+      const data = await res.json()
+      setError(data.error || 'Hata oluştu')
     } catch {
       setError('Sunucuya bağlanılamadı')
     }
