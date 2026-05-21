@@ -6,7 +6,8 @@ import { searchKnowledge } from './services/knowledge'
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
-function validateLiveCustomerIdentity(customerName: string, phone: string): string | null {
+function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
+  if (!customerName || !phone) return 'Müşteri adı ve telefon zorunludur; lütfen müşteriden tekrar alın.'
   const name = customerName.trim()
   const tel = phone.trim()
   if (name.length < 3) return 'Ad soyad en az 3 karakter olmalı; müşteriden net ad soyad al ve onaylat.'
@@ -104,20 +105,28 @@ export async function createLiveSession(
 ) {
   async function handleTool(name: string, args: Record<string, unknown>) {
     if (name === 'randevuOlustur') {
-      const rawName = args.musteri_adi as string
-      const rawPhone = args.telefon as string
+      const rawName = args.musteri_adi as string | undefined
+      const rawPhone = args.telefon as string | undefined
       const invalid = validateLiveCustomerIdentity(rawName, rawPhone)
       if (invalid) {
         return { success: false, message: invalid }
       }
+      const dateStr = args.tarih as string | undefined
+      const timeStr = args.saat as string | undefined
+      if (!dateStr || !timeStr) {
+        return { success: false, message: 'Tarih ve saat zorunludur; müşteriden tekrar alın.' }
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(new Date(dateStr).getTime())) {
+        return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
+      }
       const appointment = await createAppointment({
-        customerName: rawName.trim(),
-        phone: rawPhone.trim(),
+        customerName: (rawName as string).trim(),
+        phone: (rawPhone as string).trim(),
         type: args.randevu_turu as string,
         vehicleInfo: args.arac_bilgisi as string | undefined,
         issueOrRequest: args.sorun_veya_talep as string | undefined,
-        date: args.tarih as string,
-        time: args.saat as string,
+        date: dateStr,
+        time: timeStr,
         sessionId: options.dbSessionId,
       })
       console.log('[Randevu]', appointment.id, appointment.customerName)
