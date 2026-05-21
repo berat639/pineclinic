@@ -20,6 +20,129 @@ import { getCustomerByPhone } from '../db/repositories/appointments'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
 
+// ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
+//
+// Asterisk → Gemini akışında arka plan gürültüsünün (TV, müzik, ikinci konuşma)
+// Gemini VAD'i yanlış tetiklemesini engeller.
+//
+// Tasarım: 3 koruma katmanı
+//   1. Düşük threshold (default 0 = devre dışı, env ile aktive) — fısıltı bile
+//      eşik üstünde kalmalı; line noise altında kalmalı.
+//   2. Pre-roll buffer — gate açıldığı an, gate kapalıyken yakalanmış son
+//      birkaç frame önce gönderilir → konuşmanın ilk hecesi kaybolmaz.
+//   3. Trailing — gate açıldıktan sonra RMS eşiğin altına düşse bile bir süre
+//      daha açık kalır → cümle sonu kesilmez.
+//
+// Gemini'ye gönderilen toplam audio süresi her zaman gerçek zamanla eşleşir
+// (gerçek audio yerine sessizlik frame'i geçer); böylece Gemini'nin VAD timing'i
+// bozulmaz.
+const PHONE_FRAME_MS = 20
+
+function computeRmsInt16(pcm: Buffer): number {
+  const samples = pcm.length >> 1
+  if (samples === 0) return 0
+  let sumSq = 0
+  for (let i = 0; i < pcm.length; i += 2) {
+    const s = pcm.readInt16LE(i)
+    sumSq += s * s
+  }
+  return Math.sqrt(sumSq / samples)
+}
+
+class NoiseGate {
+  private preRoll: Buffer[] = []
+  private trailingFrames = 0
+  private wasOpen = false
+  private totalFrames = 0
+  private highFrames = 0
+  private rmsSum = 0
+  private rmsMax = 0
+  private lastLogAtFrame = 0
+
+  constructor(
+    private readonly threshold: number,
+    private readonly trailingFramesMax: number,
+    private readonly preRollMax: number,
+    private readonly shortId: string,
+    private readonly logIntervalFrames = 500,
+  ) {}
+
+  /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; Gemini'ye gidecek frame'leri döndür. */
+  process(frame: Buffer): Buffer[] {
+    this.totalFrames++
+    const rms = computeRmsInt16(frame)
+    this.rmsSum += rms
+    if (rms > this.rmsMax) this.rmsMax = rms
+
+    const isHigh = this.threshold > 0 && rms >= this.threshold
+    if (isHigh) this.highFrames++
+
+    this.maybeLog()
+
+    if (this.threshold === 0) {
+      return [frame]
+    }
+
+    if (isHigh) {
+      this.trailingFrames = this.trailingFramesMax
+      if (!this.wasOpen) {
+        const flushed = this.preRoll
+        this.preRoll = []
+        this.wasOpen = true
+        return [...flushed, frame]
+      }
+      this.wasOpen = true
+      return [frame]
+    }
+
+    if (this.trailingFrames > 0) {
+      this.trailingFrames--
+      if (this.trailingFrames === 0) {
+        this.pushPreRoll(frame)
+        this.wasOpen = false
+      } else {
+        this.wasOpen = true
+      }
+      return [frame]
+    }
+
+    this.pushPreRoll(frame)
+    this.wasOpen = false
+    return [Buffer.alloc(frame.length, 0)]
+  }
+
+  private pushPreRoll(frame: Buffer): void {
+    if (this.preRollMax <= 0) return
+    this.preRoll.push(frame)
+    if (this.preRoll.length > this.preRollMax) this.preRoll.shift()
+  }
+
+  private maybeLog(): void {
+    const elapsed = this.totalFrames - this.lastLogAtFrame
+    if (elapsed < this.logIntervalFrames) return
+    const avg = Math.round(this.rmsSum / elapsed)
+    const pct = Math.round((this.highFrames / elapsed) * 100)
+    console.log(
+      `[${this.shortId}] NoiseGate: ${elapsed}fr | avg=${avg} max=${Math.round(this.rmsMax)} high=${pct}% | thresh=${this.threshold}`,
+    )
+    this.lastLogAtFrame = this.totalFrames
+    this.rmsSum = 0
+    this.highFrames = 0
+    this.rmsMax = 0
+  }
+}
+
+function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
+  const threshold = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_RMS || '0', 10) || 0)
+  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '300', 10) || 300)
+  const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '60', 10) || 60)
+  return {
+    threshold,
+    trailingFrames: Math.round(trailingMs / PHONE_FRAME_MS),
+    preRollFrames: Math.round(preRollMs / PHONE_FRAME_MS),
+  }
+}
+
 function getTodayTurkish(): string {
   const now = new Date()
   const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
@@ -64,10 +187,16 @@ interface CallState {
   callerId?: string
   callerPhone?: string
   audioQueue: Buffer[]
+  noiseGate: NoiseGate
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
   const { ai, port, systemPromptBase, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
+
+  const gateCfg = readGateConfig()
+  console.log(
+    `   NoiseGate: thresh=${gateCfg.threshold} trailing=${gateCfg.trailingFrames}fr preRoll=${gateCfg.preRollFrames}fr`,
+  )
 
   const server = Bun.listen<CallState>({
     hostname: '0.0.0.0',
@@ -98,6 +227,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           closed: false,
           hangupPending: false,
           audioQueue: [],
+          noiseGate: new NoiseGate(
+            gateCfg.threshold,
+            gateCfg.trailingFrames,
+            gateCfg.preRollFrames,
+            shortId,
+          ),
         }
         socket.data = state
 
@@ -293,13 +428,16 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           } else if (ev.type === 'audio') {
             const { info } = state
             if (!info.session) continue
-            const pcm16 = upsample8to16(ev.pcm)
-            info.session.sendRealtimeInput({
-              media: {
-                data: pcm16.toString('base64'),
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            })
+            const gatedFrames = state.noiseGate.process(ev.pcm)
+            for (const f8k of gatedFrames) {
+              const pcm16 = upsample8to16(f8k)
+              info.session.sendRealtimeInput({
+                media: {
+                  data: pcm16.toString('base64'),
+                  mimeType: 'audio/pcm;rate=16000',
+                },
+              })
+            }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch {}

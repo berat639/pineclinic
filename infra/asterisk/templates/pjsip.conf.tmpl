@@ -67,6 +67,9 @@ force_rport=yes
 rewrite_contact=yes
 from_user=${NETGSM_SIP_USER}
 from_domain=${NETGSM_SIP_HOST}
+; RTP paketlerini DSCP EF (Expedited Forwarding) olarak işaretle — ISP destekliyorsa
+; priority queue'da gider, jitter ve drop azalır. Yan etkisiz.
+tos_audio=ef
 
 ;
 ; Identify — Netgsm'den gelen INVITE'ları kaynak host'a göre netgsm-endpoint'e eşle
