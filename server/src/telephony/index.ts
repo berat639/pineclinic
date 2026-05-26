@@ -296,9 +296,15 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const frames = state.outChunker.chunk(pcm8)
                 for (const f of frames) state.audioQueue.push(f)
               },
-              onTranscript: (_role, _text) => {
-                // Telefon kanalında transcript şu an UI'a iletilmiyor; ileride
-                // SSE üzerinden admin'e aktarmak için burası kullanılabilir.
+              onTranscript: (role, text) => {
+                // Tanı için: müşterinin ne söylediğini (input transcription)
+                // ve AI'nın ne söylediğini (output transcription) log'a düş.
+                // Chunks halinde gelir, fragment fragment yazılır — gerçek
+                // zamanlı konuşma takibi için yeterli.
+                const trimmed = text.trim()
+                if (!trimmed) return
+                const label = role === 'user' ? 'USER' : 'AI'
+                console.log(`[${shortId}] ${label}: ${trimmed}`)
               },
               onInterrupted: () => {
                 // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
@@ -330,10 +336,16 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               model,
               realtimeInputConfig: {
                 automaticActivityDetection: {
-                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+                  // Telefon hattı (8kHz µ-law/A-law) ses amplitüdünü düşürür.
+                  // START_SENSITIVITY_HIGH ile kısa/kısık konuşmaları (rakamlar,
+                  // "evet", "üç" gibi) yakalarız.
+                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                  // END LOW: cümle ortası kısa pause'larda kesilmesin.
                   endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
                   prefixPaddingMs: 300,
-                  silenceDurationMs: 1200,
+                  // 1200ms → 1000ms: AI cevap latency'sini azalt, kullanıcının
+                  // düşünme/duraklama süresi yine korunur.
+                  silenceDurationMs: 1000,
                 },
               },
             },

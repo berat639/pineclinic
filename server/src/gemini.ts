@@ -109,7 +109,8 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
 export type SessionCallbacks = {
   onReady: () => void
   onAudio: (pcm: Buffer) => void
-  onTranscript: (role: 'model', text: string) => void
+  /** role='user' → müşterinin söylediği (inputTranscription); role='model' → AI'nın söylediği (outputTranscription veya text part). */
+  onTranscript: (role: 'model' | 'user', text: string) => void
   onInterrupted: () => void
   onTurnComplete: () => void
   onHangup?: () => void
@@ -359,6 +360,11 @@ export async function createLiveSession(
         triggerTokens: 5000 as unknown as string,
         slidingWindow: { targetTokens: 2000 as unknown as string },
       },
+      // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
+      // VAD ne algılıyor, AI ne anladı, ne cevap üretti net görebilmek için
+      // server log'a düşürüyoruz (telephony/web onTranscript callback'inde).
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
       ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
     },
     callbacks: {
@@ -421,6 +427,16 @@ export async function createLiveSession(
               callbacks.onTranscript('model', part.text)
             }
           }
+        }
+
+        // Input/output transcription — Live API ses verisinin text karşılığı
+        // (chunks halinde gelir). Konuşma tamamlanıp tamamlanmadığı bilgisini
+        // de iletebilmek için boş text'leri filtreliyoruz.
+        if (content.inputTranscription?.text) {
+          callbacks.onTranscript('user', content.inputTranscription.text)
+        }
+        if (content.outputTranscription?.text) {
+          callbacks.onTranscript('model', content.outputTranscription.text)
         }
 
         if (content.turnComplete) {
