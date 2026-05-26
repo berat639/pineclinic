@@ -156,7 +156,13 @@ export async function createLiveSession(
       })
       console.log('[Randevu]', appointment.id, appointment.customerName)
 
-      // Google Calendar (fire-and-forget, skip if unconfigured)
+      // Google Calendar + ATA Hsys side effects — fire-and-forget arka planda
+      // çalışır. Burada `await` etmiyoruz çünkü her ikisi de 500-2000ms
+      // sürebilen dış API çağrılarıdır; tool response'unu bloklamak Gemini
+      // event loop'unu kilitler → müşteri AI'yı duymaz.
+      //
+      // Side effect ID'leri DB'ye background'da yazılır; randevu zaten
+      // ana DB'de mevcut, eksiklik telafi edilebilir.
       const TYPE_LABELS: Record<string, string> = {
         service: 'Servis',
         test_drive: 'Test Sürüşü',
@@ -164,28 +170,30 @@ export async function createLiveSession(
         other: 'Randevu',
       }
       const typeLabel = TYPE_LABELS[appointment.type] ?? 'Randevu'
-      const calendarResult = await createCalendarEvent({
+      const eventDescription = [
+        `Müşteri: ${appointment.customerName}`,
+        `Telefon: ${appointment.phone}`,
+        `Randevu Türü: ${typeLabel}`,
+        appointment.vehicleInfo ? `Araç: ${appointment.vehicleInfo}` : null,
+        appointment.issueOrRequest ? `Talep/Sorun: ${appointment.issueOrRequest}` : null,
+      ].filter(Boolean).join('\n')
+
+      void createCalendarEvent({
         title: `${typeLabel} — ${appointment.customerName}`,
-        description: [
-          `Müşteri: ${appointment.customerName}`,
-          `Telefon: ${appointment.phone}`,
-          `Randevu Türü: ${typeLabel}`,
-          appointment.vehicleInfo ? `Araç: ${appointment.vehicleInfo}` : null,
-          appointment.issueOrRequest ? `Talep/Sorun: ${appointment.issueOrRequest}` : null,
-        ].filter(Boolean).join('\n'),
+        description: eventDescription,
         date: appointment.date,
         time: appointment.time,
         attendeePhone: appointment.phone,
-      }).catch(() => ({ success: false as const, reason: 'calendar error' }))
+      })
+        .then(async (r) => {
+          if (r.success) {
+            console.log('[Calendar] Etkinlik oluşturuldu:', r.eventId)
+            await updateAppointment(appointment.id, { calendarEventId: r.eventId }).catch(() => {})
+          }
+        })
+        .catch((err) => console.error('[Calendar] hata:', err))
 
-      // Store calendarEventId in DB for future updates
-      if (calendarResult.success) {
-        await updateAppointment(appointment.id, { calendarEventId: calendarResult.eventId }).catch(() => {})
-        console.log('[Calendar] Etkinlik oluşturuldu:', calendarResult.eventId)
-      }
-
-      // ATA Hsys (fire-and-forget; env yoksa veya hata olursa randevu yine başarılı)
-      const ataResult = await createAtaHsysAppointment({
+      void createAtaHsysAppointment({
         date: appointment.date,
         time: appointment.time,
         telefon: appointment.phone,
@@ -197,22 +205,23 @@ export async function createLiveSession(
           'Genel Randevu',
         irtibat: 'Voice AI',
         gorusme_notu: `Sesli AI üzerinden oluşturuldu (session: ${options.dbSessionId})`,
-      }).catch(() => ({ success: false as const, reason: 'ata error' }))
+      })
+        .then(async (r) => {
+          if (r.success) {
+            console.log(`[ATA] Randevu ${r.duplicate ? 'mevcut' : 'oluşturuldu'}:`, r.id)
+            await updateAppointment(appointment.id, { ataHsysId: String(r.id) }).catch(() => {})
+          }
+        })
+        .catch((err) => console.error('[ATA] hata:', err))
 
-      if (ataResult.success) {
-        await updateAppointment(appointment.id, { ataHsysId: String(ataResult.id) }).catch(() => {})
-        console.log(
-          `[ATA] Randevu ${ataResult.duplicate ? 'mevcut' : 'oluşturuldu'}:`,
-          ataResult.id,
-        )
-      }
-
+      // Anında tool response — AI cevabı bekletilmez. Calendar/ATA ID'leri
+      // null döner; gerekirse client tarafı sonradan DB'den okur.
       return {
         success: true,
         message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`,
         id: appointment.id,
-        calendar_event_id: calendarResult.success ? calendarResult.eventId : null,
-        ata_hsys_id: ataResult.success ? ataResult.id : null,
+        calendar_event_id: null,
+        ata_hsys_id: null,
       }
     }
 
@@ -355,14 +364,40 @@ export async function createLiveSession(
     callbacks: {
       onopen: () => callbacks.onReady(),
       onmessage: async (msg) => {
-        // Tool calls
+        // Tool calls — paralel/non-blocking dispatch.
+        //
+        // Önemli: `await handleTool(...)` ile sırayla çalıştırırsak Gemini WS
+        // onmessage event loop'u kilitlenir; bu sırada Gemini'den gelen audio
+        // chunks işlenmez → Asterisk'e sessizlik gider → müşteri AI'yı
+        // duymaz. Her tool çağrısını ayrı promise olarak başlatıp sonuçları
+        // hazır olunca `sendToolResponse` ile iletiyoruz; arada audio akışı
+        // kesintiye uğramaz.
         if (msg.toolCall?.functionCalls?.length) {
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
-            const result = await handleTool(fcName, fc.args as Record<string, unknown>)
-            session.sendToolResponse({
-              functionResponses: [{ id: fc.id, name: fcName, response: result }],
-            })
+            const start = Date.now()
+            handleTool(fcName, fc.args as Record<string, unknown>)
+              .then((result) => {
+                const ms = Date.now() - start
+                if (ms > 200) console.log(`[Tool ${fcName}] ${ms}ms`)
+                try {
+                  session.sendToolResponse({
+                    functionResponses: [{ id: fc.id, name: fcName, response: result }],
+                  })
+                } catch (err) {
+                  console.error(`[Tool ${fcName}] sendToolResponse hatası:`, err)
+                }
+              })
+              .catch((err) => {
+                console.error(`[Tool ${fcName}] handler hatası:`, err)
+                try {
+                  session.sendToolResponse({
+                    functionResponses: [
+                      { id: fc.id, name: fcName, response: { error: 'tool failed' } },
+                    ],
+                  })
+                } catch {}
+              })
           }
           return
         }
