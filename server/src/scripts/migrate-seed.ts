@@ -11,6 +11,8 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import postgres from 'postgres'
+import { embedText } from '../rag'
+import { RAG_PROMPT_DOCS } from '../data/rag-prompts'
 
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
@@ -19,6 +21,10 @@ if (!DATABASE_URL) {
 }
 
 const sql = postgres(DATABASE_URL, { max: 1 })
+
+function vectorLiteral(vec: number[]): string {
+  return `[${vec.join(',')}]`
+}
 
 async function seedDefaultAccount() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -96,11 +102,59 @@ async function seedAppointments() {
   console.log(`[Seed] ${appointments.length} randevu aktarıldı`)
 }
 
+async function seedKnowledgePrompts() {
+  // Vertex embedding gerektirir; creds yoksa atla (belge embedding'siz
+  // eklenirse retrieveTopK 'embedding IS NOT NULL' filtresinden geçmez).
+  if (!process.env.GOOGLE_CREDENTIALS_JSON) {
+    console.log('[Seed] GOOGLE_CREDENTIALS_JSON eksik — bilgi bankası prompt seed atlandı')
+    return
+  }
+
+  let inserted = 0
+  let skipped = 0
+  let failed = 0
+  const nowIso = new Date().toISOString()
+
+  for (const doc of RAG_PROMPT_DOCS) {
+    // Idempotent: aynı başlık varsa atla (her redeploy'da duplicate olmasın).
+    const existing = await sql`SELECT 1 FROM knowledge_documents WHERE title = ${doc.title} LIMIT 1`
+    if (existing.length > 0) {
+      skipped++
+      continue
+    }
+
+    try {
+      // Title + content embed → kullanıcı sorusu (title) ile retrieval recall'i artar.
+      const embedding = await embedText(`${doc.title}\n${doc.content}`)
+      await sql`
+        INSERT INTO knowledge_documents (category, title, content, active, embedding, embedded_at, created_at, updated_at)
+        VALUES (
+          ${doc.category},
+          ${doc.title},
+          ${doc.content},
+          true,
+          ${vectorLiteral(embedding)}::vector,
+          ${nowIso},
+          ${nowIso},
+          ${nowIso}
+        )
+      `
+      inserted++
+    } catch (err) {
+      failed++
+      console.error(`[Seed] "${doc.title}" embedding/insert hatası:`, err)
+    }
+  }
+
+  console.log(`[Seed] Bilgi bankası prompt: ${inserted} yeni, ${skipped} mevcut, ${failed} hata (toplam ${RAG_PROMPT_DOCS.length})`)
+}
+
 async function main() {
   console.log('[Seed] Başlıyor...')
   try {
     await seedDefaultAccount()
     await seedAppointments()
+    await seedKnowledgePrompts()
     console.log('[Seed] Tamamlandı')
   } catch (err) {
     console.error('[Seed] Hata:', err)

@@ -86,4 +86,4 @@ ${sections.join('\n\n')}
 // ── Pre-warm query ────────────────────────────────────────────────────────────
 
 export const PRE_WARM_QUERY =
-  'Hyundai otomotiv servis bakım araç satış test sürüşü randevu galeri kampanya'
+  'Toyota otomotiv servis bakım araç satış test sürüşü randevu galeri kampanya'
