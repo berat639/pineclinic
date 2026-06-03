@@ -74,7 +74,7 @@ export default function Home() {
           <img
             src="/skoda-6-logo.svg"
             alt="Skoda"
-            style={{ height: 28, width: 'auto', filter: 'brightness(0) invert(1)' }}
+            style={{ height: 32, width: 'auto' }}
           />
           <div style={{
             width: 1,
