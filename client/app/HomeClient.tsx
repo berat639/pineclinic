@@ -72,8 +72,8 @@ export default function Home() {
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <img
-            src="/logo-toyota.svg"
-            alt="Toyota"
+            src="/skoda-6-logo.svg"
+            alt="Skoda"
             style={{ height: 28, width: 'auto', filter: 'brightness(0) invert(1)' }}
           />
           <div style={{

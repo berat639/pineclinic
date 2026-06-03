@@ -199,7 +199,7 @@ export async function createLiveSession(
         time: appointment.time,
         telefon: appointment.phone,
         ad_soyad: appointment.customerName,
-        arac: appointment.vehicleInfo || 'Toyota',
+        arac: appointment.vehicleInfo || 'Skoda',
         musteriistegi:
           appointment.issueOrRequest ||
           RANDEVU_TURU_TO_TALEP[appointment.type] ||

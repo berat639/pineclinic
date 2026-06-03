@@ -149,7 +149,7 @@ export const RAG_PROMPT_DOCS: RagPromptDoc[] = [
     category: 'sss',
     title: 'Aracı yeni aldım, mobil uygulamadan geçmişini görmek için onay bekliyor',
     content:
-      'Bilgi bankasındaki uygulama destek prosedürlerine göre (MyToyota vb. marka uygulaması) ruhsat sahipliği doğrulama sürecini açıkla. Müşterinin ruhsat fotoğrafını nereye iletmesi gerektiğini veya onayın sistemden nasıl tetikleneceğini adım adım anlat.',
+      'Bilgi bankasındaki uygulama destek prosedürlerine göre (MySkoda vb. marka uygulaması) ruhsat sahipliği doğrulama sürecini açıkla. Müşterinin ruhsat fotoğrafını nereye iletmesi gerektiğini veya onayın sistemden nasıl tetikleneceğini adım adım anlat.',
   },
   {
     category: 'sss',
