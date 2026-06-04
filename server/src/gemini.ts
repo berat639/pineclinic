@@ -366,6 +366,31 @@ export async function createLiveSession(
   let reconnecting = false
   let readyFired = false
 
+  /**
+   * Tool response'u activeSession'a gönder. Reconnect sırasında session null
+   * olabilir — bu durumda kısa aralıklarla retry yap (max 3s). Böylece tool
+   * response kaybolup model susmaz.
+   */
+  function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: unknown, attempt = 0): void {
+    if (closedByUser) return
+    if (activeSession && !reconnecting) {
+      try {
+        activeSession.sendToolResponse({
+          functionResponses: [{ id: fcId, name: fcName, response: result }],
+        })
+        return
+      } catch (err) {
+        console.error(`[Tool ${fcName}] sendToolResponse hatası (attempt=${attempt}):`, err)
+      }
+    }
+    // Session null veya reconnecting — 500ms sonra tekrar dene (max 6 deneme = 3s)
+    if (attempt < 6) {
+      setTimeout(() => sendToolResponseWithRetry(fcName, fcId, result, attempt + 1), 500)
+    } else {
+      console.error(`[Tool ${fcName}] sendToolResponse başarısız — ${attempt} deneme sonra vazgeçildi`)
+    }
+  }
+
   const liveConfig = {
     responseModalities: [Modality.AUDIO],
     systemInstruction: options.systemPrompt,
@@ -431,23 +456,11 @@ export async function createLiveSession(
               .then((result) => {
                 const ms = Date.now() - start
                 if (ms > 200) console.log(`[Tool ${fcName}] ${ms}ms`)
-                try {
-                  activeSession?.sendToolResponse({
-                    functionResponses: [{ id: fc.id, name: fcName, response: result }],
-                  })
-                } catch (err) {
-                  console.error(`[Tool ${fcName}] sendToolResponse hatası:`, err)
-                }
+                sendToolResponseWithRetry(fcName, fc.id, result)
               })
               .catch((err) => {
                 console.error(`[Tool ${fcName}] handler hatası:`, err)
-                try {
-                  activeSession?.sendToolResponse({
-                    functionResponses: [
-                      { id: fc.id, name: fcName, response: { error: 'tool failed' } },
-                    ],
-                  })
-                } catch {}
+                sendToolResponseWithRetry(fcName, fc.id, { error: 'tool failed' })
               })
           }
           return

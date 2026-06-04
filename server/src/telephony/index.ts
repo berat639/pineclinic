@@ -67,6 +67,9 @@ class NoiseGate {
     private readonly logIntervalFrames = 500,
   ) {}
 
+  /** Son process() çağrısında gate açık mıydı (konuşma algılandı mı). */
+  get isOpen(): boolean { return this.wasOpen }
+
   /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; Gemini'ye gidecek frame'leri döndür. */
   process(frame: Buffer): Buffer[] {
     this.totalFrames++
@@ -80,6 +83,8 @@ class NoiseGate {
     this.maybeLog()
 
     if (this.threshold === 0) {
+      // Gate devre dışı — her frame konuşma sayılır.
+      this.wasOpen = true
       return [frame]
     }
 
@@ -423,12 +428,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   // START_SENSITIVITY_HIGH ile kısa/kısık konuşmaları (rakamlar,
                   // "evet", "üç" gibi) yakalarız.
                   startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-                  // END LOW: cümle ortası kısa pause'larda kesilmesin.
-                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-                  prefixPaddingMs: 300,
-                  // 1200ms → 1000ms: AI cevap latency'sini azalt, kullanıcının
-                  // düşünme/duraklama süresi yine korunur.
-                  silenceDurationMs: 1000,
+                  // END HIGH: kısa cevaplarda ("evet", "hayır", rakamlar)
+                  // modelin konuşma bitişini hızlı algılaması için yüksek duyarlılık.
+                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                  prefixPaddingMs: 200,
+                  // Kısa onay cümlelerinde ("evet") hızlı tepki.
+                  silenceDurationMs: 700,
                 },
               },
             },
@@ -524,8 +529,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const { info } = state
             if (!info.session) continue
             const gatedFrames = state.noiseGate.process(ev.pcm)
-            if (gatedFrames.length > 0) {
-              // Müşteriden ses geldi — sessizlik timer'ını sıfırla.
+            if (state.noiseGate.isOpen) {
+              // Gerçek konuşma algılandı — sessizlik timer'ını sıfırla.
               clearSilenceTimers(state)
             }
             for (const f8k of gatedFrames) {
