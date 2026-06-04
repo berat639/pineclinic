@@ -128,7 +128,7 @@ docker exec -it voiceai-asterisk asterisk -rx 'pjsip show endpoints'
    - Asterisk: `Netgsm inbound: <cep no> -> <dahili>`
    - Server: `[tel_xxxxxxxx] AudioSocket bağlantısı açıldı`
    - Server: `[tel_xxxxxxxx] Gemini Live ready (phone)`
-4. Telefonda Skoda asistanının karşılama mesajını duymalısın. Konuştuğunda
+4. Telefonda Hyundai asistanının karşılama mesajını duymalısın. Konuştuğunda
    yanıt vermesi gerekir. Konuşma sonrası `data/recordings/phone_<id>_<ts>.wav`
    dosyası oluşur ve admin panelinde listelenir.
 
