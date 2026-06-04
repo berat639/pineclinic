@@ -345,6 +345,12 @@ export async function createLiveSession(
       if (!rawPhone.trim()) {
         return { sonuc: 'Telefon numarası gerekli.' }
       }
+      // Türk telefon numarası formatı kontrolü: en az 10 rakam olmalı
+      const digits = rawPhone.replace(/\D/g, '')
+      if (digits.length < 10) {
+        console.log(`[ATA] musteriSorgula: geçersiz numara format (${rawPhone} → ${digits.length} hane)`)
+        return { sonuc: 'Geçerli bir telefon numarası değil. Müşteriden 10 haneli telefon numarasını tekrar iste.' }
+      }
       console.log(`[ATA] musteriSorgula: telefon=${rawPhone}`)
       try {
         const result = await getCustomerInfo({ telefon: rawPhone })
