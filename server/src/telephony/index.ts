@@ -447,20 +447,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             activeSessions: sessions.size,
           })
 
-          // Gemini'ye telefon kanalı geldiğini bildir
-          session.sendClientContent({
-            turns: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: 'Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)',
-                  },
-                ],
-              },
-            ],
-            turnComplete: true,
-          })
+          // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
+          // Birden fazla turnComplete: true göndermek modelin her birine ayrı
+          // greeting üretmesine neden olur.
+          const initParts: string[] = [
+            'Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)',
+          ]
 
           // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
           // session hazır olduğunda callerPhone zaten set olmuş olur.
@@ -475,7 +467,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
                 const past = customerCtx.appointmentHistory.filter(a => a.isPast)
 
-                let ctxMsg = `Sistem bildirimi: Arayan müşteri sistemde kayıtlı.\n`
+                let ctxMsg = `Arayan müşteri sistemde kayıtlı.\n`
                 ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
                 ctxMsg += `Telefon: ${customerCtx.phone}\n`
 
@@ -493,17 +485,24 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 }
 
                 ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
-
-                session.sendClientContent({
-                  turns: [{ role: 'user', parts: [{ text: ctxMsg }] }],
-                  turnComplete: true,
-                })
+                initParts.push(ctxMsg)
                 console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
               }
             } catch (e) {
               console.error(`[${shortId}] Müşteri context hatası:`, e)
             }
           }
+
+          // Tek seferde gönder — model yalnızca BİR greeting üretir.
+          session.sendClientContent({
+            turns: [
+              {
+                role: 'user',
+                parts: initParts.map(text => ({ text })),
+              },
+            ],
+            turnComplete: true,
+          })
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
