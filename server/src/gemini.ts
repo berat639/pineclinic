@@ -60,6 +60,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
           description: 'Randevu türü: servis, test sürüşü, galeri ziyareti veya diğer',
         },
         arac_bilgisi: { type: Type.STRING, description: 'Araç marka, model ve yıl bilgisi' },
+        plaka: { type: Type.STRING, description: 'Araç plakası (örn: 06BS8016). Servis randevularında mutlaka müşteriden al.' },
         sorun_veya_talep: { type: Type.STRING, description: 'Müşterinin şikayeti veya talebi' },
         tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD)' },
         saat: { type: Type.STRING, description: 'Randevu saati (HH:MM)' },
@@ -180,8 +181,9 @@ export async function createLiveSession(
         date: dateStr,
         time: timeStr,
         sessionId: options.dbSessionId,
+        notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
       })
-      console.log('[Randevu]', appointment.id, appointment.customerName)
+      console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
 
       // Google Calendar + ATA Hsys side effects — fire-and-forget arka planda
       // çalışır. Burada `await` etmiyoruz çünkü her ikisi de 500-2000ms
@@ -225,6 +227,7 @@ export async function createLiveSession(
         time: appointment.time,
         telefon: appointment.phone,
         ad_soyad: appointment.customerName,
+        plaka: (args.plaka as string | undefined) || undefined,
         arac: appointment.vehicleInfo || 'Hyundai',
         musteriistegi:
           appointment.issueOrRequest ||
