@@ -187,9 +187,9 @@ const TABS: { id: Tab; label: string }[] = [
 
 // ── Gemini Live model meta ─────────────────────────────────────────────────
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
-  'gemini-2.5-pro-preview': {
-    label: 'Pro 2.5 (En Güçlü)',
-    tagline: 'En iyi talimat takibi, halüsinasyon düşük, akıllı tool calling. ~10x maliyet.',
+  'gemini-3.1-flash-live-preview': {
+    label: 'Flash 3.1 Live (En Yeni)',
+    tagline: 'Düşük gecikme, audio-to-audio, sayısal hassasiyet, multimodal farkındalık.',
     tier: 'Premium',
   },
   'gemini-2.5-flash-preview-native-audio': {
