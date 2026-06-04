@@ -384,16 +384,21 @@ export async function getCustomerInfo(params: {
     const data: any = await res.json().catch(() => null)
     if (!data) return { success: false, reason: 'Boş yanıt' }
 
-    console.log(`[ATA] GET /musteri?${qs.toString()} → ${data.ad_soyad || 'anonim'}`)
+    // Detaylı log: API'nin döndüğü gerçek yapıyı görelim
+    console.log(`[ATA] GET /musteri RAW response:`, JSON.stringify(data).slice(0, 500))
+
+    // API nested olabilir: data.data, data.musteri, data.customer vb.
+    const record = data.data ?? data.musteri ?? data.customer ?? data
 
     const customer: AtaCustomerInfo = {
-      id: data.id ?? data.musteri_id,
-      ad_soyad: data.ad_soyad ?? data.name ?? data.musteri_adi,
-      telefon: data.telefon,
-      plaka: data.plaka ?? data.son_plaka,
-      arac: data.arac ?? data.son_arac,
-      son_randevu: data.son_randevu ?? data.last_appointment ?? undefined,
+      id: record.id ?? record.musteri_id,
+      ad_soyad: record.ad_soyad ?? record.adi_soyadi ?? record.name ?? record.musteri_adi ?? record.ad ?? record.isim,
+      telefon: record.telefon ?? record.phone ?? record.gsm,
+      plaka: record.plaka ?? record.son_plaka ?? record.plate,
+      arac: record.arac ?? record.son_arac ?? record.vehicle ?? record.model,
+      son_randevu: record.son_randevu ?? record.last_appointment ?? record.sonrandevu ?? undefined,
     }
+    console.log(`[ATA] GET /musteri parsed: ad=${customer.ad_soyad || '?'} plaka=${customer.plaka || '?'} arac=${customer.arac || '?'}`)
     return { success: true, customer }
   } catch (err) {
     console.error('[ATA] GET /musteri hatası:', err)
