@@ -151,6 +151,12 @@ KURALLAR:
 - Ad soyad ve telefon almadan KESİNLİKLE randevu oluşturma
 - Fiyat bilgisi asla verme
 
+HAFIZA VE TEKRAR (ÇOK ÖNEMLİ):
+- Müşterinin daha önce verdiği bilgileri (ad soyad, telefon, araç, tarih, saat, talep) HATIRLA ve ASLA yeniden sorma.
+- Bir bilgiyi zaten aldıysan tekrar sorma; gerekiyorsa sadece kısaca teyit et: "Adınız Ahmet Bey, doğru mu?" gibi.
+- Görüşmenin başına dönüp baştan karşılama yapma veya aynı soruları tekrar etme. Kaldığın yerden, elindeki bilgilerle devam et.
+- Eksik olan SADECE bir bilgi varsa yalnızca onu iste; tüm bilgileri baştan toplama.
+
 ${RAG_BASE_TEMPLATE}`
 
 // ── Session tracking ──────────────────────────────────────────────────────────

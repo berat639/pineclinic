@@ -1,4 +1,16 @@
-import { GoogleGenAI, Modality, Type, StartSensitivity, EndSensitivity, type FunctionDeclaration, type RealtimeInputConfig } from '@google/genai'
+import {
+  GoogleGenAI,
+  Modality,
+  Type,
+  StartSensitivity,
+  EndSensitivity,
+  type FunctionDeclaration,
+  type RealtimeInputConfig,
+  type LiveServerMessage,
+  type LiveSendRealtimeInputParameters,
+  type LiveSendClientContentParameters,
+  type LiveSendToolResponseParameters,
+} from '@google/genai'
 import { createAppointment, updateAppointment } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import {
@@ -343,33 +355,66 @@ export async function createLiveSession(
     return { error: 'Unknown function' }
   }
 
-  const session = await ai.live.connect({
-    model: options.model,
-    config: {
-      responseModalities: [Modality.AUDIO],
-      systemInstruction: options.systemPrompt,
-      tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: VOICE },
-        },
+  // ── Bağlantı yönetimi: session resumption + otomatik reconnect ──────────────
+  // Gemini Live WS bağlantısının süre limiti var (~10 dk) ve limite yaklaşınca
+  // `goAway` gönderip kapatır. `sessionResumption` ile, kopuş anında elimizdeki
+  // handle üzerinden YENİDEN bağlanıp konuşma geçmişini (context) koruyarak
+  // devam ederiz. Böylece görüşme yarıda kalmaz ve model baştan sormaz.
+  let activeSession: Awaited<ReturnType<typeof ai.live.connect>> | null = null
+  let resumptionHandle: string | undefined
+  let closedByUser = false
+  let reconnecting = false
+  let readyFired = false
+
+  const liveConfig = {
+    responseModalities: [Modality.AUDIO],
+    systemInstruction: options.systemPrompt,
+    tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    speechConfig: {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName: VOICE },
       },
-      // Context birikimini sınırla: 1500 token eşiğinde sıkıştır, 600 token tut
-      // Her turn önceki tüm context'i yeniden faturalar — bu %50-60 tasarruf sağlar
-      contextWindowCompression: {
-        triggerTokens: 5000 as unknown as string,
-        slidingWindow: { targetTokens: 2000 as unknown as string },
-      },
-      // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
-      // VAD ne algılıyor, AI ne anladı, ne cevap üretti net görebilmek için
-      // server log'a düşürüyoruz (telephony/web onTranscript callback'inde).
-      inputAudioTranscription: {},
-      outputAudioTranscription: {},
-      ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
     },
-    callbacks: {
-      onopen: () => callbacks.onReady(),
-      onmessage: async (msg) => {
+    // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
+    // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
+    // gibi bilgiler erkenden kırpılıp model baştan sormasın.
+    contextWindowCompression: {
+      triggerTokens: 25600 as unknown as string,
+      slidingWindow: { targetTokens: 16000 as unknown as string },
+    },
+    // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
+    // Kopuşta resume edebilmek için sunucudan handle iste.
+    sessionResumption: {},
+    ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
+  }
+
+  function buildCallbacks() {
+    return {
+      // onReady yalnızca İLK bağlantıda tetiklenir; reconnect'te tekrar
+      // karşılama/greeting tetiklenmesin diye guard'lı.
+      onopen: () => {
+        if (!readyFired) {
+          readyFired = true
+          callbacks.onReady()
+        }
+      },
+      onmessage: async (msg: LiveServerMessage) => {
+        // Session resumption handle güncellemesi — kopuşta bununla resume ederiz.
+        if (msg.sessionResumptionUpdate) {
+          if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.newHandle) {
+            resumptionHandle = msg.sessionResumptionUpdate.newHandle
+          }
+          return
+        }
+        // Sunucu yakında bağlantıyı kapatacak — proaktif resume.
+        if (msg.goAway) {
+          console.warn(`[Gemini] goAway (timeLeft=${msg.goAway.timeLeft ?? '?'}) — resume ile yeniden bağlanılıyor`)
+          void reconnect()
+          return
+        }
+
         // Tool calls — paralel/non-blocking dispatch.
         //
         // Önemli: `await handleTool(...)` ile sırayla çalıştırırsak Gemini WS
@@ -387,7 +432,7 @@ export async function createLiveSession(
                 const ms = Date.now() - start
                 if (ms > 200) console.log(`[Tool ${fcName}] ${ms}ms`)
                 try {
-                  session.sendToolResponse({
+                  activeSession?.sendToolResponse({
                     functionResponses: [{ id: fc.id, name: fcName, response: result }],
                   })
                 } catch (err) {
@@ -397,7 +442,7 @@ export async function createLiveSession(
               .catch((err) => {
                 console.error(`[Tool ${fcName}] handler hatası:`, err)
                 try {
-                  session.sendToolResponse({
+                  activeSession?.sendToolResponse({
                     functionResponses: [
                       { id: fc.id, name: fcName, response: { error: 'tool failed' } },
                     ],
@@ -409,7 +454,17 @@ export async function createLiveSession(
         }
 
         const content = msg.serverContent
-        if (!content) return
+        if (!content) {
+          // Usage metadata serverContent olmadan da gelebilir
+          if (msg.usageMetadata) {
+            callbacks.onUsage?.(msg.usageMetadata as {
+              promptTokenCount?: number
+              candidatesTokenCount?: number
+              totalTokenCount?: number
+            })
+          }
+          return
+        }
 
         // Barge-in: user interrupted model
         if (content.interrupted) {
@@ -452,13 +507,66 @@ export async function createLiveSession(
           })
         }
       },
-      onerror: (e) => callbacks.onError(e),
+      onerror: (e: unknown) => callbacks.onError(e),
       onclose: (e: unknown) => {
-        if (e) console.error('[Gemini] Close event:', e)
-        callbacks.onClose()
+        // Kullanıcı/araç bilerek kapattıysa: normal kapanış.
+        if (closedByUser) {
+          callbacks.onClose()
+          return
+        }
+        const code = (e as { code?: number } | undefined)?.code
+        // Beklenmedik kapanış + elimizde resume handle var → sessizce yeniden
+        // bağlan. Aksi halde görüşmeyi gerçekten sonlandır.
+        if (resumptionHandle && !reconnecting) {
+          console.warn(`[Gemini] Beklenmedik kapanış (code=${code ?? '?'}) — resume deneniyor`)
+          void reconnect()
+        } else {
+          if (code && code !== 1000) console.error(`[Gemini] Kapanış code=${code}`)
+          callbacks.onClose()
+        }
       },
-    },
-  })
+    }
+  }
 
-  return session
+  async function connect(handle?: string) {
+    activeSession = await ai.live.connect({
+      model: options.model,
+      config: handle ? { ...liveConfig, sessionResumption: { handle } } : liveConfig,
+      callbacks: buildCallbacks(),
+    })
+  }
+
+  async function reconnect() {
+    if (reconnecting || closedByUser) return
+    reconnecting = true
+    const prev = activeSession
+    try {
+      await connect(resumptionHandle)
+      console.log('[Gemini] Resume ile yeniden bağlanıldı')
+      try { prev?.close() } catch {}
+    } catch (err) {
+      console.error('[Gemini] Reconnect başarısız:', err)
+      callbacks.onClose()
+    } finally {
+      reconnecting = false
+    }
+  }
+
+  await connect()
+
+  return {
+    sendRealtimeInput: (input: LiveSendRealtimeInputParameters) => {
+      try { activeSession?.sendRealtimeInput(input) } catch {}
+    },
+    sendClientContent: (input: LiveSendClientContentParameters) => {
+      try { activeSession?.sendClientContent(input) } catch {}
+    },
+    sendToolResponse: (input: LiveSendToolResponseParameters) => {
+      try { activeSession?.sendToolResponse(input) } catch {}
+    },
+    close: () => {
+      closedByUser = true
+      try { activeSession?.close() } catch {}
+    },
+  }
 }
