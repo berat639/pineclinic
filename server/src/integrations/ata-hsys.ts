@@ -387,6 +387,12 @@ export async function getCustomerInfo(params: {
     // Detaylı log: API'nin döndüğü gerçek yapıyı görelim
     console.log(`[ATA] GET /musteri RAW response:`, JSON.stringify(data).slice(0, 500))
 
+    // API "found: false" dönerse müşteri bulunamadı demektir
+    if (data.found === false || (data.success === true && data.message && !data.data && !data.musteri && !data.customer && !data.id && !data.ad_soyad)) {
+      console.log(`[ATA] GET /musteri: müşteri bulunamadı (API found=false)`)  
+      return { success: false, reason: data.message || 'Müşteri bulunamadı' }
+    }
+
     // API nested olabilir: data.data, data.musteri, data.customer vb.
     const record = data.data ?? data.musteri ?? data.customer ?? data
 

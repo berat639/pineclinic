@@ -60,7 +60,7 @@ class NoiseGate {
   private lastLogAtFrame = 0
 
   constructor(
-    private readonly threshold: number,
+    readonly threshold: number,
     private readonly trailingFramesMax: number,
     private readonly preRollMax: number,
     private readonly shortId: string,
@@ -184,6 +184,8 @@ export interface TelephonyDeps {
 // bu kadar süre ses vermezse AI uyarır, sonra kapatır.
 const SILENCE_WARN_MS  = 30_000   // 30s: "Ses almıyorum..." uyarısı
 const SILENCE_CLOSE_MS = 20_000   // +20s daha bekler, yoksa kapar
+/** Gate devre dışıyken (threshold=0) sessizlik timer'ını sıfırlamak için min. RMS eşiği */
+const SPEECH_RMS_THRESHOLD = 150
 // Çağrı max süresi — uzayan/takılı kalan aramaları kapat.
 const MAX_CALL_MS      = 20 * 60_000   // 20 dakika
 
@@ -528,8 +530,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const { info } = state
             if (!info.session) continue
             const gatedFrames = state.noiseGate.process(ev.pcm)
-            if (state.noiseGate.isOpen) {
-              // Gerçek konuşma algılandı — sessizlik timer'ını sıfırla.
+            // Sessizlik timer'ını sıfırla: gate aktifse isOpen kullan,
+            // gate devre dışıysa (threshold=0) frame RMS eşiğine bak.
+            const rmsForSilence = computeRmsInt16(ev.pcm)
+            const isSpeech = state.noiseGate.threshold > 0
+              ? state.noiseGate.isOpen
+              : rmsForSilence >= SPEECH_RMS_THRESHOLD
+            if (isSpeech) {
               clearSilenceTimers(state)
             }
             for (const f8k of gatedFrames) {
