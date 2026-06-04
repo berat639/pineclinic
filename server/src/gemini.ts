@@ -17,6 +17,7 @@ import {
   createAtaHsysAppointment,
   getCustomerHistory as getAtaCustomerHistory,
   updateAtaHsysAppointment,
+  getAppointmentsByDate,
 } from './integrations/ata-hsys'
 import { searchKnowledge } from './services/knowledge'
 
@@ -109,6 +110,19 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         limit: { type: Type.INTEGER, description: 'En fazla kaç kayıt (default 5, max 20)' },
       },
       required: ['telefon'],
+    },
+  },
+  {
+    name: 'randevuMusaitlikKontrol',
+    description: 'Belirli bir tarih veya tarih aralığındaki mevcut randevuları ATA Hsys sisteminden getirir. Test sürüşü, galeri ziyareti veya servis randevusu öncesi müsaitlik kontrolü için kullan. Bilgi tabanında tarih kısıtı varsa bu aracı kullanarak o tarihlerdeki doluluk durumunu kontrol et.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD). Tek gün için.' },
+        baslangic_tarih: { type: Type.STRING, description: 'Tarih aralığı başlangıcı (YYYY-MM-DD). tarih yerine from/to kullanılabilir.' },
+        bitis_tarih: { type: Type.STRING, description: 'Tarih aralığı bitişi (YYYY-MM-DD).' },
+      },
+      required: [],
     },
   },
   {
@@ -349,6 +363,36 @@ export async function createLiveSession(
       } catch (err) {
         console.error('[ATA] gecmisRandevular exception:', err)
         return { sonuc: 'Geçmiş randevu servisi şu an kullanılamıyor.' }
+      }
+    }
+    if (name === 'randevuMusaitlikKontrol') {
+      const tarih = args.tarih as string | undefined
+      const from = args.baslangic_tarih as string | undefined
+      const to = args.bitis_tarih as string | undefined
+      console.log(`[ATA] randevuMusaitlikKontrol: tarih=${tarih} from=${from} to=${to}`)
+      try {
+        const result = await getAppointmentsByDate({
+          date: tarih,
+          from: from,
+          to: to || from,
+        })
+        if (!result.success) {
+          console.error(`[ATA] müsaitlik kontrol hatası: ${result.reason}`)
+          return { sonuc: `Müsaitlik kontrolü yapılamadı: ${result.reason}` }
+        }
+        const count = result.appointments.length
+        if (count === 0) {
+          return { sonuc: `${tarih || `${from} - ${to}`} tarihinde henüz randevu yok — müsait.` }
+        }
+        const summary = result.appointments
+          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.musteriistegi || 'Randevu'}${a.randevu_durumu ? ` [${a.randevu_durumu}]` : ''}`)
+          .join('\n')
+        return {
+          sonuc: `${tarih || `${from} - ${to}`} tarihinde ${count} randevu mevcut:\n${summary}\n\nNot: Mevcut randevu sayısına göre müsaitlik değerlendir.`,
+        }
+      } catch (err) {
+        console.error('[ATA] randevuMusaitlikKontrol exception:', err)
+        return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
       }
     }
     if (name === 'cagriySonlandir') {

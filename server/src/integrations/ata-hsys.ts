@@ -262,3 +262,74 @@ export async function getCustomerHistory(params: {
     return { success: false, reason: 'network error' }
   }
 }
+
+// ── Randevu müsaitlik kontrolü ───────────────────────────────────────────────
+
+export type AtaRandevuListItem = {
+  id: number
+  date?: string
+  time?: string
+  ad_soyad?: string
+  telefon?: string
+  arac?: string
+  musteriistegi?: string
+  randevu_durumu?: string
+}
+
+export type AtaRandevuListResult =
+  | { success: true; appointments: AtaRandevuListItem[] }
+  | { success: false; reason: string }
+
+/**
+ * GET /randevu — Belirli tarih veya tarih aralığındaki randevuları getirir.
+ * Müsaitlik kontrolü için kullanılır.
+ */
+export async function getAppointmentsByDate(params: {
+  date?: string       // YYYY-MM-DD (tek gün)
+  from?: string       // YYYY-MM-DD (aralık başı)
+  to?: string         // YYYY-MM-DD (aralık sonu)
+  limit?: number
+}): Promise<AtaRandevuListResult> {
+  if (!isAtaConfigured()) return { success: false, reason: 'ATA Hsys env yok' }
+  if (!params.date && !params.from) {
+    return { success: false, reason: 'date veya from/to gerekli' }
+  }
+
+  const qs = new URLSearchParams()
+  if (params.date) qs.set('date', params.date)
+  if (params.from) qs.set('from', params.from)
+  if (params.to) qs.set('to', params.to)
+  qs.set('limit', String(Math.min(params.limit ?? 50, 100)))
+
+  try {
+    const res = await authFetch(`/randevu?${qs.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+    if (!res) return { success: false, reason: 'auth fetch null' }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      console.error(`[ATA] GET /randevu HTTP ${res.status}: ${text.slice(0, 300)}`)
+      return { success: false, reason: `HTTP ${res.status}` }
+    }
+    const data: any = await res.json().catch(() => null)
+    const list: any[] = Array.isArray(data) ? data : data?.data ?? data?.items ?? []
+    console.log(`[ATA] GET /randevu?${qs.toString()} → ${list.length} randevu`)
+    const appointments: AtaRandevuListItem[] = list
+      .map((r: any) => ({
+        id: Number(r.id ?? r.randevu_id),
+        date: r.date,
+        time: r.time,
+        ad_soyad: r.ad_soyad,
+        telefon: r.telefon,
+        arac: r.arac,
+        musteriistegi: r.musteriistegi,
+        randevu_durumu: r.randevu_durumu,
+      }))
+      .filter((r) => Number.isFinite(r.id))
+    return { success: true, appointments }
+  } catch (err) {
+    console.error('[ATA] GET /randevu hatası:', err)
+    return { success: false, reason: 'network error' }
+  }
+}
