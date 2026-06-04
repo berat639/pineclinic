@@ -294,8 +294,11 @@ export async function createLiveSession(
       }
     }
     if (name === 'searchKnowledgeBase') {
+      const sorgu = (args.sorgu as string) ?? ''
+      console.log(`[Knowledge] searchKnowledgeBase sorgu: "${sorgu}"`)
       try {
-        const results = await searchKnowledge(args.sorgu as string, 3)
+        const results = await searchKnowledge(sorgu, 5)
+        console.log(`[Knowledge] Sonuç sayısı: ${results.length}${results.length > 0 ? ` → ${results.map(r => r.documentName).join(', ')}` : ''}`)
         if (results.length === 0) {
           return { sonuc: 'Bilgi tabanında ilgili bilgi bulunamadı.' }
         }

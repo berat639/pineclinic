@@ -234,8 +234,8 @@ export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
   const words = query
     .toLowerCase()
     .split(/\s+/)
-    .filter(w => w.length >= 3)
-    .slice(0, 5)
+    .filter(w => w.length >= 2)
+    .slice(0, 8)
   if (words.length === 0) return []
 
   // Her kelime için ILIKE koşulu oluştur (OR mantığı — herhangi biri eşleşirse)
