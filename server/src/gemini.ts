@@ -18,6 +18,7 @@ import {
   getCustomerHistory as getAtaCustomerHistory,
   updateAtaHsysAppointment,
   getAppointmentsByDate,
+  getCustomerInfo,
 } from './integrations/ata-hsys'
 import { searchKnowledge } from './services/knowledge'
 
@@ -99,6 +100,17 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         },
       },
       required: ['sorgu'],
+    },
+  },
+  {
+    name: 'musteriSorgula',
+    description: 'Müşterinin telefon numarasıyla ATA Hsys sisteminden müşteri bilgisini (ad soyad, plaka, araç, son randevu) getirir. Görüşme başında müşteri telefon numarasını söyledikten HEMEN SONRA çağır — böylece müşteriyi ismiyle selamlayabilir ve mevcut bilgileri kullanabilirsin.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası (herhangi formatta — normalize edilir)' },
+      },
+      required: ['telefon'],
     },
   },
   {
@@ -326,6 +338,41 @@ export async function createLiveSession(
       } catch (err) {
         console.error('[Knowledge] Arama hatası:', err)
         return { sonuc: 'Bilgi tabanı şu an kullanılamıyor.' }
+      }
+    }
+    if (name === 'musteriSorgula') {
+      const rawPhone = (args.telefon as string | undefined) ?? ''
+      if (!rawPhone.trim()) {
+        return { sonuc: 'Telefon numarası gerekli.' }
+      }
+      console.log(`[ATA] musteriSorgula: telefon=${rawPhone}`)
+      try {
+        const result = await getCustomerInfo({ telefon: rawPhone })
+        if (!result.success) {
+          console.log(`[ATA] musteriSorgula: bulunamadı (${result.reason})`)
+          return { kayitli: false, sonuc: 'Bu numara ile kayıtlı müşteri bulunamadı. Müşteriden ad soyadını sor.' }
+        }
+        const c = result.customer
+        console.log(`[ATA] musteriSorgula: bulundu → ${c.ad_soyad}`)
+        const info: string[] = []
+        if (c.ad_soyad) info.push(`Ad Soyad: ${c.ad_soyad}`)
+        if (c.telefon) info.push(`Telefon: ${c.telefon}`)
+        if (c.plaka) info.push(`Plaka: ${c.plaka}`)
+        if (c.arac) info.push(`Araç: ${c.arac}`)
+        if (c.son_randevu) {
+          const sr = c.son_randevu
+          info.push(`Son Randevu: ${sr.date || '?'} ${sr.time || ''} — ${sr.musteriistegi || 'Randevu'}${sr.randevu_durumu ? ` [${sr.randevu_durumu}]` : ''}`)
+        }
+        return {
+          kayitli: true,
+          musteri_adi: c.ad_soyad || null,
+          plaka: c.plaka || null,
+          arac: c.arac || null,
+          sonuc: info.join('\n'),
+        }
+      } catch (err) {
+        console.error('[ATA] musteriSorgula exception:', err)
+        return { kayitli: false, sonuc: 'Müşteri sorgu servisi şu an kullanılamıyor.' }
       }
     }
     if (name === 'gecmisRandevular') {

@@ -333,3 +333,70 @@ export async function getAppointmentsByDate(params: {
     return { success: false, reason: 'network error' }
   }
 }
+
+// ── Müşteri bilgisi sorgulama ────────────────────────────────────────────────
+
+export type AtaCustomerInfo = {
+  id?: number
+  ad_soyad?: string
+  telefon?: string
+  plaka?: string
+  arac?: string
+  son_randevu?: {
+    date?: string
+    time?: string
+    musteriistegi?: string
+    randevu_durumu?: string
+  }
+}
+
+export type AtaCustomerResult =
+  | { success: true; customer: AtaCustomerInfo }
+  | { success: false; reason: string }
+
+/**
+ * GET /musteri — Telefon numarasına göre müşteri bilgisi ve son randevu özeti.
+ */
+export async function getCustomerInfo(params: {
+  telefon?: string
+  id?: number
+}): Promise<AtaCustomerResult> {
+  if (!isAtaConfigured()) return { success: false, reason: 'ATA Hsys env yok' }
+  if (!params.telefon && !params.id) {
+    return { success: false, reason: 'telefon veya id gerekli' }
+  }
+
+  const qs = new URLSearchParams()
+  if (params.telefon) qs.set('telefon', normalizeTelefon(params.telefon))
+  if (params.id) qs.set('id', String(params.id))
+
+  try {
+    const res = await authFetch(`/musteri?${qs.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+    if (!res) return { success: false, reason: 'auth fetch null' }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      console.error(`[ATA] GET /musteri HTTP ${res.status}: ${text.slice(0, 300)}`)
+      return { success: false, reason: `HTTP ${res.status}` }
+    }
+    const data: any = await res.json().catch(() => null)
+    if (!data) return { success: false, reason: 'Boş yanıt' }
+
+    console.log(`[ATA] GET /musteri?${qs.toString()} → ${data.ad_soyad || 'anonim'}`)
+
+    const customer: AtaCustomerInfo = {
+      id: data.id ?? data.musteri_id,
+      ad_soyad: data.ad_soyad ?? data.name ?? data.musteri_adi,
+      telefon: data.telefon,
+      plaka: data.plaka ?? data.son_plaka,
+      arac: data.arac ?? data.son_arac,
+      son_randevu: data.son_randevu ?? data.last_appointment ?? undefined,
+    }
+    return { success: true, customer }
+  } catch (err) {
+    console.error('[ATA] GET /musteri hatası:', err)
+    return { success: false, reason: 'network error' }
+  }
+}
