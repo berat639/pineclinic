@@ -187,19 +187,29 @@ const TABS: { id: Tab; label: string }[] = [
 
 // ── Gemini Live model meta ─────────────────────────────────────────────────
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
-  'gemini-live-2.5-flash-native-audio': {
-    label: 'Flash (Native Audio)',
-    tagline: 'En doğal ses, düşük gecikme; en yüksek kalite ve birim maliyet.',
+  'gemini-2.5-pro-preview': {
+    label: 'Pro 2.5 (En Güçlü)',
+    tagline: 'En iyi talimat takibi, halüsinasyon düşük, akıllı tool calling. ~10x maliyet.',
     tier: 'Premium',
+  },
+  'gemini-2.5-flash-preview-native-audio': {
+    label: 'Flash 2.5 (Native Audio)',
+    tagline: 'Güncel native audio modeli; doğal ses, düşük gecikme, iyi denge.',
+    tier: 'Dengeli',
+  },
+  'gemini-live-2.5-flash-native-audio': {
+    label: 'Flash (Native Audio - Eski)',
+    tagline: 'Önceki native audio modeli; stabil ama dil tanıma zayıf.',
+    tier: 'Dengeli',
   },
   'gemini-live-2.5-flash-preview': {
     label: 'Live (Cascaded)',
     tagline: 'Cascaded ses katmanı; kalite/maliyet dengeli seçenek.',
-    tier: 'Dengeli',
+    tier: 'Ekonomik',
   },
   'gemini-2.0-flash-live-001': {
-    label: 'Live Eco',
-    tagline: 'Live en düşük birim maliyet, daha eski model.',
+    label: 'Live Eco (2.0)',
+    tagline: 'En düşük birim maliyet, eski model. Kalite düşük.',
     tier: 'Ekonomik',
   },
 }
