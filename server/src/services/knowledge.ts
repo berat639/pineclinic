@@ -3,6 +3,7 @@
  * PostgreSQL/pgvector yerine knowledge.json + cosine similarity kullanır
  */
 import { embedText as ragEmbedText, retrieveTopK } from '../rag'
+import { searchByText } from '../db/repositories/knowledge'
 
 export type KnowledgeSearchResult = {
   chunkText: string
@@ -15,15 +16,30 @@ export async function searchKnowledge(
   query: string,
   limit = 3,
 ): Promise<KnowledgeSearchResult[]> {
+  // Önce embedding-based arama dene
   try {
     const results = await retrieveTopK(query, limit)
-    return results.map(r => ({
+    if (results.length > 0) {
+      return results.map(r => ({
+        chunkText: r.content,
+        score: r.score,
+        documentName: r.title,
+      }))
+    }
+  } catch (err) {
+    console.error('[Knowledge] Embedding arama hatası, text fallback deneniyor:', err)
+  }
+
+  // Embedding başarısız veya sonuç 0 — text-based fallback
+  try {
+    const textResults = await searchByText(query, limit)
+    return textResults.map(r => ({
       chunkText: r.content,
       score: r.score,
       documentName: r.title,
     }))
   } catch (err) {
-    console.error('[Knowledge] Arama hatası:', err)
+    console.error('[Knowledge] Text fallback hatası:', err)
     return []
   }
 }

@@ -224,3 +224,39 @@ export async function retrieveTopK(queryEmbedding: number[], k = 5): Promise<Ran
     score: Number(r.score),
   }))
 }
+
+/**
+ * Fallback text-based search — embedding başarısız olduğunda veya sonuç
+ * bulunamadığında kullanılır. Sorguyu kelimelere böler ve title/content
+ * üzerinde ILIKE arar.
+ */
+export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(w => w.length >= 3)
+    .slice(0, 5)
+  if (words.length === 0) return []
+
+  // Her kelime için ILIKE koşulu oluştur (OR mantığı — herhangi biri eşleşirse)
+  const conditions = words.map(
+    w => drizzleSql`(LOWER(title) LIKE ${'%' + w + '%'} OR LOWER(content) LIKE ${'%' + w + '%'})`
+  )
+  const whereClause = drizzleSql.join(conditions, drizzleSql` OR `)
+
+  const result = await db.execute(drizzleSql`
+    SELECT id, category, title, content, 0.5 AS score
+    FROM knowledge_documents
+    WHERE active = true AND (${whereClause})
+    LIMIT ${k}
+  `)
+  const rows = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
+    ?? (result as unknown as Array<Record<string, unknown>>))
+  return rows.map(r => ({
+    id: r.id as string,
+    category: r.category as string,
+    title: r.title as string,
+    content: r.content as string,
+    score: Number(r.score),
+  }))
+}
