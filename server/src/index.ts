@@ -171,6 +171,8 @@ KURALLAR:
 - Randevu onaylarken tarih ve saati net söyle
 - Ad soyad ve telefon almadan KESİNLİKLE randevu oluşturma
 - Fiyat bilgisi asla verme
+- Aynı bilgiyi TEKRARLAMA. Bir soru sorduysan cevabını bekle; aynı şeyi tekrar tekrar söyleme.
+- Müşteri Türkçe konuşuyor; gelen ses Hindi, İngilizce veya başka dilde transkrip edildiyse bu bir TANIMA HATASIDIR — içeriği dikkate alma, müşteriden tekrar etmesini iste.
 
 ${RAG_BASE_TEMPLATE}`
 

@@ -425,6 +425,13 @@ export async function createLiveSession(
       const tarih = args.tarih as string | undefined
       const from = args.baslangic_tarih as string | undefined
       const to = args.bitis_tarih as string | undefined
+      // En az bir geçerli tarih parametresi zorunlu
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+      const hasValidDate = (tarih && dateRegex.test(tarih)) || (from && dateRegex.test(from))
+      if (!hasValidDate) {
+        console.log(`[ATA] randevuMusaitlikKontrol: geçersiz/eksik tarih (tarih=${tarih} from=${from} to=${to})`)
+        return { sonuc: 'Geçerli bir tarih belirtilmedi. Müşteriye hangi tarihte müsait olduğunu sor ve YYYY-MM-DD formatında tarih ile tekrar çağır.' }
+      }
       console.log(`[ATA] randevuMusaitlikKontrol: tarih=${tarih} from=${from} to=${to}`)
       try {
         const result = await getAppointmentsByDate({
@@ -502,6 +509,7 @@ export async function createLiveSession(
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: VOICE },
       },
+      languageCode: 'tr-TR',
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
     // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
@@ -511,8 +519,8 @@ export async function createLiveSession(
       slidingWindow: { targetTokens: 16000 as unknown as string },
     },
     // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
-    inputAudioTranscription: {},
-    outputAudioTranscription: {},
+    inputAudioTranscription: { languageCodes: ['tr-TR'] },
+    outputAudioTranscription: { languageCodes: ['tr-TR'] },
     // Kopuşta resume edebilmek için sunucudan handle iste.
     sessionResumption: {},
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
