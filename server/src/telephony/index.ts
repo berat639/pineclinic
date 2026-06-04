@@ -175,6 +175,13 @@ export interface TelephonyDeps {
   callerRegistry: Map<string, string>
 }
 
+// Müşteri sessizlik timeout'u — AI soru sorup cevap beklerken müşteri
+// bu kadar süre ses vermezse AI uyarır, sonra kapatır.
+const SILENCE_WARN_MS  = 30_000   // 30s: "Ses almıyorum..." uyarısı
+const SILENCE_CLOSE_MS = 20_000   // +20s daha bekler, yoksa kapar
+// Çağrı max süresi — uzayan/takılı kalan aramaları kapat.
+const MAX_CALL_MS      = 20 * 60_000   // 20 dakika
+
 /** Tek bir AudioSocket bağlantısı için durum. */
 interface CallState {
   shortId: string
@@ -188,6 +195,60 @@ interface CallState {
   callerPhone?: string
   audioQueue: Buffer[]
   noiseGate: NoiseGate
+  // Zaman aşımı timer'ları
+  silenceTimer?: ReturnType<typeof setTimeout>
+  closeTimer?: ReturnType<typeof setTimeout>
+  maxCallTimer?: ReturnType<typeof setTimeout>
+}
+
+/** Timer'ları temizle. */
+function clearSilenceTimers(state: CallState) {
+  if (state.silenceTimer) { clearTimeout(state.silenceTimer); state.silenceTimer = undefined }
+  if (state.closeTimer)   { clearTimeout(state.closeTimer);   state.closeTimer   = undefined }
+}
+
+/**
+ * AI konuşmasını bitirip cevap beklemeye başladığında çağrılır.
+ * SILENCE_WARN_MS sonra sesli uyarı verir; SILENCE_CLOSE_MS daha geçerse
+ * görüşmeyi kapatır. Müşteri konuşursa timer sıfırlanır.
+ */
+function startSilenceWatch(state: CallState, socket: { end: () => void }) {
+  clearSilenceTimers(state)
+  if (state.closed || state.hangupPending) return
+
+  state.silenceTimer = setTimeout(() => {
+    if (state.closed || state.hangupPending || !state.info.session) return
+    console.log(`[${state.shortId}] Sessizlik uyarısı — müşteriden ses yok`)
+    // AI üzerinden sesli uyarı gönder.
+    try {
+      state.info.session.sendClientContent({
+        turns: [{
+          role: 'user',
+          parts: [{ text: 'Sistem: Müşteriden 30 saniyedir ses alınamıyor. Kısa ve nazikçe "Sizi duyamıyorum, hattınızda bir sorun mu var?" diye sor.' }],
+        }],
+        turnComplete: true,
+      })
+    } catch {}
+
+    // Uyarıdan sonra SILENCE_CLOSE_MS daha bekle, hâlâ sessizse kapat.
+    state.closeTimer = setTimeout(() => {
+      if (state.closed || state.hangupPending || !state.info.session) return
+      console.log(`[${state.shortId}] Sessizlik timeout — görüşme sonlandırılıyor`)
+      try {
+        state.info.session.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{ text: 'Sistem: Hattan ses alınamıyor. Kısa bir veda söyle ve cagriySonlandir aracını çağır.' }],
+          }],
+          turnComplete: true,
+        })
+      } catch {}
+      // Fallback: 3s sonra gene kapalı değilse direkt kapat.
+      setTimeout(() => {
+        if (!state.closed) { state.closed = true; try { socket.end() } catch {} }
+      }, 3_000)
+    }, SILENCE_CLOSE_MS)
+  }, SILENCE_WARN_MS)
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
@@ -235,6 +296,22 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           ),
         }
         socket.data = state
+
+        // Maksimum çağrı süresi — takılı kalan aramaları zorla kapat.
+        state.maxCallTimer = setTimeout(() => {
+          if (state.closed || state.hangupPending || !state.info.session) return
+          console.log(`[${shortId}] Maksimum çağrı süresi (${MAX_CALL_MS / 60000}dk) — görüşme sonlandırılıyor`)
+          try {
+            state.info.session.sendClientContent({
+              turns: [{
+                role: 'user',
+                parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Kısa bir veda söyle ve cagriySonlandir aracını çağır.' }],
+              }],
+              turnComplete: true,
+            })
+          } catch {}
+          setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch {} } }, 4_000)
+        }, MAX_CALL_MS)
 
         // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
         const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
@@ -317,7 +394,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 state.hangupPending = true
               },
               onTurnComplete: () => {
-                // no-op (Asterisk RTP kendisi pacing yapıyor)
+                // AI konuşmasını bitirdi, müşteri cevabını bekliyor.
+                // Sessizlik timer'ını başlat; müşteri konuşursa data() sıfırlar.
+                startSilenceWatch(state, socket)
               },
               onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
               onClose: () => {
@@ -445,6 +524,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const { info } = state
             if (!info.session) continue
             const gatedFrames = state.noiseGate.process(ev.pcm)
+            if (gatedFrames.length > 0) {
+              // Müşteriden ses geldi — sessizlik timer'ını sıfırla.
+              clearSilenceTimers(state)
+            }
             for (const f8k of gatedFrames) {
               const pcm16 = upsample8to16(f8k)
               info.session.sendRealtimeInput({
@@ -488,6 +571,10 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
   state.closed = true
   const { info, shortId } = state
   const { sessions } = deps
+
+  // Tüm timeout timer'larını temizle — bellek sızıntısı / geç tetiklenme olmasın.
+  clearSilenceTimers(state)
+  if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
 
   try { info.session?.close() } catch {}
   sessions.delete(shortId)
