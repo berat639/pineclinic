@@ -50,9 +50,11 @@ function getTodayTurkish(): string {
 const ALLOWED_LIVE_MODELS = [
   'gemini-live-2.5-flash-native-audio',
   'gemini-live-2.5-flash-preview',
+  'gemini-2.5-pro-preview',
+  'gemini-2.5-flash-preview-native-audio',
   'gemini-2.0-flash-live-001',
 ] as const
-const DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio'
+const DEFAULT_LIVE_MODEL = 'gemini-2.5-flash-preview-native-audio'
 
 async function resolveLiveModel(): Promise<string> {
   const saved = await getAiModel()
