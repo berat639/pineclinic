@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface KnowledgeDoc {
   id: string
-  category: 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac'
+  category: 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac' | 'musteri'
   title: string
   content: string
   active: boolean
@@ -14,7 +14,7 @@ export interface KnowledgeDoc {
   updatedAt: string
 }
 
-const CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac'] as const
+const CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac', 'musteri'] as const
 type Category = typeof CATEGORIES[number]
 
 const CAT_LABEL: Record<Category, string> = {
@@ -24,6 +24,7 @@ const CAT_LABEL: Record<Category, string> = {
   kampanya: 'Kampanya',
   sss: 'SSS',
   arac: 'Araç',
+  musteri: 'Müşteri',
 }
 
 const CAT_ICON: Record<Category, string> = {
@@ -33,6 +34,7 @@ const CAT_ICON: Record<Category, string> = {
   kampanya: '🎯',
   sss: '❓',
   arac: '🚗',
+  musteri: '👤',
 }
 
 const CAT_COLOR: Record<Category, string> = {
@@ -42,6 +44,7 @@ const CAT_COLOR: Record<Category, string> = {
   kampanya: '#fb923c',
   sss:      '#f59e0b',
   arac:     '#38bdf8',
+  musteri:  '#f472b6',
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────

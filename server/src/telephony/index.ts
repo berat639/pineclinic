@@ -15,7 +15,7 @@ import type { GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
 import { buildRagPrompt, embedText, PRE_WARM_QUERY } from '../rag'
-import { retrieveTopK as retrieveDocsByEmbedding } from '../db/repositories/knowledge'
+import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
@@ -490,6 +490,17 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
                 initParts.push(ctxMsg)
                 console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
+              } else {
+                // Bilgi tabanında müşteri kaydı ara (admin panelden eklenen)
+                const knowledgeCustomer = await findCustomerDocByPhone(state.callerPhone)
+                if (knowledgeCustomer) {
+                  let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
+                  ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
+                  ctxMsg += `${knowledgeCustomer.content}\n`
+                  ctxMsg += `\nMüşteriyi ismiyle selamla. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+                  initParts.push(ctxMsg)
+                  console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
+                }
               }
             } catch (e) {
               console.error(`[${shortId}] Müşteri context hatası:`, e)

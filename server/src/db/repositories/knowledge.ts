@@ -2,7 +2,7 @@ import { sql as drizzleSql, eq } from 'drizzle-orm'
 import { db } from '../client'
 import { knowledgeDocuments } from '../schema'
 
-export type KnowledgeCategory = 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac'
+export type KnowledgeCategory = 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac' | 'musteri'
 
 export interface KnowledgeDoc {
   id: string
@@ -259,4 +259,32 @@ export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
     content: r.content as string,
     score: Number(r.score),
   }))
+}
+
+/**
+ * Bilgi tabanında telefon numarası geçen "musteri" kategorisindeki dokümanları arar.
+ * Admin panelden eklenen müşteri tanıma kayıtları için kullanılır.
+ */
+export async function findCustomerDocByPhone(phone: string): Promise<{ name: string; content: string } | null> {
+  const normalized = phone.replace(/\D/g, '')
+  if (normalized.length < 10) return null
+  const last10 = normalized.slice(-10)
+
+  const result = await db.execute(drizzleSql`
+    SELECT title, content
+    FROM knowledge_documents
+    WHERE active = true
+      AND category = 'musteri'
+      AND content LIKE ${'%' + last10 + '%'}
+    LIMIT 1
+  `)
+  const rows = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
+    ?? (result as unknown as Array<Record<string, unknown>>))
+  if (rows.length === 0) return null
+
+  const row = rows[0]
+  // Title formatı: "Ad Soyad" veya "Müşteri - Ad Soyad"
+  const title = row.title as string
+  const name = title.replace(/^müşteri\s*[-–—:]\s*/i, '').trim()
+  return { name, content: row.content as string }
 }

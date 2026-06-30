@@ -151,11 +151,11 @@ function Spinner() {
 
 // ── Tab definitions ────────────────────────────────────────────────────────
 
-const KB_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac'] as const
+const KB_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac', 'musteri'] as const
 type KbCategory = typeof KB_CATEGORIES[number]
 
 const KB_CATEGORY_LABEL: Record<KbCategory, string> = {
-  genel: 'Genel', servis: 'Servis', galeri: 'Galeri', kampanya: 'Kampanya', sss: 'SSS', arac: 'Araç',
+  genel: 'Genel', servis: 'Servis', galeri: 'Galeri', kampanya: 'Kampanya', sss: 'SSS', arac: 'Araç', musteri: 'Müşteri',
 }
 
 const KB_CATEGORY_COLOR: Record<KbCategory, string> = {
@@ -165,6 +165,7 @@ const KB_CATEGORY_COLOR: Record<KbCategory, string> = {
   kampanya: '#fb923c',
   sss:      '#f59e0b',
   arac:     '#38bdf8',
+  musteri:  '#f472b6',
 }
 
 function kbCategoryLabel(cat: string) {

@@ -14,6 +14,7 @@ import {
 import { createAppointment, updateAppointment, getCustomerByPhone, getAppointmentsByDateRange } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import { searchKnowledge } from './services/knowledge'
+import { findCustomerDocByPhone } from './db/repositories/knowledge'
 
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
@@ -301,6 +302,16 @@ export async function createLiveSession(
       try {
         const customer = await getCustomerByPhone(rawPhone)
         if (!customer) {
+          // Bilgi tabanında müşteri kaydı ara
+          const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
+          if (knowledgeCustomer) {
+            console.log(`[DB] musteriSorgula: bilgi tabanından bulundu → ${knowledgeCustomer.name}`)
+            return {
+              kayitli: true,
+              musteri_adi: knowledgeCustomer.name,
+              sonuc: `Ad Soyad: ${knowledgeCustomer.name}\n${knowledgeCustomer.content}`,
+            }
+          }
           console.log(`[DB] musteriSorgula: bulunamadı`)
           return { kayitli: false, sonuc: 'Bu numara ile kayıtlı müşteri bulunamadı. Müşteriden ad soyadını sor.' }
         }
