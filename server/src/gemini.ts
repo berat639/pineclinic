@@ -484,8 +484,8 @@ export async function createLiveSession(
       slidingWindow: { targetTokens: 16000 as unknown as string },
     },
     // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
-    inputAudioTranscription: { languageCodes: ['tr-TR'] },
-    outputAudioTranscription: { languageCodes: ['tr-TR'] },
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
     // Kopuşta resume edebilmek için sunucudan handle iste.
     sessionResumption: {},
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
