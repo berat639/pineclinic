@@ -4,7 +4,7 @@
       "id": "seed-001",
       "category": "genel",
       "title": "Çalışma Saatleri",
-      "content": "Ata Hyundai çalışma saatleri: Pazartesi ile Cuma arasında saat 08:00-18:00, Cumartesi günleri 09:00-14:00 saatleri arasında hizmet vermektedir. Pazar günleri kapalıdır.",
+      "content": "Skoda çalışma saatleri: Pazartesi ile Cuma arasında saat 08:00-18:00, Cumartesi günleri 09:00-14:00 saatleri arasında hizmet vermektedir. Pazar günleri kapalıdır.",
       "active": true,
       "embedding": [
         -0.011042063124477863,
@@ -784,7 +784,7 @@
       "id": "seed-002",
       "category": "servis",
       "title": "Periyodik Bakım Bilgisi",
-      "content": "Hyundai araçlarda periyodik bakım her 15.000 km'de bir yapılmalıdır. Bakım kapsamında motor yağı ve yağ filtresi değişimi, hava filtresi kontrolü, fren kontrolü, ateşleme sistemi kontrolü gerçekleştirilir. Bakım fiyatları araç modeline göre değiştiğinden, kesin fiyat için servis randevusu oluşturulması önerilir.",
+      "content": "Skoda araçlarda periyodik bakım 15.000 km'de veya 1 yılda bir yapılmalıdır (model ve kullanım koşullarına göre değişir). Bakım kapsamında motor yağı ve yağ filtresi değişimi, hava filtresi kontrolü, fren kontrolü, ateşleme sistemi kontrolü gerçekleştirilir. Bakım fiyatları araç modeline göre değiştiğinden, kesin fiyat için servis randevusu oluşturulması önerilir.",
       "active": true,
       "embedding": [
         -0.009970816783607006,
@@ -3123,8 +3123,8 @@
     {
       "id": "seed-005",
       "category": "arac",
-      "title": "Hyundai i20 2024",
-      "content": "Hyundai i20 2024 modeli iki motor seçeneğiyle sunulmaktadır: 1.2 MPI 84 HP ve 1.0 T-GDI 100 HP. Donanım paketleri: Style, Elite ve N Line. 5 yıl veya 150.000 km fabrika garantisi mevcuttur. Test sürüşü için randevu alabilirsiniz.",
+      "title": "Skoda Fabia 2024",
+      "content": "Skoda Fabia 2024 modeli iki motor seçeneğiyle sunulmaktadır: 1.0 MPI 80 HP ve 1.0 TSI 95 HP. Donanım paketleri: Ambition, Style ve Monte Carlo. 2 yıl sınırsız km fabrika garantisi mevcuttur. Test sürüşü için randevu alabilirsiniz.",
       "active": true,
       "embedding": [
         -0.018661711364984512,
@@ -3903,8 +3903,8 @@
     {
       "id": "seed-006",
       "category": "arac",
-      "title": "Hyundai Tucson 2024",
-      "content": "Hyundai Tucson 2024, 1.6 T-GDI 150 HP ve 1.6 T-GDI 230 HP Hybrid motor seçenekleriyle sunulmaktadır. Akıllı HTRAC 4WD sistemi opsiyonel olarak mevcuttur. Ön çarpışma uyarısı, şerit takip ve otomatik acil frenleme standart donanım olarak gelmektedir. Test sürüşü için randevu alabilirsiniz.",
+      "title": "Skoda Kodiaq 2024",
+      "content": "Skoda Kodiaq 2024, 1.5 TSI 150 HP ve 2.0 TSI 204 HP 4x4 motor seçenekleriyle sunulmaktadır. 7 kişilik oturma düzeni opsiyonel olarak mevcuttur. Ön çarpışma uyarısı, şerit takip ve otomatik acil frenleme standart donanım olarak gelmektedir. Test sürüşü için randevu alabilirsiniz.",
       "active": true,
       "embedding": [
         0.023414118215441704,
@@ -4683,8 +4683,8 @@
     {
       "id": "seed-007",
       "category": "arac",
-      "title": "Hyundai Bayon 2024",
-      "content": "Hyundai Bayon 2024, B-segment SUV kategorisinde yer almaktadır. 1.0 T-GDI 100 HP motor ile sunulmakta, Comfort, Style ve Elite donanım seçenekleri mevcuttur. BlueLink bağlantı teknolojisi tüm versiyonlarda standart olarak gelmektedir.",
+      "title": "Skoda Karoq 2024",
+      "content": "Skoda Karoq 2024, kompakt SUV kategorisinde yer almaktadır. 1.0 TSI 110 HP ve 1.5 TSI 150 HP motor seçenekleriyle sunulmakta, Ambition, Style ve Sportline donanım seçenekleri mevcuttur. Skoda Connect bağlantı teknolojisi tüm versiyonlarda standart olarak gelmektedir.",
       "active": true,
       "embedding": [
         0.007913293316960335,
@@ -5464,7 +5464,7 @@
       "id": "seed-008",
       "category": "servis",
       "title": "Garanti ve Sigorta Servisi",
-      "content": "Tüm yeni Hyundai araçlarda 5 yıl veya 150.000 km fabrika garantisi uygulanmaktadır. Garanti kapsamı: motor ve şanzıman arızaları, elektronik sistem arızaları ve fabrika kaynaklı üretim hataları. Garanti işlemleri yalnızca yetkili Hyundai servislerinde gerçekleştirilmelidir.",
+      "content": "Tüm yeni Skoda araçlarda 2 yıl sınırsız km fabrika garantisi uygulanmaktadır. Uzatılmış garanti seçenekleri mevcuttur. Garanti kapsamı: motor ve şanzıman arızaları, elektronik sistem arızaları ve fabrika kaynaklı üretim hataları. Garanti işlemleri yalnızca yetkili Skoda servislerinde gerçekleştirilmelidir.",
       "active": true,
       "embedding": [
         -0.015002545900642872,

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
-import './globals.css'
 import { ThemeProvider } from './theme-provider'
+import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Voice AI — Otomotiv Danışmanı',

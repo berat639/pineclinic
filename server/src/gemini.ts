@@ -11,24 +11,9 @@ import {
   type LiveSendClientContentParameters,
   type LiveSendToolResponseParameters,
 } from '@google/genai'
-import { createAppointment, updateAppointment } from './db/repositories/appointments'
+import { createAppointment, updateAppointment, getCustomerByPhone, getAppointmentsByDateRange } from './db/repositories/appointments'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
-import {
-  createAtaHsysAppointment,
-  getCustomerHistory as getAtaCustomerHistory,
-  updateAtaHsysAppointment,
-  getAppointmentsByDate,
-  getCustomerInfo,
-} from './integrations/ata-hsys'
 import { searchKnowledge } from './services/knowledge'
-
-/** randevu_turu → ATA Hsys "musteriistegi" fallback değeri */
-const RANDEVU_TURU_TO_TALEP: Record<string, string> = {
-  service: 'Periyodik Bakım',
-  test_drive: 'Test Sürüşü',
-  gallery_visit: 'Galeri Ziyareti',
-  other: 'Genel Randevu',
-}
 
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
@@ -104,7 +89,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'musteriSorgula',
-    description: 'Müşterinin telefon numarasıyla ATA Hsys sisteminden müşteri bilgisini (ad soyad, plaka, araç, son randevu) getirir. Görüşme başında müşteri telefon numarasını söyledikten HEMEN SONRA çağır — böylece müşteriyi ismiyle selamlayabilir ve mevcut bilgileri kullanabilirsin.',
+    description: 'Müşterinin telefon numerasıyla sistemden müşteri bilgisini (ad soyad, araç, geçmiş randevular) getirir. Görüşme başında müşteri telefon numerasını söyledikten HEMEN SONRA çağır — böylece müşteriyi ismiyle selamlayabilir ve mevcut bilgileri kullanabilirsin.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -115,7 +100,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'gecmisRandevular',
-    description: 'Müşterinin telefonuna göre önceki servis/randevu kayıtlarını ATA Hsys sisteminden getirir. Müşteri "geçen sefer", "garantim", "önceki randevum", "ne zaman bakım yaptırmıştım" gibi konulara atıfta bulunduğunda kullan. Müşteri telefon numarasını AÇIKÇA söylemiş olmalı.',
+    description: 'Müşterinin telefonuna göre önceki servis/randevu kayıtlarını sistemden getirir. Müşteri "geçen sefer", "garantim", "önceki randevum", "ne zaman bakım yaptırmıştım" gibi konulara atıfta bulunduğunda kullan. Müşteri telefon numerasını AÇIKÇA söylemiş olmalı.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -127,7 +112,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'randevuMusaitlikKontrol',
-    description: 'Belirli bir tarih veya tarih aralığındaki mevcut randevuları ATA Hsys sisteminden getirir. Test sürüşü, galeri ziyareti veya servis randevusu öncesi müsaitlik kontrolü için kullan. Bilgi tabanında tarih kısıtı varsa bu aracı kullanarak o tarihlerdeki doluluk durumunu kontrol et.',
+    description: 'Belirli bir tarih veya tarih aralığındaki mevcut randevuları sistemden getirir. Test sürüşü, galeri ziyareti veya servis randevusu öncesi müsaitlik kontrolü için kullan. Bilgi tabanında tarih kısıtı varsa bu aracı kullanarak o tarihlerdeki doluluk durumunu kontrol et.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -197,13 +182,10 @@ export async function createLiveSession(
       })
       console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
 
-      // Google Calendar + ATA Hsys side effects — fire-and-forget arka planda
-      // çalışır. Burada `await` etmiyoruz çünkü her ikisi de 500-2000ms
-      // sürebilen dış API çağrılarıdır; tool response'unu bloklamak Gemini
+      // Google Calendar side effect — fire-and-forget arka planda
+      // çalışır. Burada `await` etmiyoruz çünkü 500-2000ms
+      // sürebilen dış API çağrısıdır; tool response'unu bloklamak Gemini
       // event loop'unu kilitler → müşteri AI'yı duymaz.
-      //
-      // Side effect ID'leri DB'ye background'da yazılır; randevu zaten
-      // ana DB'de mevcut, eksiklik telafi edilebilir.
       const TYPE_LABELS: Record<string, string> = {
         service: 'Servis',
         test_drive: 'Test Sürüşü',
@@ -234,36 +216,11 @@ export async function createLiveSession(
         })
         .catch((err) => console.error('[Calendar] hata:', err))
 
-      void createAtaHsysAppointment({
-        date: appointment.date,
-        time: appointment.time,
-        telefon: appointment.phone,
-        ad_soyad: appointment.customerName,
-        plaka: (args.plaka as string | undefined) || undefined,
-        arac: appointment.vehicleInfo || 'Hyundai',
-        musteriistegi:
-          appointment.issueOrRequest ||
-          RANDEVU_TURU_TO_TALEP[appointment.type] ||
-          'Genel Randevu',
-        irtibat: 'Voice AI',
-        gorusme_notu: `Sesli AI üzerinden oluşturuldu (session: ${options.dbSessionId})`,
-      })
-        .then(async (r) => {
-          if (r.success) {
-            console.log(`[ATA] Randevu ${r.duplicate ? 'mevcut' : 'oluşturuldu'}:`, r.id)
-            await updateAppointment(appointment.id, { ataHsysId: String(r.id) }).catch(() => {})
-          }
-        })
-        .catch((err) => console.error('[ATA] hata:', err))
-
-      // Anında tool response — AI cevabı bekletilmez. Calendar/ATA ID'leri
-      // null döner; gerekirse client tarafı sonradan DB'den okur.
       return {
         success: true,
         message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`,
         id: appointment.id,
         calendar_event_id: null,
-        ata_hsys_id: null,
       }
     }
 
@@ -305,17 +262,6 @@ export async function createLiveSession(
         }).then(r => { if (r.success) console.log('[Calendar] Etkinlik güncellendi:', r.eventId) }).catch(() => {})
       }
 
-      // ATA Hsys patch (yalnız tarih/saat değişimi veya görüşme notu için)
-      if (updated.ataHsysId && (args.tarih || args.saat)) {
-        const patch: { date?: string; time?: string; gorusme_notu?: string } = {}
-        if (args.tarih) patch.date = args.tarih as string
-        if (args.saat) patch.time = args.saat as string
-        patch.gorusme_notu = `Voice AI ile güncellendi (session: ${options.dbSessionId})`
-        void updateAtaHsysAppointment(updated.ataHsysId, patch)
-          .then((r) => { if (r.success) console.log('[ATA] Randevu güncellendi:', r.id) })
-          .catch(() => {})
-      }
-
       return {
         success: true,
         message: `Randevu güncellendi: ${updated.date} ${updated.time}.`,
@@ -348,36 +294,47 @@ export async function createLiveSession(
       // Türk telefon numarası formatı kontrolü: en az 10 rakam olmalı
       const digits = rawPhone.replace(/\D/g, '')
       if (digits.length < 10) {
-        console.log(`[ATA] musteriSorgula: geçersiz numara format (${rawPhone} → ${digits.length} hane)`)
+        console.log(`[DB] musteriSorgula: geçersiz numara format (${rawPhone} → ${digits.length} hane)`)
         return { sonuc: 'Geçerli bir telefon numarası değil. Müşteriden 10 haneli telefon numarasını tekrar iste.' }
       }
-      console.log(`[ATA] musteriSorgula: telefon=${rawPhone}`)
+      console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
-        const result = await getCustomerInfo({ telefon: rawPhone })
-        if (!result.success) {
-          console.log(`[ATA] musteriSorgula: bulunamadı (${result.reason})`)
+        const customer = await getCustomerByPhone(rawPhone)
+        if (!customer) {
+          console.log(`[DB] musteriSorgula: bulunamadı`)
           return { kayitli: false, sonuc: 'Bu numara ile kayıtlı müşteri bulunamadı. Müşteriden ad soyadını sor.' }
         }
-        const c = result.customer
-        console.log(`[ATA] musteriSorgula: bulundu → ${c.ad_soyad}`)
+        console.log(`[DB] musteriSorgula: bulundu → ${customer.name}`)
         const info: string[] = []
-        if (c.ad_soyad) info.push(`Ad Soyad: ${c.ad_soyad}`)
-        if (c.telefon) info.push(`Telefon: ${c.telefon}`)
-        if (c.plaka) info.push(`Plaka: ${c.plaka}`)
-        if (c.arac) info.push(`Araç: ${c.arac}`)
-        if (c.son_randevu) {
-          const sr = c.son_randevu
-          info.push(`Son Randevu: ${sr.date || '?'} ${sr.time || ''} — ${sr.musteriistegi || 'Randevu'}${sr.randevu_durumu ? ` [${sr.randevu_durumu}]` : ''}`)
+        info.push(`Ad Soyad: ${customer.name}`)
+        info.push(`Telefon: ${customer.phone}`)
+        const pastAppointments = customer.appointmentHistory.filter(a => a.isPast)
+        const upcomingAppointments = customer.appointmentHistory.filter(a => !a.isPast)
+        if (pastAppointments.length > 0) {
+          const last = pastAppointments[0]
+          info.push(`Son Randevu: ${last.date} ${last.time} — ${last.issueOrRequest || last.type}${last.vehicleInfo ? ` (${last.vehicleInfo})` : ''}`)
         }
+        if (upcomingAppointments.length > 0) {
+          const next = upcomingAppointments[0]
+          info.push(`Yaklaşan Randevu: ${next.date} ${next.time} — ${next.issueOrRequest || next.type}`)
+        }
+        // Extract plate from notes if available
+        const notesWithPlate = customer.appointmentHistory
+          .map(a => a as unknown as { notes?: string })
+          .find(a => a.notes?.startsWith('Plaka:'))
+        const plaka = notesWithPlate ? (notesWithPlate.notes as string).replace('Plaka: ', '') : null
+        if (plaka) info.push(`Plaka: ${plaka}`)
+        const vehicleInfo = customer.appointmentHistory.find(a => a.vehicleInfo)?.vehicleInfo
+        if (vehicleInfo) info.push(`Araç: ${vehicleInfo}`)
         return {
           kayitli: true,
-          musteri_adi: c.ad_soyad || null,
-          plaka: c.plaka || null,
-          arac: c.arac || null,
+          musteri_adi: customer.name,
+          plaka: plaka || null,
+          arac: vehicleInfo || null,
           sonuc: info.join('\n'),
         }
       } catch (err) {
-        console.error('[ATA] musteriSorgula exception:', err)
+        console.error('[DB] musteriSorgula exception:', err)
         return { kayitli: false, sonuc: 'Müşteri sorgu servisi şu an kullanılamıyor.' }
       }
     }
@@ -390,34 +347,32 @@ export async function createLiveSession(
         return { sonuc: 'Geçmiş sorgu için telefon numarası gerekli.' }
       }
       try {
-        const history = await getAtaCustomerHistory({
-          telefon: rawPhone,
-          mode: 'customer',
-          limit,
-        })
-        if (!history.success) {
-          console.error('[ATA] gecmisRandevular hatası:', history.reason)
-          return { sonuc: 'Geçmiş randevu sorgulanamadı.' }
-        }
-        if (history.appointments.length === 0) {
+        const customer = await getCustomerByPhone(rawPhone)
+        if (!customer || customer.appointmentHistory.length === 0) {
           return { sonuc: 'Bu numara için kayıtlı önceki randevu bulunamadı.' }
         }
-        const formatted = history.appointments
+        const pastAppointments = customer.appointmentHistory.filter(a => a.isPast).slice(0, limit)
+        if (pastAppointments.length === 0) {
+          return { sonuc: 'Bu numara için geçmiş randevu bulunamadı.' }
+        }
+        const TYPE_LABELS: Record<string, string> = {
+          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+        }
+        const formatted = pastAppointments
           .map((r, i) => {
             const parts = [
               `[${i + 1}]`,
               r.date,
               r.time,
-              r.musteriistegi ? `— ${r.musteriistegi}` : '',
-              r.arac ? `(${r.arac}${r.plaka ? ` ${r.plaka}` : ''})` : '',
-              r.randevu_durumu ? `[durum: ${r.randevu_durumu}]` : '',
+              r.issueOrRequest ? `— ${r.issueOrRequest}` : `— ${TYPE_LABELS[r.type] || r.type}`,
+              r.vehicleInfo ? `(${r.vehicleInfo})` : '',
             ]
             return parts.filter(Boolean).join(' ')
           })
           .join('\n')
         return { sonuc: formatted }
       } catch (err) {
-        console.error('[ATA] gecmisRandevular exception:', err)
+        console.error('[DB] gecmisRandevular exception:', err)
         return { sonuc: 'Geçmiş randevu servisi şu an kullanılamıyor.' }
       }
     }
@@ -429,32 +384,31 @@ export async function createLiveSession(
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/
       const hasValidDate = (tarih && dateRegex.test(tarih)) || (from && dateRegex.test(from))
       if (!hasValidDate) {
-        console.log(`[ATA] randevuMusaitlikKontrol: geçersiz/eksik tarih (tarih=${tarih} from=${from} to=${to})`)
+        console.log(`[DB] randevuMusaitlikKontrol: geçersiz/eksik tarih (tarih=${tarih} from=${from} to=${to})`)
         return { sonuc: 'Geçerli bir tarih belirtilmedi. Müşteriye hangi tarihte müsait olduğunu sor ve YYYY-MM-DD formatında tarih ile tekrar çağır.' }
       }
-      console.log(`[ATA] randevuMusaitlikKontrol: tarih=${tarih} from=${from} to=${to}`)
+      console.log(`[DB] randevuMusaitlikKontrol: tarih=${tarih} from=${from} to=${to}`)
       try {
-        const result = await getAppointmentsByDate({
+        const result = await getAppointmentsByDateRange({
           date: tarih,
           from: from,
           to: to || from,
         })
-        if (!result.success) {
-          console.error(`[ATA] müsaitlik kontrol hatası: ${result.reason}`)
-          return { sonuc: `Müsaitlik kontrolü yapılamadı: ${result.reason}` }
-        }
-        const count = result.appointments.length
+        const count = result.length
         if (count === 0) {
           return { sonuc: `${tarih || `${from} - ${to}`} tarihinde henüz randevu yok — müsait.` }
         }
-        const summary = result.appointments
-          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.musteriistegi || 'Randevu'}${a.randevu_durumu ? ` [${a.randevu_durumu}]` : ''}`)
+        const TYPE_LABELS: Record<string, string> = {
+          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+        }
+        const summary = result
+          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.issueOrRequest || TYPE_LABELS[a.type] || 'Randevu'}`)
           .join('\n')
         return {
           sonuc: `${tarih || `${from} - ${to}`} tarihinde ${count} randevu mevcut:\n${summary}\n\nNot: Mevcut randevu sayısına göre müsaitlik değerlendir.`,
         }
       } catch (err) {
-        console.error('[ATA] randevuMusaitlikKontrol exception:', err)
+        console.error('[DB] randevuMusaitlikKontrol exception:', err)
         return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
       }
     }
@@ -481,7 +435,7 @@ export async function createLiveSession(
    * olabilir — bu durumda kısa aralıklarla retry yap (max 3s). Böylece tool
    * response kaybolup model susmaz.
    */
-  function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: unknown, attempt = 0): void {
+  function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: Record<string, unknown>, attempt = 0): void {
     if (closedByUser) return
     if (activeSession && !reconnecting) {
       try {

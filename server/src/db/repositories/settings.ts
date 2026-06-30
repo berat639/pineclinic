@@ -99,3 +99,15 @@ export async function setAiModel(model: string): Promise<{ model: string; update
   await setSetting(AI_MODEL, model)
   return { model, updatedAt: new Date().toISOString() }
 }
+
+// ── Greeting settings ───────────────────────────────────────────────────────
+const AI_GREETING = 'ai.greeting'
+
+export async function getGreeting(): Promise<string | null> {
+  return getSetting(AI_GREETING)
+}
+
+export async function setGreeting(text: string): Promise<{ greeting: string; updatedAt: string }> {
+  await setSetting(AI_GREETING, text)
+  return { greeting: text, updatedAt: new Date().toISOString() }
+}

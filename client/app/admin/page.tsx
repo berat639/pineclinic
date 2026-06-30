@@ -563,6 +563,43 @@ export default function AdminPage() {
     finally { setAiSaving(false) }
   }
 
+  // ── Greeting (Karşılama Mesajı) ──────────────────────────────────────────
+  const [greetingText, setGreetingText] = useState('')
+  const [greetingLoading, setGreetingLoading] = useState(true)
+  const [greetingSaving, setGreetingSaving] = useState(false)
+
+  const fetchGreeting = useCallback(async () => {
+    setGreetingLoading(true)
+    try {
+      const res = await fetch('/api/admin/settings/greeting')
+      const data = await res.json() as { greeting?: string }
+      if (data.greeting) setGreetingText(data.greeting)
+    } catch { showToast('error', 'Karşılama mesajı alınamadı') }
+    finally { setGreetingLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchGreeting() }, [fetchGreeting])
+
+  const handleSaveGreeting = async () => {
+    if (!greetingText.trim() || greetingSaving) return
+    setGreetingSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/greeting', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ greeting: greetingText.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error || 'Kaydedilemedi')
+      }
+      showToast('success', 'Karşılama mesajı güncellendi (sonraki çağrılarda devreye girer)')
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : 'Mesaj kaydedilemedi')
+    }
+    finally { setGreetingSaving(false) }
+  }
+
   const handleCalConnect = async () => {
     const res = await fetch('/api/admin/settings/calendar/auth')
     const data = await res.json()
@@ -1310,6 +1347,76 @@ export default function AdminPage() {
                     <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
                       Değişiklik yalnızca <strong>sonraki çağrılar</strong> için geçerlidir; o anki aktif oturumlar etkilenmez.
                     </p>
+                  </>
+                )}
+              </div>
+
+              {/* Karşılama Mesajı card */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 0 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 18, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                    Karşılama Mesajı
+                  </span>
+                  {greetingLoading ? <Spinner /> : (
+                    <span style={{
+                      fontSize: 11, color: 'rgba(240,244,255,0.45)',
+                      padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                    }}>
+                      Sesli AI Açılış
+                    </span>
+                  )}
+                </div>
+
+                {!greetingLoading && (
+                  <>
+                    <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
+                    </p>
+
+                    <textarea
+                      value={greetingText}
+                      onChange={(e) => setGreetingText(e.target.value)}
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8,
+                        color: '#f0f4ff',
+                        resize: 'vertical',
+                        outline: 'none',
+                        fontFamily: 'inherit',
+                      }}
+                      placeholder="Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım..."
+                    />
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={handleSaveGreeting}
+                        disabled={greetingSaving || !greetingText.trim()}
+                        style={{
+                          padding: '8px 18px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
+                          border: '1px solid rgba(52,211,153,0.3)',
+                          borderRadius: 8,
+                          color: '#34d399',
+                          cursor: greetingSaving ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

@@ -62,7 +62,7 @@
           },
           "arac": {
             "type": "string",
-            "example": "Hyundai Tucson"
+            "example": "Skoda Kodiaq"
           },
           "danisman_id": {
             "type": "integer",
@@ -84,7 +84,7 @@
           },
           "kampanya": {
             "type": "string",
-            "example": "Hyundai Servis Kampanyası"
+            "example": "Skoda Servis Kampanyası"
           },
           "gorusme_notu": {
             "type": "string",

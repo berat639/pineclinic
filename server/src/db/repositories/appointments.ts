@@ -1,4 +1,4 @@
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, gte, lte } from 'drizzle-orm'
 import { db } from '../client'
 import { appointments } from '../schema'
 import { broadcastSSE } from '../../events'
@@ -191,4 +191,25 @@ export async function getCustomerByPhone(phone: string): Promise<CustomerContext
       isPast: a.date < today,
     })),
   }
+}
+
+export async function getAppointmentsByDateRange(params: {
+  date?: string
+  from?: string
+  to?: string
+}): Promise<Appointment[]> {
+  const conditions = []
+  if (params.date) {
+    conditions.push(eq(appointments.date, params.date))
+  } else {
+    if (params.from) conditions.push(gte(appointments.date, params.from))
+    if (params.to) conditions.push(lte(appointments.date, params.to))
+  }
+  if (conditions.length === 0) return []
+  const rows = await db
+    .select()
+    .from(appointments)
+    .where(and(...conditions))
+    .orderBy(appointments.date)
+  return rows.map(rowToAppointment)
 }

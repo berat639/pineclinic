@@ -173,7 +173,7 @@ interface SharedSessionInfo {
 export interface TelephonyDeps {
   ai: GoogleGenAI
   port: number
-  systemPromptBase: string
+  buildSystemPrompt: () => Promise<string>
   resolveLiveModel: () => Promise<string>
   sessions: Map<string, SharedSessionInfo>
   notifyAdmins: (event: string, payload: unknown) => void
@@ -259,7 +259,7 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
-  const { ai, port, systemPromptBase, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
+  const { ai, port, buildSystemPrompt, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
 
   const gateCfg = readGateConfig()
   console.log(
@@ -364,6 +364,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
           const todayStr = getTodayTurkish()
           const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
+          const systemPromptBase = await buildSystemPrompt()
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
           const model = await resolveLiveModel()
           console.log(`[${shortId}] Gemini Live model: ${model}`)

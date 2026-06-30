@@ -68,6 +68,9 @@ export function useVoiceAI(wsUrl: string) {
     micStartedRef.current = false
 
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Mikrofon erişimi yalnızca güvenli bağlantılarda (HTTPS veya localhost) kullanılabilir.')
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       streamRef.current = stream
 

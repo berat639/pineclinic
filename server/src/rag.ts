@@ -10,8 +10,12 @@ import { retrieveTopK as retrieveDocsByEmbedding, type RankedDoc } from './db/re
 // ── Embedding client ──────────────────────────────────────────────────────────
 
 function getEmbeddingClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (apiKey) {
+    return new GoogleGenAI({ apiKey })
+  }
   const encoded = process.env.GOOGLE_CREDENTIALS_JSON
-  if (!encoded) throw new Error('GOOGLE_CREDENTIALS_JSON tanımlı değil')
+  if (!encoded) throw new Error('GEMINI_API_KEY veya GOOGLE_CREDENTIALS_JSON tanımlı değil')
   const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'))
   return new GoogleGenAI({
     vertexai: true,
@@ -86,4 +90,4 @@ ${sections.join('\n\n')}
 // ── Pre-warm query ────────────────────────────────────────────────────────────
 
 export const PRE_WARM_QUERY =
-  'Hyundai otomotiv servis bakım araç satış test sürüşü randevu galeri kampanya'
+  'Skoda otomotiv servis bakım araç satış test sürüşü randevu galeri kampanya'
