@@ -1094,6 +1094,76 @@ export default function AdminPage() {
                 )}
               </div>
 
+              {/* Karşılama Mesajı card */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 12 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 18, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                    Karşılama Mesajı
+                  </span>
+                  {greetingLoading ? <Spinner /> : (
+                    <span style={{
+                      fontSize: 11, color: 'rgba(240,244,255,0.45)',
+                      padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                    }}>
+                      Sesli AI Açılış
+                    </span>
+                  )}
+                </div>
+
+                {!greetingLoading && (
+                  <>
+                    <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
+                    </p>
+
+                    <textarea
+                      value={greetingText}
+                      onChange={(e) => setGreetingText(e.target.value)}
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8,
+                        color: '#f0f4ff',
+                        resize: 'vertical',
+                        outline: 'none',
+                        fontFamily: 'inherit',
+                      }}
+                      placeholder="Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım..."
+                    />
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={handleSaveGreeting}
+                        disabled={greetingSaving || !greetingText.trim()}
+                        style={{
+                          padding: '8px 18px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
+                          border: '1px solid rgba(52,211,153,0.3)',
+                          borderRadius: 8,
+                          color: '#34d399',
+                          cursor: greetingSaving ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
             </div>
           )}
 
@@ -1347,76 +1417,6 @@ export default function AdminPage() {
                     <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
                       Değişiklik yalnızca <strong>sonraki çağrılar</strong> için geçerlidir; o anki aktif oturumlar etkilenmez.
                     </p>
-                  </>
-                )}
-              </div>
-
-              {/* Karşılama Mesajı card */}
-              <div className="glass-card" style={{ padding: 24, marginBottom: 0 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginBottom: 18, paddingBottom: 14,
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
-                    Karşılama Mesajı
-                  </span>
-                  {greetingLoading ? <Spinner /> : (
-                    <span style={{
-                      fontSize: 11, color: 'rgba(240,244,255,0.45)',
-                      padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
-                    }}>
-                      Sesli AI Açılış
-                    </span>
-                  )}
-                </div>
-
-                {!greetingLoading && (
-                  <>
-                    <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
-                      Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
-                    </p>
-
-                    <textarea
-                      value={greetingText}
-                      onChange={(e) => setGreetingText(e.target.value)}
-                      rows={3}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 8,
-                        color: '#f0f4ff',
-                        resize: 'vertical',
-                        outline: 'none',
-                        fontFamily: 'inherit',
-                      }}
-                      placeholder="Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım..."
-                    />
-
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                      <button
-                        type="button"
-                        onClick={handleSaveGreeting}
-                        disabled={greetingSaving || !greetingText.trim()}
-                        style={{
-                          padding: '8px 18px',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
-                          border: '1px solid rgba(52,211,153,0.3)',
-                          borderRadius: 8,
-                          color: '#34d399',
-                          cursor: greetingSaving ? 'wait' : 'pointer',
-                        }}
-                      >
-                        {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
-                      </button>
-                    </div>
                   </>
                 )}
               </div>
