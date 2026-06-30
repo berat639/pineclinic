@@ -741,7 +741,14 @@ const app = new Elysia()
             ws.send(pcm)
             info.audioChunks.push({ buffer: pcm, offsetMs: Date.now() - startedAtMs })
           },
-          onTranscript: (role, text) => ws.send(JSON.stringify({ type: 'transcript', role, text })),
+          onTranscript: (role, text) => {
+            const trimmed = text.trim()
+            if (trimmed) {
+              const label = role === 'user' ? 'USER' : 'AI'
+              console.log(`[${shortId}] ${label}: ${trimmed}`)
+            }
+            ws.send(JSON.stringify({ type: 'transcript', role, text }))
+          },
           onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
           onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
           onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
