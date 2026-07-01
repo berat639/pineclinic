@@ -40,6 +40,7 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [currentModel, setCurrentModel] = useState('')
+  const [greetingText, setGreetingText] = useState('')
 
   const sessionRef = useRef<GeminiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
@@ -47,7 +48,7 @@ export default function Home() {
   const textBufferRef = useRef('')
   const isActive = status !== 'idle' && status !== 'error'
 
-  // Fetch API key and current model on mount
+  // Fetch API key, current model, and greeting on mount
   useEffect(() => {
     // Get API key
     fetch('/api/direct-session')
@@ -59,6 +60,12 @@ export default function Home() {
     fetch('/api/admin/settings/ai')
       .then(r => r.json())
       .then((d: { current?: string }) => { if (d.current) setCurrentModel(d.current) })
+      .catch(() => {})
+
+    // Get greeting text from settings
+    fetch('/api/admin/settings/greeting')
+      .then(r => r.json())
+      .then((d: { greeting?: string }) => { if (d.greeting) setGreetingText(d.greeting) })
       .catch(() => {})
   }, [])
 
@@ -127,6 +134,11 @@ export default function Home() {
       await session.connect(apiKey, currentModel || undefined)
       setStatus('listening')
 
+      // Send greeting text to start the conversation automatically
+      if (greetingText) {
+        session.sendText(greetingText)
+      }
+
       const mic = new MicrophoneCapture()
       micRef.current = mic
       await mic.start((pcm) => {
@@ -136,7 +148,7 @@ export default function Home() {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
-  }, [apiKey, currentModel, addTranscript])
+  }, [apiKey, currentModel, greetingText, addTranscript])
 
   const stop = useCallback(() => {
     micRef.current?.stop()
