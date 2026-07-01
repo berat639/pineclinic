@@ -158,7 +158,16 @@ export class GeminiLiveSession {
             responseModalities: [Modality.AUDIO],
             mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
             systemInstruction: getSystemPrompt(),
-            tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+            tools: [
+              { functionDeclarations: TOOL_DECLARATIONS },
+              { googleSearch: {} } // Grounding with Google Search
+            ],
+            contextWindowCompression: {
+              triggerTokens: '104857',
+              slidingWindow: {
+                targetTokens: '52428',
+              },
+            },
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: {
