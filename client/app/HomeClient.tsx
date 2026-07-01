@@ -124,6 +124,10 @@ export default function Home() {
       },
       onInterrupted: () => {
         setStatus('listening')
+        if (playerRef.current) {
+          playerRef.current.stop()
+          playerRef.current = new AudioStreamPlayer(24000)
+        }
       },
     }
 

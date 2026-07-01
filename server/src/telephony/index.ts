@@ -425,7 +425,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 // NO_INTERRUPTION: müşteri konuşmaya başlasa bile AI kendi
                 // cümlesini/sorusunu sonuna kadar söyler, yarıda kesilmez.
                 // (Varsayılan START_OF_ACTIVITY_INTERRUPTS = barge-in açık.)
-                activityHandling: ActivityHandling.NO_INTERRUPTION,
+                activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
                 automaticActivityDetection: {
                   // Telefon hattı (8kHz µ-law/A-law) ses amplitüdünü düşürür.
                   // START_SENSITIVITY_HIGH ile kısa/kısık konuşmaları (rakamlar,
