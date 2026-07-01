@@ -1,10 +1,12 @@
 'use client'
 
-import { useVoiceAI, type VoiceStatus } from '@/hooks/useVoiceAI'
-import { useState, useEffect } from 'react'
-import Image from 'next/image'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { ThemeToggle } from './theme-provider'
+import { GeminiLiveSession, type LiveChatCallbacks } from '@/lib/gemini-live'
+import { AudioStreamPlayer, MicrophoneCapture } from '@/lib/audio'
+
+type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: 'Başlamak için tıklayın',
@@ -30,21 +32,120 @@ const STATUS_ICON: Record<VoiceStatus, string> = {
   error: '⚠️',
 }
 
+type TranscriptEntry = { id: string; role: 'user' | 'model'; text: string }
+
 export default function Home() {
-  const [wsUrl, setWsUrl] = useState('')
-  const { status, transcript, serverError, start, stop } = useVoiceAI(wsUrl)
+  const [status, setStatus] = useState<VoiceStatus>('idle')
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
+  const [errorMsg, setErrorMsg] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [currentModel, setCurrentModel] = useState('')
+
+  const sessionRef = useRef<GeminiLiveSession | null>(null)
+  const playerRef = useRef<AudioStreamPlayer | null>(null)
+  const micRef = useRef<MicrophoneCapture | null>(null)
+  const textBufferRef = useRef('')
   const isActive = status !== 'idle' && status !== 'error'
 
+  // Fetch API key and current model on mount
   useEffect(() => {
-    const envUrl = process.env.NEXT_PUBLIC_WS_URL
-    if (envUrl) {
-      setWsUrl(envUrl)
-    } else {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.hostname
-      const port = process.env.NEXT_PUBLIC_WS_PORT || '3005'
-      setWsUrl(`${proto}//${host}:${port}/ws`)
+    // Get API key
+    fetch('/api/direct-session')
+      .then(r => r.json())
+      .then((d: { apiKey?: string }) => { if (d.apiKey) setApiKey(d.apiKey) })
+      .catch(() => {})
+
+    // Get current model from admin settings
+    fetch('/api/admin/settings/ai')
+      .then(r => r.json())
+      .then((d: { current?: string }) => { if (d.current) setCurrentModel(d.current) })
+      .catch(() => {})
+  }, [])
+
+  const addTranscript = useCallback((role: 'user' | 'model', text: string) => {
+    setTranscript(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, role, text }])
+  }, [])
+
+  const start = useCallback(async () => {
+    if (!apiKey) {
+      setStatus('error')
+      setErrorMsg('API key bulunamadı. Server ayarlarını kontrol edin.')
+      return
     }
+
+    setStatus('connecting')
+    setErrorMsg('')
+    setTranscript([])
+
+    try {
+      // iOS AudioContext unlock
+      const unlockCtx = new AudioContext()
+      const buf = unlockCtx.createBuffer(1, 1, 22050)
+      const src = unlockCtx.createBufferSource()
+      src.buffer = buf
+      src.connect(unlockCtx.destination)
+      src.start(0)
+      setTimeout(() => unlockCtx.close(), 100)
+    } catch { /* ignore */ }
+
+    const player = new AudioStreamPlayer(24000)
+    playerRef.current = player
+
+    const callbacks: LiveChatCallbacks = {
+      onAudioChunk: (data) => {
+        player.addChunk(data)
+        setStatus('speaking')
+      },
+      onText: (text) => {
+        textBufferRef.current += text
+      },
+      onTurnComplete: () => {
+        if (textBufferRef.current.trim()) {
+          addTranscript('model', textBufferRef.current.trim())
+          textBufferRef.current = ''
+        }
+        setStatus('listening')
+      },
+      onConnectionChange: (connected) => {
+        if (!connected && sessionRef.current) {
+          setStatus('idle')
+        }
+      },
+      onError: (err) => {
+        setStatus('error')
+        setErrorMsg(err)
+      },
+      onInterrupted: () => {
+        setStatus('listening')
+      },
+    }
+
+    const session = new GeminiLiveSession(callbacks)
+    sessionRef.current = session
+
+    try {
+      await session.connect(apiKey, currentModel || undefined)
+      setStatus('listening')
+
+      const mic = new MicrophoneCapture()
+      micRef.current = mic
+      await mic.start((pcm) => {
+        session.sendAudio(pcm)
+      })
+    } catch (err) {
+      setStatus('error')
+      setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
+    }
+  }, [apiKey, currentModel, addTranscript])
+
+  const stop = useCallback(() => {
+    micRef.current?.stop()
+    micRef.current = null
+    sessionRef.current?.disconnect()
+    sessionRef.current = null
+    playerRef.current?.stop()
+    playerRef.current = null
+    setStatus('idle')
   }, [])
 
   return (
@@ -239,7 +340,7 @@ export default function Home() {
           )}
           {STATUS_LABEL[status]}
         </div>
-        {status === 'error' && serverError && (
+        {status === 'error' && errorMsg && (
           <div style={{
             fontSize: '0.8rem',
             color: '#f87171',
@@ -248,7 +349,7 @@ export default function Home() {
             lineHeight: 1.45,
             padding: '0 0.5rem',
           }}>
-            {serverError}
+            {errorMsg}
           </div>
         )}
 
@@ -316,49 +417,6 @@ export default function Home() {
             </div>
           ))}
         </div>
-
-        {/* Direct Chat link */}
-        <Link
-          href="/direct-chat"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            width: '100%',
-            padding: '0.85rem 1.1rem',
-            borderRadius: 14,
-            background: 'linear-gradient(135deg, rgba(139,92,246,0.08), rgba(59,130,246,0.08))',
-            border: '1px solid rgba(139,92,246,0.2)',
-            textDecoration: 'none',
-            transition: 'all 0.25s',
-            marginTop: '0.75rem',
-          }}
-        >
-          <div style={{
-            width: 36, height: 36,
-            borderRadius: 10,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)',
-            flexShrink: 0,
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a78bfa' }}>
-              Doğrudan Sesli Sohbet
-            </div>
-            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>
-              Yapay zeka ile birebir sesli konuşma
-            </div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </Link>
       </div>
     </main>
   )
