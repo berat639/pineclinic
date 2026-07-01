@@ -159,8 +159,7 @@ export class GeminiLiveSession {
             mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
             systemInstruction: getSystemPrompt(),
             tools: [
-              { functionDeclarations: TOOL_DECLARATIONS },
-              { googleSearch: {} } // Grounding with Google Search
+              { functionDeclarations: TOOL_DECLARATIONS }
             ],
             contextWindowCompression: {
               triggerTokens: '104857',
