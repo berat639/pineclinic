@@ -316,6 +316,49 @@ export default function Home() {
             </div>
           ))}
         </div>
+
+        {/* Direct Chat link */}
+        <Link
+          href="/direct-chat"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            width: '100%',
+            padding: '0.85rem 1.1rem',
+            borderRadius: 14,
+            background: 'linear-gradient(135deg, rgba(139,92,246,0.08), rgba(59,130,246,0.08))',
+            border: '1px solid rgba(139,92,246,0.2)',
+            textDecoration: 'none',
+            transition: 'all 0.25s',
+            marginTop: '0.75rem',
+          }}
+        >
+          <div style={{
+            width: 36, height: 36,
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)',
+            flexShrink: 0,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a78bfa' }}>
+              Doğrudan Sesli Sohbet
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>
+              Yapay zeka ile birebir sesli konuşma
+            </div>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </Link>
       </div>
     </main>
   )

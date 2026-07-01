@@ -19,7 +19,7 @@ import { findCustomerDocByPhone } from './db/repositories/knowledge'
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
-function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
+export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
   if (!customerName || !phone) return 'Müşteri adı ve telefon zorunludur; lütfen müşteriden tekrar alın.'
   const name = customerName.trim()
   const tel = phone.trim()

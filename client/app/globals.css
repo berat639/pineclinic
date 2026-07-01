@@ -389,3 +389,742 @@ body {
   background: var(--glass-bg-hover);
   color: var(--foreground);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Direct Chat — /direct-chat page styles
+   Mobile-first, responsive, safe-area aware
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Container ──────────────────────────────────────────────────────────── */
+.direct-chat-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.dc-flex-center {
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Background orbs ───────────────────────────────────────────────────── */
+.dc-bg-orbs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dc-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+}
+
+.dc-orb-1 {
+  width: 500px; height: 500px;
+  opacity: 0.04;
+  top: -15%; right: -15%;
+  animation: dc-float 8s ease-in-out infinite;
+}
+
+.dc-orb-2 {
+  width: 400px; height: 400px;
+  opacity: 0.03;
+  bottom: -10%; left: -10%;
+  animation: dc-float 10s ease-in-out infinite 2s;
+}
+
+.dc-orb-live {
+  width: 500px; height: 500px;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 1s;
+}
+
+.dc-orb-mic {
+  width: 350px; height: 350px;
+  bottom: 10%; left: 50%;
+  transform: translateX(-50%);
+  transition: opacity 0.15s;
+  filter: blur(100px);
+}
+
+/* ── Navigation ────────────────────────────────────────────────────────── */
+.dc-nav {
+  position: relative;
+  z-index: 10;
+  padding: 1rem 1.5rem;
+}
+
+.dc-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: color 0.2s;
+  min-height: 44px;
+  padding: 0 0.5rem;
+}
+
+.dc-back-link:hover { color: var(--foreground); }
+
+/* ── Center content (idle screen) ──────────────────────────────────────── */
+.dc-center-content {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+/* ── Logo ──────────────────────────────────────────────────────────────── */
+.dc-logo-wrap {
+  position: relative;
+  margin-bottom: 2rem;
+}
+
+.dc-logo-box {
+  width: 112px; height: 112px;
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+  box-shadow: 0 12px 40px rgba(139, 92, 246, 0.4), 0 0 80px rgba(139, 92, 246, 0.15);
+}
+
+.dc-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+}
+
+.dc-pulse-ring-1 {
+  animation: dc-pulse-ring 2.5s ease-out infinite;
+  opacity: 0.2;
+}
+
+.dc-pulse-ring-2 {
+  animation: dc-pulse-ring 2.5s ease-out infinite 1s;
+  opacity: 0.15;
+}
+
+/* ── Typography (idle) ─────────────────────────────────────────────────── */
+.dc-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-align: center;
+}
+
+.dc-subtitle {
+  font-size: 1rem;
+  color: var(--muted);
+  text-align: center;
+  max-width: 400px;
+  margin-bottom: 0.5rem;
+}
+
+.dc-desc {
+  font-size: 0.85rem;
+  color: var(--foreground-3, #64748b);
+  text-align: center;
+  max-width: 400px;
+  margin-bottom: 2.5rem;
+  line-height: 1.6;
+}
+
+/* ── Error box ─────────────────────────────────────────────────────────── */
+.dc-error-box {
+  padding: 0.8rem 1.2rem;
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+  font-size: 0.85rem;
+  max-width: 400px;
+  text-align: center;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  animation: dc-fadeInUp 0.3s ease-out;
+}
+
+/* ── Start Call Button ─────────────────────────────────────────────────── */
+.dc-start-btn {
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 8px 30px rgba(34, 197, 94, 0.4), 0 0 60px rgba(34, 197, 94, 0.1);
+  transition: all 0.3s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dc-start-btn:hover { transform: scale(1.05); }
+.dc-start-btn:active { transform: scale(0.95); }
+
+.dc-start-label {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #22c55e;
+}
+
+/* ── Chips ─────────────────────────────────────────────────────────────── */
+.dc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 2.5rem;
+  justify-content: center;
+}
+
+.dc-chip {
+  padding: 0.5rem 1rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Connecting screen ─────────────────────────────────────────────────── */
+.dc-connecting-orb-wrap {
+  position: relative;
+  margin-bottom: 2rem;
+}
+
+.dc-connecting-orb-outer {
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+  animation: dc-pulse-ring 1.5s ease-in-out infinite;
+}
+
+.dc-connecting-orb-inner-bg {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
+}
+
+.dc-connecting-orb-inner {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+}
+
+.dc-connecting-text {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.dc-connecting-sub {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  color: var(--muted);
+}
+
+/* ── Header (connected) ────────────────────────────────────────────────── */
+.dc-header {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1.5rem;
+  background: rgba(5, 10, 20, 0.6);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.dc-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dc-header-icon {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6, #ec4899);
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+  flex-shrink: 0;
+}
+
+.dc-header-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.dc-header-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.dc-live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  animation: dc-dotPulse 2s infinite;
+}
+
+/* ── Call area ─────────────────────────────────────────────────────────── */
+.dc-call-area {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+/* ── Main orb ──────────────────────────────────────────────────────────── */
+.dc-main-orb-wrap {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.dc-mic-ring {
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  transition: all 0.15s;
+}
+
+.dc-speak-ring {
+  position: absolute;
+  inset: -30px;
+  border-radius: 50%;
+}
+
+.dc-speak-ring-1 {
+  border: 2px solid rgba(139, 92, 246, 0.3);
+  animation: dc-pulse-ring 2s ease-out infinite;
+}
+
+.dc-speak-ring-2 {
+  border: 2px solid rgba(139, 92, 246, 0.2);
+  animation: dc-pulse-ring 2s ease-out infinite 0.7s;
+}
+
+.dc-main-orb {
+  width: 144px; height: 144px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s;
+}
+
+/* ── Status ─────────────────────────────────────────────────────────────── */
+.dc-status-text {
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  text-align: center;
+  max-width: 400px;
+  transition: color 0.3s;
+}
+
+.dc-status-sub {
+  font-size: 0.85rem;
+  text-align: center;
+  max-width: 450px;
+  color: var(--muted);
+  animation: dc-fadeInUp 0.3s ease-out;
+}
+
+/* ── Waveform ──────────────────────────────────────────────────────────── */
+.dc-waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 40px;
+  margin-top: 2rem;
+}
+
+.dc-wave-bar {
+  width: 3px;
+  border-radius: 99px;
+  transition: all ease;
+}
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+.dc-controls {
+  position: relative;
+  z-index: 10;
+  padding: 1rem 1.5rem;
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  background: rgba(5, 10, 20, 0.6);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
+}
+
+.dc-controls-inner {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.dc-text-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dc-text-input-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.dc-text-input {
+  flex: 1;
+  background: transparent;
+  outline: none;
+  border: none;
+  font-size: 0.85rem;
+  color: var(--foreground);
+  font-family: inherit;
+  min-height: 24px;
+}
+
+.dc-text-input::placeholder {
+  color: var(--muted);
+}
+
+.dc-send-btn {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dc-end-call-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.dc-end-btn {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4);
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dc-end-btn:hover { transform: scale(1.05); }
+.dc-end-btn:active { transform: scale(0.95); }
+
+.dc-footer-hint {
+  text-align: center;
+  font-size: 0.7rem;
+  margin-top: 0.75rem;
+  color: var(--muted);
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes dc-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-20px) scale(1.05); }
+}
+
+@keyframes dc-pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+@keyframes dc-fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dc-dotPulse {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes dc-waveform-anim {
+  0%, 100% { height: 4px; }
+  50% { height: 20px; }
+}
+
+/* ── Mobile responsive ─────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .dc-logo-box {
+    width: 88px; height: 88px;
+    border-radius: 20px;
+  }
+
+  .dc-logo-box svg {
+    width: 36px; height: 36px;
+  }
+
+  .dc-title {
+    font-size: 1.6rem;
+  }
+
+  .dc-start-btn {
+    width: 80px; height: 80px;
+  }
+
+  .dc-start-btn svg {
+    width: 30px; height: 30px;
+  }
+
+  .dc-main-orb {
+    width: 120px; height: 120px;
+  }
+
+  .dc-main-orb svg {
+    width: 40px; height: 40px;
+  }
+
+  .dc-end-btn {
+    width: 56px; height: 56px;
+  }
+
+  .dc-controls {
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dc-header {
+    padding: 0.6rem 1rem;
+  }
+
+  .dc-desc {
+    margin-bottom: 1.5rem;
+  }
+
+  .dc-chips {
+    margin-top: 1.5rem;
+  }
+
+  .dc-main-orb-wrap {
+    margin-bottom: 2rem;
+  }
+}
+
+/* ── Light mode overrides for direct-chat ──────────────────────────────── */
+[data-theme="light"] .direct-chat-container {
+  background: var(--background);
+}
+
+[data-theme="light"] .dc-header {
+  background: rgba(220, 228, 240, 0.85);
+}
+
+[data-theme="light"] .dc-controls {
+  background: rgba(220, 228, 240, 0.85);
+}
+
+[data-theme="light"] .dc-text-input-box {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+}
+
+[data-theme="light"] .dc-text-input {
+  color: var(--foreground);
+}
+
+[data-theme="light"] .dc-chip {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  color: var(--foreground-3);
+}
+
+/* ── Mode Selector ─────────────────────────────────────────────────────── */
+.dc-mode-selector {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  margin-bottom: 1rem;
+}
+
+.dc-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: 11px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-family: inherit;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dc-mode-btn:hover {
+  color: var(--foreground);
+}
+
+.dc-mode-btn-active {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(59, 130, 246, 0.15));
+  color: #a78bfa;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.15);
+}
+
+.dc-mode-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+  max-width: 380px;
+  margin-bottom: 2rem;
+  line-height: 1.5;
+}
+
+/* ── Mode Badge (header) ───────────────────────────────────────────────── */
+.dc-mode-badge {
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Transcript (server mode) ──────────────────────────────────────────── */
+.dc-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 480px;
+  width: 100%;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 0 1rem;
+  margin-top: 1rem;
+}
+
+.dc-transcript-entry {
+  padding: 0.5rem 0.8rem;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  animation: dc-fadeInUp 0.3s ease-out;
+}
+
+.dc-transcript-ai {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  color: #c4b5fd;
+  align-self: flex-start;
+  border-bottom-left-radius: 3px;
+  max-width: 85%;
+}
+
+.dc-transcript-user {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  align-self: flex-end;
+  border-bottom-right-radius: 3px;
+  max-width: 85%;
+}
+
+/* ── Light mode overrides for new elements ─────────────────────────────── */
+[data-theme="light"] .dc-mode-btn-active {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1));
+  color: #7c3aed;
+}
+
+[data-theme="light"] .dc-transcript-ai {
+  background: rgba(139, 92, 246, 0.08);
+  color: #6d28d9;
+}
+
+[data-theme="light"] .dc-transcript-user {
+  background: rgba(34, 197, 94, 0.08);
+  color: #15803d;
+}
+
+/* ── Mobile responsive for new elements ────────────────────────────────── */
+@media (max-width: 480px) {
+  .dc-mode-btn {
+    padding: 0.5rem 0.9rem;
+    font-size: 0.75rem;
+  }
+
+  .dc-transcript {
+    max-height: 120px;
+    padding: 0 0.5rem;
+  }
+
+  .dc-mode-desc {
+    margin-bottom: 1.5rem;
+  }
+}
+
+

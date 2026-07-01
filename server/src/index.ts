@@ -4,10 +4,13 @@ import { randomUUID } from 'crypto'
 import { createReadStream, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { GoogleGenAI } from '@google/genai'
-import { createLiveSession } from './gemini'
+import { createLiveSession, validateLiveCustomerIdentity } from './gemini'
 import {
   readAppointments,
   deleteAppointment,
+  createAppointment,
+  getCustomerByPhone,
+  getAppointmentsByDateRange,
 } from './db/repositories/appointments'
 import {
   listRecordings,
@@ -24,6 +27,7 @@ import {
   updateDocEmbedding,
   countEmbedded,
   retrieveTopK as retrieveDocsByEmbedding,
+  findCustomerDocByPhone,
 } from './db/repositories/knowledge'
 import {
   getCalendarSettings,
@@ -699,6 +703,103 @@ const app = new Elysia()
     }
     const saved = await setGreeting(greeting.trim())
     return { success: true, ...saved }
+  })
+
+  // ── Direct Mode: Tool Call HTTP Endpoints ───────────────────────────────────
+  // Bu endpoint'ler doğrudan (direct) modda çalışan client-side Gemini
+  // bağlantısının tool call'larını karşılar. Ses direkt Gemini'ye gider,
+  // ama tool call'lar bu HTTP endpoint'ler üzerinden sunucuya gelir.
+
+  .post('/api/tools/search-knowledge', async ({ body, set }) => {
+    const { sorgu } = (body ?? {}) as { sorgu?: string }
+    if (!sorgu?.trim()) { set.status = 400; return { error: 'sorgu parametresi zorunlu' } }
+    try {
+      const { searchKnowledge } = await import('./services/knowledge')
+      const results = await searchKnowledge(sorgu, 5)
+      if (results.length === 0) return { sonuc: 'Bilgi tabanında ilgili bilgi bulunamadı.' }
+      const content = results
+        .map((r, i) => `[${i + 1}] (${r.documentName})\n${r.chunkText}`)
+        .join('\n\n---\n\n')
+      return { sonuc: content }
+    } catch (err) {
+      console.error('[Tools/Knowledge]', err)
+      return { sonuc: 'Bilgi tabanı şu an kullanılamıyor.' }
+    }
+  })
+
+  .post('/api/tools/customer-query', async ({ body, set }) => {
+    const { telefon } = (body ?? {}) as { telefon?: string }
+    if (!telefon?.trim()) { set.status = 400; return { error: 'telefon parametresi zorunlu' } }
+    const digits = telefon.replace(/\D/g, '')
+    if (digits.length < 10) return { sonuc: 'Geçerli bir telefon numarası değil. En az 10 hane gerekli.' }
+    try {
+      const customer = await getCustomerByPhone(telefon)
+      if (!customer) {
+        const knowledgeCustomer = await findCustomerDocByPhone(telefon)
+        if (knowledgeCustomer) {
+          return { kayitli: true, musteri_adi: knowledgeCustomer.name, sonuc: `Ad Soyad: ${knowledgeCustomer.name}\n${knowledgeCustomer.content}` }
+        }
+        return { kayitli: false, sonuc: 'Bu numara ile kayıtlı müşteri bulunamadı.' }
+      }
+      const info: string[] = [`Ad Soyad: ${customer.name}`, `Telefon: ${customer.phone}`]
+      const pastAppointments = customer.appointmentHistory.filter(a => a.isPast)
+      if (pastAppointments.length > 0) {
+        const last = pastAppointments[0]
+        info.push(`Son Randevu: ${last.date} ${last.time} — ${last.issueOrRequest || last.type}`)
+      }
+      const vehicleInfo = customer.appointmentHistory.find(a => a.vehicleInfo)?.vehicleInfo
+      if (vehicleInfo) info.push(`Araç: ${vehicleInfo}`)
+      return { kayitli: true, musteri_adi: customer.name, sonuc: info.join('\n') }
+    } catch (err) {
+      console.error('[Tools/CustomerQuery]', err)
+      return { kayitli: false, sonuc: 'Müşteri sorgu servisi şu an kullanılamıyor.' }
+    }
+  })
+
+  .post('/api/tools/create-appointment', async ({ body, set }) => {
+    const args = (body ?? {}) as Record<string, string>
+    const invalid = validateLiveCustomerIdentity(args.musteri_adi, args.telefon)
+    if (invalid) return { success: false, message: invalid }
+    if (!args.tarih || !args.saat) return { success: false, message: 'Tarih ve saat zorunludur.' }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.tarih)) return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
+    try {
+      const appointment = await createAppointment({
+        customerName: args.musteri_adi.trim(),
+        phone: args.telefon.trim(),
+        type: args.randevu_turu || 'other',
+        vehicleInfo: args.arac_bilgisi || undefined,
+        issueOrRequest: args.sorun_veya_talep || undefined,
+        date: args.tarih,
+        time: args.saat,
+        sessionId: `direct-${randomUUID().slice(0, 8)}`,
+        notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
+      })
+      console.log('[Tools/Appointment]', appointment.id, appointment.customerName)
+      return { success: true, message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`, id: appointment.id }
+    } catch (err) {
+      console.error('[Tools/Appointment]', err)
+      set.status = 500
+      return { success: false, message: 'Randevu oluşturma hatası.' }
+    }
+  })
+
+  .post('/api/tools/check-availability', async ({ body }) => {
+    const args = (body ?? {}) as { tarih?: string; baslangic_tarih?: string; bitis_tarih?: string }
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+    const hasValidDate = (args.tarih && dateRegex.test(args.tarih)) || (args.baslangic_tarih && dateRegex.test(args.baslangic_tarih))
+    if (!hasValidDate) return { sonuc: 'Geçerli bir tarih belirtilmedi.' }
+    try {
+      const result = await getAppointmentsByDateRange({
+        date: args.tarih,
+        from: args.baslangic_tarih,
+        to: args.bitis_tarih || args.baslangic_tarih,
+      })
+      if (result.length === 0) return { sonuc: `${args.tarih || `${args.baslangic_tarih} - ${args.bitis_tarih}`} tarihinde henüz randevu yok — müsait.` }
+      return { sonuc: `${result.length} randevu mevcut.`, count: result.length }
+    } catch (err) {
+      console.error('[Tools/Availability]', err)
+      return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
+    }
   })
 
   // ── WebSocket: Voice streaming ──────────────────────────────────────────────

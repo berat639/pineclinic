@@ -8,7 +8,7 @@ const config: NextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/:path((?!admin-auth).*)',
+        source: '/api/:path((?!admin-auth|direct-session).*)',
         destination: `${BACKEND_PROXY_URL}/api/:path*`,
       },
     ]
