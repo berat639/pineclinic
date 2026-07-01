@@ -58,9 +58,6 @@ function getTodayTurkish(): string {
 const ALLOWED_LIVE_MODELS = [
   'gemini-3.1-flash-live-preview',
   'gemini-live-2.5-flash-native-audio',
-  'gemini-live-2.5-flash-preview',
-  'gemini-2.5-flash-preview-native-audio',
-  'gemini-2.0-flash-live-001',
 ] as const
 const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview'
 
