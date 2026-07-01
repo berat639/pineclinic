@@ -618,8 +618,9 @@ export async function createLiveSession(
   }
 
   async function connect(handle?: string) {
+    const modelName = options.model.startsWith('models/') ? options.model : `models/${options.model}`
     activeSession = await ai.live.connect({
-      model: options.model,
+      model: modelName,
       config: handle ? { ...liveConfig, sessionResumption: { handle } } : liveConfig,
       callbacks: buildCallbacks(),
     })
