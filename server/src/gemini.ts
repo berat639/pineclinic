@@ -16,7 +16,7 @@ import { createCalendarEvent, updateCalendarEvent } from './integrations/google-
 import { searchKnowledge } from './services/knowledge'
 import { findCustomerDocByPhone } from './db/repositories/knowledge'
 
-const VOICE = process.env.GEMINI_LIVE_VOICE || 'Aoede'
+const VOICE = process.env.GEMINI_LIVE_VOICE || 'Orus'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
