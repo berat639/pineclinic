@@ -554,7 +554,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             for (const f8k of gatedFrames) {
               const pcm16 = upsample8to16(f8k)
               info.session.sendRealtimeInput({
-                media: {
+                audio: {
                   data: pcm16.toString('base64'),
                   mimeType: 'audio/pcm;rate=16000',
                 },
