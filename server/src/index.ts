@@ -37,6 +37,8 @@ import {
   setAiModel,
   getGreeting,
   setGreeting,
+  getConnectionMode,
+  setConnectionMode,
 } from './db/repositories/settings'
 import { embedText, buildRagPrompt, PRE_WARM_QUERY } from './rag'
 import { RAG_BASE_TEMPLATE } from './data/rag-prompts'
@@ -702,6 +704,22 @@ const app = new Elysia()
       return { error: 'Karşılama mesajı en az 5 karakter olmalıdır.' }
     }
     const saved = await setGreeting(greeting.trim())
+    return { success: true, ...saved }
+  })
+
+  // ── Connection Mode Settings ─────────────────────────────────────────────────
+  .get('/api/admin/settings/connection-mode', async () => {
+    const mode = await getConnectionMode()
+    return { mode }
+  })
+
+  .put('/api/admin/settings/connection-mode', async ({ body, set }) => {
+    const { mode } = (body ?? {}) as { mode?: string }
+    if (mode !== 'server' && mode !== 'direct') {
+      set.status = 400
+      return { error: 'Geçersiz mod. İzin verilen: server, direct' }
+    }
+    const saved = await setConnectionMode(mode)
     return { success: true, ...saved }
   })
 

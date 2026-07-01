@@ -404,6 +404,11 @@ export default function AdminPage() {
   const [aiLoading, setAiLoading] = useState(true)
   const [aiSaving, setAiSaving] = useState(false)
 
+  // Connection Mode (Bağlantı Modu)
+  const [connMode, setConnMode] = useState<'server' | 'direct'>('server')
+  const [connModeLoading, setConnModeLoading] = useState(true)
+  const [connModeSaving, setConnModeSaving] = useState(false)
+
   // VoIP / Call Center (Ayarlar tab — sadece UI, backend yok)
   const [voipMode, setVoipMode] = useState<VoipMode>('cloud')
 
@@ -562,6 +567,37 @@ export default function AdminPage() {
       showToast('error', e instanceof Error ? e.message : 'Model kaydedilemedi')
     }
     finally { setAiSaving(false) }
+  }
+
+  // ── Connection Mode (Bağlantı Modu) ──────────────────────────────────────
+  const fetchConnMode = useCallback(async () => {
+    setConnModeLoading(true)
+    try {
+      const res = await fetch('/api/admin/settings/connection-mode')
+      const data = await res.json() as { mode?: string }
+      if (data.mode === 'direct' || data.mode === 'server') setConnMode(data.mode)
+    } catch { /* ignore */ }
+    finally { setConnModeLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchConnMode() }, [fetchConnMode])
+
+  const handleSaveConnMode = async (mode: 'server' | 'direct') => {
+    if (connModeSaving || mode === connMode) return
+    setConnModeSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/connection-mode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      if (!res.ok) throw new Error('Kaydedilemedi')
+      setConnMode(mode)
+      showToast('success', `Bağlantı modu "${mode === 'server' ? 'Sunucu' : 'Doğrudan'}" olarak güncellendi`)
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : 'Mod kaydedilemedi')
+    }
+    finally { setConnModeSaving(false) }
   }
 
   // ── Greeting (Karşılama Mesajı) ──────────────────────────────────────────
@@ -1417,6 +1453,100 @@ export default function AdminPage() {
 
                     <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
                       Değişiklik yalnızca <strong>sonraki çağrılar</strong> için geçerlidir; o anki aktif oturumlar etkilenmez.
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* Connection Mode card */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 0 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 18, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                    Bağlantı Modu
+                  </span>
+                  {connModeLoading ? <Spinner /> : (
+                    <span style={{
+                      fontSize: 11, color: 'rgba(240,244,255,0.45)',
+                      padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                    }}>
+                      Web Arayüzü
+                    </span>
+                  )}
+                </div>
+
+                {!connModeLoading && (
+                  <>
+                    <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      Web arayüzünün AI ile nasıl bağlanacağını belirler. Telefon (Netgsm) aramaları daima sunucu modunda çalışır.
+                    </p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 10 }}>
+                      {([
+                        {
+                          id: 'server' as const,
+                          label: 'Sunucu Modu (WS Proxy)',
+                          desc: 'Ses sunucu üzerinden geçer. Tüm özellikler aktif: bilgi tabanı, randevu, kayıt, Netgsm.',
+                          tier: 'Dengeli' as const,
+                        },
+                        {
+                          id: 'direct' as const,
+                          label: 'Doğrudan Mod (Direct)',
+                          desc: 'Ses doğrudan Gemini API\'ye gider. Düşük gecikme. Bilgi tabanı + randevu HTTP ile çalışır.',
+                          tier: 'Premium' as const,
+                        },
+                      ]).map(opt => {
+                        const isActive = connMode === opt.id
+                        const tierColor = AI_TIER_COLOR[opt.tier]
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => handleSaveConnMode(opt.id)}
+                            disabled={connModeSaving}
+                            style={{
+                              textAlign: 'left',
+                              display: 'flex', alignItems: 'flex-start', gap: 12,
+                              padding: '12px 14px',
+                              background: isActive ? `rgba(${hexToRgb(tierColor)}, 0.10)` : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${isActive ? `rgba(${hexToRgb(tierColor)}, 0.45)` : 'rgba(255,255,255,0.07)'}`,
+                              borderRadius: 10,
+                              cursor: connModeSaving ? 'wait' : 'pointer',
+                              transition: 'background 0.15s, border-color 0.15s',
+                              opacity: connModeSaving && !isActive ? 0.5 : 1,
+                              color: 'inherit',
+                            }}
+                          >
+                            <span style={{
+                              marginTop: 3, flexShrink: 0,
+                              width: 16, height: 16, borderRadius: '50%',
+                              border: `2px solid ${isActive ? tierColor : 'rgba(255,255,255,0.2)'}`,
+                              background: isActive ? tierColor : 'transparent',
+                              boxShadow: isActive ? `0 0 0 3px rgba(${hexToRgb(tierColor)}, 0.18)` : 'none',
+                              transition: 'all 0.15s',
+                            }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#f0f4ff' }}>
+                                  {opt.label}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.55)', lineHeight: 1.5 }}>
+                                {opt.desc}
+                              </div>
+                            </div>
+                            {connModeSaving && isActive && <Spinner />}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
+                      Değişiklik yalnızca <strong>web arayüzü</strong> için geçerlidir. Telefon aramaları daima sunucu modunda çalışır.
                     </p>
                   </>
                 )}

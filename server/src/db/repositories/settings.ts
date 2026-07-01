@@ -111,3 +111,19 @@ export async function setGreeting(text: string): Promise<{ greeting: string; upd
   await setSetting(AI_GREETING, text)
   return { greeting: text, updatedAt: new Date().toISOString() }
 }
+
+// ── Connection mode settings ────────────────────────────────────────────────
+const CONNECTION_MODE = 'ai.connection_mode'
+
+export type ConnectionMode = 'server' | 'direct'
+
+export async function getConnectionMode(): Promise<ConnectionMode> {
+  const val = await getSetting(CONNECTION_MODE)
+  return val === 'direct' ? 'direct' : 'server'
+}
+
+export async function setConnectionMode(mode: ConnectionMode): Promise<{ mode: ConnectionMode; updatedAt: string }> {
+  await setSetting(CONNECTION_MODE, mode)
+  return { mode, updatedAt: new Date().toISOString() }
+}
+
