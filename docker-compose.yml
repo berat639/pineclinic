@@ -67,6 +67,7 @@ services:
       NODE_ENV: production
       SERVER_URL: http://server:3001
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
     depends_on:
       - server
 
