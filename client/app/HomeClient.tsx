@@ -1,12 +1,10 @@
 'use client'
 
 import { useVoiceAI, type VoiceStatus } from '@/hooks/useVoiceAI'
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { ThemeToggle } from './theme-provider'
-
-const DirectChat = lazy(() => import('./direct-chat/DirectChat'))
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: 'Başlamak için tıklayın',
@@ -37,9 +35,6 @@ export default function Home() {
   const { status, transcript, serverError, start, stop } = useVoiceAI(wsUrl)
   const isActive = status !== 'idle' && status !== 'error'
 
-  // Connection mode from admin settings
-  const [connectionMode, setConnectionMode] = useState<'server' | 'direct' | null>(null)
-
   useEffect(() => {
     const envUrl = process.env.NEXT_PUBLIC_WS_URL
     if (envUrl) {
@@ -50,33 +45,7 @@ export default function Home() {
       const port = process.env.NEXT_PUBLIC_WS_PORT || '3005'
       setWsUrl(`${proto}//${host}:${port}/ws`)
     }
-
-    // Fetch connection mode from admin settings
-    fetch('/api/admin/settings/connection-mode')
-      .then(res => res.json())
-      .then((data: { mode?: string }) => {
-        setConnectionMode(data.mode === 'direct' ? 'direct' : 'server')
-      })
-      .catch(() => setConnectionMode('server'))
   }, [])
-
-  // If admin selected direct mode, render DirectChat
-  if (connectionMode === 'direct') {
-    return (
-      <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>Yükleniyor...</div>}>
-        <DirectChat />
-      </Suspense>
-    )
-  }
-
-  // Loading state
-  if (connectionMode === null) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-        Yükleniyor...
-      </div>
-    )
-  }
 
   return (
     <main style={{
