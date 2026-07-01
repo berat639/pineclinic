@@ -54,10 +54,8 @@ function getTodayTurkish(): string {
   return `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()} ${days[now.getDay()]}`
 }
 
-// ── Live API uyumlu modeller (admin panelden seçilebilir) ─────────────────────
 const ALLOWED_LIVE_MODELS = [
   'gemini-3.1-flash-live-preview',
-  'gemini-live-2.5-flash-native-audio',
 ] as const
 const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview'
 
@@ -70,24 +68,11 @@ async function resolveLiveModel(): Promise<string> {
 }
 
 // ── GoogleGenAI client ────────────────────────────────────────────────────────
-// GEMINI_API_KEY varsa → doğrudan Gemini API (3.1 modelleri için gerekli)
-// Yoksa → Vertex AI (service account ile)
 function createAI(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY
-  if (apiKey) {
-    console.log('[AI] Gemini API key modu')
-    return new GoogleGenAI({ apiKey })
-  }
-  const encoded = process.env.GOOGLE_CREDENTIALS_JSON
-  if (!encoded) throw new Error('GEMINI_API_KEY veya GOOGLE_CREDENTIALS_JSON tanımlı değil')
-  const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'))
-  console.log('[AI] Vertex AI modu')
-  return new GoogleGenAI({
-    vertexai: true,
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.GOOGLE_VERTEX_LOCATION || 'europe-west1',
-    googleAuthOptions: { credentials },
-  })
+  if (!apiKey) throw new Error('GEMINI_API_KEY tanımlı değil')
+  console.log('[AI] Gemini API key modu')
+  return new GoogleGenAI({ apiKey })
 }
 
 const ai = createAI()

@@ -186,17 +186,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'settings',     label: 'Ayarlar' },
 ]
 
-// ── Gemini Live model meta ─────────────────────────────────────────────────
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
   'gemini-3.1-flash-live-preview': {
     label: 'Gemini API — 3.1 Flash',
     tagline: 'API Key ile çalışır. Düşük gecikme, audio-to-audio, en yeni model.',
     tier: 'Premium',
-  },
-  'gemini-live-2.5-flash-native-audio': {
-    label: 'Vertex AI — 2.5 Flash',
-    tagline: 'Service Account ile çalışır. Native audio, stabil model.',
-    tier: 'Dengeli',
   },
 }
 
