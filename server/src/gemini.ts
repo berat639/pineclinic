@@ -480,8 +480,8 @@ export async function createLiveSession(
     // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
     // gibi bilgiler erkenden kırpılıp model baştan sormasın.
     contextWindowCompression: {
-      triggerTokens: 25600 as unknown as string,
-      slidingWindow: { targetTokens: 16000 as unknown as string },
+      triggerTokens: '25600',
+      slidingWindow: { targetTokens: '16000' },
     },
     // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
     inputAudioTranscription: {},
