@@ -606,11 +606,11 @@ export async function createLiveSession(
         const code = (e as { code?: number } | undefined)?.code
         // Beklenmedik kapanış + elimizde resume handle var → sessizce yeniden
         // bağlan. Aksi halde görüşmeyi gerçekten sonlandır.
-        if (resumptionHandle && !reconnecting) {
+        if (resumptionHandle && !reconnecting && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           console.warn(`[Gemini] Beklenmedik kapanış (code=${code ?? '?'}) — resume deneniyor`)
           void reconnect()
         } else {
-          if (code && code !== 1000) console.error(`[Gemini] Kapanış code=${code}`)
+          if (code && code !== 1000) console.error(`[Gemini] Kapanış code=${code}, reconnect limit aşıldı veya handle yok`)
           callbacks.onClose()
         }
       },
@@ -626,17 +626,41 @@ export async function createLiveSession(
     })
   }
 
+  let reconnectAttempts = 0
+  const MAX_RECONNECT_ATTEMPTS = 5
+  const BASE_BACKOFF_MS = 500
+
   async function reconnect() {
     if (reconnecting || closedByUser) return
     reconnecting = true
+    reconnectAttempts++
+
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      console.error(`[Gemini] Reconnect limiti aşıldı (${MAX_RECONNECT_ATTEMPTS} deneme) — oturum sonlandırılıyor`)
+      reconnecting = false
+      resumptionHandle = undefined
+      callbacks.onClose()
+      return
+    }
+
+    const backoffMs = BASE_BACKOFF_MS * Math.pow(2, reconnectAttempts - 1)
+    console.log(`[Gemini] Reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} — ${backoffMs}ms beklenecek`)
+    await new Promise(resolve => setTimeout(resolve, backoffMs))
+
+    if (closedByUser) { reconnecting = false; return }
+
     const prev = activeSession
     try {
       await connect(resumptionHandle)
       console.log('[Gemini] Resume ile yeniden bağlanıldı')
+      reconnectAttempts = 0 // Başarılı — sayacı sıfırla
       try { prev?.close() } catch {}
     } catch (err) {
       console.error('[Gemini] Reconnect başarısız:', err)
+      resumptionHandle = undefined // Stale handle'ı temizle
+      reconnecting = false
       callbacks.onClose()
+      return
     } finally {
       reconnecting = false
     }
