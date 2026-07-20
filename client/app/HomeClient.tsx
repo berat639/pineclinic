@@ -258,10 +258,10 @@ export default function Home() {
             marginBottom: '0.5rem',
             letterSpacing: '-0.02em',
           }}>
-            Otomotiv AI Danışmanı
+            AI Sesli Asistan
           </h1>
           <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 400 }}>
-            Servis randevusu · Test sürüşü · Araç danışmanlığı
+            Randevu · Bilgi · Danışmanlık
           </p>
         </div>
 
@@ -417,9 +417,9 @@ export default function Home() {
           width: '100%',
         }}>
           {[
-            { icon: '🔧', label: 'Servis\nRandevusu' },
-            { icon: '🚗', label: 'Test\nSürüşü' },
-            { icon: '🏪', label: 'Galeri\nZiyareti' },
+            { icon: '�', label: 'Randevu\nOluştur' },
+            { icon: '❓', label: 'Bilgi\nAl' },
+            { icon: '💬', label: 'Danışmanlık\nİste' },
           ].map((item, i) => (
             <div key={i} className="glass-card" style={{
               padding: '1rem',

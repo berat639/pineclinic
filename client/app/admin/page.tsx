@@ -14,8 +14,9 @@ type Tab = 'appointments' | 'knowledge' | 'recordings' | 'settings'
 
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
-  type: 'service' | 'test_drive' | 'gallery_visit' | 'other'
+  type: string
   vehicleInfo?: string; issueOrRequest?: string; date: string; time: string
+  extraFields?: Record<string, string> | null
 }
 
 type CalendarStatus = {

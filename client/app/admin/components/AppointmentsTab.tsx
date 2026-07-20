@@ -8,9 +8,12 @@ interface Appointment {
   extraFields?: Record<string, string> | null
 }
 
-const TYPE_LABEL: Record<string, string> = { service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri', other: 'Diğer' }
-const TYPE_ICON: Record<string, string> = { service: '🔧', test_drive: '🚗', gallery_visit: '🏪', other: '📋' }
-const TYPE_BADGE: Record<string, string> = { service: 'badge-service', test_drive: 'badge-test', gallery_visit: 'badge-gallery', other: 'badge-other' }
+const TYPE_LABEL: Record<string, string> = {}
+const TYPE_ICON: Record<string, string> = {}
+const TYPE_BADGE: Record<string, string> = {}
+
+function getTypeLabel(type: string) { return TYPE_LABEL[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }
+function getTypeIcon(type: string) { return TYPE_ICON[type] || '📋' }
 
 function fmtDate(d: string) {
   if (!d) return '—'
@@ -27,6 +30,8 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+
+  const uniqueTypes = [...new Set(appointments.map(a => a.type))]
 
   const filtered = appointments.filter(a => {
     const matchType = filter === 'all' || a.type === filter
@@ -57,14 +62,14 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
           <input type="text" placeholder="Ara..." value={search} onChange={e => setSearch(e.target.value)}
             style={{ width: '100%', padding: '7px 10px 7px 30px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#f0f4ff', fontSize: '0.83rem', outline: 'none' }} />
         </div>
-        {['all', 'service', 'test_drive', 'gallery_visit', 'other'].map(f => (
+        {['all', ...uniqueTypes].map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{
             padding: '5px 12px', borderRadius: 8, border: '1px solid', fontSize: '0.77rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s',
             background: filter === f ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.04)',
             borderColor: filter === f ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.08)',
             color: filter === f ? '#60a5fa' : '#94a3b8',
           }}>
-            {f === 'all' ? 'Tümü' : `${TYPE_ICON[f]} ${TYPE_LABEL[f]}`}
+            {f === 'all' ? 'Tümü' : `${getTypeIcon(f)} ${getTypeLabel(f)}`}
           </button>
         ))}
       </div>
@@ -95,7 +100,7 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
                       style={{ borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', cursor: 'pointer', transition: 'background 0.15s' }}
                     >
                       <td style={{ padding: '0.8rem 1rem', whiteSpace: 'nowrap' }}>
-                        <span className={`badge ${TYPE_BADGE[a.type] || 'badge-other'}`}>{TYPE_ICON[a.type] || '📋'} {TYPE_LABEL[a.type] || a.type}</span>
+                        <span className={`badge ${TYPE_BADGE[a.type] || 'badge-other'}`}>{getTypeIcon(a.type)} {getTypeLabel(a.type)}</span>
                       </td>
                       <td style={{ padding: '0.8rem 1rem' }}>
                         <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{a.customerName || <span style={{ color: '#475569', fontStyle: 'italic' }}>—</span>}</div>
@@ -130,7 +135,7 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
                 <div>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 6 }}>Detay</h3>
-                  <span className={`badge ${TYPE_BADGE[selected.type]}`}>{TYPE_ICON[selected.type]} {TYPE_LABEL[selected.type]}</span>
+                  <span className={`badge ${TYPE_BADGE[selected.type] || 'badge-other'}`}>{getTypeIcon(selected.type)} {getTypeLabel(selected.type)}</span>
                 </div>
                 <button onClick={() => setSelectedId(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
               </div>
