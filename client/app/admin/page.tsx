@@ -858,10 +858,13 @@ export default function AdminPage() {
 
           {/* ── Tab: Bilgi Tabanı ───────────────────────────────────────── */}
           {activeTab === 'knowledge' && (
-            <div style={{ maxWidth: 640 }}>
+            <div style={{ maxWidth: 1100, width: '100%' }}>
+
+              {/* Üst satır: Belge Ekle (sol) + Kategori Yönetimi (sağ) */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
 
               {/* Upload card */}
-              <div className="glass-card" style={{ padding: 24, marginBottom: 12 }}>
+              <div className="glass-card" style={{ padding: 24 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(240,244,255,0.7)', marginBottom: 14 }}>
                   Belge Ekle
                 </div>
@@ -982,7 +985,7 @@ export default function AdminPage() {
               </div>
 
               {/* Category Management */}
-              <div className="glass-card" style={{ padding: '12px 20px', marginBottom: 12 }}>
+              <div className="glass-card" style={{ padding: '12px 20px' }}>
                 <button onClick={() => setCatMgmtOpen(!catMgmtOpen)} style={{
                   width: '100%', background: 'none', border: 'none', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
@@ -1055,8 +1058,10 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* Document list */}
-              <div className="glass-card" style={{ overflow: 'hidden' }}>
+              </div>{/* üst grid sonu */}
+
+              {/* Belge Listesi - full width */}
+              <div className="glass-card" style={{ overflow: 'hidden', marginBottom: 12 }}>
                 {kbLoading ? (
                   <div style={{ padding: '28px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'rgba(240,244,255,0.35)', fontSize: 13 }}>
                     <Spinner /> Belgeler yükleniyor…
@@ -1217,8 +1222,11 @@ export default function AdminPage() {
                 )}
               </div>
 
+              {/* Alt satır: Karşılama Mesajı (sol) + Konuşma Akışı (sağ) */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+
               {/* Karşılama Mesajı card */}
-              <div className="glass-card" style={{ padding: 24, marginBottom: 12 }}>
+              <div className="glass-card" style={{ padding: 24 }}>
                 <div style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   marginBottom: 18, paddingBottom: 14,
@@ -1261,7 +1269,7 @@ export default function AdminPage() {
                         outline: 'none',
                         fontFamily: 'inherit',
                       }}
-                      placeholder="Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım..."
+                      placeholder="Merhaba, hoş geldiniz!..."
                     />
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
@@ -1287,8 +1295,10 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* ── AI Prompt & Tool Yönetimi ─────────────────────── */}
+              {/* Konuşma Akışı */}
               <PromptEditor />
+
+              </div>{/* alt grid sonu */}
 
             </div>
           )}

@@ -92,14 +92,14 @@ export default function PromptEditor() {
 
   if (loading) {
     return (
-      <div className="glass-card" style={{ padding: 24, marginTop: 12 }}>
+      <div className="glass-card" style={{ padding: 24 }}>
         <div style={{ fontSize: 13, color: 'rgba(240,244,255,0.4)' }}>Yükleniyor...</div>
       </div>
     )
   }
 
   return (
-    <div className="glass-card" style={{ padding: 24, marginTop: 12 }}>
+    <div className="glass-card" style={{ padding: 24 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
