@@ -53,17 +53,18 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
     .split(',').map(s => s.trim()).filter(Boolean)
 
   // ── Custom fields from DB ─────────────────────────────────────────────────
-  // Format in DB (tools.custom_fields): JSON array of {name, description, required}
-  let customFields: Array<{ name: string; description: string; required?: boolean }> = []
+  // Format in DB (tools.custom_fields): JSON array of {name, description, required, active}
+  let customFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
   try {
     const raw = dbDescs['tools.custom_fields']
     if (raw) customFields = JSON.parse(raw)
   } catch { /* ignore parse errors */ }
 
-  // Build custom field properties for randevuOlustur
+  // Build custom field properties for randevuOlustur (only active fields)
   const customProps: Record<string, { type: typeof Type.STRING; description: string }> = {}
   const customRequired: string[] = []
   for (const f of customFields) {
+    if (f.active === false) continue // skip inactive fields
     const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
     customProps[safeName] = { type: Type.STRING, description: f.description }
     if (f.required) customRequired.push(safeName)
