@@ -113,6 +113,11 @@ async function runMigrations() {
   `
 
   await sql`
+    ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS extra_fields TEXT
+  `
+
+  await sql`
     CREATE TABLE IF NOT EXISTS business_settings (
       key        TEXT PRIMARY KEY,
       value      TEXT NOT NULL,

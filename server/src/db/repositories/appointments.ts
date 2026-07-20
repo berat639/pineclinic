@@ -18,6 +18,7 @@ export interface Appointment {
   ataHsysId?: string | null
   discountRequested?: boolean
   notes?: string | null
+  extraFields?: Record<string, string> | null
 }
 
 function toIso(d: Date | null | undefined): string {
@@ -25,6 +26,10 @@ function toIso(d: Date | null | undefined): string {
 }
 
 function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
+  let extraFields: Record<string, string> | null = null
+  if (r.extraFields) {
+    try { extraFields = JSON.parse(r.extraFields) } catch { /* ignore */ }
+  }
   return {
     id: r.id,
     createdAt: toIso(r.createdAt),
@@ -40,6 +45,7 @@ function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
     ataHsysId: r.ataHsysId,
     discountRequested: r.discountRequested ?? false,
     notes: r.notes,
+    extraFields,
   }
 }
 
@@ -60,6 +66,7 @@ export async function createAppointment(data: {
   calendarEventId?: string
   discountRequested?: boolean
   notes?: string
+  extraFields?: Record<string, string>
 }): Promise<Appointment> {
   // sessionId varsa: aynı session için upsert
   if (data.sessionId) {
@@ -105,6 +112,7 @@ export async function createAppointment(data: {
       calendarEventId: data.calendarEventId ?? null,
       discountRequested: data.discountRequested ?? false,
       notes: data.notes ?? null,
+      extraFields: data.extraFields ? JSON.stringify(data.extraFields) : null,
     })
     .returning()
 

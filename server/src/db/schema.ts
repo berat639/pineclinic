@@ -51,6 +51,7 @@ export const appointments = pgTable('appointments', {
   ataHsysId: text('ata_hsys_id'),
   discountRequested: boolean('discount_requested').default(false),
   notes: text('notes'),
+  extraFields: text('extra_fields'),
 })
 
 export const businessSettings = pgTable('business_settings', {

@@ -20,6 +20,12 @@ interface ToolItem {
   isCustom: boolean
 }
 
+interface CustomField {
+  name: string
+  description: string
+  required?: boolean
+}
+
 export default function PromptEditor() {
   const [sections, setSections] = useState<PromptSection[]>([])
   const [tools, setTools] = useState<ToolItem[]>([])
@@ -31,6 +37,12 @@ export default function PromptEditor() {
   const [previewText, setPreviewText] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [toolsExpanded, setToolsExpanded] = useState(false)
+  const [customFields, setCustomFields] = useState<CustomField[]>([])
+  const [fieldsExpanded, setFieldsExpanded] = useState(false)
+  const [newFieldName, setNewFieldName] = useState('')
+  const [newFieldDesc, setNewFieldDesc] = useState('')
+  const [newFieldReq, setNewFieldReq] = useState(false)
+  const [fieldsSaving, setFieldsSaving] = useState(false)
 
   const fetchSections = useCallback(async () => {
     try {
@@ -47,6 +59,11 @@ export default function PromptEditor() {
           const toolData = await toolRes.json()
           setTools(toolData)
           for (const t of toolData) vals[t.key] = t.value
+          // Load custom fields from tools.custom_fields
+          const cfItem = toolData.find((t: ToolItem) => t.key === 'tools.custom_fields')
+          if (cfItem?.value) {
+            try { setCustomFields(JSON.parse(cfItem.value)) } catch { /* ignore */ }
+          }
         }
         setEditValues(prev => ({ ...prev, ...vals }))
       }
@@ -55,6 +72,31 @@ export default function PromptEditor() {
   }, [])
 
   useEffect(() => { fetchSections() }, [fetchSections])
+
+  const saveCustomFields = async (fields: CustomField[]) => {
+    setFieldsSaving(true)
+    try {
+      await fetch('/api/admin/settings/tools/tools.custom_fields', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: JSON.stringify(fields) }),
+      })
+      setCustomFields(fields)
+    } catch { /* ignore */ }
+    setFieldsSaving(false)
+  }
+
+  const addCustomField = () => {
+    if (!newFieldName.trim() || !newFieldDesc.trim()) return
+    const fields = [...customFields, { name: newFieldName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'), description: newFieldDesc.trim(), required: newFieldReq }]
+    saveCustomFields(fields)
+    setNewFieldName(''); setNewFieldDesc(''); setNewFieldReq(false)
+  }
+
+  const removeCustomField = (idx: number) => {
+    const fields = customFields.filter((_, i) => i !== idx)
+    saveCustomFields(fields)
+  }
 
   const handleSave = async (key: string) => {
     const value = editValues[key]
@@ -344,6 +386,100 @@ export default function PromptEditor() {
                 </div>
               )
             })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Custom Fields (Dinamik Alanlar) ───────────────────── */}
+      <div className="glass-card" style={{ padding: 24, marginTop: 12 }}>
+        <button
+          onClick={() => setFieldsExpanded(!fieldsExpanded)}
+          style={{
+            width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
+          }}
+        >
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+              📋 Özel Alanlar (Dinamik)
+            </span>
+            <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 4 }}>
+              Randevu oluştururken AI&apos;nın müşteriden isteyeceği ek alanlar. Yeni alan ekle/çıkar.
+            </div>
+          </div>
+          <span style={{ fontSize: 14, color: '#64748b', transition: 'transform 0.2s', transform: fieldsExpanded ? 'rotate(180deg)' : 'none' }}>▾</span>
+        </button>
+
+        {fieldsExpanded && (
+          <div style={{ marginTop: 16 }}>
+            {/* Sabit alanlar (bilgilendirme) */}
+            <div style={{ marginBottom: 14, padding: '10px 12px', background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.15)', borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 6 }}>Sabit Alanlar (değiştirilemez, her zaman sorulur):</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.8 }}>
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>musteri_adi</code>{' '}
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>telefon</code>{' '}
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>randevu_turu</code>{' '}
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>tarih</code>{' '}
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>saat</code>{' '}
+                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>sorun_veya_talep</code>
+              </div>
+            </div>
+
+            {/* Mevcut custom fields */}
+            {customFields.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Eklenen Özel Alanlar:</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {customFields.map((f, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                      background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+                      borderRadius: 8,
+                    }}>
+                      <code style={{ fontSize: 11, color: '#7dd3fc', flex: '0 0 auto' }}>{f.name}</code>
+                      <span style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>{f.description}</span>
+                      {f.required && <span style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(251,146,60,0.15)', border: '1px solid rgba(251,146,60,0.25)', borderRadius: 4, color: '#fb923c' }}>Zorunlu</span>}
+                      <button onClick={() => removeCustomField(idx)} disabled={fieldsSaving} style={{
+                        background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13, padding: '2px 6px',
+                      }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add new field */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 100px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Alan Adı (key)</label>
+                <input value={newFieldName} onChange={e => setNewFieldName(e.target.value)} placeholder="tc_kimlik" style={{
+                  width: '100%', padding: '6px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, fontFamily: 'monospace', outline: 'none',
+                }} />
+              </div>
+              <div style={{ flex: '2 1 180px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Açıklama (AI bunu görür)</label>
+                <input value={newFieldDesc} onChange={e => setNewFieldDesc(e.target.value)} placeholder="Hastanın TC kimlik numarası" style={{
+                  width: '100%', padding: '6px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                }} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={newFieldReq} onChange={e => setNewFieldReq(e.target.checked)} />
+                Zorunlu
+              </label>
+              <button onClick={addCustomField} disabled={fieldsSaving || !newFieldName.trim() || !newFieldDesc.trim()} style={{
+                padding: '6px 14px', borderRadius: 6, background: 'rgba(34,197,94,0.15)',
+                border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11,
+                cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
+              }}>
+                {fieldsSaving ? '...' : '+ Alan Ekle'}
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 10, color: 'rgba(240,244,255,0.25)' }}>
+              Eklenen alanlar randevu oluşturulurken AI tarafından müşteriden sorulur ve extra_fields olarak kaydedilir.
+            </div>
           </div>
         )}
       </div>

@@ -52,6 +52,23 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
   const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
     .split(',').map(s => s.trim()).filter(Boolean)
 
+  // ── Custom fields from DB ─────────────────────────────────────────────────
+  // Format in DB (tools.custom_fields): JSON array of {name, description, required}
+  let customFields: Array<{ name: string; description: string; required?: boolean }> = []
+  try {
+    const raw = dbDescs['tools.custom_fields']
+    if (raw) customFields = JSON.parse(raw)
+  } catch { /* ignore parse errors */ }
+
+  // Build custom field properties for randevuOlustur
+  const customProps: Record<string, { type: typeof Type.STRING; description: string }> = {}
+  const customRequired: string[] = []
+  for (const f of customFields) {
+    const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
+    customProps[safeName] = { type: Type.STRING, description: f.description }
+    if (f.required) customRequired.push(safeName)
+  }
+
   return [
     {
       name: 'randevuOlustur',
@@ -71,8 +88,9 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
           sorun_veya_talep: { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') },
           tarih: { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') },
           saat: { type: Type.STRING, description: desc('tools.randevuOlustur.saat') },
+          ...customProps,
         },
-        required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
+        required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat', ...customRequired],
       },
     },
     {
@@ -188,6 +206,16 @@ export async function createLiveSession(
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(new Date(dateStr).getTime())) {
         return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
       }
+
+      // Collect custom/extra fields (anything not in the known set)
+      const knownKeys = new Set(['musteri_adi', 'telefon', 'randevu_turu', 'arac_bilgisi', 'plaka', 'sorun_veya_talep', 'tarih', 'saat'])
+      const extraFields: Record<string, string> = {}
+      for (const [k, v] of Object.entries(args)) {
+        if (!knownKeys.has(k) && v !== undefined && v !== null && v !== '') {
+          extraFields[k] = String(v)
+        }
+      }
+
       const appointment = await createAppointment({
         customerName: (rawName as string).trim(),
         phone: (rawPhone as string).trim(),
@@ -198,6 +226,7 @@ export async function createLiveSession(
         time: timeStr,
         sessionId: options.dbSessionId,
         notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
+        extraFields: Object.keys(extraFields).length > 0 ? extraFields : undefined,
       })
       console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
 

@@ -94,6 +94,7 @@ export const ALL_TOOL_KEYS = [
 ]
 
 export function getDefaultToolDescription(key: string): string | null {
+  if (key === 'tools.custom_fields') return '[]'
   return TOOL_DESC_MAP.get(key)?.defaultDescription
     ?? TOOL_PARAM_MAP.get(key)?.defaultDescription
     ?? null
