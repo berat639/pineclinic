@@ -179,6 +179,36 @@ async function runMigrations() {
     WHERE max_concurrent_sessions = 5
   `
 
+  // ── Knowledge Categories (dynamic, admin-managed) ─────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS knowledge_categories (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug       TEXT NOT NULL UNIQUE,
+      label      TEXT NOT NULL,
+      icon       TEXT NOT NULL DEFAULT '📁',
+      color      TEXT NOT NULL DEFAULT '#60a5fa',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Seed default categories if empty
+  const catCount = await sql`SELECT COUNT(*)::int AS cnt FROM knowledge_categories`
+  if ((catCount[0]?.cnt ?? 0) === 0) {
+    await sql`
+      INSERT INTO knowledge_categories (slug, label, icon, color, sort_order) VALUES
+        ('genel',    'Genel',    '🌐', '#60a5fa', 0),
+        ('servis',   'Servis',   '🔧', '#34d399', 1),
+        ('galeri',   'Galeri',   '🏪', '#a78bfa', 2),
+        ('kampanya', 'Kampanya', '🎯', '#fb923c', 3),
+        ('sss',      'SSS',      '❓', '#f59e0b', 4),
+        ('arac',     'Araç',     '🚗', '#38bdf8', 5),
+        ('musteri',  'Müşteri',  '👤', '#f472b6', 6)
+      ON CONFLICT (slug) DO NOTHING
+    `
+    console.log('[Migration] Varsayılan kategoriler oluşturuldu')
+  }
+
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }

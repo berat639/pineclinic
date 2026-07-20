@@ -2,7 +2,7 @@ import { sql as drizzleSql, eq } from 'drizzle-orm'
 import { db } from '../client'
 import { knowledgeDocuments } from '../schema'
 
-export type KnowledgeCategory = 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac' | 'musteri'
+export type KnowledgeCategory = string
 
 export interface KnowledgeDoc {
   id: string

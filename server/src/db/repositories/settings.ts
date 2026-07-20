@@ -127,3 +127,70 @@ export async function setConnectionMode(mode: ConnectionMode): Promise<{ mode: C
   return { mode, updatedAt: new Date().toISOString() }
 }
 
+// ── Prompt section settings ─────────────────────────────────────────────────
+const PROMPT_PREFIX = 'prompt.'
+
+export interface PromptSectionRow {
+  key: string
+  value: string
+  updatedAt: string | null
+}
+
+/** Get all prompt.* sections from DB */
+export async function getAllPromptSections(): Promise<Record<string, PromptSectionRow>> {
+  const result = await db.execute(drizzleSql`
+    SELECT key, value, updated_at FROM business_settings WHERE key LIKE 'prompt.%'
+  `)
+  const rows = (result as unknown as { rows?: Array<{ key: string; value: string; updated_at: string | null }> }).rows
+    ?? (result as unknown as Array<{ key: string; value: string; updated_at: string | null }>)
+  const map: Record<string, PromptSectionRow> = {}
+  for (const row of rows) {
+    map[row.key] = { key: row.key, value: row.value, updatedAt: row.updated_at ?? null }
+  }
+  return map
+}
+
+/** Get a single prompt section from DB */
+export async function getPromptSection(key: string): Promise<string | null> {
+  if (!key.startsWith(PROMPT_PREFIX)) return null
+  return getSetting(key)
+}
+
+/** Set a prompt section in DB */
+export async function setPromptSection(key: string, value: string): Promise<void> {
+  if (!key.startsWith(PROMPT_PREFIX)) throw new Error('Key must start with prompt.')
+  await setSetting(key, value)
+}
+
+/** Delete a prompt section (revert to default) */
+export async function resetPromptSection(key: string): Promise<void> {
+  if (!key.startsWith(PROMPT_PREFIX)) throw new Error('Key must start with prompt.')
+  await deleteSetting(key)
+}
+
+// ── Tool description settings ───────────────────────────────────────────────
+const TOOLS_PREFIX = 'tools.'
+
+/** Get all tools.* descriptions from DB */
+export async function getToolDescriptions(): Promise<Record<string, string>> {
+  const result = await db.execute(drizzleSql`
+    SELECT key, value FROM business_settings WHERE key LIKE 'tools.%'
+  `)
+  const rows = (result as unknown as { rows?: Array<{ key: string; value: string }> }).rows
+    ?? (result as unknown as Array<{ key: string; value: string }>)
+  const map: Record<string, string> = {}
+  for (const row of rows) map[row.key] = row.value
+  return map
+}
+
+/** Set a tool description in DB */
+export async function setToolDescription(key: string, value: string): Promise<void> {
+  if (!key.startsWith(TOOLS_PREFIX)) throw new Error('Key must start with tools.')
+  await setSetting(key, value)
+}
+
+/** Delete a tool description (revert to default) */
+export async function resetToolDescription(key: string): Promise<void> {
+  if (!key.startsWith(TOOLS_PREFIX)) throw new Error('Key must start with tools.')
+  await deleteSetting(key)
+}

@@ -53,14 +53,30 @@ export async function retrieveTopK(query: string, k = 5): Promise<RankedDoc[]> {
 
 // ── Prompt builder ────────────────────────────────────────────────────────────
 
-const CATEGORY_LABELS: Record<string, string> = {
-  genel: 'GENEL BİLGİLER', servis: 'SERVİS BİLGİLERİ',
-  galeri: 'GALERİ & SATIŞ', kampanya: 'KAMPANYALAR',
-  sss: 'SIK SORULAN SORULAR', arac: 'ARAÇ BİLGİLERİ',
+import { listCategories } from './db/repositories/categories'
+
+// Category label cache (refreshed lazily)
+let categoryLabelCache: Record<string, string> = {}
+let categoryLabelCacheAt = 0
+const CATEGORY_CACHE_TTL = 60_000 // 60s
+
+async function getCategoryLabels(): Promise<Record<string, string>> {
+  if (Date.now() - categoryLabelCacheAt < CATEGORY_CACHE_TTL && Object.keys(categoryLabelCache).length > 0) {
+    return categoryLabelCache
+  }
+  try {
+    const cats = await listCategories()
+    const map: Record<string, string> = {}
+    for (const c of cats) map[c.slug] = c.label.toUpperCase()
+    categoryLabelCache = map
+    categoryLabelCacheAt = Date.now()
+  } catch { /* keep stale cache */ }
+  return categoryLabelCache
 }
 
-export function buildRagPrompt(docs: RankedDoc[]): string {
+export async function buildRagPrompt(docs: RankedDoc[]): Promise<string> {
   if (docs.length === 0) return ''
+  const labels = await getCategoryLabels()
   const grouped = new Map<string, RankedDoc[]>()
   for (const doc of docs) {
     if (!grouped.has(doc.category)) grouped.set(doc.category, [])
@@ -68,7 +84,7 @@ export function buildRagPrompt(docs: RankedDoc[]): string {
   }
   const sections: string[] = []
   for (const [cat, catDocs] of grouped) {
-    const label = CATEGORY_LABELS[cat] ?? cat.toUpperCase()
+    const label = labels[cat] ?? cat.toUpperCase()
     const items = catDocs.map(d => `• ${d.title}: ${d.content}`).join('\n')
     sections.push(`[${label}]\n${items}`)
   }

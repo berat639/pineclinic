@@ -5,6 +5,7 @@ import AppointmentsTab from './components/AppointmentsTab'
 import StatsBar from './components/StatsBar'
 import ToastContainer from './components/ToastContainer'
 import RecordingsTab from './components/RecordingsTab'
+import PromptEditor from './components/PromptEditor'
 import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -151,25 +152,13 @@ function Spinner() {
 
 // ── Tab definitions ────────────────────────────────────────────────────────
 
-const KB_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac', 'musteri'] as const
-type KbCategory = typeof KB_CATEGORIES[number]
-
-const KB_CATEGORY_LABEL: Record<KbCategory, string> = {
-  genel: 'Genel', servis: 'Servis', galeri: 'Galeri', kampanya: 'Kampanya', sss: 'SSS', arac: 'Araç', musteri: 'Müşteri',
-}
-
-const KB_CATEGORY_COLOR: Record<KbCategory, string> = {
-  genel:    '#60a5fa',
-  servis:   '#34d399',
-  galeri:   '#a78bfa',
-  kampanya: '#fb923c',
-  sss:      '#f59e0b',
-  arac:     '#38bdf8',
-  musteri:  '#f472b6',
-}
-
-function kbCategoryLabel(cat: string) {
-  return KB_CATEGORY_LABEL[cat as KbCategory] ?? cat
+interface KbCategoryDef {
+  id: string
+  slug: string
+  label: string
+  icon: string
+  color: string
+  sortOrder: number
 }
 
 function hexToRgb(hex: string): string {
@@ -448,11 +437,12 @@ export default function AdminPage() {
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([])
   const [kbLoading, setKbLoading] = useState(false)
   const [kbName, setKbName] = useState('')
-  const [kbCategory, setKbCategory] = useState<KbCategory>('genel')
+  const [kbCategory, setKbCategory] = useState<string>('genel')
   const [kbText, setKbText] = useState('')
   const [kbFile, setKbFile] = useState<File | null>(null)
   const [kbUploading, setKbUploading] = useState(false)
   const [openKbId, setOpenKbId] = useState<string | null>(null)
+  const [kbCategories, setKbCategories] = useState<KbCategoryDef[]>([])
 
   // Inline action toast (for KB / calendar actions)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -649,12 +639,19 @@ export default function AdminPage() {
   const fetchKnowledgeDocs = useCallback(async () => {
     setKbLoading(true)
     try {
-      const res = await fetch('/api/admin/knowledge')
+      const [res, catRes] = await Promise.all([
+        fetch('/api/admin/knowledge'),
+        fetch('/api/admin/categories'),
+      ])
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       if (Array.isArray(data)) setKnowledgeDocs(data)
       else if (Array.isArray(data.docs)) setKnowledgeDocs(data.docs)
       else setKnowledgeDocs([])
+      if (catRes.ok) {
+        const cats = await catRes.json()
+        if (Array.isArray(cats)) setKbCategories(cats)
+      }
     } catch (e) {
       console.error('[KB] fetchKnowledgeDocs hatası:', e)
       showToast('error', 'Belgeler yüklenemedi')
@@ -842,14 +839,14 @@ export default function AdminPage() {
                       Kategori
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {KB_CATEGORIES.map(cat => {
-                        const isActive = kbCategory === cat
-                        const color = KB_CATEGORY_COLOR[cat]
+                      {kbCategories.map(cat => {
+                        const isActive = kbCategory === cat.slug
+                        const color = cat.color
                         return (
                           <button
-                            key={cat}
+                            key={cat.slug}
                             type="button"
-                            onClick={() => setKbCategory(cat)}
+                            onClick={() => setKbCategory(cat.slug)}
                             disabled={kbUploading}
                             style={{
                               padding: '5px 12px',
@@ -864,7 +861,7 @@ export default function AdminPage() {
                               opacity: kbUploading ? 0.5 : 1,
                             }}
                           >
-                            {KB_CATEGORY_LABEL[cat]}
+                            {cat.label}
                           </button>
                         )
                       })}
@@ -1035,7 +1032,7 @@ export default function AdminPage() {
                                     color: 'var(--accent)',
                                     letterSpacing: '0.04em',
                                   }}>
-                                    {kbCategoryLabel(doc.category)}
+                                    {kbCategories.find(c => c.slug === doc.category)?.label ?? doc.category}
                                   </span>
                                   <span style={{
                                     fontSize: 10,
@@ -1933,6 +1930,9 @@ CLIENT_APP_URL=http://localhost:3000`}</pre>
                   </p>
                 </div>
               </details>
+
+              {/* ── AI Prompt Yönetimi ─────────────────────────────── */}
+              <PromptEditor />
 
             </div>
           )}

@@ -83,6 +83,16 @@ export const recordings = pgTable('recordings', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+export const knowledgeCategories = pgTable('knowledge_categories', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  slug: text('slug').notNull().unique(),
+  label: text('label').notNull(),
+  icon: text('icon').notNull().default('📁'),
+  color: text('color').notNull().default('#60a5fa'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect
 export type NewKnowledgeDocument = typeof knowledgeDocuments.$inferInsert
 
@@ -95,3 +105,6 @@ export type NewAppointment = typeof appointments.$inferInsert
 export type BusinessSetting = typeof businessSettings.$inferSelect
 export type Recording = typeof recordings.$inferSelect
 export type NewRecording = typeof recordings.$inferInsert
+
+export type KnowledgeCategory = typeof knowledgeCategories.$inferSelect
+export type NewKnowledgeCategory = typeof knowledgeCategories.$inferInsert

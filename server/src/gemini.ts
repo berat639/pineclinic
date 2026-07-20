@@ -15,6 +15,8 @@ import { createAppointment, updateAppointment, getCustomerByPhone, getAppointmen
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
 import { searchKnowledge } from './services/knowledge'
 import { findCustomerDocByPhone } from './db/repositories/knowledge'
+import { getToolDescriptions } from './db/repositories/settings'
+import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription } from './data/default-tools'
 
 const VOICE = process.env.GEMINI_LIVE_VOICE || 'Orus'
 
@@ -32,104 +34,120 @@ export function validateLiveCustomerIdentity(customerName: string | undefined, p
   return null
 }
 
-const TOOL_DECLARATIONS: FunctionDeclaration[] = [
-  {
-    name: 'randevuOlustur',
-    description: 'Müşteri için servis veya galeri randevusu oluşturur ve sisteme kaydeder.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        musteri_adi: { type: Type.STRING, description: 'Müşterinin AÇIKÇA SÖYLEDİĞİ gerçek ad soyadı. Köşeli parantez, KULLANICI, şablon veya uydurma isim YASAK. Önce bilgileri sesli tekrar edip müşteri onayı al.' },
-        telefon: { type: Type.STRING, description: 'Müşterinin AÇIKÇA SÖYLEDİĞİ gerçek telefonu (rakamlar). Şablon veya köşeli parantez YASAK.' },
-        randevu_turu: {
-          type: Type.STRING,
-          enum: ['service', 'test_drive', 'gallery_visit', 'other'],
-          description: 'Randevu türü: servis, test sürüşü, galeri ziyareti veya diğer',
+/**
+ * Build tool declarations dynamically from DB (with fallback to defaults).
+ * Called once per session creation.
+ */
+async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
+  // Fetch all tools.* settings from DB
+  let dbDescs: Record<string, string> = {}
+  try {
+    dbDescs = await getToolDescriptions()
+  } catch { /* use defaults */ }
+
+  // Helper: get description from DB or fallback
+  const desc = (key: string) => dbDescs[key] ?? getDefaultToolDescription(key) ?? ''
+
+  // Get enum values for randevu_turu (comma-separated in DB)
+  const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
+    .split(',').map(s => s.trim()).filter(Boolean)
+
+  return [
+    {
+      name: 'randevuOlustur',
+      description: desc('tools.randevuOlustur'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          musteri_adi: { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') },
+          telefon: { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') },
+          randevu_turu: {
+            type: Type.STRING,
+            enum: turuEnum,
+            description: desc('tools.randevuOlustur.randevu_turu'),
+          },
+          arac_bilgisi: { type: Type.STRING, description: desc('tools.randevuOlustur.arac_bilgisi') },
+          plaka: { type: Type.STRING, description: desc('tools.randevuOlustur.plaka') },
+          sorun_veya_talep: { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') },
+          tarih: { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') },
+          saat: { type: Type.STRING, description: desc('tools.randevuOlustur.saat') },
         },
-        arac_bilgisi: { type: Type.STRING, description: 'Araç marka, model ve yıl bilgisi' },
-        plaka: { type: Type.STRING, description: 'Araç plakası (örn: 06BS8016). Servis randevularında mutlaka müşteriden al.' },
-        sorun_veya_talep: { type: Type.STRING, description: 'Müşterinin şikayeti veya talebi' },
-        tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD)' },
-        saat: { type: Type.STRING, description: 'Randevu saati (HH:MM)' },
+        required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
       },
-      required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
     },
-  },
-  {
-    name: 'randevuGuncelle',
-    description: 'Daha önce oluşturulan randevuyu günceller. Eksik bilgi tamamlandığında, tarih/saat değiştiğinde veya araç/talep bilgisi eklendiğinde kullan. randevuOlustur sonrasında dönen randevu_id zorunludur.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        randevu_id: { type: Type.STRING, description: 'randevuOlustur ile oluşturulan randevunun ID\'si' },
-        calendar_event_id: { type: Type.STRING, description: 'randevuOlustur ile dönen Google Calendar event ID\'si (varsa)' },
-        musteri_adi: { type: Type.STRING, description: 'Güncellenecek müşteri adı soyadı' },
-        telefon: { type: Type.STRING, description: 'Güncellenecek telefon numarası' },
-        randevu_turu: { type: Type.STRING, enum: ['service', 'test_drive', 'gallery_visit', 'other'] },
-        arac_bilgisi: { type: Type.STRING, description: 'Güncellenecek araç bilgisi' },
-        sorun_veya_talep: { type: Type.STRING, description: 'Güncellenecek talep/şikayet' },
-        tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
-        saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
-      },
-      required: ['randevu_id'],
-    },
-  },
-  {
-    name: 'searchKnowledgeBase',
-    description: 'Bilgi tabanında arama yapar. Araç fiyatları, kampanyalar, servis detayları, garanti bilgileri için kullan. Müşteri bir ürün veya fiyat sorarsa bu aracı kullan.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        sorgu: {
-          type: Type.STRING,
-          description: 'Aranacak konu veya soru (Türkçe)',
+    {
+      name: 'randevuGuncelle',
+      description: desc('tools.randevuGuncelle'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          randevu_id: { type: Type.STRING, description: 'randevuOlustur ile oluşturulan randevunun ID\'si' },
+          calendar_event_id: { type: Type.STRING, description: 'Google Calendar event ID\'si (varsa)' },
+          musteri_adi: { type: Type.STRING, description: 'Güncellenecek müşteri adı soyadı' },
+          telefon: { type: Type.STRING, description: 'Güncellenecek telefon numarası' },
+          randevu_turu: { type: Type.STRING, enum: turuEnum },
+          arac_bilgisi: { type: Type.STRING, description: 'Güncellenecek ek bilgi' },
+          sorun_veya_talep: { type: Type.STRING, description: 'Güncellenecek talep/şikayet' },
+          tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
+          saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
         },
+        required: ['randevu_id'],
       },
-      required: ['sorgu'],
     },
-  },
-  {
-    name: 'musteriSorgula',
-    description: 'Müşterinin telefon numerasıyla sistemden müşteri bilgisini (ad soyad, araç, geçmiş randevular) getirir. Görüşme başında müşteri telefon numerasını söyledikten HEMEN SONRA çağır — böylece müşteriyi ismiyle selamlayabilir ve mevcut bilgileri kullanabilirsin.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası (herhangi formatta — normalize edilir)' },
+    {
+      name: 'searchKnowledgeBase',
+      description: desc('tools.searchKnowledgeBase'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          sorgu: { type: Type.STRING, description: 'Aranacak konu veya soru (Türkçe)' },
+        },
+        required: ['sorgu'],
       },
-      required: ['telefon'],
     },
-  },
-  {
-    name: 'gecmisRandevular',
-    description: 'Müşterinin telefonuna göre önceki servis/randevu kayıtlarını sistemden getirir. Müşteri "geçen sefer", "garantim", "önceki randevum", "ne zaman bakım yaptırmıştım" gibi konulara atıfta bulunduğunda kullan. Müşteri telefon numerasını AÇIKÇA söylemiş olmalı.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefonu (rakamlar, herhangi formatta — +90, 0 vb. olabilir, normalize edilir)' },
-        limit: { type: Type.INTEGER, description: 'En fazla kaç kayıt (default 5, max 20)' },
+    {
+      name: 'musteriSorgula',
+      description: desc('tools.musteriSorgula'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası (herhangi formatta — normalize edilir)' },
+        },
+        required: ['telefon'],
       },
-      required: ['telefon'],
     },
-  },
-  {
-    name: 'randevuMusaitlikKontrol',
-    description: 'Belirli bir tarih veya tarih aralığındaki mevcut randevuları sistemden getirir. Test sürüşü, galeri ziyareti veya servis randevusu öncesi müsaitlik kontrolü için kullan. Bilgi tabanında tarih kısıtı varsa bu aracı kullanarak o tarihlerdeki doluluk durumunu kontrol et.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD). Tek gün için.' },
-        baslangic_tarih: { type: Type.STRING, description: 'Tarih aralığı başlangıcı (YYYY-MM-DD). tarih yerine from/to kullanılabilir.' },
-        bitis_tarih: { type: Type.STRING, description: 'Tarih aralığı bitişi (YYYY-MM-DD).' },
+    {
+      name: 'gecmisRandevular',
+      description: desc('tools.gecmisRandevular'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası' },
+          limit: { type: Type.INTEGER, description: 'En fazla kaç kayıt (default 5, max 20)' },
+        },
+        required: ['telefon'],
       },
-      required: [],
     },
-  },
-  {
-    name: 'cagriySonlandir',
-    description: 'Telefon görüşmesini sonlandırır. YALNIZCA müşteri açıkça veda edip aramayı bitirmek istediğini belirttiğinde kullan (örn: "iyi günler", "görüşürüz", "hoşça kalın"). Kısa bir veda cümlesi söyledikten SONRA çağır — cümle bitmeden çağırma. "Araştırıp döneceğim", "bir dakika bakayım", "kontrol edeyim" gibi geçici durumlar için ASLA çağırma. Web oturumlarında etkisizdir.',
-    parameters: { type: Type.OBJECT, properties: {}, required: [] },
-  },
-]
+    {
+      name: 'randevuMusaitlikKontrol',
+      description: desc('tools.randevuMusaitlikKontrol'),
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD). Tek gün için.' },
+          baslangic_tarih: { type: Type.STRING, description: 'Tarih aralığı başlangıcı (YYYY-MM-DD).' },
+          bitis_tarih: { type: Type.STRING, description: 'Tarih aralığı bitişi (YYYY-MM-DD).' },
+        },
+        required: [],
+      },
+    },
+    {
+      name: 'cagriySonlandir',
+      description: desc('tools.cagriySonlandir'),
+      parameters: { type: Type.OBJECT, properties: {}, required: [] },
+    },
+  ]
+}
 
 export type SessionCallbacks = {
   onReady: () => void
@@ -466,10 +484,12 @@ export async function createLiveSession(
     }
   }
 
+  const toolDeclarations = await buildToolDeclarations()
+
   const liveConfig = {
     responseModalities: [Modality.AUDIO],
     systemInstruction: options.systemPrompt,
-    tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    tools: [{ functionDeclarations: toolDeclarations }],
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: VOICE },

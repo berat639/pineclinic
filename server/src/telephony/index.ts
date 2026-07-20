@@ -351,7 +351,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
             const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
             if (topDocs.length > 0) {
-              ragContext = buildRagPrompt(topDocs)
+              ragContext = await buildRagPrompt(topDocs)
               console.log(
                 `[${shortId}] RAG: ${topDocs.length} belge → ${topDocs
                   .map((d) => d.title)

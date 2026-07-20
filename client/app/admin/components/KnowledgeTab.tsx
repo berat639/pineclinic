@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 
 export interface KnowledgeDoc {
   id: string
-  category: 'genel' | 'servis' | 'galeri' | 'kampanya' | 'sss' | 'arac' | 'musteri'
+  category: string
   title: string
   content: string
   active: boolean
@@ -14,38 +14,16 @@ export interface KnowledgeDoc {
   updatedAt: string
 }
 
-const CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac', 'musteri'] as const
-type Category = typeof CATEGORIES[number]
-
-const CAT_LABEL: Record<Category, string> = {
-  genel: 'Genel',
-  servis: 'Servis',
-  galeri: 'Galeri',
-  kampanya: 'Kampanya',
-  sss: 'SSS',
-  arac: 'Araç',
-  musteri: 'Müşteri',
+interface CategoryDef {
+  id: string
+  slug: string
+  label: string
+  icon: string
+  color: string
+  sortOrder: number
 }
 
-const CAT_ICON: Record<Category, string> = {
-  genel: '🌐',
-  servis: '🔧',
-  galeri: '🏪',
-  kampanya: '🎯',
-  sss: '❓',
-  arac: '🚗',
-  musteri: '👤',
-}
-
-const CAT_COLOR: Record<Category, string> = {
-  genel:    '#60a5fa',
-  servis:   '#34d399',
-  galeri:   '#a78bfa',
-  kampanya: '#fb923c',
-  sss:      '#f59e0b',
-  arac:     '#38bdf8',
-  musteri:  '#f472b6',
-}
+type Category = string
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
@@ -54,14 +32,19 @@ interface ModalProps {
   onClose: () => void
   onSave: (data: { category: Category; title: string; content: string; active: boolean }) => Promise<void>
   saving: boolean
+  categories: CategoryDef[]
 }
 
-function DocModal({ doc, onClose, onSave, saving }: ModalProps) {
+function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   const isEdit = !!doc?.id
   const [category, setCategory] = useState<Category>((doc?.category as Category) || 'genel')
   const [title, setTitle] = useState(doc?.title || '')
   const [content, setContent] = useState(doc?.content || '')
   const [active, setActive] = useState(doc?.active !== false)
+
+  const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
+  const getCatIcon = (slug: string) => categories.find(c => c.slug === slug)?.icon ?? '📁'
+  const getCatLabel = (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -95,14 +78,14 @@ function DocModal({ doc, onClose, onSave, saving }: ModalProps) {
               Kategori
             </label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {CATEGORIES.map(cat => (
-                <button key={cat} type="button" onClick={() => setCategory(cat)} style={{
+              {categories.map(cat => (
+                <button key={cat.slug} type="button" onClick={() => setCategory(cat.slug)} style={{
                   padding: '5px 12px', borderRadius: 20, border: '1px solid', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 500, transition: 'all 0.15s',
-                  background: category === cat ? `rgba(${hexToRgb(CAT_COLOR[cat])}, 0.2)` : 'rgba(255,255,255,0.04)',
-                  borderColor: category === cat ? CAT_COLOR[cat] : 'rgba(255,255,255,0.08)',
-                  color: category === cat ? CAT_COLOR[cat] : '#94a3b8',
+                  background: category === cat.slug ? `rgba(${hexToRgb(cat.color)}, 0.2)` : 'rgba(255,255,255,0.04)',
+                  borderColor: category === cat.slug ? cat.color : 'rgba(255,255,255,0.08)',
+                  color: category === cat.slug ? cat.color : '#94a3b8',
                 }}>
-                  {CAT_ICON[cat]} {CAT_LABEL[cat]}
+                  {cat.icon} {cat.label}
                 </button>
               ))}
             </div>
@@ -202,12 +185,17 @@ export default function KnowledgeTab() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([])
   const [totalEmbedded, setTotalEmbedded] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [categories, setCategories] = useState<CategoryDef[]>([])
   const [catFilter, setCatFilter] = useState<Category | 'all'>('all')
   const [modal, setModal] = useState<{ open: boolean; doc: Partial<KnowledgeDoc> | null }>({ open: false, doc: null })
   const [saving, setSaving] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
+  const getCatIcon = (slug: string) => categories.find(c => c.slug === slug)?.icon ?? '📁'
+  const getCatLabel = (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
 
@@ -219,11 +207,18 @@ export default function KnowledgeTab() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch('/api/knowledge')
+      const [r, catRes] = await Promise.all([
+        fetch('/api/knowledge'),
+        fetch('/api/admin/categories'),
+      ])
       if (!r.ok) throw new Error()
       const data = await r.json()
       setDocs(data.docs || [])
       setTotalEmbedded(data.totalEmbedded || 0)
+      if (catRes.ok) {
+        const cats = await catRes.json()
+        setCategories(cats)
+      }
     } catch {
       showToast('Bilgi bankası yüklenemedi', 'error')
     }
@@ -321,14 +316,14 @@ export default function KnowledgeTab() {
       <div className="glass-card" style={{ padding: '0.85rem 1.25rem', marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Kategori filtre */}
-          {(['all', ...CATEGORIES] as const).map(cat => (
+          {(['all', ...categories.map(c => c.slug)] as const).map(cat => (
             <button key={cat} onClick={() => setCatFilter(cat as Category | 'all')} style={{
               padding: '5px 12px', borderRadius: 8, border: '1px solid', fontSize: '0.77rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s',
               background: catFilter === cat ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.04)',
               borderColor: catFilter === cat ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.08)',
               color: catFilter === cat ? '#60a5fa' : '#94a3b8',
             }}>
-              {cat === 'all' ? 'Tümü' : `${CAT_ICON[cat as Category]} ${CAT_LABEL[cat as Category]}`}
+              {cat === 'all' ? 'Tümü' : `${getCatIcon(cat)} ${getCatLabel(cat)}`}
             </button>
           ))}
         </div>
@@ -385,7 +380,7 @@ export default function KnowledgeTab() {
         /* Doc grid */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '1rem' }}>
           {filtered.map(doc => {
-            const color = CAT_COLOR[doc.category as Category] || '#60a5fa'
+            const color = getCatColor(doc.category)
             const hasEmbedding = !!doc.embeddedAt
 
             return (
@@ -404,7 +399,7 @@ export default function KnowledgeTab() {
                         padding: '2px 8px', borderRadius: 20, border: `1px solid rgba(${hexToRgb(color)}, 0.25)`,
                         flexShrink: 0,
                       }}>
-                        {CAT_ICON[doc.category as Category]} {CAT_LABEL[doc.category as Category]}
+                        {getCatIcon(doc.category)} {getCatLabel(doc.category)}
                       </span>
                     </div>
                     <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', lineHeight: 1.3 }}>
@@ -498,6 +493,7 @@ export default function KnowledgeTab() {
           onClose={() => !saving && setModal({ open: false, doc: null })}
           onSave={handleSave}
           saving={saving}
+          categories={categories}
         />
       )}
     </div>
