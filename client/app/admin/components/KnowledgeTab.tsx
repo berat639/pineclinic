@@ -192,10 +192,46 @@ export default function KnowledgeTab() {
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [catMgmtOpen, setCatMgmtOpen] = useState(false)
+  const [newCatSlug, setNewCatSlug] = useState('')
+  const [newCatLabel, setNewCatLabel] = useState('')
+  const [newCatIcon, setNewCatIcon] = useState('📁')
+  const [newCatColor, setNewCatColor] = useState('#60a5fa')
+  const [catSaving, setCatSaving] = useState(false)
 
   const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
   const getCatIcon = (slug: string) => categories.find(c => c.slug === slug)?.icon ?? '📁'
   const getCatLabel = (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug
+
+  const addCategory = async () => {
+    if (!newCatSlug.trim() || !newCatLabel.trim()) return
+    setCatSaving(true)
+    try {
+      const res = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: newCatSlug.trim().toLowerCase(), label: newCatLabel.trim(), icon: newCatIcon, color: newCatColor }),
+      })
+      if (res.ok) {
+        setNewCatSlug(''); setNewCatLabel(''); setNewCatIcon('📁'); setNewCatColor('#60a5fa')
+        await load()
+        showToast('✅ Kategori eklendi')
+      } else {
+        const data = await res.json()
+        showToast(data.error || 'Hata', 'error')
+      }
+    } catch { showToast('Kategori eklenemedi', 'error') }
+    setCatSaving(false)
+  }
+
+  const deleteCategory = async (id: string) => {
+    if (!confirm('Bu kategoriyi silmek istediğinizden emin misiniz? Bağlı belgeler Genel kategorisine taşınacak.')) return
+    try {
+      const res = await fetch(`/api/admin/categories/${id}`, { method: 'DELETE' })
+      if (res.ok) { await load(); showToast('🗑 Kategori silindi') }
+      else showToast('Silinemedi', 'error')
+    } catch { showToast('Hata', 'error') }
+  }
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
 
@@ -360,6 +396,80 @@ export default function KnowledgeTab() {
             ➕ Yeni Belge
           </button>
         </div>
+      </div>
+
+      {/* Category Management */}
+      <div className="glass-card" style={{ padding: '0.75rem 1.25rem', marginBottom: '1rem' }}>
+        <button onClick={() => setCatMgmtOpen(!catMgmtOpen)} style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>⚙️ Kategori Yönetimi</span>
+          <span style={{ fontSize: 12, color: '#64748b', transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+        </button>
+
+        {catMgmtOpen && (
+          <div style={{ marginTop: 12 }}>
+            {/* Existing categories */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {categories.map(cat => (
+                <div key={cat.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', borderRadius: 20,
+                  background: `rgba(${hexToRgb(cat.color)}, 0.15)`,
+                  border: `1px solid ${cat.color}`,
+                  fontSize: 12, color: cat.color,
+                }}>
+                  {cat.icon} {cat.label}
+                  {cat.slug !== 'genel' && (
+                    <button onClick={() => deleteCategory(cat.id)} style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#ef4444', fontSize: 11, padding: 0, marginLeft: 4,
+                    }}>✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add new category */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 100px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Slug (key)</label>
+                <input value={newCatSlug} onChange={e => setNewCatSlug(e.target.value)} placeholder="ornek" style={{
+                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                }} />
+              </div>
+              <div style={{ flex: '1 1 120px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Etiket</label>
+                <input value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)} placeholder="Örnek Kategori" style={{
+                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                }} />
+              </div>
+              <div style={{ flex: '0 0 50px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>İkon</label>
+                <input value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} style={{
+                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none', textAlign: 'center',
+                }} />
+              </div>
+              <div style={{ flex: '0 0 60px' }}>
+                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Renk</label>
+                <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{
+                  width: '100%', height: 28, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent',
+                }} />
+              </div>
+              <button onClick={addCategory} disabled={catSaving || !newCatSlug.trim() || !newCatLabel.trim()} style={{
+                padding: '5px 14px', borderRadius: 6, background: 'rgba(34,197,94,0.15)',
+                border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11,
+                cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
+              }}>
+                {catSaving ? '...' : '+ Ekle'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Loading */}
