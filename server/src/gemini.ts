@@ -111,7 +111,7 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
           calendar_event_id: { type: Type.STRING, description: 'Google Calendar event ID\'si (varsa)' },
           musteri_adi: { type: Type.STRING, description: 'Güncellenecek müşteri adı soyadı' },
           telefon: { type: Type.STRING, description: 'Güncellenecek telefon numarası' },
-          randevu_turu: { type: Type.STRING, enum: turuEnum },
+          randevu_turu: { type: Type.STRING, description: 'Güncellenecek randevu türü' },
           arac_bilgisi: { type: Type.STRING, description: 'Güncellenecek ek bilgi' },
           sorun_veya_talep: { type: Type.STRING, description: 'Güncellenecek talep/şikayet' },
           tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
