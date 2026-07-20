@@ -48,26 +48,47 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
   // Helper: get description from DB or fallback
   const desc = (key: string) => dbDescs[key] ?? getDefaultToolDescription(key) ?? ''
 
-  // Get enum values for randevu_turu (comma-separated in DB)
-  const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
-    .split(',').map(s => s.trim()).filter(Boolean)
-
-  // ── Custom fields from DB ─────────────────────────────────────────────────
+  // ── Fields from DB ────────────────────────────────────────────────────────
   // Format in DB (tools.custom_fields): JSON array of {name, description, required, active}
-  let customFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
+  // If custom_fields is populated, it defines ALL fields for randevuOlustur.
+  // If empty/missing, fall back to hardcoded defaults.
+  let allFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
   try {
     const raw = dbDescs['tools.custom_fields']
-    if (raw) customFields = JSON.parse(raw)
+    if (raw) allFields = JSON.parse(raw)
   } catch { /* ignore parse errors */ }
 
-  // Build custom field properties for randevuOlustur (only active fields)
-  const customProps: Record<string, { type: typeof Type.STRING; description: string }> = {}
-  const customRequired: string[] = []
-  for (const f of customFields) {
-    if (f.active === false) continue // skip inactive fields
-    const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
-    customProps[safeName] = { type: Type.STRING, description: f.description }
-    if (f.required) customRequired.push(safeName)
+  // Build properties and required list from active fields
+  const fieldProps: Record<string, unknown> = {}
+  const fieldRequired: string[] = []
+  
+  if (allFields.length > 0) {
+    // Dynamic mode: use only fields from DB
+    for (const f of allFields) {
+      if (f.active === false) continue
+      const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
+      // Special handling for enum fields (value contains comma-separated options)
+      if (safeName === 'randevu_turu' && f.description.includes(',')) {
+        const enumVals = f.description.split(',').map(s => s.trim()).filter(Boolean)
+        fieldProps[safeName] = { type: Type.STRING, enum: enumVals, description: 'Randevu türü' }
+      } else {
+        fieldProps[safeName] = { type: Type.STRING, description: f.description }
+      }
+      if (f.required) fieldRequired.push(safeName)
+    }
+  } else {
+    // Fallback: hardcoded defaults (backward compat)
+    const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
+      .split(',').map(s => s.trim()).filter(Boolean)
+    fieldProps.musteri_adi = { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') }
+    fieldProps.telefon = { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') }
+    fieldProps.randevu_turu = { type: Type.STRING, enum: turuEnum, description: desc('tools.randevuOlustur.randevu_turu') }
+    fieldProps.arac_bilgisi = { type: Type.STRING, description: desc('tools.randevuOlustur.arac_bilgisi') }
+    fieldProps.plaka = { type: Type.STRING, description: desc('tools.randevuOlustur.plaka') }
+    fieldProps.sorun_veya_talep = { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') }
+    fieldProps.tarih = { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') }
+    fieldProps.saat = { type: Type.STRING, description: desc('tools.randevuOlustur.saat') }
+    fieldRequired.push('musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat')
   }
 
   return [
@@ -76,22 +97,8 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
       description: desc('tools.randevuOlustur'),
       parameters: {
         type: Type.OBJECT,
-        properties: {
-          musteri_adi: { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') },
-          telefon: { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') },
-          randevu_turu: {
-            type: Type.STRING,
-            enum: turuEnum,
-            description: desc('tools.randevuOlustur.randevu_turu'),
-          },
-          arac_bilgisi: { type: Type.STRING, description: desc('tools.randevuOlustur.arac_bilgisi') },
-          plaka: { type: Type.STRING, description: desc('tools.randevuOlustur.plaka') },
-          sorun_veya_talep: { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') },
-          tarih: { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') },
-          saat: { type: Type.STRING, description: desc('tools.randevuOlustur.saat') },
-          ...customProps,
-        },
-        required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat', ...customRequired],
+        properties: fieldProps as Record<string, { type: typeof Type.STRING; description: string }>,
+        required: fieldRequired,
       },
     },
     {

@@ -130,45 +130,9 @@ export default function PromptEditor() {
 
       {fieldsExpanded && (
         <div style={{ marginTop: 16 }}>
-          {/* Sabit alanlar */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 8 }}>Sabit Alanlar:</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {tools.filter(t => t.type === 'param' && t.toolName === 'randevuOlustur').map(param => (
-                <div key={param.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                  background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: 8,
-                }}>
-                  <code style={{ fontSize: 10, color: '#7dd3fc', flex: '0 0 100px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {param.key.split('.').pop()}
-                  </code>
-                  <input
-                    value={editValues[param.key] ?? param.value}
-                    onChange={e => setEditValues(prev => ({ ...prev, [param.key]: e.target.value }))}
-                    style={{
-                      flex: 1, padding: '4px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)',
-                      borderRadius: 5, color: '#f0f4ff', fontSize: 11, outline: 'none',
-                    }}
-                  />
-                  <button
-                    onClick={() => handleSaveParam(param.key)}
-                    disabled={saving === param.key || editValues[param.key] === param.value}
-                    style={{
-                      padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(34,197,94,0.25)',
-                      background: 'rgba(34,197,94,0.1)', color: '#22c55e', fontSize: 10, cursor: 'pointer',
-                      opacity: editValues[param.key] !== param.value ? 1 : 0.3,
-                    }}
-                  >✓</button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Özel alanlar */}
+          {/* Tüm alanlar (aktif/pasif toggle ile) */}
           {customFields.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Eklenen Özel Alanlar:</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {customFields.map((f, idx) => (
                   <div key={idx} style={{
