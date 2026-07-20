@@ -3,8 +3,9 @@ import { useState, useCallback } from 'react'
 
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
-  type: 'service' | 'test_drive' | 'gallery_visit' | 'other'
+  type: string
   vehicleInfo?: string; issueOrRequest?: string; date: string; time: string
+  extraFields?: Record<string, string> | null
 }
 
 const TYPE_LABEL: Record<string, string> = { service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri', other: 'Diğer' }
@@ -80,29 +81,33 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    {['Tür', 'Müşteri', 'Telefon', 'Tarih & Saat', 'Oluşturulma', ''].map((h, i) => (
+                    {['Tür', 'Müşteri', 'Telefon', 'Talep/Detay', 'Tarih & Saat', ''].map((h, i) => (
                       <th key={i} style={{ padding: '0.8rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((a, i) => (
+                  {filtered.map((a, i) => {
+                    const extraSummary = a.extraFields ? Object.values(a.extraFields).filter(Boolean).join(', ') : ''
+                    const detailText = [a.issueOrRequest, a.vehicleInfo, extraSummary].filter(Boolean).join(' • ')
+                    return (
                     <tr key={a.id} onClick={() => setSelectedId(selectedId === a.id ? null : a.id)}
                       style={{ borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', cursor: 'pointer', transition: 'background 0.15s' }}
                     >
                       <td style={{ padding: '0.8rem 1rem', whiteSpace: 'nowrap' }}>
-                        <span className={`badge ${TYPE_BADGE[a.type]}`}>{TYPE_ICON[a.type]} {TYPE_LABEL[a.type]}</span>
+                        <span className={`badge ${TYPE_BADGE[a.type] || 'badge-other'}`}>{TYPE_ICON[a.type] || '📋'} {TYPE_LABEL[a.type] || a.type}</span>
                       </td>
                       <td style={{ padding: '0.8rem 1rem' }}>
                         <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{a.customerName || <span style={{ color: '#475569', fontStyle: 'italic' }}>—</span>}</div>
-                        {a.vehicleInfo && <div style={{ fontSize: '0.73rem', color: '#64748b', marginTop: 2 }}>{a.vehicleInfo}</div>}
                       </td>
                       <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>{a.phone || '—'}</td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.78rem', color: '#94a3b8', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {detailText || '—'}
+                      </td>
                       <td style={{ padding: '0.8rem 1rem', whiteSpace: 'nowrap' }}>
                         <div style={{ fontSize: '0.84rem', fontWeight: 500 }}>{fmtDate(a.date)}</div>
                         {a.time && <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>🕐 {a.time}</div>}
                       </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.77rem', color: '#475569', whiteSpace: 'nowrap' }}>{fmtCreated(a.createdAt)}</td>
                       <td style={{ padding: '0.8rem 1rem' }}>
                         <button onClick={e => { e.stopPropagation(); handleDelete(a.id) }} disabled={deleting === a.id}
                           className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.74rem', opacity: deleting === a.id ? 0.5 : 1 }}>
@@ -110,7 +115,8 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -132,14 +138,21 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
                 {([
                   ['👤 Müşteri', selected.customerName],
                   ['📞 Telefon', selected.phone],
-                  ['🚗 Araç', selected.vehicleInfo],
-                  ['📋 Talep', selected.issueOrRequest],
+                  ['� Talep', selected.issueOrRequest],
                   ['📅 Tarih', fmtDate(selected.date)],
                   ['🕐 Saat', selected.time],
+                  ['ℹ️ Ek Bilgi', selected.vehicleInfo],
                   ['⏱ Oluşturulma', fmtCreated(selected.createdAt)],
                 ] as [string, string | undefined][]).map(([label, value], i) => value && (
                   <div key={i}>
                     <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
+                    <div style={{ fontSize: '0.875rem', color: '#e2e8f0' }}>{value}</div>
+                  </div>
+                ))}
+                {/* Extra fields */}
+                {selected.extraFields && Object.entries(selected.extraFields).map(([key, value]) => value && (
+                  <div key={key}>
+                    <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>{key.replace(/_/g, ' ')}</div>
                     <div style={{ fontSize: '0.875rem', color: '#e2e8f0' }}>{value}</div>
                   </div>
                 ))}
