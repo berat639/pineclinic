@@ -1177,6 +1177,9 @@ export default function AdminPage() {
                 )}
               </div>
 
+              {/* ── AI Prompt & Tool Yönetimi ─────────────────────── */}
+              <PromptEditor />
+
             </div>
           )}
 
@@ -1930,9 +1933,6 @@ CLIENT_APP_URL=http://localhost:3000`}</pre>
                   </p>
                 </div>
               </details>
-
-              {/* ── AI Prompt Yönetimi ─────────────────────────────── */}
-              <PromptEditor />
 
             </div>
           )}
