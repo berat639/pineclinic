@@ -729,10 +729,12 @@ const app = new Elysia()
     const { key } = params
     const { value } = (body ?? {}) as { value?: string }
     if (!key.startsWith('tools.')) { set.status = 400; return { error: 'Geçersiz key' } }
-    if (!value || value.trim().length < 3) { set.status = 400; return { error: 'Değer en az 3 karakter olmalı' } }
+    if (!value) { set.status = 400; return { error: 'Değer boş olamaz' } }
+    // custom_fields can be "[]" (2 chars), other keys need 3+
+    if (key !== 'tools.custom_fields' && value.trim().length < 3) { set.status = 400; return { error: 'Değer en az 3 karakter olmalı' } }
     const { setToolDescription } = await import('./db/repositories/settings')
     await setToolDescription(key, value.trim())
-    await invalidatePromptCache() // also invalidate tools cache
+    await invalidatePromptCache()
     return { success: true, key, updatedAt: new Date().toISOString() }
   })
 
