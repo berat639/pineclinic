@@ -737,6 +737,45 @@ export default function AdminPage() {
     } catch { showToast('error', 'Belge silinemedi') }
   }
 
+  const [editingKbId, setEditingKbId] = useState<string | null>(null)
+  const [editKbTitle, setEditKbTitle] = useState('')
+  const [editKbContent, setEditKbContent] = useState('')
+  const [editKbCategory, setEditKbCategory] = useState('')
+  const [editKbSaving, setEditKbSaving] = useState(false)
+
+  const startKbEdit = (doc: KnowledgeDoc) => {
+    setEditingKbId(doc.id)
+    setEditKbTitle(doc.title)
+    setEditKbContent(doc.content)
+    setEditKbCategory(doc.category)
+    setOpenKbId(doc.id)
+  }
+
+  const handleKbSave = async () => {
+    if (!editingKbId || !editKbTitle.trim() || !editKbContent.trim()) return
+    setEditKbSaving(true)
+    try {
+      const res = await fetch(`/api/admin/knowledge/${editingKbId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editKbTitle.trim(), content: editKbContent.trim(), category: editKbCategory }),
+      })
+      if (!res.ok) throw new Error()
+      setEditingKbId(null)
+      showToast('success', 'Belge güncellendi')
+      fetchKnowledgeDocs()
+    } catch { showToast('error', 'Güncelleme başarısız') }
+    setEditKbSaving(false)
+  }
+
+  const handleKbToggle = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/knowledge/${id}/toggle`, { method: 'PATCH' })
+      if (!res.ok) throw new Error()
+      fetchKnowledgeDocs()
+    } catch { showToast('error', 'Durum değiştirilemedi') }
+  }
+
   // ── Logout ────────────────────────────────────────────────────────────────
 
   const handleLogout = async () => {
@@ -1197,23 +1236,34 @@ export default function AdminPage() {
                             </button>
                           </div>
                           {expanded && (
-                            <div
-                              style={{
-                                margin: '0 12px 12px 38px',
-                                padding: '12px 14px',
-                                maxHeight: 280,
-                                overflowY: 'auto',
-                                fontSize: 12,
-                                lineHeight: 1.55,
-                                color: 'rgba(226,232,240,0.92)',
-                                background: 'rgba(0,0,0,0.25)',
-                                border: '1px solid rgba(255,255,255,0.06)',
-                                borderRadius: 8,
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {doc.content?.trim() ? doc.content : 'İçerik boş.'}
+                            <div style={{ margin: '0 12px 12px 38px', padding: '12px 14px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8 }}>
+                              {editingKbId === doc.id ? (
+                                /* Edit mode */
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <input value={editKbTitle} onChange={e => setEditKbTitle(e.target.value)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 12, outline: 'none' }} placeholder="Başlık" />
+                                    <select value={editKbCategory} onChange={e => setEditKbCategory(e.target.value)} style={{ padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none' }}>
+                                      {kbCategories.map(c => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+                                    </select>
+                                  </div>
+                                  <textarea value={editKbContent} onChange={e => setEditKbContent(e.target.value)} rows={6} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 12, lineHeight: 1.6, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }} />
+                                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                    <button onClick={() => setEditingKbId(null)} style={{ padding: '5px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8', fontSize: 11, cursor: 'pointer' }}>İptal</button>
+                                    <button onClick={handleKbSave} disabled={editKbSaving} style={{ padding: '5px 14px', borderRadius: 6, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>{editKbSaving ? '...' : '💾 Kaydet'}</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* View mode */
+                                <div>
+                                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(226,232,240,0.92)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto' }}>
+                                    {doc.content?.trim() ? doc.content : 'İçerik boş.'}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
+                                    <button onClick={() => handleKbToggle(doc.id)} style={{ padding: '4px 10px', borderRadius: 5, background: doc.active ? 'rgba(251,146,60,0.1)' : 'rgba(34,197,94,0.1)', border: `1px solid ${doc.active ? 'rgba(251,146,60,0.25)' : 'rgba(34,197,94,0.25)'}`, color: doc.active ? '#fb923c' : '#22c55e', fontSize: 10, cursor: 'pointer' }}>{doc.active ? 'Pasif Yap' : 'Aktif Yap'}</button>
+                                    <button onClick={() => startKbEdit(doc)} style={{ padding: '4px 10px', borderRadius: 5, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#60a5fa', fontSize: 10, cursor: 'pointer' }}>✏️ Düzenle</button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
