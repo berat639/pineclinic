@@ -55,23 +55,15 @@ export async function retrieveTopK(query: string, k = 5): Promise<RankedDoc[]> {
 
 import { listCategories } from './db/repositories/categories'
 
-// Category label cache (refreshed lazily)
-let categoryLabelCache: Record<string, string> = {}
-let categoryLabelCacheAt = 0
-const CATEGORY_CACHE_TTL = 60_000 // 60s
-
 async function getCategoryLabels(): Promise<Record<string, string>> {
-  if (Date.now() - categoryLabelCacheAt < CATEGORY_CACHE_TTL && Object.keys(categoryLabelCache).length > 0) {
-    return categoryLabelCache
-  }
   try {
     const cats = await listCategories()
     const map: Record<string, string> = {}
     for (const c of cats) map[c.slug] = c.label.toUpperCase()
-    categoryLabelCache = map
-    categoryLabelCacheAt = Date.now()
-  } catch { /* keep stale cache */ }
-  return categoryLabelCache
+    return map
+  } catch {
+    return {}
+  }
 }
 
 export async function buildRagPrompt(docs: RankedDoc[]): Promise<string> {

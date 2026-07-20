@@ -46,7 +46,6 @@ import {
 import { embedText, buildRagPrompt, PRE_WARM_QUERY } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
 import { listCategories, createCategory, updateCategory, deleteCategory, seedCategories } from './db/repositories/categories'
-import { redisClient } from './db/redis'
 
 const callerRegistry = new Map<string, string>()
 
@@ -85,44 +84,28 @@ const ai = createAI()
 // ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
 const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
 
-const PROMPT_CACHE_KEY = 'voiceai:prompt_sections'
-const PROMPT_CACHE_TTL = 60 // seconds
-
 /**
- * Build system prompt dynamically from DB sections (with Redis cache).
- * Falls back to default-prompts.ts values for missing sections.
+ * Build system prompt dynamically from DB sections.
+ * No cache — always reads fresh from DB for instant updates.
  */
 async function buildSystemPrompt(greeting: string): Promise<string> {
-  // Try Redis cache first
   let dbSections: Record<string, string> = {}
   try {
-    const cached = await redisClient.get(PROMPT_CACHE_KEY)
-    if (cached) {
-      dbSections = JSON.parse(cached)
-    } else {
-      const rows = await getAllPromptSections()
-      dbSections = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.value]))
-      await redisClient.setex(PROMPT_CACHE_KEY, PROMPT_CACHE_TTL, JSON.stringify(dbSections))
-    }
+    const rows = await getAllPromptSections()
+    dbSections = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.value]))
   } catch {
-    // Redis/DB failure — use defaults only
+    // DB failure — use defaults only
   }
 
   const parts: string[] = []
   for (const key of PROMPT_SECTION_KEYS) {
     let value = dbSections[key] ?? getDefaultPromptValue(key) ?? ''
-    // Replace {{greeting}} placeholder in greeting_flow section
     if (key === 'prompt.greeting_flow') {
       value = value.replace(/\{\{greeting\}\}/g, greeting)
     }
     if (value) parts.push(value)
   }
   return parts.join('\n\n')
-}
-
-/** Invalidate prompt cache (call after PUT/DELETE) */
-async function invalidatePromptCache(): Promise<void> {
-  try { await redisClient.del(PROMPT_CACHE_KEY) } catch { /* ignore */ }
 }
 
 // ── Session tracking ──────────────────────────────────────────────────────────
@@ -668,7 +651,6 @@ const app = new Elysia()
     if (!key.startsWith('prompt.')) { set.status = 400; return { error: 'Geçersiz key' } }
     if (!value || value.trim().length < 5) { set.status = 400; return { error: 'Değer en az 5 karakter olmalı' } }
     await setPromptSection(key, value.trim())
-    await invalidatePromptCache()
     return { success: true, key, updatedAt: new Date().toISOString() }
   })
 
@@ -676,7 +658,6 @@ const app = new Elysia()
     const { key } = params
     if (!key.startsWith('prompt.')) { set.status = 400; return { error: 'Geçersiz key' } }
     await resetPromptSection(key)
-    await invalidatePromptCache()
     const defaultVal = getDefaultPromptValue(key)
     return { success: true, key, value: defaultVal }
   })
@@ -734,7 +715,6 @@ const app = new Elysia()
     if (key !== 'tools.custom_fields' && value.trim().length < 3) { set.status = 400; return { error: 'Değer en az 3 karakter olmalı' } }
     const { setToolDescription } = await import('./db/repositories/settings')
     await setToolDescription(key, value.trim())
-    await invalidatePromptCache()
     return { success: true, key, updatedAt: new Date().toISOString() }
   })
 
@@ -744,7 +724,6 @@ const app = new Elysia()
     const { resetToolDescription } = await import('./db/repositories/settings')
     const { getDefaultToolDescription } = await import('./data/default-tools')
     await resetToolDescription(key)
-    await invalidatePromptCache()
     return { success: true, key, value: getDefaultToolDescription(key) }
   })
 
