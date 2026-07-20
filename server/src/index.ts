@@ -711,6 +711,17 @@ const app = new Elysia()
         isCustom: !!dbDescs[p.key],
       })),
     ]
+    // Include custom_fields entry so frontend can load it
+    if (dbDescs['tools.custom_fields']) {
+      allItems.push({
+        key: 'tools.custom_fields',
+        toolName: 'randevuOlustur',
+        label: 'Özel Alanlar JSON',
+        type: 'param' as const,
+        value: dbDescs['tools.custom_fields'],
+        isCustom: true,
+      })
+    }
     return allItems
   })
 
