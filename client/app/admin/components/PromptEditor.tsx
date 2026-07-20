@@ -346,23 +346,6 @@ export default function PromptEditor() {
                           fontFamily: 'monospace', lineHeight: 1.5, resize: 'vertical', outline: 'none',
                         }}
                       />
-                      {/* Related params */}
-                      {tools.filter(p => p.type === 'param' && p.toolName === tool.toolName).map(param => (
-                        <div key={param.key} style={{ marginTop: 8 }}>
-                          <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>
-                            {param.label} {param.isCustom && <span style={{ color: '#fb923c' }}>●</span>}
-                          </label>
-                          <input
-                            value={editValues[param.key] ?? ''}
-                            onChange={e => setEditValues(prev => ({ ...prev, [param.key]: e.target.value }))}
-                            style={{
-                              width: '100%', padding: '6px 10px',
-                              background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)',
-                              borderRadius: 6, color: '#f0f4ff', fontSize: 11, fontFamily: 'monospace', outline: 'none',
-                            }}
-                          />
-                        </div>
-                      ))}
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
                         {tool.isCustom && (
                           <button onClick={() => handleReset(tool.key)} disabled={saving === tool.key}
@@ -370,7 +353,7 @@ export default function PromptEditor() {
                             ↺ Sıfırla
                           </button>
                         )}
-                        <button onClick={() => { handleSave(tool.key); tools.filter(p => p.type === 'param' && p.toolName === tool.toolName).forEach(p => { if (editValues[p.key] !== p.value) handleSave(p.key) }) }}
+                        <button onClick={() => handleSave(tool.key)}
                           disabled={saving === tool.key || !hasChanges}
                           style={{
                             padding: '4px 12px', borderRadius: 6,
@@ -412,16 +395,36 @@ export default function PromptEditor() {
 
         {fieldsExpanded && (
           <div style={{ marginTop: 16 }}>
-            {/* Sabit alanlar (bilgilendirme) */}
-            <div style={{ marginBottom: 14, padding: '10px 12px', background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.15)', borderRadius: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 6 }}>Sabit Alanlar (değiştirilemez, her zaman sorulur):</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.8 }}>
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>musteri_adi</code>{' '}
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>telefon</code>{' '}
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>randevu_turu</code>{' '}
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>tarih</code>{' '}
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>saat</code>{' '}
-                <code style={{ background: 'rgba(0,0,0,0.2)', padding: '1px 5px', borderRadius: 3 }}>sorun_veya_talep</code>
+            {/* Sabit alanlar (düzenlenebilir açıklamalar) */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 8 }}>Sabit Alanlar (açıklamaları düzenlenebilir):</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {tools.filter(t => t.type === 'param' && t.toolName === 'randevuOlustur').map(param => (
+                  <div key={param.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                    background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: 8,
+                  }}>
+                    <code style={{ fontSize: 10, color: '#7dd3fc', flex: '0 0 90px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{param.key.split('.').pop()}</code>
+                    <input
+                      value={editValues[param.key] ?? param.value}
+                      onChange={e => setEditValues(prev => ({ ...prev, [param.key]: e.target.value }))}
+                      style={{
+                        flex: 1, padding: '4px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.06)',
+                        borderRadius: 5, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSave(param.key)}
+                      disabled={saving === param.key || editValues[param.key] === param.value}
+                      style={{
+                        padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(34,197,94,0.25)',
+                        background: 'rgba(34,197,94,0.1)', color: '#22c55e', fontSize: 10, cursor: 'pointer',
+                        opacity: editValues[param.key] !== param.value ? 1 : 0.3,
+                      }}
+                    >✓</button>
+                  </div>
+                ))}
               </div>
             </div>
 
