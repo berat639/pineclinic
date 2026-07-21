@@ -661,11 +661,22 @@ export async function createLiveSession(
           return
         }
         const code = (e as { code?: number } | undefined)?.code
+
+        // Bağlantı stabil kaldıysa (>10s) sayacı sıfırla
+        const sinceLastSuccess = Date.now() - lastReconnectSuccessAt
+        if (lastReconnectSuccessAt > 0 && sinceLastSuccess >= STABLE_CONNECTION_MS) {
+          reconnectAttempts = 0
+        }
+
         // Beklenmedik kapanış + elimizde resume handle var → sessizce yeniden
         // bağlan. Aksi halde görüşmeyi gerçekten sonlandır.
         if (resumptionHandle && !reconnecting && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          console.warn(`[Gemini] Beklenmedik kapanış (code=${code ?? '?'}) — resume deneniyor`)
+          console.warn(`[Gemini] Beklenmedik kapanış (code=${code ?? '?'}) — resume deneniyor (attempt=${reconnectAttempts + 1})`)
           void reconnect()
+        } else if (!reconnecting && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          // Handle yok ama hâlâ deneme hakkımız var → fresh reconnect
+          console.warn(`[Gemini] Beklenmedik kapanış (code=${code ?? '?'}) — handle yok, fresh reconnect deneniyor`)
+          void reconnectFresh()
         } else {
           if (code && code !== 1000) console.error(`[Gemini] Kapanış code=${code}, reconnect limit aşıldı veya handle yok`)
           callbacks.onClose()
@@ -684,13 +695,23 @@ export async function createLiveSession(
   }
 
   let reconnectAttempts = 0
+  let lastReconnectSuccessAt = 0
   const MAX_RECONNECT_ATTEMPTS = 5
   const BASE_BACKOFF_MS = 500
+  /** Reconnect sonrası bağlantı bu kadar süre ayakta kalmalı ki sayaç sıfırlansın */
+  const STABLE_CONNECTION_MS = 10_000
 
   async function reconnect() {
     if (reconnecting || closedByUser) return
     reconnecting = true
     reconnectAttempts++
+
+    // Eğer son başarılı reconnect çok yakınsa (bağlantı hemen düştü),
+    // sayacı sıfırlama — sonsuz döngüyü engelle.
+    const sinceLastSuccess = Date.now() - lastReconnectSuccessAt
+    if (lastReconnectSuccessAt > 0 && sinceLastSuccess < STABLE_CONNECTION_MS) {
+      // Bağlantı stabil değildi, sayacı sıfırlama
+    }
 
     if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
       console.error(`[Gemini] Reconnect limiti aşıldı (${MAX_RECONNECT_ATTEMPTS} deneme) — oturum sonlandırılıyor`)
@@ -709,12 +730,57 @@ export async function createLiveSession(
     const prev = activeSession
     try {
       await connect(resumptionHandle)
+      lastReconnectSuccessAt = Date.now()
       console.log('[Gemini] Resume ile yeniden bağlanıldı')
-      reconnectAttempts = 0 // Başarılı — sayacı sıfırla
+      // Sayacı yalnızca bağlantı stabil kaldıysa sıfırla (onclose'da kontrol edilir).
+      // Hemen düşerse sayaç artmaya devam eder → MAX'a ulaşınca durur.
       try { prev?.close() } catch {}
     } catch (err) {
       console.error('[Gemini] Reconnect başarısız:', err)
       resumptionHandle = undefined // Stale handle'ı temizle
+      reconnecting = false
+      // Stale handle ile resume başarısız olduysa handle'sız (fresh) bir deneme daha yap
+      if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+        console.log('[Gemini] Handle\'sız (fresh) reconnect deneniyor...')
+        reconnecting = false
+        void reconnectFresh()
+      } else {
+        callbacks.onClose()
+      }
+      return
+    } finally {
+      reconnecting = false
+    }
+  }
+
+  /** Stale resume handle ile bağlantı kurulamadığında handle'sız yeni session aç. */
+  async function reconnectFresh() {
+    if (reconnecting || closedByUser) return
+    reconnecting = true
+    reconnectAttempts++
+
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      console.error(`[Gemini] Fresh reconnect limiti de aşıldı — oturum sonlandırılıyor`)
+      reconnecting = false
+      resumptionHandle = undefined
+      callbacks.onClose()
+      return
+    }
+
+    console.log(`[Gemini] Fresh reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`)
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    if (closedByUser) { reconnecting = false; return }
+
+    const prev = activeSession
+    try {
+      resumptionHandle = undefined
+      await connect() // handle'sız → yeni session
+      lastReconnectSuccessAt = Date.now()
+      console.log('[Gemini] Fresh session ile yeniden bağlanıldı')
+      try { prev?.close() } catch {}
+    } catch (err) {
+      console.error('[Gemini] Fresh reconnect de başarısız:', err)
       reconnecting = false
       callbacks.onClose()
       return
