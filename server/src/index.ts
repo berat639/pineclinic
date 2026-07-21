@@ -860,7 +860,13 @@ const app = new Elysia()
   })
 
   // ── WebSocket: Voice streaming ──────────────────────────────────────────────
+  // Web session koruma sabitleri
+  const WS_IDLE_TIMEOUT_MS  = 5 * 60_000   // 5 dk ses yoksa kapat
+  const WS_MAX_SESSION_MS   = 30 * 60_000  // 30 dk max session ömrü
+  const WS_PING_INTERVAL_MS = 30_000       // 30s ping
+
   .ws('/ws', {
+    idleTimeout: 120, // Elysia seviyesi idle (saniye) — ek güvenlik ağı
 
     async open(ws) {
       const shortId = randomUUID().slice(0, 8)
@@ -875,6 +881,32 @@ const app = new Elysia()
         userAudioChunks: [],
         shortId,
       }
+      // ── Idle + max session timer'ları ──
+      let lastActivityAt = Date.now()
+      const idleTimer = setInterval(() => {
+        const idleMs = Date.now() - lastActivityAt
+        const totalMs = Date.now() - startedAtMs
+        if (totalMs > WS_MAX_SESSION_MS) {
+          console.log(`[${shortId}] Max session süresi aşıldı (${Math.round(totalMs / 60_000)}dk) — kapatılıyor`)
+          ws.send(JSON.stringify({ type: 'error', message: 'Maksimum oturum süresi doldu.' }))
+          ws.close()
+          return
+        }
+        if (idleMs > WS_IDLE_TIMEOUT_MS) {
+          console.log(`[${shortId}] WS idle timeout (${Math.round(idleMs / 60_000)}dk ses yok) — kapatılıyor`)
+          ws.send(JSON.stringify({ type: 'error', message: 'Uzun süredir ses alınamadı, oturum kapatıldı.' }))
+          ws.close()
+        }
+      }, 30_000)
+      ;(ws.data as any).idleTimer = idleTimer
+      ;(ws.data as any).touchActivity = () => { lastActivityAt = Date.now() }
+
+      // Heartbeat — ölü bağlantıları tespit et
+      const pingTimer = setInterval(() => {
+        try { ws.send(JSON.stringify({ type: 'ping' })) } catch {}
+      }, WS_PING_INTERVAL_MS)
+      ;(ws.data as any).pingTimer = pingTimer
+
       try {
         // RAG pre-warm
         let ragContext = ''
@@ -937,14 +969,23 @@ const app = new Elysia()
       const shortId = (ws.data as any).sessionId as string
       const info = sessions.get(shortId)
       if (!info) return
+      // Pong — client heartbeat cevabı (activity sayılmaz)
+      if (typeof message === 'string') {
+        try { if (JSON.parse(message as string).type === 'pong') return } catch {}
+      }
       if (message instanceof Buffer || message instanceof Uint8Array) {
         const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
         info.session.sendRealtimeInput({ media: { data: buf.toString('base64'), mimeType: 'audio/pcm;rate=16000' } })
         info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
+        // Ses geldi — idle timer'ı sıfırla
+        ;(ws.data as any).touchActivity?.()
       }
     },
 
     async close(ws) {
+      // Timer'ları temizle
+      clearInterval((ws.data as any).idleTimer)
+      clearInterval((ws.data as any).pingTimer)
       const shortId = (ws.data as any).sessionId as string
       const info = sessions.get(shortId)
       if (info) {
@@ -984,6 +1025,19 @@ const app = new Elysia()
 
     // Seed default categories if not present
     try { await seedCategories() } catch (e) { console.error('[Categories] Seed hatası:', e) }
+
+    // Stale session temizliği — zombi/takılı session'ları periyodik olarak kapat
+    setInterval(() => {
+      const now = Date.now()
+      for (const [id, info] of sessions) {
+        const ageMs = now - info.startedAtMs
+        if (ageMs > 30 * 60_000) {
+          console.log(`[Cleanup] Stale session temizlendi: ${id} (${Math.round(ageMs / 60_000)}dk)`)
+          try { info.session?.close() } catch {}
+          sessions.delete(id)
+        }
+      }
+    }, 60_000)
 
     // ── Telephony (Netgsm SIP Trunk → AudioSocket) ─────────────────────────
     if (process.env.TELEPHONY_ENABLED === '1') {

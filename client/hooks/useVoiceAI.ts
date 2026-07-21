@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
 export type TranscriptEntry = { role: 'user' | 'model'; text: string; id: string }
@@ -61,6 +61,14 @@ export function useVoiceAI(wsUrl: string) {
     }
   }, [])
 
+  // Sayfa kapanınca/yenilenince WS ve mikrofonu temizle
+  const cleanupRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    const handler = () => cleanupRef.current()
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
+
   const start = useCallback(async () => {
     if (statusRef.current !== 'idle' && statusRef.current !== 'error') return
     setServerError(null)
@@ -92,6 +100,10 @@ export function useVoiceAI(wsUrl: string) {
           try {
             const msg = JSON.parse(event.data as string)
             switch (msg.type) {
+              case 'ping':
+                // Server heartbeat — pong ile cevapla
+                try { ws.send(JSON.stringify({ type: 'pong' })) } catch {}
+                break
               case 'ready':
                 setStatusBoth('listening')
                 // Mic'i hemen açma — AI selam bitirsin, sonra aç
@@ -175,6 +187,7 @@ export function useVoiceAI(wsUrl: string) {
     micStartedRef.current = false
     micPendingRef.current = null
   }
+  cleanupRef.current = cleanup
 
   const stop = useCallback(() => {
     cleanup()
