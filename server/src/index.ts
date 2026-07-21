@@ -859,13 +859,13 @@ const app = new Elysia()
     }
   })
 
-  // ── WebSocket: Voice streaming ──────────────────────────────────────────────
-  // Web session koruma sabitleri
-  const WS_IDLE_TIMEOUT_MS  = 5 * 60_000   // 5 dk ses yoksa kapat
-  const WS_MAX_SESSION_MS   = 30 * 60_000  // 30 dk max session ömrü
-  const WS_PING_INTERVAL_MS = 30_000       // 30s ping
+// ── Web session koruma sabitleri ──────────────────────────────────────────────
+const WS_IDLE_TIMEOUT_MS  = 5 * 60_000   // 5 dk ses yoksa kapat
+const WS_MAX_SESSION_MS   = 30 * 60_000  // 30 dk max session ömrü
+const WS_PING_INTERVAL_MS = 30_000       // 30s ping
 
-  .ws('/ws', {
+// ── WebSocket: Voice streaming ──────────────────────────────────────────────
+app.ws('/ws', {
     idleTimeout: 120, // Elysia seviyesi idle (saniye) — ek güvenlik ağı
 
     async open(ws) {
