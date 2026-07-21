@@ -696,13 +696,28 @@ export async function createLiveSession(
 
   let reconnectAttempts = 0
   let lastReconnectSuccessAt = 0
+  /** Toplam reconnect sayısı (sıfırlanmaz) — sürekli düşen session'ları tespit etmek için */
+  let totalReconnects = 0
   const MAX_RECONNECT_ATTEMPTS = 5
+  /** Session ömrü boyunca max toplam reconnect — bu aşılırsa session zombi sayılır */
+  const MAX_TOTAL_RECONNECTS = 15
   const BASE_BACKOFF_MS = 500
   /** Reconnect sonrası bağlantı bu kadar süre ayakta kalmalı ki sayaç sıfırlansın */
   const STABLE_CONNECTION_MS = 10_000
 
   async function reconnect() {
     if (reconnecting || closedByUser) return
+    totalReconnects++
+
+    // Zombi session koruması: toplam reconnect sayısı çok yüksekse tamamen kapat
+    if (totalReconnects > MAX_TOTAL_RECONNECTS) {
+      console.error(`[Gemini] Session ${options.dbSessionId} zombi — ${totalReconnects} toplam reconnect, kapatılıyor`)
+      closedByUser = true
+      try { activeSession?.close() } catch {}
+      callbacks.onClose()
+      return
+    }
+
     reconnecting = true
     reconnectAttempts++
 
@@ -721,8 +736,10 @@ export async function createLiveSession(
       return
     }
 
-    const backoffMs = BASE_BACKOFF_MS * Math.pow(2, reconnectAttempts - 1)
-    console.log(`[Gemini] Reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} — ${backoffMs}ms beklenecek`)
+    const baseBackoff = BASE_BACKOFF_MS * Math.pow(2, reconnectAttempts - 1)
+    const jitter = Math.floor(Math.random() * baseBackoff * 0.5)
+    const backoffMs = baseBackoff + jitter
+    console.log(`[Gemini] Reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} (total=${totalReconnects}) — ${backoffMs}ms beklenecek`)
     await new Promise(resolve => setTimeout(resolve, backoffMs))
 
     if (closedByUser) { reconnecting = false; return }
@@ -756,6 +773,16 @@ export async function createLiveSession(
   /** Stale resume handle ile bağlantı kurulamadığında handle'sız yeni session aç. */
   async function reconnectFresh() {
     if (reconnecting || closedByUser) return
+    totalReconnects++
+
+    if (totalReconnects > MAX_TOTAL_RECONNECTS) {
+      console.error(`[Gemini] Session ${options.dbSessionId} zombi (fresh) — ${totalReconnects} toplam reconnect, kapatılıyor`)
+      closedByUser = true
+      try { activeSession?.close() } catch {}
+      callbacks.onClose()
+      return
+    }
+
     reconnecting = true
     reconnectAttempts++
 
@@ -767,8 +794,9 @@ export async function createLiveSession(
       return
     }
 
-    console.log(`[Gemini] Fresh reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`)
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const jitter = Math.floor(Math.random() * 500)
+    console.log(`[Gemini] Fresh reconnect deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} (total=${totalReconnects})`)
+    await new Promise(resolve => setTimeout(resolve, 1000 + jitter))
 
     if (closedByUser) { reconnecting = false; return }
 

@@ -345,34 +345,41 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         scheduleFrame()
 
         try {
-          // RAG pre-warm (web /ws ile aynı)
-          let ragContext = ''
-          try {
-            const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
-            const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
-            if (topDocs.length > 0) {
-              ragContext = await buildRagPrompt(topDocs)
-              console.log(
-                `[${shortId}] RAG: ${topDocs.length} belge → ${topDocs
-                  .map((d) => d.title)
-                  .join(', ')}`,
-              )
-            }
-          } catch (e) {
-            console.error(`[${shortId}] RAG hatası:`, e)
-          }
-
+          // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
           const todayStr = getTodayTurkish()
           const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
-          const systemPromptBase = await buildSystemPrompt()
+
+          const [ragContext, systemPromptBase, model] = await Promise.all([
+            (async () => {
+              try {
+                const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+                const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
+                if (topDocs.length > 0) {
+                  console.log(
+                    `[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map((d) => d.title).join(', ')}`,
+                  )
+                  return await buildRagPrompt(topDocs)
+                }
+              } catch (e) {
+                console.error(`[${shortId}] RAG hatası:`, e)
+              }
+              return ''
+            })(),
+            buildSystemPrompt(),
+            resolveLiveModel(),
+          ])
+
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          const model = await resolveLiveModel()
           console.log(`[${shortId}] Gemini Live model: ${model}`)
 
-          const session = await createLiveSession(
+          const SESSION_CONNECT_TIMEOUT_MS = 10_000
+
+          const session = await Promise.race([
+            createLiveSession(
             ai,
             {
               onReady: () => console.log(`[${shortId}] Gemini Live ready (phone)`),
+
               onAudio: (pcm) => {
                 if (state.closed) return
                 // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
@@ -440,7 +447,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
               },
             },
-          )
+          ),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)), SESSION_CONNECT_TIMEOUT_MS)
+            ),
+          ])
 
           info.session = session
           sessions.set(shortId, info)
