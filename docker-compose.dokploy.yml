@@ -67,6 +67,9 @@ services:
       REDIS_URL: redis://voiceai-redis:6379
       PORT: "3001"
       NODE_ENV: production
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+      GEMINI_EMBEDDING_DIMENSIONS: ${GEMINI_EMBEDDING_DIMENSIONS:-768}
     depends_on:
       postgres:
         condition: service_healthy

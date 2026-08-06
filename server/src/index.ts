@@ -43,7 +43,7 @@ import {
   setPromptSection,
   resetPromptSection,
 } from './db/repositories/settings'
-import { embedText, buildRagPrompt, PRE_WARM_QUERY } from './rag'
+import { embedText, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
 import { listCategories, createCategory, updateCategory, deleteCategory, seedCategories } from './db/repositories/categories'
 
@@ -1021,7 +1021,7 @@ app.ws('/ws', {
     console.log(`   http://localhost:${PORT}`)
     console.log(`   ws://localhost:${PORT}/ws`)
     console.log(`   Model: ${await resolveLiveModel()}`)
-    console.log(`   RAG: pgvector + HNSW (text-embedding-004)`)
+    console.log(`   RAG: pgvector + HNSW (${getEmbeddingModel()}, dim=${getEmbeddingDimensions()})`)
 
     // Seed default categories if not present
     try { await seedCategories() } catch (e) { console.error('[Categories] Seed hatası:', e) }

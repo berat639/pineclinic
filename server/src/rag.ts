@@ -1,6 +1,6 @@
 /**
  * rag.ts — Semantic RAG engine
- * Embedding: Google text-embedding-004 via @google/genai (Gemini API)
+ * Embedding: Google Gemini Embedding via @google/genai (Gemini API)
  * Retrieval: PostgreSQL pgvector cosine similarity with HNSW index
  */
 
@@ -15,16 +15,34 @@ function getEmbeddingClient(): GoogleGenAI {
   return new GoogleGenAI({ apiKey })
 }
 
-const EMBEDDING_MODEL = 'text-embedding-004'
+const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001'
+const DEFAULT_EMBEDDING_DIMENSIONS = 768
+
+export function getEmbeddingModel(): string {
+  return (process.env.GEMINI_EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL).trim()
+}
+
+export function getEmbeddingDimensions(): number {
+  const raw = Number(process.env.GEMINI_EMBEDDING_DIMENSIONS || DEFAULT_EMBEDDING_DIMENSIONS)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_EMBEDDING_DIMENSIONS
+}
 
 export async function embedText(text: string): Promise<number[]> {
   const client = getEmbeddingClient()
+  const model = getEmbeddingModel()
+  const dims = getEmbeddingDimensions()
   const result = await client.models.embedContent({
-    model: EMBEDDING_MODEL,
+    model,
     contents: text,
+    config: {
+      outputDimensionality: dims,
+    },
   })
   const values = result.embeddings?.[0]?.values
   if (!values || values.length === 0) throw new Error('Embedding API boş vektör döndürdü')
+  if (values.length !== dims) {
+    throw new Error(`Embedding boyutu beklenenden farklı: ${values.length} (beklenen: ${dims})`)
+  }
   return values
 }
 
