@@ -1,6 +1,6 @@
 /**
  * rag.ts — Semantic RAG engine
- * Embedding: Google text-embedding-004 via @google/genai (Vertex AI)
+ * Embedding: Google text-embedding-004 via @google/genai (Gemini API)
  * Retrieval: PostgreSQL pgvector cosine similarity with HNSW index
  */
 
@@ -11,18 +11,8 @@ import { retrieveTopK as retrieveDocsByEmbedding, type RankedDoc } from './db/re
 
 function getEmbeddingClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY
-  if (apiKey) {
-    return new GoogleGenAI({ apiKey })
-  }
-  const encoded = process.env.GOOGLE_CREDENTIALS_JSON
-  if (!encoded) throw new Error('GEMINI_API_KEY veya GOOGLE_CREDENTIALS_JSON tanımlı değil')
-  const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'))
-  return new GoogleGenAI({
-    vertexai: true,
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.GOOGLE_VERTEX_LOCATION || 'europe-west1',
-    googleAuthOptions: { credentials },
-  })
+  if (!apiKey) throw new Error('GEMINI_API_KEY tanımlı değil')
+  return new GoogleGenAI({ apiKey })
 }
 
 const EMBEDDING_MODEL = 'text-embedding-004'

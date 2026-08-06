@@ -299,7 +299,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] knowledge/upload embedding:', e)
         set.status = 500
-        return { error: 'Gömme (embedding) başarısız — Vertex / API anahtarlarını kontrol edin.' }
+        return { error: 'Gömme (embedding) başarısız — GEMINI_API_KEY ayarını kontrol edin.' }
       }
 
       const doc = await createDoc(
