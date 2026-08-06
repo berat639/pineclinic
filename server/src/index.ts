@@ -331,6 +331,37 @@ const app = new Elysia()
     return { success: true, id: params.id }
   })
 
+  .put('/api/admin/knowledge/:id', async ({ params, body, set }) => {
+    const { category, title, content, active } = body as any
+    let newEmbedding: number[] | undefined
+    if (content) {
+      try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Admin Re-embed hatası:', e); newEmbedding = [] }
+    }
+    const doc = await updateDoc(params.id, { category, title, content, active }, newEmbedding)
+    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, doc }
+  })
+
+  .patch('/api/admin/knowledge/:id/toggle', async ({ params, set }) => {
+    const doc = await toggleDoc(params.id)
+    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
+    return { success: true, doc }
+  })
+
+  .post('/api/admin/knowledge/reindex', async () => {
+    const docs = await listDocs()
+    const results = { success: 0, failed: 0, total: docs.length }
+    for (const doc of docs) {
+      try {
+        const embedding = await embedText(doc.content)
+        await updateDocEmbedding(doc.id, embedding)
+        results.success++
+        console.log(`[RAG] Admin Reindex: "${doc.title}" ✓`)
+      } catch (e) { results.failed++; console.error(`[RAG] "${doc.title}":`, e) }
+    }
+    return { success: true, results }
+  })
+
   .get('/api/telephony/register', ({ query }) => {
     const uuid = query.uuid as string | undefined
     const caller = query.caller as string | undefined
