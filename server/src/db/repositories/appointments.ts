@@ -89,6 +89,7 @@ export async function createAppointment(data: {
           calendarEventId: data.calendarEventId ?? existing[0].calendarEventId ?? null,
           discountRequested: data.discountRequested ?? existing[0].discountRequested ?? false,
           notes: data.notes ?? existing[0].notes ?? null,
+          extraFields: data.extraFields ? JSON.stringify(data.extraFields) : existing[0].extraFields ?? null,
         })
         .where(eq(appointments.id, existing[0].id))
         .returning()

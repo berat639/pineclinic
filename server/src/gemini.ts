@@ -204,14 +204,17 @@ export async function createLiveSession(
       const rawPhone = args.telefon as string | undefined
       const invalid = validateLiveCustomerIdentity(rawName, rawPhone)
       if (invalid) {
+        console.warn('[Randevu:REJECTED]', { name: rawName, phone: rawPhone, reason: invalid })
         return { success: false, message: invalid }
       }
       const dateStr = args.tarih as string | undefined
       const timeStr = args.saat as string | undefined
       if (!dateStr || !timeStr) {
+        console.warn('[Randevu:REJECTED]', { name: rawName, reason: 'missing date/time', date: dateStr, time: timeStr })
         return { success: false, message: 'Tarih ve saat zorunludur; müşteriden tekrar alın.' }
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(new Date(dateStr).getTime())) {
+        console.warn('[Randevu:REJECTED]', { name: rawName, reason: 'invalid date format', date: dateStr })
         return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
       }
 
@@ -224,18 +227,24 @@ export async function createLiveSession(
         }
       }
 
-      const appointment = await createAppointment({
-        customerName: (rawName as string).trim(),
-        phone: (rawPhone as string).trim(),
-        type: args.randevu_turu as string,
-        vehicleInfo: args.arac_bilgisi as string | undefined,
-        issueOrRequest: args.sorun_veya_talep as string | undefined,
-        date: dateStr,
-        time: timeStr,
-        sessionId: options.dbSessionId,
-        notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
-        extraFields: Object.keys(extraFields).length > 0 ? extraFields : undefined,
-      })
+      let appointment
+      try {
+        appointment = await createAppointment({
+          customerName: (rawName as string).trim(),
+          phone: (rawPhone as string).trim(),
+          type: args.randevu_turu as string,
+          vehicleInfo: args.arac_bilgisi as string | undefined,
+          issueOrRequest: args.sorun_veya_talep as string | undefined,
+          date: dateStr,
+          time: timeStr,
+          sessionId: options.dbSessionId,
+          notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
+          extraFields: Object.keys(extraFields).length > 0 ? extraFields : undefined,
+        })
+      } catch (dbErr) {
+        console.error('[Randevu:DB_ERROR]', { name: rawName, phone: rawPhone, error: dbErr })
+        return { success: false, message: 'Randevu kaydedilirken bir hata oluştu, lütfen tekrar deneyin.' }
+      }
       console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
 
       // Google Calendar side effect — fire-and-forget arka planda

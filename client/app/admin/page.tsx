@@ -178,7 +178,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
   'gemini-3.1-flash-live-preview': {
-    label: 'Gemini API — 3.1 Flash',
+    label: 'Gemini API — Live 1.0',
     tagline: 'API Key ile çalışır. Düşük gecikme, audio-to-audio, en yeni model.',
     tier: 'Premium',
   },
@@ -2068,42 +2068,6 @@ export default function AdminPage() {
               </div>
 
               </div>
-
-              {/* Setup details (collapsed) */}
-              <details style={{
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(255,255,255,0.05)',
-                borderRadius: 10,
-              }}>
-                <summary style={{
-                  padding: '11px 16px', fontSize: 13, color: 'rgba(240,244,255,0.35)',
-                  cursor: 'pointer', userSelect: 'none',
-                  display: 'flex', alignItems: 'center', gap: 7,
-                }}>
-                  <IconInfo />
-                  Kurulum bilgileri
-                </summary>
-                <div style={{ padding: '0 16px 16px' }}>
-                  <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.35)', marginBottom: 8 }}>
-                    Gerekli environment değişkenleri:
-                  </p>
-                  <pre style={{
-                    background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)',
-                    borderRadius: 7, padding: '10px 14px',
-                    fontSize: 12, color: '#7dd3fc', overflowX: 'auto', margin: '0 0 10px', lineHeight: 1.6,
-                  }}>{`GOOGLE_OAUTH_CLIENT_ID=...
-GOOGLE_OAUTH_CLIENT_SECRET=...
-APP_URL=http://localhost:3001
-CLIENT_APP_URL=http://localhost:3000`}</pre>
-                  <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.3)', lineHeight: 1.7 }}>
-                    GCP Console → APIs &amp; Services → Credentials → OAuth 2.0 Client ID<br />
-                    Redirect URI:{' '}
-                    <code style={{ color: '#7dd3fc', fontSize: 11 }}>
-                      APP_URL/api/admin/settings/calendar/callback
-                    </code>
-                  </p>
-                </div>
-              </details>
 
             </div>
           )}

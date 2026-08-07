@@ -126,6 +126,7 @@ interface SessionInfo {
 const sessions = new Map<string, SessionInfo>()
 
 // ── SSE: Admin real-time notifications ───────────────────────────────────────
+import { sseClients as sharedSseClients } from './events'
 type SseClient = { id: string; send: (data: string) => void }
 const sseClients = new Set<SseClient>()
 
@@ -135,6 +136,11 @@ function notifyAdmins(event: string, payload: unknown) {
     try { client.send(data) } catch { sseClients.delete(client) }
   }
 }
+
+// Bridge events.ts broadcastSSE → actual SSE clients
+sharedSseClients.add((event: string, data: unknown) => {
+  notifyAdmins(event, data)
+})
 
 // ── WAV helper: time-aligned stereo (user=L, AI=R) ──────────────────────────
 /**
