@@ -6,11 +6,12 @@ import StatsBar from './components/StatsBar'
 import ToastContainer from './components/ToastContainer'
 import RecordingsTab from './components/RecordingsTab'
 import PromptEditor from './components/PromptEditor'
+import CalendarTab from './components/CalendarTab'
 import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Tab = 'appointments' | 'knowledge' | 'recordings' | 'settings'
+type Tab = 'calendar' | 'appointments' | 'knowledge' | 'recordings' | 'settings'
 
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
@@ -170,6 +171,7 @@ function hexToRgb(hex: string): string {
 }
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'calendar',     label: 'Takvim' },
   { id: 'appointments', label: 'Randevular' },
   { id: 'knowledge',    label: 'Bilgi Tabanı' },
   { id: 'recordings',   label: 'Kayıtlar' },
@@ -887,6 +889,9 @@ export default function AdminPage() {
               </button>
             ))}
           </div>
+
+          {/* ── Tab: Takvim ──────────────────────────────────────────── */}
+          {activeTab === 'calendar' && <CalendarTab />}
 
           {/* ── Tab: Randevular ─────────────────────────────────────────── */}
           {activeTab === 'appointments' && (
