@@ -60,6 +60,65 @@ export const businessSettings = pgTable('business_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
+// ── Dental Clinic: Doctors, Patients, Calendar ──────────────────────────────
+
+export const doctors = pgTable('doctors', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  color: text('color').notNull().default('#60a5fa'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const patients = pgTable('patients', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  phone: text('phone'),
+  balance: integer('balance').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const dentalAppointments = pgTable('dental_appointments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  doctorId: uuid('doctor_id').notNull().references(() => doctors.id),
+  title: text('title').notNull(),
+  startTime: timestamp('start_time', { withTimezone: true }).notNull(),
+  endTime: timestamp('end_time', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('scheduled'),
+  type: text('type').notNull().default('general'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const treatmentPlans = pgTable('treatment_plans', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  procedureName: text('procedure_name').notNull(),
+  cost: integer('cost').notNull().default(0),
+  status: text('status').notNull().default('planned'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const patientPayments = pgTable('patient_payments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  date: text('date').notNull(),
+  amount: integer('amount').notNull(),
+  method: text('method').notNull().default('Nakit'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const completedWorks = pgTable('completed_works', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  doctorId: uuid('doctor_id').notNull().references(() => doctors.id),
+  date: text('date').notNull(),
+  description: text('description').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
 // Single-doc + single-embedding model (admin UI uses category/title/content/active)
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

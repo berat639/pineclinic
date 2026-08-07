@@ -227,6 +227,74 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
 
+  // ── Dental Calendar API ────────────────────────────────────────────────────
+  .get('/api/dental/doctors', async () => {
+    const { listDoctors } = await import('./db/repositories/dental')
+    return await listDoctors()
+  })
+  .get('/api/dental/appointments', async ({ query }) => {
+    const { listDentalAppointments } = await import('./db/repositories/dental')
+    return await listDentalAppointments(query.date as string | undefined)
+  })
+  .post('/api/dental/appointments', async ({ body, set }) => {
+    const { createDentalAppointment } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.patientId || !b.doctorId || !b.title || !b.startTime || !b.endTime) {
+      set.status = 400; return { error: 'Missing required fields' }
+    }
+    return await createDentalAppointment({
+      patientId: b.patientId, doctorId: b.doctorId, title: b.title,
+      startTime: new Date(b.startTime), endTime: new Date(b.endTime),
+      status: b.status, type: b.type, notes: b.notes,
+    })
+  })
+  .get('/api/dental/patients', async () => {
+    const { listPatients } = await import('./db/repositories/dental')
+    return await listPatients()
+  })
+  .post('/api/dental/patients', async ({ body, set }) => {
+    const { createPatient } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.name) { set.status = 400; return { error: 'Name required' } }
+    return await createPatient({ name: b.name, phone: b.phone, balance: b.balance })
+  })
+  .get('/api/dental/patients/:id', async ({ params, set }) => {
+    const { getPatient } = await import('./db/repositories/dental')
+    const p = await getPatient(params.id)
+    if (!p) { set.status = 404; return { error: 'Patient not found' } }
+    return p
+  })
+  .get('/api/dental/patients/:id/treatments', async ({ params }) => {
+    const { getPatientTreatments } = await import('./db/repositories/dental')
+    return await getPatientTreatments(params.id)
+  })
+  .post('/api/dental/patients/:id/treatments', async ({ params, body, set }) => {
+    const { createTreatmentPlan } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.procedureName || b.cost === undefined) { set.status = 400; return { error: 'Missing fields' } }
+    return await createTreatmentPlan({ patientId: params.id, procedureName: b.procedureName, cost: b.cost, status: b.status })
+  })
+  .get('/api/dental/patients/:id/payments', async ({ params }) => {
+    const { getPatientPayments } = await import('./db/repositories/dental')
+    return await getPatientPayments(params.id)
+  })
+  .post('/api/dental/patients/:id/payments', async ({ params, body, set }) => {
+    const { createPayment } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.date || !b.amount || !b.method) { set.status = 400; return { error: 'Missing fields' } }
+    return await createPayment({ patientId: params.id, date: b.date, amount: b.amount, method: b.method, notes: b.notes })
+  })
+  .get('/api/dental/patients/:id/works', async ({ params }) => {
+    const { getPatientCompletedWorks } = await import('./db/repositories/dental')
+    return await getPatientCompletedWorks(params.id)
+  })
+  .post('/api/dental/patients/:id/works', async ({ params, body, set }) => {
+    const { createCompletedWork } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.doctorId || !b.date || !b.description) { set.status = 400; return { error: 'Missing fields' } }
+    return await createCompletedWork({ patientId: params.id, doctorId: b.doctorId, date: b.date, description: b.description })
+  })
+
   .get('/api/appointments', async () => await readAppointments())
 
   .delete('/api/appointments/:id', async ({ params, set }) => {

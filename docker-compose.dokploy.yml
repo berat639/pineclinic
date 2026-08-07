@@ -149,6 +149,7 @@ services:
     environment:
       AUDIOSOCKET_HOST: voiceai-server
       AUDIOSOCKET_PORT: ${AUDIOSOCKET_PORT:-12000}
+      BACKEND_HTTP_PORT: "3001"
     ports:
       - "5060:5060/tcp"
       - "5060:5060/udp"

@@ -214,6 +214,88 @@ async function runMigrations() {
     console.log('[Migration] Varsayılan kategoriler oluşturuldu')
   }
 
+  // ── Dental Clinic Tables ───────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS doctors (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name       TEXT NOT NULL,
+      color      TEXT NOT NULL DEFAULT '#60a5fa',
+      active     BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS patients (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name       TEXT NOT NULL,
+      phone      TEXT,
+      balance    INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS dental_appointments (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id UUID NOT NULL REFERENCES patients(id),
+      doctor_id  UUID NOT NULL REFERENCES doctors(id),
+      title      TEXT NOT NULL,
+      start_time TIMESTAMPTZ NOT NULL,
+      end_time   TIMESTAMPTZ NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'scheduled',
+      type       TEXT NOT NULL DEFAULT 'general',
+      notes      TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS treatment_plans (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id     UUID NOT NULL REFERENCES patients(id),
+      procedure_name TEXT NOT NULL,
+      cost           INTEGER NOT NULL DEFAULT 0,
+      status         TEXT NOT NULL DEFAULT 'planned',
+      created_at     TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS patient_payments (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id UUID NOT NULL REFERENCES patients(id),
+      date       TEXT NOT NULL,
+      amount     INTEGER NOT NULL,
+      method     TEXT NOT NULL DEFAULT 'Nakit',
+      notes      TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS completed_works (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id  UUID NOT NULL REFERENCES patients(id),
+      doctor_id   UUID NOT NULL REFERENCES doctors(id),
+      date        TEXT NOT NULL,
+      description TEXT NOT NULL,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Seed doctors if empty
+  const docCount = await sql`SELECT COUNT(*)::int AS cnt FROM doctors`
+  if ((docCount[0]?.cnt ?? 0) === 0) {
+    await sql`
+      INSERT INTO doctors (name, color) VALUES
+        ('Dt. Faruk Mutlu',   '#60a5fa'),
+        ('Dt. Mustafa Çetin', '#34d399'),
+        ('Dt. Osman Kaya',    '#a78bfa')
+    `
+    console.log('[Migration] Varsayılan doktorlar oluşturuldu')
+  }
+
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }
