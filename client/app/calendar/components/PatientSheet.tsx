@@ -65,6 +65,13 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
   const [treatCost, setTreatCost] = useState('')
   const [treatSaving, setTreatSaving] = useState(false)
 
+  // Work form
+  const [showWorkForm, setShowWorkForm] = useState(false)
+  const [workDoctor, setWorkDoctor] = useState('')
+  const [workDate, setWorkDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [workDesc, setWorkDesc] = useState('')
+  const [workSaving, setWorkSaving] = useState(false)
+
   const fetchDetails = useCallback(async () => {
     if (!patient) return
     try {
@@ -126,6 +133,25 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
       }
     } catch (err) { console.error(err) }
     finally { setTreatSaving(false) }
+  }
+
+  const handleAddWork = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!patient || !workDoctor || !workDesc) return
+    setWorkSaving(true)
+    try {
+      const res = await fetch(`/api/dental/patients/${patient.id}/works`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doctorId: workDoctor, date: workDate, description: workDesc }),
+      })
+      if (res.ok) {
+        setShowWorkForm(false)
+        setWorkDesc('')
+        fetchDetails()
+      }
+    } catch (err) { console.error(err) }
+    finally { setWorkSaving(false) }
   }
 
   if (!patient) return null
@@ -236,7 +262,21 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
 
           {activeTab === 'works' && (
             <div className="tab-content">
-              {works.length === 0 ? (
+              <button className="add-btn" onClick={() => setShowWorkForm(!showWorkForm)}>+ İşlem Ekle</button>
+
+              {showWorkForm && (
+                <form onSubmit={handleAddWork} className="inline-form">
+                  <select value={workDoctor} onChange={e => setWorkDoctor(e.target.value)} required className="form-input">
+                    <option value="">Doktor Seç...</option>
+                    {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <input type="date" value={workDate} onChange={e => setWorkDate(e.target.value)} required className="form-input" />
+                  <input placeholder="Yapılan işlem açıklaması" value={workDesc} onChange={e => setWorkDesc(e.target.value)} required className="form-input" style={{ flex: 2 }} />
+                  <button type="submit" disabled={workSaving} className="save-btn">{workSaving ? '...' : 'Ekle'}</button>
+                </form>
+              )}
+
+              {works.length === 0 && !showWorkForm ? (
                 <p className="empty-state">Henüz yapılan iş kaydı yok.</p>
               ) : (
                 <div className="timeline">

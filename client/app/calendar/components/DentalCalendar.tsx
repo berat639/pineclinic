@@ -78,10 +78,10 @@ export default function DentalCalendar({ doctors, events, currentDate, onEventCl
         height="auto"
         expandRows={true}
         resourceLabelContent={(arg) => (
-          <div style={{ fontWeight: 600, fontSize: '0.85rem', padding: '4px 0', textAlign: 'center' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.85rem', padding: '4px 0', textAlign: 'center', color: 'var(--foreground)' }}>
             <div>{arg.resource.title}</div>
             {arg.resource.extendedProps?.specialty && (
-              <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--foreground-3)', marginTop: 2 }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--foreground-2)', marginTop: 2 }}>
                 {arg.resource.extendedProps.specialty}
               </div>
             )}
@@ -116,13 +116,20 @@ export default function DentalCalendar({ doctors, events, currentDate, onEventCl
           border-color: var(--divider);
         }
         .dental-calendar-wrapper .fc-col-header-cell {
-          background: var(--glass-bg);
+          background: var(--background-2);
           padding: 10px 0;
         }
         .dental-calendar-wrapper .fc-col-header-cell-cushion {
           color: var(--foreground);
           font-weight: 600;
           font-size: 0.85rem;
+        }
+        .dental-calendar-wrapper .fc-datagrid-cell-frame,
+        .dental-calendar-wrapper .fc-resource-header {
+          background: var(--background-2);
+        }
+        .dental-calendar-wrapper .fc-datagrid-cell-main {
+          color: var(--foreground);
         }
         .dental-calendar-wrapper .fc-timegrid-slot-label-cushion {
           color: var(--foreground-2);

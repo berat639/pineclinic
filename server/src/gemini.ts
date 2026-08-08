@@ -245,7 +245,7 @@ export async function createLiveSession(
         appointment = await createAppointment({
           customerName: (rawName as string).trim(),
           phone: (rawPhone as string).trim(),
-          type: ((args.randevu_turu ?? args.type ?? args.tur ?? args.islem_turu ?? 'other') as string),
+          type: ((args.randevu_turu ?? args.type ?? args.tur ?? args.islem_turu ?? args.islem ?? 'Kontrol') as string),
           vehicleInfo: (args.arac_bilgisi ?? args.arac) as string | undefined,
           issueOrRequest: (args.sorun_veya_talep ?? args.talep ?? args.sorun ?? args.aciklama) as string | undefined,
           date: dateStr,
