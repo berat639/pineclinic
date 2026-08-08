@@ -200,15 +200,18 @@ export async function createLiveSession(
 ) {
   async function handleTool(name: string, args: Record<string, unknown>) {
     if (name === 'randevuOlustur') {
-      const rawName = args.musteri_adi as string | undefined
-      const rawPhone = args.telefon as string | undefined
+      console.log('[Randevu:ARGS]', JSON.stringify(args))
+
+      // Resolve fields from multiple possible names (custom_fields may use different keys)
+      const rawName = (args.musteri_adi ?? args.ad_soyad ?? args.hasta_adi ?? args.isim ?? args.adi_soyadi ?? args.musteri ?? args.name) as string | undefined
+      const rawPhone = (args.telefon ?? args.phone ?? args.tel ?? args.telefon_numarasi ?? args.cep_telefonu) as string | undefined
       const invalid = validateLiveCustomerIdentity(rawName, rawPhone)
       if (invalid) {
-        console.warn('[Randevu:REJECTED]', { name: rawName, phone: rawPhone, reason: invalid })
+        console.warn('[Randevu:REJECTED]', { name: rawName, phone: rawPhone, reason: invalid, allArgs: Object.keys(args) })
         return { success: false, message: invalid }
       }
-      const dateStr = args.tarih as string | undefined
-      const timeStr = args.saat as string | undefined
+      const dateStr = (args.tarih ?? args.date ?? args.randevu_tarihi) as string | undefined
+      const timeStr = (args.saat ?? args.time ?? args.randevu_saati) as string | undefined
       if (!dateStr || !timeStr) {
         console.warn('[Randevu:REJECTED]', { name: rawName, reason: 'missing date/time', date: dateStr, time: timeStr })
         return { success: false, message: 'Tarih ve saat zorunludur; müşteriden tekrar alın.' }
@@ -219,7 +222,12 @@ export async function createLiveSession(
       }
 
       // Collect custom/extra fields (anything not in the known set)
-      const knownKeys = new Set(['musteri_adi', 'telefon', 'randevu_turu', 'arac_bilgisi', 'plaka', 'sorun_veya_talep', 'tarih', 'saat'])
+      const knownKeys = new Set([
+        'musteri_adi', 'ad_soyad', 'hasta_adi', 'isim', 'adi_soyadi', 'musteri', 'name',
+        'telefon', 'phone', 'tel', 'telefon_numarasi', 'cep_telefonu',
+        'randevu_turu', 'arac_bilgisi', 'plaka', 'sorun_veya_talep',
+        'tarih', 'date', 'randevu_tarihi', 'saat', 'time', 'randevu_saati',
+      ])
       const extraFields: Record<string, string> = {}
       for (const [k, v] of Object.entries(args)) {
         if (!knownKeys.has(k) && v !== undefined && v !== null && v !== '') {
@@ -232,9 +240,9 @@ export async function createLiveSession(
         appointment = await createAppointment({
           customerName: (rawName as string).trim(),
           phone: (rawPhone as string).trim(),
-          type: args.randevu_turu as string,
-          vehicleInfo: args.arac_bilgisi as string | undefined,
-          issueOrRequest: args.sorun_veya_talep as string | undefined,
+          type: ((args.randevu_turu ?? args.type ?? args.tur ?? args.islem_turu ?? 'other') as string),
+          vehicleInfo: (args.arac_bilgisi ?? args.arac) as string | undefined,
+          issueOrRequest: (args.sorun_veya_talep ?? args.talep ?? args.sorun ?? args.aciklama) as string | undefined,
           date: dateStr,
           time: timeStr,
           sessionId: options.dbSessionId,
