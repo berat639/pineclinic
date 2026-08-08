@@ -137,3 +137,45 @@ export async function createCompletedWork(data: {
   }).returning()
   return row
 }
+
+// ── Voice → Calendar Sync ────────────────────────────────────────────────────
+
+export async function createDentalAppointmentFromVoice(data: {
+  customerName: string
+  phone: string
+  type: string
+  date: string
+  time: string
+  notes?: string | null
+}) {
+  // Find or create patient
+  let [patient] = await db.select().from(patients)
+    .where(eq(patients.phone, data.phone)).limit(1)
+  if (!patient) {
+    [patient] = await db.insert(patients).values({
+      name: data.customerName,
+      phone: data.phone,
+      balance: 0,
+    }).returning()
+  }
+
+  // Assign to first active doctor (admin can reassign later)
+  const [doctor] = await db.select().from(doctors)
+    .where(eq(doctors.active, true)).limit(1)
+  if (!doctor) return null
+
+  const startTime = new Date(`${data.date}T${data.time}:00+03:00`)
+  const endTime = new Date(startTime.getTime() + 30 * 60_000)
+
+  const [row] = await db.insert(dentalAppointments).values({
+    patientId: patient.id,
+    doctorId: doctor.id,
+    title: `${data.customerName} - ${data.type}`,
+    startTime,
+    endTime,
+    status: 'scheduled',
+    type: data.type,
+    notes: data.notes ?? null,
+  }).returning()
+  return row
+}

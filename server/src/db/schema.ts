@@ -65,6 +65,7 @@ export const businessSettings = pgTable('business_settings', {
 export const doctors = pgTable('doctors', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   name: text('name').notNull(),
+  specialty: text('specialty').notNull().default('Genel'),
   color: text('color').notNull().default('#60a5fa'),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

@@ -6,6 +6,7 @@ import resourceTimeGridPlugin from '@fullcalendar/resource-timegrid'
 interface Doctor {
   id: string
   name: string
+  specialty?: string
   color: string
 }
 
@@ -39,6 +40,7 @@ export default function DentalCalendar({ doctors, events, currentDate, onEventCl
   const resources = doctors.map((d) => ({
     id: d.id,
     title: d.name,
+    extendedProps: { specialty: d.specialty },
     eventColor: d.color,
   }))
 
@@ -76,8 +78,13 @@ export default function DentalCalendar({ doctors, events, currentDate, onEventCl
         height="auto"
         expandRows={true}
         resourceLabelContent={(arg) => (
-          <div style={{ fontWeight: 600, fontSize: '0.85rem', padding: '4px 0' }}>
-            {arg.resource.title}
+          <div style={{ fontWeight: 600, fontSize: '0.85rem', padding: '4px 0', textAlign: 'center' }}>
+            <div>{arg.resource.title}</div>
+            {arg.resource.extendedProps?.specialty && (
+              <div style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--foreground-3)', marginTop: 2 }}>
+                {arg.resource.extendedProps.specialty}
+              </div>
+            )}
           </div>
         )}
         eventContent={(arg) => (

@@ -260,6 +260,22 @@ export async function createLiveSession(
       }
       console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
 
+      // Sync to dental calendar (fire-and-forget)
+      void (async () => {
+        try {
+          const { createDentalAppointmentFromVoice } = await import('./db/repositories/dental')
+          await createDentalAppointmentFromVoice({
+            customerName: appointment.customerName,
+            phone: appointment.phone,
+            type: appointment.type,
+            date: appointment.date,
+            time: appointment.time,
+            notes: appointment.notes,
+          })
+          console.log('[Randevu:CalendarSync]', appointment.id)
+        } catch (e) { console.error('[Randevu:CalendarSync:ERROR]', e) }
+      })()
+
       // Google Calendar side effect — fire-and-forget arka planda
       // çalışır. Burada `await` etmiyoruz çünkü 500-2000ms
       // sürebilen dış API çağrısıdır; tool response'unu bloklamak Gemini

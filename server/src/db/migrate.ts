@@ -288,13 +288,15 @@ async function runMigrations() {
   const docCount = await sql`SELECT COUNT(*)::int AS cnt FROM doctors`
   if ((docCount[0]?.cnt ?? 0) === 0) {
     await sql`
-      INSERT INTO doctors (name, color) VALUES
-        ('Dt. Faruk Mutlu',   '#60a5fa'),
-        ('Dt. Mustafa Çetin', '#34d399'),
-        ('Dt. Osman Kaya',    '#a78bfa')
+      INSERT INTO doctors (name, specialty, color) VALUES
+        ('Dt. Faruk Mutlu',   'İmplant & Protez', '#60a5fa'),
+        ('Dt. Mustafa Çetin', 'Ortodonti',        '#34d399'),
+        ('Dt. Osman Kaya',    'Endodonti',        '#a78bfa')
     `
     console.log('[Migration] Varsayılan doktorlar oluşturuldu')
   }
+
+  await sql`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS specialty TEXT NOT NULL DEFAULT 'Genel'`
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
