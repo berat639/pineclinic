@@ -62,11 +62,20 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
   const fieldProps: Record<string, unknown> = {}
   const fieldRequired: string[] = []
   
+  // Base mandatory fields — always included regardless of custom_fields
+  fieldProps.musteri_adi = { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') || 'Müşterinin ad soyadı (gerçek isim, müşteriden sesli alınmalı ve onaylatılmalı)' }
+  fieldProps.telefon = { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') || 'Müşteri telefon numarası (05XX ile başlayan 11 hane)' }
+  fieldProps.tarih = { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') || 'Randevu tarihi (YYYY-MM-DD formatında)' }
+  fieldProps.saat = { type: Type.STRING, description: desc('tools.randevuOlustur.saat') || 'Randevu saati (HH:MM formatında)' }
+  fieldRequired.push('musteri_adi', 'telefon', 'tarih', 'saat')
+
   if (allFields.length > 0) {
-    // Dynamic mode: use only fields from DB
+    // Dynamic mode: add custom fields on top of base fields
     for (const f of allFields) {
       if (f.active === false) continue
       const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
+      // Skip if already defined as base field
+      if (fieldProps[safeName]) continue
       // Special handling for enum fields (value contains comma-separated options)
       if (safeName === 'randevu_turu' && f.description.includes(',')) {
         const enumVals = f.description.split(',').map(s => s.trim()).filter(Boolean)
@@ -74,21 +83,17 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
       } else {
         fieldProps[safeName] = { type: Type.STRING, description: f.description }
       }
-      if (f.required) fieldRequired.push(safeName)
+      if (f.required && !fieldRequired.includes(safeName)) fieldRequired.push(safeName)
     }
   } else {
-    // Fallback: hardcoded defaults (backward compat)
+    // Fallback: hardcoded extras (backward compat)
     const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
       .split(',').map(s => s.trim()).filter(Boolean)
-    fieldProps.musteri_adi = { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') }
-    fieldProps.telefon = { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') }
     fieldProps.randevu_turu = { type: Type.STRING, enum: turuEnum, description: desc('tools.randevuOlustur.randevu_turu') }
     fieldProps.arac_bilgisi = { type: Type.STRING, description: desc('tools.randevuOlustur.arac_bilgisi') }
     fieldProps.plaka = { type: Type.STRING, description: desc('tools.randevuOlustur.plaka') }
     fieldProps.sorun_veya_talep = { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') }
-    fieldProps.tarih = { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') }
-    fieldProps.saat = { type: Type.STRING, description: desc('tools.randevuOlustur.saat') }
-    fieldRequired.push('musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat')
+    fieldRequired.push('randevu_turu')
   }
 
   return [
