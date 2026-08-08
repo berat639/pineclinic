@@ -232,6 +232,12 @@ const app = new Elysia()
     const { listDoctors } = await import('./db/repositories/dental')
     return await listDoctors()
   })
+  .post('/api/dental/doctors', async ({ body, set }) => {
+    const { createDoctor } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.name || !b.specialty) { set.status = 400; return { error: 'Name and specialty required' } }
+    return await createDoctor({ name: b.name, specialty: b.specialty, color: b.color })
+  })
   .get('/api/dental/appointments', async ({ query }) => {
     const { listDentalAppointments } = await import('./db/repositories/dental')
     return await listDentalAppointments(query.date as string | undefined)

@@ -36,9 +36,10 @@ export default function CalendarTab() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [showDocForm, setShowDocForm] = useState(false)
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10))
 
-  // Form state
+  // Appointment form state
   const [formDoctor, setFormDoctor] = useState('')
   const [formName, setFormName] = useState('')
   const [formPhone, setFormPhone] = useState('')
@@ -47,6 +48,12 @@ export default function CalendarTab() {
   const [formType, setFormType] = useState('')
   const [formNotes, setFormNotes] = useState('')
   const [formSaving, setFormSaving] = useState(false)
+
+  // Doctor form state
+  const [docName, setDocName] = useState('')
+  const [docSpecialty, setDocSpecialty] = useState('')
+  const [docColor, setDocColor] = useState('#60a5fa')
+  const [docSaving, setDocSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -118,6 +125,28 @@ export default function CalendarTab() {
     }
   }
 
+  const handleAddDoctor = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!docName || !docSpecialty) return
+    setDocSaving(true)
+    try {
+      const res = await fetch('/api/dental/doctors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: docName, specialty: docSpecialty, color: docColor }),
+      })
+      if (res.ok) {
+        setShowDocForm(false)
+        setDocName(''); setDocSpecialty('')
+        fetchData()
+      }
+    } catch (err) {
+      console.error('Doctor create error:', err)
+    } finally {
+      setDocSaving(false)
+    }
+  }
+
   return (
     <div style={{ maxWidth: 1200, width: '100%' }}>
       {/* Header */}
@@ -165,7 +194,7 @@ export default function CalendarTab() {
       </div>
 
       {/* Doctor chips */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
         {doctors.map(d => (
           <span key={d.id} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -178,7 +207,30 @@ export default function CalendarTab() {
             <span style={{ color: 'var(--foreground-3)', fontSize: '0.7rem' }}>({d.specialty})</span>
           </span>
         ))}
+        <button
+          onClick={() => setShowDocForm(!showDocForm)}
+          style={{
+            padding: '4px 10px', borderRadius: 6,
+            border: '1px dashed var(--glass-border)', background: 'transparent',
+            color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+          }}
+        >+ Doktor Ekle</button>
       </div>
+
+      {/* Doctor Form */}
+      {showDocForm && (
+        <form onSubmit={handleAddDoctor} style={{
+          padding: 12, marginBottom: 14, borderRadius: 8,
+          background: 'var(--glass-bg)', border: '1px solid var(--glass-border)',
+          display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
+        }}>
+          <input placeholder="Doktor Adı (Dt. ...)" value={docName} onChange={e => setDocName(e.target.value)} required style={inputStyle} />
+          <input placeholder="Uzmanlık (ör. Ortodonti)" value={docSpecialty} onChange={e => setDocSpecialty(e.target.value)} required style={inputStyle} />
+          <input type="color" value={docColor} onChange={e => setDocColor(e.target.value)} style={{ width: 36, height: 32, border: 'none', borderRadius: 6, cursor: 'pointer' }} />
+          <button type="submit" disabled={docSaving} style={btnStyle}>{docSaving ? '...' : 'Ekle'}</button>
+          <button type="button" onClick={() => setShowDocForm(false)} style={{ ...btnStyle, background: 'var(--glass-bg)', color: 'var(--foreground-2)', border: '1px solid var(--glass-border)' }}>İptal</button>
+        </form>
+      )}
 
       {/* Appointment Form */}
       {showForm && (

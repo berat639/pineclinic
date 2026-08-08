@@ -15,6 +15,15 @@ export async function listDoctors() {
   return db.select().from(doctors).where(eq(doctors.active, true))
 }
 
+export async function createDoctor(data: { name: string; specialty: string; color?: string }) {
+  const [row] = await db.insert(doctors).values({
+    name: data.name,
+    specialty: data.specialty,
+    color: data.color ?? '#60a5fa',
+  }).returning()
+  return row
+}
+
 // ── Dental Appointments ──────────────────────────────────────────────────────
 
 export async function listDentalAppointments(dateStr?: string) {

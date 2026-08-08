@@ -12,6 +12,7 @@ interface Patient {
 interface Doctor {
   id: string
   name: string
+  specialty?: string
   color: string
 }
 
@@ -51,6 +52,19 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
   const [payments, setPayments] = useState<Payment[]>([])
   const [works, setWorks] = useState<CompletedWork[]>([])
 
+  // Payment form
+  const [showPayForm, setShowPayForm] = useState(false)
+  const [payAmount, setPayAmount] = useState('')
+  const [payMethod, setPayMethod] = useState('Nakit')
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paySaving, setPaySaving] = useState(false)
+
+  // Treatment form
+  const [showTreatForm, setShowTreatForm] = useState(false)
+  const [treatName, setTreatName] = useState('')
+  const [treatCost, setTreatCost] = useState('')
+  const [treatSaving, setTreatSaving] = useState(false)
+
   const fetchDetails = useCallback(async () => {
     if (!patient) return
     try {
@@ -76,14 +90,50 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
   const totalCost = treatments.reduce((sum, t) => sum + t.cost, 0)
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
 
+  const handleAddPayment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!patient || !payAmount) return
+    setPaySaving(true)
+    try {
+      const res = await fetch(`/api/dental/patients/${patient.id}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: payDate, amount: parseInt(payAmount), method: payMethod }),
+      })
+      if (res.ok) {
+        setShowPayForm(false)
+        setPayAmount('')
+        fetchDetails()
+      }
+    } catch (err) { console.error(err) }
+    finally { setPaySaving(false) }
+  }
+
+  const handleAddTreatment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!patient || !treatName || !treatCost) return
+    setTreatSaving(true)
+    try {
+      const res = await fetch(`/api/dental/patients/${patient.id}/treatments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ procedureName: treatName, cost: parseInt(treatCost) }),
+      })
+      if (res.ok) {
+        setShowTreatForm(false)
+        setTreatName(''); setTreatCost('')
+        fetchDetails()
+      }
+    } catch (err) { console.error(err) }
+    finally { setTreatSaving(false) }
+  }
+
   if (!patient) return null
 
   return (
     <>
-      {/* Backdrop */}
       <div className={`sheet-backdrop ${open ? 'open' : ''}`} onClick={onClose} />
 
-      {/* Sheet */}
       <div className={`sheet-panel ${open ? 'open' : ''}`}>
         {/* Header */}
         <div className="sheet-header">
@@ -93,7 +143,7 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
             <span className="sheet-badge">Aktif Hasta</span>
           </div>
           <div className="sheet-balance">
-            Kalan Bakiye: <strong>{(patient.balance - totalPaid).toLocaleString('tr-TR')} ₺</strong>
+            Kalan Bakiye: <strong>{(totalCost - totalPaid).toLocaleString('tr-TR')} ₺</strong>
           </div>
         </div>
 
@@ -108,7 +158,17 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
         <div className="sheet-body">
           {activeTab === 'treatments' && (
             <div className="tab-content">
-              {treatments.length === 0 ? (
+              <button className="add-btn" onClick={() => setShowTreatForm(!showTreatForm)}>+ Tedavi Ekle</button>
+
+              {showTreatForm && (
+                <form onSubmit={handleAddTreatment} className="inline-form">
+                  <input placeholder="İşlem adı" value={treatName} onChange={e => setTreatName(e.target.value)} required className="form-input" />
+                  <input placeholder="Tutar (₺)" type="number" value={treatCost} onChange={e => setTreatCost(e.target.value)} required className="form-input" style={{ width: 100 }} />
+                  <button type="submit" disabled={treatSaving} className="save-btn">{treatSaving ? '...' : 'Ekle'}</button>
+                </form>
+              )}
+
+              {treatments.length === 0 && !showTreatForm ? (
                 <p className="empty-state">Henüz tedavi planı eklenmemiş.</p>
               ) : (
                 <>
@@ -123,20 +183,13 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
                       </div>
                     ))}
                   </div>
-                  <div className="cost-summary">
-                    <div className="cost-row">
-                      <span>Toplam Maliyet</span>
-                      <strong>{totalCost.toLocaleString('tr-TR')} ₺</strong>
+                  {treatments.length > 0 && (
+                    <div className="cost-summary">
+                      <div className="cost-row"><span>Toplam Maliyet</span><strong>{totalCost.toLocaleString('tr-TR')} ₺</strong></div>
+                      <div className="cost-row"><span>Ödenen</span><strong className="paid">{totalPaid.toLocaleString('tr-TR')} ₺</strong></div>
+                      <div className="cost-row total"><span>Kalan</span><strong className="remaining">{(totalCost - totalPaid).toLocaleString('tr-TR')} ₺</strong></div>
                     </div>
-                    <div className="cost-row">
-                      <span>Ödenen</span>
-                      <strong className="paid">{totalPaid.toLocaleString('tr-TR')} ₺</strong>
-                    </div>
-                    <div className="cost-row total">
-                      <span>Kalan</span>
-                      <strong className="remaining">{(totalCost - totalPaid).toLocaleString('tr-TR')} ₺</strong>
-                    </div>
-                  </div>
+                  )}
                 </>
               )}
             </div>
@@ -144,16 +197,28 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
 
           {activeTab === 'payments' && (
             <div className="tab-content">
-              {payments.length === 0 ? (
+              <button className="add-btn" onClick={() => setShowPayForm(!showPayForm)}>+ Ödeme Ekle</button>
+
+              {showPayForm && (
+                <form onSubmit={handleAddPayment} className="inline-form">
+                  <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} required className="form-input" />
+                  <input placeholder="Tutar (₺)" type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} required className="form-input" style={{ width: 100 }} />
+                  <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="form-input">
+                    <option>Nakit</option>
+                    <option>Kredi Kartı</option>
+                    <option>Havale</option>
+                    <option>Taksit</option>
+                  </select>
+                  <button type="submit" disabled={paySaving} className="save-btn">{paySaving ? '...' : 'Ekle'}</button>
+                </form>
+              )}
+
+              {payments.length === 0 && !showPayForm ? (
                 <p className="empty-state">Henüz ödeme kaydı yok.</p>
               ) : (
                 <table className="payments-table">
                   <thead>
-                    <tr>
-                      <th>Tarih</th>
-                      <th>Tutar</th>
-                      <th>Yöntem</th>
-                    </tr>
+                    <tr><th>Tarih</th><th>Tutar</th><th>Yöntem</th></tr>
                   </thead>
                   <tbody>
                     {payments.map((p) => (
@@ -195,280 +260,114 @@ export default function PatientSheet({ open, onClose, patient, doctors }: Props)
 
       <style jsx>{`
         .sheet-backdrop {
-          position: fixed;
-          inset: 0;
+          position: fixed; inset: 0;
           background: rgba(0, 0, 0, 0.5);
-          opacity: 0;
-          pointer-events: none;
-          transition: opacity 0.3s ease;
-          z-index: 998;
+          opacity: 0; pointer-events: none;
+          transition: opacity 0.3s ease; z-index: 998;
         }
-        .sheet-backdrop.open {
-          opacity: 1;
-          pointer-events: all;
-        }
+        .sheet-backdrop.open { opacity: 1; pointer-events: all; }
         .sheet-panel {
-          position: fixed;
-          top: 0;
-          right: 0;
-          bottom: 0;
-          width: min(480px, 90vw);
+          position: fixed; top: 0; right: 0; bottom: 0;
+          width: min(500px, 92vw);
           background: var(--background);
           border-left: 1px solid var(--glass-border);
           transform: translateX(100%);
           transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          z-index: 999;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
+          z-index: 999; display: flex; flex-direction: column; overflow: hidden;
         }
-        .sheet-panel.open {
-          transform: translateX(0);
-        }
-        .sheet-header {
-          padding: 20px 24px 16px;
-          border-bottom: 1px solid var(--divider);
-        }
-        .sheet-header-top {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
+        .sheet-panel.open { transform: translateX(0); }
+        .sheet-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--divider); }
+        .sheet-header-top { display: flex; align-items: center; gap: 12px; }
         .sheet-close {
-          background: var(--glass-bg);
-          border: 1px solid var(--glass-border);
-          color: var(--foreground-2);
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 0.9rem;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: background 0.2s;
+          background: var(--glass-bg); border: 1px solid var(--glass-border);
+          color: var(--foreground-2); width: 32px; height: 32px; border-radius: 8px;
+          cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center;
         }
-        .sheet-close:hover {
-          background: var(--glass-bg-hover);
-        }
-        .sheet-patient-name {
-          font-size: 1.2rem;
-          font-weight: 700;
-          flex: 1;
-        }
+        .sheet-close:hover { background: var(--glass-bg-hover); }
+        .sheet-patient-name { font-size: 1.2rem; font-weight: 700; flex: 1; }
         .sheet-badge {
-          font-size: 0.7rem;
-          font-weight: 600;
-          padding: 4px 10px;
-          border-radius: 20px;
-          background: rgba(34, 197, 94, 0.15);
-          color: var(--success);
-          white-space: nowrap;
+          font-size: 0.7rem; font-weight: 600; padding: 4px 10px; border-radius: 20px;
+          background: rgba(34, 197, 94, 0.15); color: var(--success); white-space: nowrap;
         }
-        .sheet-balance {
-          margin-top: 10px;
-          font-size: 0.85rem;
-          color: var(--foreground-2);
-        }
-        .sheet-balance strong {
-          color: var(--accent);
-        }
-        .sheet-tabs {
-          display: flex;
-          gap: 0;
-          border-bottom: 1px solid var(--divider);
-          padding: 0 24px;
-        }
+        .sheet-balance { margin-top: 10px; font-size: 0.85rem; color: var(--foreground-2); }
+        .sheet-balance strong { color: var(--accent); }
+        .sheet-tabs { display: flex; border-bottom: 1px solid var(--divider); padding: 0 24px; }
         .tab-btn {
-          flex: 1;
-          padding: 12px 8px;
-          background: none;
-          border: none;
-          border-bottom: 2px solid transparent;
-          color: var(--foreground-3);
-          font-size: 0.8rem;
-          font-weight: 500;
-          cursor: pointer;
+          flex: 1; padding: 12px 8px; background: none; border: none;
+          border-bottom: 2px solid transparent; color: var(--foreground-3);
+          font-size: 0.8rem; font-weight: 500; cursor: pointer; text-align: center;
           transition: color 0.2s, border-color 0.2s;
-          text-align: center;
         }
-        .tab-btn:hover {
-          color: var(--foreground-2);
-        }
-        .tab-btn.active {
-          color: var(--accent);
-          border-bottom-color: var(--accent);
-        }
-        .sheet-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 20px 24px;
-        }
-        .empty-state {
-          text-align: center;
-          color: var(--foreground-3);
-          padding: 40px 0;
-          font-size: 0.85rem;
-        }
+        .tab-btn:hover { color: var(--foreground-2); }
+        .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .sheet-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+        .empty-state { text-align: center; color: var(--foreground-3); padding: 40px 0; font-size: 0.85rem; }
 
-        /* Treatments */
-        .treatment-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          margin-bottom: 20px;
+        .add-btn {
+          display: inline-block; margin-bottom: 12px; padding: 6px 12px;
+          border-radius: 6px; border: 1px dashed var(--glass-border);
+          background: transparent; color: var(--accent); font-size: 0.75rem;
+          font-weight: 600; cursor: pointer; transition: background 0.2s;
         }
+        .add-btn:hover { background: var(--glass-bg); }
+        .inline-form {
+          display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+          padding: 12px; border-radius: 8px; background: var(--glass-bg); border: 1px solid var(--glass-border);
+        }
+        .form-input {
+          flex: 1; min-width: 80px; padding: 6px 10px; border-radius: 6px;
+          border: 1px solid var(--input-border); background: var(--input-bg);
+          color: var(--foreground); font-size: 0.78rem; outline: none;
+        }
+        .save-btn {
+          padding: 6px 14px; border-radius: 6px; border: none;
+          background: var(--accent); color: #fff; font-size: 0.78rem;
+          font-weight: 600; cursor: pointer;
+        }
+        .save-btn:disabled { opacity: 0.5; }
+
+        .treatment-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
         .treatment-card {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 14px;
-          border-radius: 8px;
-          background: var(--glass-bg);
-          border: 1px solid var(--glass-border);
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 12px 14px; border-radius: 8px; background: var(--glass-bg); border: 1px solid var(--glass-border);
         }
-        .treatment-info {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .treatment-name {
-          font-size: 0.85rem;
-          font-weight: 500;
-          color: var(--foreground);
-        }
-        .treatment-status {
-          font-size: 0.7rem;
-          font-weight: 500;
-          padding: 2px 8px;
-          border-radius: 10px;
-          width: fit-content;
-        }
-        .status-planned {
-          background: rgba(96, 165, 250, 0.15);
-          color: var(--accent);
-        }
-        .status-completed {
-          background: rgba(34, 197, 94, 0.15);
-          color: var(--success);
-        }
-        .treatment-cost {
-          font-size: 0.85rem;
-          font-weight: 600;
-          color: var(--foreground);
-        }
-        .cost-summary {
-          padding: 14px;
-          border-radius: 10px;
-          background: var(--glass-bg);
-          border: 1px solid var(--glass-border);
-        }
-        .cost-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 6px 0;
-          font-size: 0.8rem;
-          color: var(--foreground-2);
-        }
-        .cost-row.total {
-          border-top: 1px solid var(--divider);
-          margin-top: 6px;
-          padding-top: 10px;
-        }
+        .treatment-info { display: flex; flex-direction: column; gap: 4px; }
+        .treatment-name { font-size: 0.85rem; font-weight: 500; color: var(--foreground); }
+        .treatment-status { font-size: 0.7rem; font-weight: 500; padding: 2px 8px; border-radius: 10px; width: fit-content; }
+        .status-planned { background: rgba(96, 165, 250, 0.15); color: var(--accent); }
+        .status-completed { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+        .treatment-cost { font-size: 0.85rem; font-weight: 600; color: var(--foreground); }
+        .cost-summary { padding: 14px; border-radius: 10px; background: var(--glass-bg); border: 1px solid var(--glass-border); }
+        .cost-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.8rem; color: var(--foreground-2); }
+        .cost-row.total { border-top: 1px solid var(--divider); margin-top: 6px; padding-top: 10px; }
         .cost-row .paid { color: var(--success); }
         .cost-row .remaining { color: var(--warning); font-size: 0.95rem; }
 
-        /* Payments */
-        .payments-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.8rem;
-        }
+        .payments-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
         .payments-table th {
-          text-align: left;
-          padding: 10px 12px;
-          color: var(--foreground-3);
-          font-weight: 500;
-          border-bottom: 1px solid var(--divider);
-          font-size: 0.75rem;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
+          text-align: left; padding: 10px 12px; color: var(--foreground-3);
+          font-weight: 500; border-bottom: 1px solid var(--divider); font-size: 0.75rem;
+          text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .payments-table td {
-          padding: 12px;
-          border-bottom: 1px solid var(--divider);
-          color: var(--foreground);
-        }
-        .payments-table .amount {
-          font-weight: 600;
-          color: var(--success);
-        }
+        .payments-table td { padding: 12px; border-bottom: 1px solid var(--divider); color: var(--foreground); }
+        .payments-table .amount { font-weight: 600; color: var(--success); }
         .method-badge {
-          font-size: 0.7rem;
-          padding: 3px 8px;
-          border-radius: 6px;
-          background: var(--glass-bg);
-          border: 1px solid var(--glass-border);
-          color: var(--foreground-2);
+          font-size: 0.7rem; padding: 3px 8px; border-radius: 6px;
+          background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--foreground-2);
         }
 
-        /* Timeline */
-        .timeline {
-          display: flex;
-          flex-direction: column;
-          gap: 0;
-          padding-left: 16px;
-        }
-        .timeline-item {
-          position: relative;
-          padding-left: 24px;
-          padding-bottom: 24px;
-        }
+        .timeline { display: flex; flex-direction: column; padding-left: 16px; }
+        .timeline-item { position: relative; padding-left: 24px; padding-bottom: 24px; }
         .timeline-dot {
-          position: absolute;
-          left: 0;
-          top: 4px;
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background: var(--accent);
-          border: 2px solid var(--background);
-          box-shadow: 0 0 0 2px var(--accent);
+          position: absolute; left: 0; top: 4px; width: 10px; height: 10px;
+          border-radius: 50%; background: var(--accent); border: 2px solid var(--background); box-shadow: 0 0 0 2px var(--accent);
         }
-        .timeline-line {
-          position: absolute;
-          left: 4px;
-          top: 16px;
-          bottom: 0;
-          width: 2px;
-          background: var(--divider);
-        }
-        .timeline-content {
-          padding-top: 0;
-        }
-        .timeline-date {
-          font-size: 0.75rem;
-          color: var(--foreground-3);
-          margin-bottom: 2px;
-        }
-        .timeline-doctor {
-          font-size: 0.8rem;
-          font-weight: 600;
-          color: var(--accent);
-          margin-bottom: 4px;
-        }
-        .timeline-desc {
-          font-size: 0.85rem;
-          color: var(--foreground);
-          line-height: 1.4;
-        }
+        .timeline-line { position: absolute; left: 4px; top: 16px; bottom: 0; width: 2px; background: var(--divider); }
+        .timeline-date { font-size: 0.75rem; color: var(--foreground-3); margin-bottom: 2px; }
+        .timeline-doctor { font-size: 0.8rem; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+        .timeline-desc { font-size: 0.85rem; color: var(--foreground); line-height: 1.4; }
 
-        @media (max-width: 640px) {
-          .sheet-panel {
-            width: 100vw;
-          }
-        }
+        @media (max-width: 640px) { .sheet-panel { width: 100vw; } }
       `}</style>
     </>
   )
