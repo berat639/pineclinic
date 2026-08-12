@@ -42,10 +42,19 @@ import {
   getAllPromptSections,
   setPromptSection,
   resetPromptSection,
+  getBranding,
+  setBranding,
 } from './db/repositories/settings'
 import { embedText, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
 import { listCategories, createCategory, updateCategory, deleteCategory, seedCategories } from './db/repositories/categories'
+import { authPlugin } from './api/auth'
+import { shiftsPlugin } from './api/shifts'
+import { notificationsPlugin } from './api/notifications'
+import { yoneticiPlugin } from './api/yonetici'
+import { hekimPlugin } from './api/hekim'
+import { hostPlugin } from './api/host'
+import { startReminderCron } from './cron/reminders'
 
 const callerRegistry = new Map<string, string>()
 
@@ -93,9 +102,7 @@ async function buildSystemPrompt(greeting: string): Promise<string> {
   try {
     const rows = await getAllPromptSections()
     dbSections = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.value]))
-  } catch {
-    // DB failure — use defaults only
-  }
+  } catch {}
 
   const parts: string[] = []
   for (const key of PROMPT_SECTION_KEYS) {
@@ -105,6 +112,17 @@ async function buildSystemPrompt(greeting: string): Promise<string> {
     }
     if (value) parts.push(value)
   }
+
+  // Inject conversation flow as prompt text
+  try {
+    const { getActiveFlow, flowToPromptText } = await import('./db/repositories/flows')
+    const flow = await getActiveFlow()
+    if (flow) {
+      const flowText = flowToPromptText(flow)
+      if (flowText) parts.push(flowText)
+    }
+  } catch {}
+
   return parts.join('\n\n')
 }
 
@@ -226,17 +244,38 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
+  .use(authPlugin)
+  .use(shiftsPlugin)
+  .use(notificationsPlugin)
+  .use(yoneticiPlugin)
+  .use(hekimPlugin)
+  .use(hostPlugin)
+
+  // ── Users API (admin) ──────────────────────────────────────────────────────
+  .get('/api/admin/users', async () => {
+    const { listUsers } = await import('./db/repositories/users')
+    return await listUsers()
+  })
 
   // ── Dental Calendar API ────────────────────────────────────────────────────
   .get('/api/dental/doctors', async () => {
-    const { listDoctors } = await import('./db/repositories/dental')
-    return await listDoctors()
+    const { db } = await import('./db/client')
+    const { users } = await import('./db/schema')
+    const { eq } = await import('drizzle-orm')
+    return db.select({ id: users.id, name: users.name, specialty: users.specialty, color: users.color, active: users.active })
+      .from(users).where(eq(users.role, 'hekim'))
   })
   .post('/api/dental/doctors', async ({ body, set }) => {
-    const { createDoctor } = await import('./db/repositories/dental')
+    const { createUser } = await import('./db/repositories/users')
     const b = body as any
     if (!b.name || !b.specialty) { set.status = 400; return { error: 'Name and specialty required' } }
-    return await createDoctor({ name: b.name, specialty: b.specialty, color: b.color })
+    const hash = await Bun.password.hash('Hekim123!')
+    const user = await createUser({ email: `hekim.${Date.now()}@klinik.com`, passwordHash: hash, name: b.name, role: 'hekim' })
+    const { db } = await import('./db/client')
+    const { users } = await import('./db/schema')
+    const { eq } = await import('drizzle-orm')
+    await db.update(users).set({ specialty: b.specialty, color: b.color || '#60a5fa' }).where(eq(users.id, user.id))
+    return { id: user.id, name: user.name, specialty: b.specialty, color: b.color || '#60a5fa', active: true }
   })
   .get('/api/dental/appointments', async ({ query }) => {
     const { listDentalAppointments } = await import('./db/repositories/dental')
@@ -245,14 +284,63 @@ const app = new Elysia()
   .post('/api/dental/appointments', async ({ body, set }) => {
     const { createDentalAppointment } = await import('./db/repositories/dental')
     const b = body as any
-    if (!b.patientId || !b.doctorId || !b.title || !b.startTime || !b.endTime) {
+    if (!b.patientId || !b.title || !b.startTime || !b.endTime) {
       set.status = 400; return { error: 'Missing required fields' }
     }
     return await createDentalAppointment({
-      patientId: b.patientId, doctorId: b.doctorId, title: b.title,
+      patientId: b.patientId, doctorId: b.doctorId || null, title: b.title,
       startTime: new Date(b.startTime), endTime: new Date(b.endTime),
       status: b.status, type: b.type, notes: b.notes,
     })
+  })
+  .delete('/api/dental/appointments/:id', async ({ params, set }) => {
+    const { deleteDentalAppointment } = await import('./db/repositories/dental')
+    const ok = await deleteDentalAppointment(params.id)
+    if (!ok) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
+  })
+  .put('/api/dental/appointments/:id', async ({ params, body, set }) => {
+    const { updateDentalAppointment } = await import('./db/repositories/dental')
+    const b = body as Record<string, unknown>
+    const updated = await updateDentalAppointment(params.id, {
+      doctorId: b.doctorId !== undefined ? (b.doctorId as string | null) : undefined,
+      timeConfirmed: b.timeConfirmed !== undefined ? (b.timeConfirmed as boolean) : undefined,
+      status: b.status as string | undefined,
+      startTime: b.startTime ? new Date(b.startTime as string) : undefined,
+      endTime: b.endTime ? new Date(b.endTime as string) : undefined,
+    })
+    if (!updated) { set.status = 404; return { error: 'Not found' } }
+    return updated
+  })
+  .get('/api/dental/payments', async ({ query }) => {
+    const { listAllPayments } = await import('./db/repositories/dental')
+    return await listAllPayments({
+      page: Number((query as any).page || 1),
+      pageSize: Number((query as any).pageSize || 25),
+      status: (query as any).status,
+      search: (query as any).search,
+    })
+  })
+  .put('/api/dental/payments/:id', async ({ params, body, set }) => {
+    const { updatePayment } = await import('./db/repositories/dental')
+    const b = body as Record<string, unknown>
+    const updated = await updatePayment(params.id, {
+      date: b.date as string | undefined,
+      amount: b.amount !== undefined ? Number(b.amount) : undefined,
+      method: b.method as string | undefined,
+      notes: b.notes as string | undefined,
+      status: b.status as string | undefined,
+      dueDate: b.dueDate !== undefined ? (b.dueDate as string | null) : undefined,
+      treatmentPlanId: b.treatmentPlanId !== undefined ? (b.treatmentPlanId as string | null) : undefined,
+    })
+    if (!updated) { set.status = 404; return { error: 'Not found' } }
+    return updated
+  })
+  .delete('/api/dental/payments/:id', async ({ params, set }) => {
+    const { deletePayment } = await import('./db/repositories/dental')
+    const ok = await deletePayment(params.id)
+    if (!ok) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
   })
   .get('/api/dental/patients', async () => {
     const { listPatients } = await import('./db/repositories/dental')
@@ -270,6 +358,19 @@ const app = new Elysia()
     if (!p) { set.status = 404; return { error: 'Patient not found' } }
     return p
   })
+  .put('/api/dental/patients/:id', async ({ params, body, set }) => {
+    const { db } = await import('./db/client')
+    const { patients } = await import('./db/schema')
+    const { eq } = await import('drizzle-orm')
+    const b = body as any
+    const updateData: any = {}
+    if (b.phone !== undefined) updateData.phone = b.phone
+    if (b.email !== undefined) updateData.email = b.email
+    if (Object.keys(updateData).length === 0) return { success: true }
+    
+    await db.update(patients).set(updateData).where(eq(patients.id, params.id))
+    return { success: true }
+  })
   .get('/api/dental/patients/:id/treatments', async ({ params }) => {
     const { getPatientTreatments } = await import('./db/repositories/dental')
     return await getPatientTreatments(params.id)
@@ -278,7 +379,31 @@ const app = new Elysia()
     const { createTreatmentPlan } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.procedureName || b.cost === undefined) { set.status = 400; return { error: 'Missing fields' } }
-    return await createTreatmentPlan({ patientId: params.id, procedureName: b.procedureName, cost: b.cost, status: b.status })
+    return await createTreatmentPlan({ 
+      patientId: params.id, 
+      procedureName: b.procedureName, 
+      toothNumber: b.toothNumber, 
+      indication: b.indication, 
+      cost: b.cost, 
+      status: b.status,
+      clinicId: b.clinicId,
+      isPeriodic: b.isPeriodic,
+      periodDays: b.periodDays,
+      nextNotificationDate: b.nextNotificationDate,
+      notifyPatient: b.notifyPatient,
+      notificationType: b.notificationType
+    })
+  })
+  .put('/api/dental/treatments/:id', async ({ params, body }) => {
+    const { updateTreatmentPlan } = await import('./db/repositories/dental')
+    const b = body as any
+    return await updateTreatmentPlan(params.id, { status: b.status })
+  })
+  .delete('/api/dental/treatments/:id', async ({ params, set }) => {
+    const { deleteTreatmentPlan } = await import('./db/repositories/dental')
+    const success = await deleteTreatmentPlan(params.id)
+    if (!success) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
   })
   .get('/api/dental/patients/:id/payments', async ({ params }) => {
     const { getPatientPayments } = await import('./db/repositories/dental')
@@ -287,8 +412,8 @@ const app = new Elysia()
   .post('/api/dental/patients/:id/payments', async ({ params, body, set }) => {
     const { createPayment } = await import('./db/repositories/dental')
     const b = body as any
-    if (!b.date || !b.amount || !b.method) { set.status = 400; return { error: 'Missing fields' } }
-    return await createPayment({ patientId: params.id, date: b.date, amount: b.amount, method: b.method, notes: b.notes })
+    if (!b.date || !b.amount) { set.status = 400; return { error: 'Missing fields' } }
+    return await createPayment({ patientId: params.id, date: b.date, amount: b.amount, method: b.method || 'Nakit', notes: b.notes, status: b.status, dueDate: b.dueDate, treatmentPlanId: b.treatmentPlanId })
   })
   .get('/api/dental/patients/:id/works', async ({ params }) => {
     const { getPatientCompletedWorks } = await import('./db/repositories/dental')
@@ -474,6 +599,32 @@ const app = new Elysia()
         for (const c of sseClients) {
           if (c.id === clientId) { clearInterval((c as any).hb); sseClients.delete(c); break }
         }
+      },
+    })
+  })
+
+  // User-scoped SSE for notifications
+  .get('/api/notifications/stream', async ({ cookie, set }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+
+    set.headers['Content-Type'] = 'text/event-stream'
+    set.headers['Cache-Control'] = 'no-cache'
+    set.headers['Connection'] = 'keep-alive'
+
+    const { registerSSEClient } = await import('./services/notification')
+    return new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder()
+        const send = (data: string) => { try { controller.enqueue(enc.encode(data)) } catch {} }
+        const unregister = registerSSEClient(user.id, send)
+        send(`: connected\n\n`)
+        const hb = setInterval(() => send(`: ping\n\n`), 25000)
+        ;(controller as any).__cleanup = () => { clearInterval(hb); unregister() }
+      },
+      cancel(controller: any) {
+        controller?.__cleanup?.()
       },
     })
   })
@@ -742,6 +893,21 @@ const app = new Elysia()
     return { success: true, ...saved }
   })
 
+  // ── Branding Settings ──────────────────────────────────────────────────────
+  .get('/api/admin/settings/branding', async () => {
+    return getBranding()
+  })
+
+  .put('/api/admin/settings/branding', async ({ body, set }) => {
+    const { title, subtitle, logoUrl } = (body ?? {}) as { title?: string; subtitle?: string; logoUrl?: string }
+    if (!title && !subtitle && !logoUrl) {
+      set.status = 400
+      return { error: 'En az bir alan gerekli (title, subtitle, logoUrl)' }
+    }
+    const result = await setBranding({ title, subtitle, logoUrl })
+    return { success: true, ...result }
+  })
+
   // ── Prompt Section Settings ─────────────────────────────────────────────────
   .get('/api/admin/settings/prompts', async () => {
     const dbSections = await getAllPromptSections()
@@ -873,6 +1039,56 @@ const app = new Elysia()
     return await deleteCategory(params.id)
   })
 
+  // ── Conversation Flow API ─────────────────────────────────────────────────
+  .get('/api/admin/flow', async () => {
+    const { getActiveFlow } = await import('./db/repositories/flows')
+    const flow = await getActiveFlow()
+    return flow ?? { nodes: [], edges: [] }
+  })
+
+  .put('/api/admin/flow', async ({ body, set }) => {
+    const { nodes, edges } = (body ?? {}) as { nodes?: unknown[]; edges?: unknown[] }
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+      set.status = 400
+      return { error: 'nodes ve edges array olmalı' }
+    }
+    const { saveFlow } = await import('./db/repositories/flows')
+    const flow = await saveFlow(nodes as any[], edges as any[])
+    return { success: true, flow }
+  })
+
+  // ── Direct Mode: Session Config ──────────────────────────────────────────────
+  // Client bağlanmadan önce dinamik system prompt, RAG context ve tool declarations alır
+  .get('/api/direct-session-config', async () => {
+    const { buildToolDeclarations } = await import('./gemini')
+    const greeting = await getGreeting() ?? DEFAULT_GREETING
+    const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
+    const systemPrompt = dateHeader + await buildSystemPrompt(greeting)
+
+    // RAG pre-warm
+    let ragContext = ''
+    try {
+      const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+      const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
+      if (topDocs.length > 0) {
+        ragContext = await buildRagPrompt(topDocs)
+      }
+    } catch { /* ignore */ }
+
+    const toolDeclarations = (await buildToolDeclarations())
+      .filter(t => t.name !== 'cagriySonlandir')
+    const model = await resolveLiveModel()
+    const branding = await getBranding()
+
+    return {
+      systemPrompt: systemPrompt + ragContext,
+      toolDeclarations,
+      model,
+      greeting,
+      branding,
+    }
+  })
+
   // ── Direct Mode: Tool Call HTTP Endpoints ───────────────────────────────────
   // Bu endpoint'ler doğrudan (direct) modda çalışan client-side Gemini
   // bağlantısının tool call'larını karşılar. Ses direkt Gemini'ye gider,
@@ -926,24 +1142,40 @@ const app = new Elysia()
 
   .post('/api/tools/create-appointment', async ({ body, set }) => {
     const args = (body ?? {}) as Record<string, string>
-    const invalid = validateLiveCustomerIdentity(args.musteri_adi, args.telefon)
-    if (invalid) return { success: false, message: invalid }
-    if (!args.tarih || !args.saat) return { success: false, message: 'Tarih ve saat zorunludur.' }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.tarih)) return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
+    const name = args.musteri_adi || args.ad_soyad || args.hasta_adi || ''
+    const phone = args.telefon || args.phone || ''
+    const tarih = args.tarih || args.date || ''
+    const saat = args.saat || args.time || ''
+    const type = args.randevu_turu || args.islem_turu || args.tur || 'kontrol'
+
+    if (!name || name.length < 2) return { success: false, message: 'Müşteri adı zorunludur; müşteriden adını soyadını sor.' }
+    if (!phone || phone.replace(/\D/g, '').length < 10) return { success: false, message: 'Geçerli telefon numarası zorunludur (en az 10 hane).' }
+    if (!tarih || !saat) return { success: false, message: 'Tarih ve saat zorunludur.' }
+
     try {
-      const appointment = await createAppointment({
-        customerName: args.musteri_adi.trim(),
-        phone: args.telefon.trim(),
-        type: args.randevu_turu || 'other',
-        vehicleInfo: args.arac_bilgisi || undefined,
-        issueOrRequest: args.sorun_veya_talep || undefined,
-        date: args.tarih,
-        time: args.saat,
-        sessionId: `direct-${randomUUID().slice(0, 8)}`,
-        notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
-      })
+      const { createFlowAppointment } = await import('./db/repositories/appointments')
+      const appointment = await createFlowAppointment(
+        { ...args, musteri_adi: name, telefon: phone, tarih, saat },
+        `direct-${randomUUID().slice(0, 8)}`,
+      )
       console.log('[Tools/Appointment]', appointment.id, appointment.customerName)
-      return { success: true, message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`, id: appointment.id }
+
+      // Dental calendar sync
+      void (async () => {
+        try {
+          const { createDentalAppointmentFromVoice } = await import('./db/repositories/dental')
+          await createDentalAppointmentFromVoice({
+            customerName: name,
+            phone,
+            type,
+            date: tarih,
+            time: saat,
+            doctorId: args.doktor_id || null,
+          })
+        } catch (e) { console.error('[Tools/Appointment:CalendarSync]', e) }
+      })()
+
+      return { success: true, message: `Randevu ${tarih} ${saat} için kaydedildi.`, id: appointment.id }
     } catch (err) {
       console.error('[Tools/Appointment]', err)
       set.status = 500
@@ -1173,6 +1405,9 @@ app.ws('/ws', {
       console.log(`   Telephony: kapalı (TELEPHONY_ENABLED=1 ile aç)`)
     }
     console.log('')
+    
+    // Start Cron Jobs
+    startReminderCron()
   })
 
 export type App = typeof app

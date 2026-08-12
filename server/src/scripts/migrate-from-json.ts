@@ -132,7 +132,7 @@ async function importKnowledge() {
         : `INSERT INTO knowledge_documents (category, title, content, active, embedding, embedded_at, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5::vector, $6, $7, $8)
            RETURNING id`
-      const result = await sql.unsafe(queryText, params)
+      const result = await sql.unsafe(queryText, params as any[])
       if (result.length > 0) inserted++
     } else {
       const result = idValid

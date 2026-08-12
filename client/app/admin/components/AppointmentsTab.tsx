@@ -20,9 +20,36 @@ function fmtDate(d: string) {
   try { return new Date(d).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' }) }
   catch { return d }
 }
+
 function fmtCreated(d: string) {
   try { return new Date(d).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
   catch { return d }
+}
+
+const TR_DICT: Record<string, string> = {
+  'ad_soyad': 'Ad Soyad',
+  'telefon': 'Telefon',
+  'tarih': 'Tarih',
+  'saat': 'Saat',
+  'tc': 'TC Kimlik No',
+  'tc_kimlik': 'TC Kimlik No',
+  'email': 'E-Posta',
+  'sikayet': 'Şikayet / Talep',
+  'talep': 'Talep / Detay',
+  'arac_plaka': 'Araç Plakası',
+  'plaka': 'Plaka',
+  'customerName': 'Müşteri',
+  'phone': 'Telefon',
+  'issueOrRequest': 'Talep / Detay',
+  'date': 'Tarih',
+  'time': 'Saat'
+}
+
+function formatFieldName(str: string): string {
+  if (!str) return '';
+  if (TR_DICT[str]) return TR_DICT[str];
+  const spaced = str.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ');
+  return spaced.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
 }
 
 export default function AppointmentsTab({ appointments, onDelete }: { appointments: Appointment[], onDelete: (id: string) => void }) {
@@ -30,6 +57,39 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [flowFields, setFlowFields] = useState<{ id: string, label: string, type?: string }[]>([])
+  const [users, setUsers] = useState<any[]>([])
+
+  // Load flow fields to determine dynamic columns and users for doctor mapping
+  useCallback(() => {
+    fetch('/api/admin/flow')
+      .then(res => res.json())
+      .then(data => {
+        if (data.nodes) {
+          const fields = data.nodes
+            .filter((n: any) => n.type === 'FIELD' || n.type === 'fieldNode')
+            .map((n: any) => {
+              const rawName = n.data.fieldName || n.data.label || n.id;
+              return {
+                id: rawName,
+                label: formatFieldName(rawName),
+                type: n.data.fieldType
+              };
+            })
+          
+          const uniqueFields = fields.filter((v: any, i: number, a: any[]) => a.findIndex(t => (t.id === v.id)) === i)
+          setFlowFields(uniqueFields)
+        }
+      })
+      .catch(() => {})
+
+    fetch('/api/admin/users')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setUsers(data)
+      })
+      .catch(() => {})
+  }, [])()
 
   const uniqueTypes = [...new Set(appointments.map(a => a.type))]
 
@@ -86,7 +146,7 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    {['Tür', 'Müşteri', 'Telefon', 'Talep/Detay', 'Tarih & Saat', ''].map((h, i) => (
+                    {['Tür', ...flowFields.map(f => f.label), 'Tarih & Saat', ''].map((h, i) => (
                       <th key={i} style={{ padding: '0.8rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -102,13 +162,25 @@ export default function AppointmentsTab({ appointments, onDelete }: { appointmen
                       <td style={{ padding: '0.8rem 1rem', whiteSpace: 'nowrap' }}>
                         <span className={`badge ${TYPE_BADGE[a.type] || 'badge-other'}`}>{getTypeIcon(a.type)} {getTypeLabel(a.type)}</span>
                       </td>
-                      <td style={{ padding: '0.8rem 1rem' }}>
-                        <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{a.customerName || <span style={{ color: '#475569', fontStyle: 'italic' }}>—</span>}</div>
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>{a.phone || '—'}</td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.78rem', color: '#94a3b8', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {detailText || '—'}
-                      </td>
+                      {flowFields.map(f => {
+                        // Check extraFields first, fallback to standard fields if matched by name, or common fallbacks
+                        let val = a.extraFields?.[f.id] 
+                          || a[f.id as keyof Appointment] 
+                          || (f.id === 'ad_soyad' || f.id.includes('müşteri') ? a.customerName : null)
+                          || (f.id === 'telefon' ? a.phone : null)
+                          || (f.id === 'talep' || f.id === 'sikayet' ? a.issueOrRequest : null)
+                          
+                        if (val && (f.type === 'user' || f.type === 'doctor' || f.id.toLowerCase().includes('doktor') || f.id.toLowerCase().includes('hekim') || f.id.toLowerCase().includes('personel') || f.id.toLowerCase().includes('uzman'))) {
+                           const userMatch = users.find(u => u.id === val || u.name === val)
+                           if (userMatch) val = userMatch.name
+                        }
+
+                        return (
+                          <td key={f.id} style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: '#e2e8f0', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {val ? String(val) : <span style={{ color: '#475569', fontStyle: 'italic' }}>—</span>}
+                          </td>
+                        )
+                      })}
                       <td style={{ padding: '0.8rem 1rem', whiteSpace: 'nowrap' }}>
                         <div style={{ fontSize: '0.84rem', fontWeight: 500 }}>{fmtDate(a.date)}</div>
                         {a.time && <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>🕐 {a.time}</div>}

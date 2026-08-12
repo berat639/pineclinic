@@ -4,14 +4,16 @@ import { useEffect, useState, useCallback, type CSSProperties } from 'react'
 import AppointmentsTab from './components/AppointmentsTab'
 import StatsBar from './components/StatsBar'
 import ToastContainer from './components/ToastContainer'
-import RecordingsTab from './components/RecordingsTab'
-import PromptEditor from './components/PromptEditor'
+import FlowBuilder from './components/FlowBuilder'
 import CalendarTab from './components/CalendarTab'
+import PaymentsTab from './components/PaymentsTab'
+import UsersTab from './components/UsersTab'
+import KnowledgeTab from './components/KnowledgeTab'
 import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Tab = 'calendar' | 'appointments' | 'knowledge' | 'recordings' | 'settings'
+type Tab = 'calendar' | 'appointments' | 'payments' | 'knowledge' | 'settings' | 'users'
 
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
@@ -173,9 +175,10 @@ function hexToRgb(hex: string): string {
 const TABS: { id: Tab; label: string }[] = [
   { id: 'calendar',     label: 'Takvim' },
   { id: 'appointments', label: 'Randevular' },
+  { id: 'payments',     label: 'Ödemeler' },
   { id: 'knowledge',    label: 'Bilgi Tabanı' },
-  { id: 'recordings',   label: 'Kayıtlar' },
   { id: 'settings',     label: 'Ayarlar' },
+  { id: 'users',        label: 'Kullanıcılar' },
 ]
 
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
@@ -375,6 +378,23 @@ export default function AdminPage() {
   const [aiLoading, setAiLoading] = useState(true)
   const [aiSaving, setAiSaving] = useState(false)
 
+  // Karşılama Mesajı (Ayarlar tab)
+  const [greetingText, setGreetingText] = useState('')
+  const [greetingLoading, setGreetingLoading] = useState(false)
+  const [greetingSaving, setGreetingSaving] = useState(false)
+  
+  const handleSaveGreeting = async () => {
+    try {
+      setGreetingSaving(true)
+      await fetch('/api/settings/greeting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ greeting: greetingText })
+      })
+    } catch (err) {}
+    finally { setGreetingSaving(false) }
+  }
+
   // Connection Mode (Bağlantı Modu)
   const [connMode, setConnMode] = useState<'server' | 'direct'>('server')
   const [connModeLoading, setConnModeLoading] = useState(true)
@@ -436,24 +456,7 @@ export default function AdminPage() {
   const [voipAfterHours, setVoipAfterHours] = useState<AfterHours>('voicemail')
   const [voipSaving, setVoipSaving] = useState(false)
 
-  // Knowledge (Bilgi Tabanı tab)
-  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([])
-  const [kbLoading, setKbLoading] = useState(false)
-  const [kbName, setKbName] = useState('')
-  const [kbCategory, setKbCategory] = useState<string>('genel')
-  const [kbText, setKbText] = useState('')
-  const [kbFile, setKbFile] = useState<File | null>(null)
-  const [kbUploading, setKbUploading] = useState(false)
-  const [openKbId, setOpenKbId] = useState<string | null>(null)
-  const [kbCategories, setKbCategories] = useState<KbCategoryDef[]>([])
-  const [catMgmtOpen, setCatMgmtOpen] = useState(false)
-  const [newCatSlug, setNewCatSlug] = useState('')
-  const [newCatLabel, setNewCatLabel] = useState('')
-  const [newCatIcon, setNewCatIcon] = useState('📁')
-  const [newCatColor, setNewCatColor] = useState('#60a5fa')
-  const [catSaving, setCatSaving] = useState(false)
-
-  // Inline action toast (for KB / calendar actions)
+  // Inline action toast (for calendar actions)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const showToast = (type: 'success' | 'error', text: string) => {
@@ -578,43 +581,6 @@ export default function AdminPage() {
     finally { setConnModeSaving(false) }
   }
 
-  // ── Greeting (Karşılama Mesajı) ──────────────────────────────────────────
-  const [greetingText, setGreetingText] = useState('')
-  const [greetingLoading, setGreetingLoading] = useState(true)
-  const [greetingSaving, setGreetingSaving] = useState(false)
-
-  const fetchGreeting = useCallback(async () => {
-    setGreetingLoading(true)
-    try {
-      const res = await fetch('/api/admin/settings/greeting')
-      const data = await res.json() as { greeting?: string }
-      if (data.greeting) setGreetingText(data.greeting)
-    } catch { showToast('error', 'Karşılama mesajı alınamadı') }
-    finally { setGreetingLoading(false) }
-  }, [])
-
-  useEffect(() => { fetchGreeting() }, [fetchGreeting])
-
-  const handleSaveGreeting = async () => {
-    if (!greetingText.trim() || greetingSaving) return
-    setGreetingSaving(true)
-    try {
-      const res = await fetch('/api/admin/settings/greeting', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ greeting: greetingText.trim() }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string }
-        throw new Error(err.error || 'Kaydedilemedi')
-      }
-      showToast('success', 'Karşılama mesajı güncellendi (sonraki çağrılarda devreye girer)')
-    } catch (e) {
-      showToast('error', e instanceof Error ? e.message : 'Mesaj kaydedilemedi')
-    }
-    finally { setGreetingSaving(false) }
-  }
-
   const handleCalConnect = async () => {
     const res = await fetch('/api/admin/settings/calendar/auth')
     const data = await res.json()
@@ -641,141 +607,6 @@ export default function AdminPage() {
       showToast('success', 'Takvim kaydedildi')
       fetchCalStatus()
     } finally { setSaving(false) }
-  }
-
-  // ── Knowledge ─────────────────────────────────────────────────────────────
-
-  const fetchKnowledgeDocs = useCallback(async () => {
-    setKbLoading(true)
-    try {
-      const [res, catRes] = await Promise.all([
-        fetch('/api/admin/knowledge'),
-        fetch('/api/admin/categories'),
-      ])
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (Array.isArray(data)) setKnowledgeDocs(data)
-      else if (Array.isArray(data.docs)) setKnowledgeDocs(data.docs)
-      else setKnowledgeDocs([])
-      if (catRes.ok) {
-        const cats = await catRes.json()
-        if (Array.isArray(cats)) setKbCategories(cats)
-      }
-    } catch (e) {
-      console.error('[KB] fetchKnowledgeDocs hatası:', e)
-      showToast('error', 'Belgeler yüklenemedi')
-    } finally {
-      setKbLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchKnowledgeDocs() }, [fetchKnowledgeDocs])
-
-  const addCategory = async () => {
-    if (!newCatSlug.trim() || !newCatLabel.trim()) return
-    setCatSaving(true)
-    try {
-      const res = await fetch('/api/admin/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: newCatSlug.trim().toLowerCase(), label: newCatLabel.trim(), icon: newCatIcon, color: newCatColor }),
-      })
-      if (res.ok) {
-        setNewCatSlug(''); setNewCatLabel(''); setNewCatIcon('📁'); setNewCatColor('#60a5fa')
-        await fetchKnowledgeDocs()
-        showToast('success', 'Kategori eklendi')
-      } else {
-        const data = await res.json()
-        showToast('error', data.error || 'Hata')
-      }
-    } catch { showToast('error', 'Kategori eklenemedi') }
-    setCatSaving(false)
-  }
-
-  const deleteCategory = async (id: string) => {
-    if (!confirm('Bu kategoriyi silmek istediğinizden emin misiniz? Bağlı belgeler Genel kategorisine taşınacak.')) return
-    try {
-      const res = await fetch(`/api/admin/categories/${id}`, { method: 'DELETE' })
-      if (res.ok) { await fetchKnowledgeDocs(); showToast('success', 'Kategori silindi') }
-      else showToast('error', 'Silinemedi')
-    } catch { showToast('error', 'Hata') }
-  }
-
-  // Bilgi Tabanı sekmesi açıldığında veriyi tazele
-  useEffect(() => {
-    if (activeTab === 'knowledge') fetchKnowledgeDocs()
-  }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleKbUpload = async () => {
-    if (!kbText.trim() && !kbFile) return
-    setKbUploading(true)
-    try {
-      const form = new FormData()
-      if (kbName.trim()) form.append('name', kbName.trim())
-      form.append('category', kbCategory)
-      if (kbFile) form.append('file', kbFile)
-      else form.append('text', kbText.trim())
-      const res = await fetch('/api/admin/knowledge/upload', { method: 'POST', body: form })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string }
-        throw new Error(err.error || 'Yükleme başarısız')
-      }
-      showToast('success', 'Belge başarıyla indekslendi')
-      setKbName(''); setKbText(''); setKbFile(null); setKbCategory('genel')
-      fetchKnowledgeDocs()
-    } catch (e) {
-      showToast('error', e instanceof Error ? e.message : 'Belge yüklenemedi')
-    }
-    finally { setKbUploading(false) }
-  }
-
-  const handleKbDelete = async (id: string) => {
-    try {
-      const res = await fetch(`/api/admin/knowledge/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      setOpenKbId(prev => (prev === id ? null : prev))
-      showToast('success', 'Belge silindi')
-      fetchKnowledgeDocs()
-    } catch { showToast('error', 'Belge silinemedi') }
-  }
-
-  const [editingKbId, setEditingKbId] = useState<string | null>(null)
-  const [editKbTitle, setEditKbTitle] = useState('')
-  const [editKbContent, setEditKbContent] = useState('')
-  const [editKbCategory, setEditKbCategory] = useState('')
-  const [editKbSaving, setEditKbSaving] = useState(false)
-
-  const startKbEdit = (doc: KnowledgeDoc) => {
-    setEditingKbId(doc.id)
-    setEditKbTitle(doc.title)
-    setEditKbContent(doc.content)
-    setEditKbCategory(doc.category)
-    setOpenKbId(doc.id)
-  }
-
-  const handleKbSave = async () => {
-    if (!editingKbId || !editKbTitle.trim() || !editKbContent.trim()) return
-    setEditKbSaving(true)
-    try {
-      const res = await fetch(`/api/admin/knowledge/${editingKbId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: editKbTitle.trim(), content: editKbContent.trim(), category: editKbCategory }),
-      })
-      if (!res.ok) throw new Error()
-      setEditingKbId(null)
-      showToast('success', 'Belge güncellendi')
-      fetchKnowledgeDocs()
-    } catch { showToast('error', 'Güncelleme başarısız') }
-    setEditKbSaving(false)
-  }
-
-  const handleKbToggle = async (id: string) => {
-    try {
-      const res = await fetch(`/api/admin/knowledge/${id}/toggle`, { method: 'PATCH' })
-      if (!res.ok) throw new Error()
-      fetchKnowledgeDocs()
-    } catch { showToast('error', 'Durum değiştirilemedi') }
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────
@@ -833,7 +664,7 @@ export default function AdminPage() {
                 Admin Panel
               </h1>
               <p style={{ fontSize: 12, color: 'var(--foreground-3)', margin: '3px 0 0' }}>
-                Araç Servisi Yönetim Paneli
+                Müşteri Rezervasyon Yönetim Sistemi
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -902,382 +733,44 @@ export default function AdminPage() {
           )}
 
           {/* ── Tab: Bilgi Tabanı ───────────────────────────────────────── */}
-          {activeTab === 'knowledge' && (
-            <div style={{ maxWidth: 1100, width: '100%' }}>
+          {activeTab === 'knowledge' && <KnowledgeTab />}
 
-              {/* Üst satır: Belge Ekle (sol) + Kategori Yönetimi (sağ) */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          {/* ── Tab: Ödemeler ───────────────────────────────────────────── */}
+          {activeTab === 'payments' && <PaymentsTab />}
 
-              {/* Upload card */}
+
+          {/* ── Tab: Kullanıcılar ───────────────────────────────────────── */}
+          {activeTab === 'users' && <UsersTab />}
+
+          {/* ── Tab: Ayarlar ────────────────────────────────────────────── */}
+          {activeTab === 'settings' && (
+            <div style={{ maxWidth: 800 }}>
               <div className="glass-card" style={{ padding: 24 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(240,244,255,0.7)', marginBottom: 14 }}>
-                  Belge Ekle
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {/* Category picker */}
-                  <div>
-                    <div style={{
-                      fontSize: 11, fontWeight: 600, color: 'rgba(240,244,255,0.45)',
-                      letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 7,
-                    }}>
-                      Kategori
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {kbCategories.map(cat => {
-                        const isActive = kbCategory === cat.slug
-                        const color = cat.color
-                        return (
-                          <button
-                            key={cat.slug}
-                            type="button"
-                            onClick={() => setKbCategory(cat.slug)}
-                            disabled={kbUploading}
-                            style={{
-                              padding: '5px 12px',
-                              borderRadius: 20,
-                              border: '1px solid',
-                              cursor: kbUploading ? 'not-allowed' : 'pointer',
-                              fontSize: 12, fontWeight: 500,
-                              transition: 'all 0.15s',
-                              background: isActive ? `rgba(${hexToRgb(color)}, 0.18)` : 'rgba(255,255,255,0.04)',
-                              borderColor: isActive ? color : 'rgba(255,255,255,0.08)',
-                              color: isActive ? color : '#94a3b8',
-                              opacity: kbUploading ? 0.5 : 1,
-                            }}
-                          >
-                            {cat.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Belge adı (opsiyonel)"
-                    value={kbName}
-                    onChange={e => setKbName(e.target.value)}
-                    disabled={kbUploading}
-                    style={{
-                      padding: '9px 12px',
-                      background: 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: 8, color: '#f0f4ff', fontSize: 13, outline: 'none',
-                      opacity: kbUploading ? 0.5 : 1,
-                    }}
-                  />
-                  <textarea
-                    placeholder="Metin içeriğini buraya yapıştırın..."
-                    value={kbText}
-                    onChange={e => { setKbText(e.target.value); if (e.target.value) setKbFile(null) }}
-                    disabled={kbUploading || !!kbFile}
-                    rows={5}
-                    style={{
-                      padding: '9px 12px',
-                      background: 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: 8, color: '#f0f4ff', fontSize: 13, outline: 'none',
-                      resize: 'vertical', fontFamily: 'inherit',
-                      opacity: kbUploading || !!kbFile ? 0.5 : 1,
-                    }}
-                  />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: 'rgba(240,244,255,0.38)', whiteSpace: 'nowrap' }}>
-                      veya dosya yükle
-                    </span>
-                    <label style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 7,
-                      padding: '7px 13px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: 8,
-                      cursor: kbUploading || !!kbText.trim() ? 'not-allowed' : 'pointer',
-                      fontSize: 12, color: 'rgba(240,244,255,0.6)',
-                      opacity: kbUploading || !!kbText.trim() ? 0.4 : 1,
-                    }}>
-                      <input
-                        type="file"
-                        accept=".txt,.md,.pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.mp4,.mp3,.wav,.m4a"
-                        disabled={kbUploading || !!kbText.trim()}
-                        onChange={e => { const f = e.target.files?.[0] ?? null; setKbFile(f); if (f) setKbText('') }}
-                        style={{ display: 'none' }}
-                      />
-                      {kbFile ? kbFile.name : 'Dosya seç (PDF, görsel, ses, video, metin)'}
-                    </label>
-                    {kbFile && (
-                      <button
-                        onClick={() => setKbFile(null)}
-                        style={{ background: 'transparent', border: 'none', color: 'rgba(248,113,113,0.7)', cursor: 'pointer', fontSize: 12 }}
-                      >
-                        Kaldır
-                      </button>
-                    )}
-                  </div>
-                  <div>
+                <h2 style={{ fontSize: 16, marginBottom: 20 }}>Sistem Ayarları</h2>
+
+                {/* AI Model Settings */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={voipLabelStyle}>Yapay Zeka Modeli</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select
+                      value={aiModel}
+                      onChange={e => setAiModel(e.target.value)}
+                      style={{ ...voipInputStyle, flex: 1 }}
+                    >
+                      {aiAvailable.map(m => (
+                        <option key={m} value={m}>{AI_MODEL_META[m]?.label ?? m}</option>
+                      ))}
+                    </select>
                     <button
-                      onClick={handleKbUpload}
-                      disabled={kbUploading || (!kbText.trim() && !kbFile)}
+                      onClick={() => handleSaveAiModel(aiModel)}
+                      disabled={aiSaving || aiLoading}
                       className="btn btn-primary"
                     >
-                      {kbUploading ? (
-                        <>
-                          <Spinner />
-                          İndeksleniyor...
-                        </>
-                      ) : 'İndeksle'}
+                      {aiSaving ? 'Kaydediliyor...' : 'Kaydet'}
                     </button>
                   </div>
                 </div>
               </div>
-
-              {/* Category Management */}
-              <div className="glass-card" style={{ padding: '12px 20px' }}>
-                <button onClick={() => setCatMgmtOpen(!catMgmtOpen)} style={{
-                  width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
-                }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>⚙️ Kategori Yönetimi</span>
-                  <span style={{ fontSize: 12, color: '#64748b', transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
-                </button>
-
-                {catMgmtOpen && (
-                  <div style={{ marginTop: 12 }}>
-                    {/* Existing categories */}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                      {kbCategories.map(cat => (
-                        <div key={cat.id} style={{
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          padding: '4px 10px', borderRadius: 20,
-                          background: `${cat.color}22`,
-                          border: `1px solid ${cat.color}`,
-                          fontSize: 12, color: cat.color,
-                        }}>
-                          {cat.icon} {cat.label}
-                          {cat.slug !== 'genel' && (
-                            <button onClick={() => deleteCategory(cat.id)} style={{
-                              background: 'none', border: 'none', cursor: 'pointer',
-                              color: '#ef4444', fontSize: 11, padding: 0, marginLeft: 4,
-                            }}>✕</button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add new category */}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                      <div style={{ flex: '1 1 80px' }}>
-                        <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Slug</label>
-                        <input value={newCatSlug} onChange={e => setNewCatSlug(e.target.value)} placeholder="ornek" style={{
-                          width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
-                        }} />
-                      </div>
-                      <div style={{ flex: '1 1 100px' }}>
-                        <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Etiket</label>
-                        <input value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)} placeholder="Kategori Adı" style={{
-                          width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
-                        }} />
-                      </div>
-                      <div style={{ flex: '0 0 44px' }}>
-                        <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>İkon</label>
-                        <input value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} style={{
-                          width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none', textAlign: 'center',
-                        }} />
-                      </div>
-                      <div style={{ flex: '0 0 44px' }}>
-                        <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Renk</label>
-                        <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{
-                          width: '100%', height: 26, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent',
-                        }} />
-                      </div>
-                      <button onClick={addCategory} disabled={catSaving || !newCatSlug.trim() || !newCatLabel.trim()} style={{
-                        padding: '5px 12px', borderRadius: 6, background: 'rgba(34,197,94,0.15)',
-                        border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11,
-                        cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
-                      }}>
-                        {catSaving ? '...' : '+ Ekle'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              </div>{/* üst grid sonu */}
-
-              {/* Belge Listesi - full width */}
-              <div className="glass-card" style={{ overflow: 'hidden', marginBottom: 12 }}>
-                {kbLoading ? (
-                  <div style={{ padding: '28px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'rgba(240,244,255,0.35)', fontSize: 13 }}>
-                    <Spinner /> Belgeler yükleniyor…
-                  </div>
-                ) : knowledgeDocs.length === 0 ? (
-                  <div style={{ padding: '28px 24px', textAlign: 'center', fontSize: 13, color: 'rgba(240,244,255,0.3)' }}>
-                    Henüz belge yüklenmedi
-                  </div>
-                ) : (
-                  <>
-                    {knowledgeDocs.map((doc, idx) => {
-                      const expanded = openKbId === doc.id
-                      const indexed = !!doc.embeddedAt
-                      return (
-                        <div
-                          key={doc.id}
-                          style={{
-                            borderBottom: idx < knowledgeDocs.length - 1 ? '1px solid var(--divider)' : 'none',
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'stretch',
-                              gap: 4,
-                              padding: '4px 8px 4px 4px',
-                            }}
-                          >
-                            <button
-                              type="button"
-                              aria-expanded={expanded}
-                              onClick={() => setOpenKbId(expanded ? null : doc.id)}
-                              style={{
-                                flex: 1,
-                                minWidth: 0,
-                                display: 'flex',
-                                alignItems: 'flex-start',
-                                gap: 10,
-                                padding: '10px 12px',
-                                background: expanded ? 'rgba(3,105,161,0.08)' : 'transparent',
-                                border: 'none',
-                                borderRadius: 8,
-                                cursor: 'pointer',
-                                color: 'inherit',
-                                textAlign: 'left',
-                                transition: 'background 0.15s ease',
-                              }}
-                            >
-                              <span
-                                aria-hidden
-                                style={{
-                                  display: 'inline-flex',
-                                  marginTop: 3,
-                                  color: 'rgba(148,163,184,0.9)',
-                                  transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                                  transition: 'transform 0.2s ease',
-                                  fontSize: 9,
-                                  lineHeight: 1,
-                                  flexShrink: 0,
-                                }}
-                              >
-                                ▶
-                              </span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{
-                                  fontSize: 13,
-                                  fontWeight: 500,
-                                  color: 'var(--foreground)',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}>
-                                  {doc.title}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                                  <span style={{
-                                    fontSize: 10,
-                                    fontWeight: 600,
-                                    padding: '2px 7px',
-                                    background: 'rgba(3,105,161,0.15)',
-                                    border: '1px solid rgba(3,105,161,0.25)',
-                                    borderRadius: 4,
-                                    color: 'var(--accent)',
-                                    letterSpacing: '0.04em',
-                                  }}>
-                                    {kbCategories.find(c => c.slug === doc.category)?.label ?? doc.category}
-                                  </span>
-                                  <span style={{
-                                    fontSize: 10,
-                                    fontWeight: 600,
-                                    padding: '2px 7px',
-                                    borderRadius: 4,
-                                    background: doc.active ? 'rgba(22,163,74,0.12)' : 'rgba(148,163,184,0.1)',
-                                    border: `1px solid ${doc.active ? 'rgba(22,163,74,0.25)' : 'rgba(148,163,184,0.2)'}`,
-                                    color: doc.active ? 'var(--success)' : 'var(--muted)',
-                                  }}>
-                                    {doc.active ? 'Aktif' : 'Pasif'}
-                                  </span>
-                                  <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>
-                                    {indexed ? 'İndekslenmiş' : 'Gömme yok'}
-                                  </span>
-                                  <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>
-                                    {new Date(doc.createdAt).toLocaleDateString('tr-TR')}
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleKbDelete(doc.id)
-                              }}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                alignSelf: 'center',
-                                width: 30,
-                                height: 30,
-                                background: 'transparent',
-                                border: '1px solid rgba(248,113,113,0.2)',
-                                borderRadius: 7,
-                                color: 'rgba(248,113,113,0.6)',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                                flexShrink: 0,
-                              }}
-                              title="Sil"
-                            >
-                              <IconTrash />
-                            </button>
-                          </div>
-                          {expanded && (
-                            <div style={{ margin: '0 12px 12px 38px', padding: '12px 14px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8 }}>
-                              {editingKbId === doc.id ? (
-                                /* Edit mode */
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <input value={editKbTitle} onChange={e => setEditKbTitle(e.target.value)} style={{ flex: 1, padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 12, outline: 'none' }} placeholder="Başlık" />
-                                    <select value={editKbCategory} onChange={e => setEditKbCategory(e.target.value)} style={{ padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none' }}>
-                                      {kbCategories.map(c => <option key={c.slug} value={c.slug}>{c.label}</option>)}
-                                    </select>
-                                  </div>
-                                  <textarea value={editKbContent} onChange={e => setEditKbContent(e.target.value)} rows={6} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#f0f4ff', fontSize: 12, lineHeight: 1.6, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }} />
-                                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                                    <button onClick={() => setEditingKbId(null)} style={{ padding: '5px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8', fontSize: 11, cursor: 'pointer' }}>İptal</button>
-                                    <button onClick={handleKbSave} disabled={editKbSaving} style={{ padding: '5px 14px', borderRadius: 6, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>{editKbSaving ? '...' : '💾 Kaydet'}</button>
-                                  </div>
-                                </div>
-                              ) : (
-                                /* View mode */
-                                <div>
-                                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(226,232,240,0.92)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto' }}>
-                                    {doc.content?.trim() ? doc.content : 'İçerik boş.'}
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
-                                    <button onClick={() => handleKbToggle(doc.id)} style={{ padding: '4px 10px', borderRadius: 5, background: doc.active ? 'rgba(251,146,60,0.1)' : 'rgba(34,197,94,0.1)', border: `1px solid ${doc.active ? 'rgba(251,146,60,0.25)' : 'rgba(34,197,94,0.25)'}`, color: doc.active ? '#fb923c' : '#22c55e', fontSize: 10, cursor: 'pointer' }}>{doc.active ? 'Pasif Yap' : 'Aktif Yap'}</button>
-                                    <button onClick={() => startKbEdit(doc)} style={{ padding: '4px 10px', borderRadius: 5, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#60a5fa', fontSize: 10, cursor: 'pointer' }}>✏️ Düzenle</button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
-              </div>
-
               {/* Alt satır: Karşılama Mesajı (sol) + Konuşma Akışı (sağ) */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
 
@@ -1352,15 +845,16 @@ export default function AdminPage() {
               </div>
 
               {/* Konuşma Akışı */}
-              <PromptEditor />
+              <FlowBuilder />
 
               </div>{/* alt grid sonu */}
 
             </div>
           )}
 
-          {/* ── Tab: Kayıtlar ───────────────────────────────────────────── */}
-          {activeTab === 'recordings' && <RecordingsTab />}
+
+          {/* ── Tab: Ödemeler ───────────────────────────────────────────── */}
+          {activeTab === 'payments' && <PaymentsTab />}
 
           {/* ── Tab: Ayarlar ────────────────────────────────────────────── */}
           {activeTab === 'settings' && (
@@ -2076,6 +1570,9 @@ export default function AdminPage() {
 
             </div>
           )}
+
+          {/* ── Tab: Kullanıcılar ───────────────────────────────────────── */}
+          {activeTab === 'users' && <UsersTab />}
 
         </div>
       </div>

@@ -38,96 +38,70 @@ export function validateLiveCustomerIdentity(customerName: string | undefined, p
  * Build tool declarations dynamically from DB (with fallback to defaults).
  * Called once per session creation.
  */
-async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
-  // Fetch all tools.* settings from DB
+export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
+  const { getActiveFlow, flowToToolFields } = await import('./db/repositories/flows')
   let dbDescs: Record<string, string> = {}
-  try {
-    dbDescs = await getToolDescriptions()
-  } catch { /* use defaults */ }
-
-  // Helper: get description from DB or fallback
+  try { dbDescs = await getToolDescriptions() } catch { /* use defaults */ }
   const desc = (key: string) => dbDescs[key] ?? getDefaultToolDescription(key) ?? ''
 
-  // ── Fields from DB ────────────────────────────────────────────────────────
-  // Format in DB (tools.custom_fields): JSON array of {name, description, required, active}
-  // If custom_fields is populated, it defines ALL fields for randevuOlustur.
-  // If empty/missing, fall back to hardcoded defaults.
-  let allFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
-  try {
-    const raw = dbDescs['tools.custom_fields']
-    if (raw) allFields = JSON.parse(raw)
-  } catch { /* ignore parse errors */ }
+  // Build randevuOlustur fields from flow (zero hardcoded fields)
+  const flow = await getActiveFlow()
+  let fieldProps: Record<string, unknown> = {}
+  let fieldRequired: string[] = []
 
-  // Build properties and required list from active fields
-  const fieldProps: Record<string, unknown> = {}
-  const fieldRequired: string[] = []
-  
-  // Base mandatory fields — always included regardless of custom_fields
-  fieldProps.musteri_adi = { type: Type.STRING, description: desc('tools.randevuOlustur.musteri_adi') || 'Müşterinin ad soyadı (gerçek isim, müşteriden sesli alınmalı ve onaylatılmalı)' }
-  fieldProps.telefon = { type: Type.STRING, description: desc('tools.randevuOlustur.telefon') || 'Müşteri telefon numarası (05XX ile başlayan 11 hane)' }
-  fieldProps.tarih = { type: Type.STRING, description: desc('tools.randevuOlustur.tarih') || 'Randevu tarihi (YYYY-MM-DD formatında)' }
-  fieldProps.saat = { type: Type.STRING, description: desc('tools.randevuOlustur.saat') || 'Randevu saati (HH:MM formatında)' }
-  fieldRequired.push('musteri_adi', 'telefon', 'tarih', 'saat')
-
-  if (allFields.length > 0) {
-    // Dynamic mode: add custom fields on top of base fields
-    for (const f of allFields) {
-      if (f.active === false) continue
-      const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
-      // Skip if already defined as base field
-      if (fieldProps[safeName]) continue
-      // Special handling for enum fields (value contains comma-separated options)
-      if (safeName === 'randevu_turu' && f.description.includes(',')) {
-        const enumVals = f.description.split(',').map(s => s.trim()).filter(Boolean)
-        fieldProps[safeName] = { type: Type.STRING, enum: enumVals, description: 'Randevu türü' }
-      } else {
-        fieldProps[safeName] = { type: Type.STRING, description: f.description }
-      }
-      if (f.required && !fieldRequired.includes(safeName)) fieldRequired.push(safeName)
+  if (flow && flow.nodes.some(n => n.type === 'FIELD')) {
+    const { properties, required } = flowToToolFields(flow)
+    for (const [k, v] of Object.entries(properties)) {
+      fieldProps[k] = v.enum
+        ? { type: Type.STRING, enum: v.enum, description: v.description }
+        : { type: Type.STRING, description: v.description }
     }
+    fieldRequired = required
   } else {
-    // Fallback: hardcoded extras (backward compat)
-    const turuEnum = (dbDescs['tools.randevuOlustur.randevu_turu_enum'] ?? 'service,test_drive,gallery_visit,other')
-      .split(',').map(s => s.trim()).filter(Boolean)
-    fieldProps.randevu_turu = { type: Type.STRING, enum: turuEnum, description: desc('tools.randevuOlustur.randevu_turu') }
-    fieldProps.arac_bilgisi = { type: Type.STRING, description: desc('tools.randevuOlustur.arac_bilgisi') }
-    fieldProps.plaka = { type: Type.STRING, description: desc('tools.randevuOlustur.plaka') }
-    fieldProps.sorun_veya_talep = { type: Type.STRING, description: desc('tools.randevuOlustur.sorun_veya_talep') }
-    fieldRequired.push('randevu_turu')
+    // Fallback: legacy custom_fields from business_settings
+    let allFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
+    try {
+      const raw = dbDescs['tools.custom_fields']
+      if (raw) allFields = JSON.parse(raw)
+    } catch { /* ignore */ }
+
+    if (allFields.length > 0) {
+      for (const f of allFields) {
+        if (f.active === false) continue
+        const safeName = f.name.replace(/[^a-z0-9_]/gi, '_').toLowerCase()
+        fieldProps[safeName] = { type: Type.STRING, description: f.description }
+        if (f.required) fieldRequired.push(safeName)
+      }
+    }
   }
 
-  return [
-    {
+  // Ensure doktor_id and musteri_adi are always available as optional params
+  if (!fieldProps['doktor_id']) {
+    fieldProps['doktor_id'] = { type: Type.STRING, description: 'Mevcut hasta için atanacak doktorun ID\'si (musteriSorgula sonucundaki doktor_gecmisi\'nden)' }
+  }
+  if (!fieldProps['musteri_adi']) {
+    fieldProps['musteri_adi'] = { type: Type.STRING, description: 'Müşteri adı soyadı (kayıtlı müşteri için musteriSorgula\'dan gelen ad)' }
+  }
+
+  const tools: FunctionDeclaration[] = []
+
+  // Only include randevuOlustur if there are fields to collect
+  if (Object.keys(fieldProps).length > 0) {
+    tools.push({
       name: 'randevuOlustur',
-      description: desc('tools.randevuOlustur'),
+      description: desc('tools.randevuOlustur') || 'Müşteri için randevu/kayıt oluşturur.',
       parameters: {
         type: Type.OBJECT,
         properties: fieldProps as Record<string, { type: typeof Type.STRING; description: string }>,
         required: fieldRequired,
       },
-    },
-    {
-      name: 'randevuGuncelle',
-      description: desc('tools.randevuGuncelle'),
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          randevu_id: { type: Type.STRING, description: 'randevuOlustur ile oluşturulan randevunun ID\'si' },
-          calendar_event_id: { type: Type.STRING, description: 'Google Calendar event ID\'si (varsa)' },
-          musteri_adi: { type: Type.STRING, description: 'Güncellenecek müşteri adı soyadı' },
-          telefon: { type: Type.STRING, description: 'Güncellenecek telefon numarası' },
-          randevu_turu: { type: Type.STRING, description: 'Güncellenecek randevu türü' },
-          arac_bilgisi: { type: Type.STRING, description: 'Güncellenecek ek bilgi' },
-          sorun_veya_talep: { type: Type.STRING, description: 'Güncellenecek talep/şikayet' },
-          tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
-          saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
-        },
-        required: ['randevu_id'],
-      },
-    },
+    })
+  }
+
+  tools.push(
     {
       name: 'searchKnowledgeBase',
-      description: desc('tools.searchKnowledgeBase'),
+      description: desc('tools.searchKnowledgeBase') || 'Bilgi tabanında arama yapar.',
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -138,46 +112,34 @@ async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
     },
     {
       name: 'musteriSorgula',
-      description: desc('tools.musteriSorgula'),
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası (herhangi formatta — normalize edilir)' },
-        },
-        required: ['telefon'],
-      },
-    },
-    {
-      name: 'gecmisRandevular',
-      description: desc('tools.gecmisRandevular'),
+      description: desc('tools.musteriSorgula') || 'Telefon numarasıyla müşteri bilgisi getirir.',
       parameters: {
         type: Type.OBJECT,
         properties: {
           telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası' },
-          limit: { type: Type.INTEGER, description: 'En fazla kaç kayıt (default 5, max 20)' },
         },
         required: ['telefon'],
       },
     },
     {
       name: 'randevuMusaitlikKontrol',
-      description: desc('tools.randevuMusaitlikKontrol'),
+      description: desc('tools.randevuMusaitlikKontrol') || 'Tarih müsaitliğini kontrol eder.',
       parameters: {
         type: Type.OBJECT,
         properties: {
-          tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD). Tek gün için.' },
-          baslangic_tarih: { type: Type.STRING, description: 'Tarih aralığı başlangıcı (YYYY-MM-DD).' },
-          bitis_tarih: { type: Type.STRING, description: 'Tarih aralığı bitişi (YYYY-MM-DD).' },
+          tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD)' },
         },
         required: [],
       },
     },
     {
       name: 'cagriySonlandir',
-      description: desc('tools.cagriySonlandir'),
+      description: desc('tools.cagriySonlandir') || 'Çağrıyı sonlandırır.',
       parameters: { type: Type.OBJECT, properties: {}, required: [] },
     },
-  ]
+  )
+
+  return tools
 }
 
 export type SessionCallbacks = {
@@ -203,62 +165,32 @@ export async function createLiveSession(
     realtimeInputConfig?: RealtimeInputConfig
   }
 ) {
+  // Track last phone used in musteriSorgula so randevuOlustur can reuse it
+  let lastPhoneUsed: string | null = null
+
   async function handleTool(name: string, args: Record<string, unknown>) {
+    console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
+
     if (name === 'randevuOlustur') {
       console.log('[Randevu:ARGS]', JSON.stringify(args))
 
-      // Resolve fields from multiple possible names (custom_fields may use different keys)
-      const rawName = (args.musteri_adi ?? args.ad_soyad ?? args.hasta_adi ?? args.isim ?? args.adi_soyadi ?? args.musteri ?? args.name) as string | undefined
-      const rawPhone = (args.telefon ?? args.phone ?? args.tel ?? args.telefon_numarasi ?? args.cep_telefonu) as string | undefined
-      const invalid = validateLiveCustomerIdentity(rawName, rawPhone)
-      if (invalid) {
-        console.warn('[Randevu:REJECTED]', { name: rawName, phone: rawPhone, reason: invalid, allArgs: Object.keys(args) })
-        return { success: false, message: invalid }
-      }
-      const dateStr = (args.tarih ?? args.date ?? args.randevu_tarihi) as string | undefined
-      const timeStr = (args.saat ?? args.time ?? args.randevu_saati) as string | undefined
-      if (!dateStr || !timeStr) {
-        console.warn('[Randevu:REJECTED]', { name: rawName, reason: 'missing date/time', date: dateStr, time: timeStr })
-        return { success: false, message: 'Tarih ve saat zorunludur; müşteriden tekrar alın.' }
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(new Date(dateStr).getTime())) {
-        console.warn('[Randevu:REJECTED]', { name: rawName, reason: 'invalid date format', date: dateStr })
-        return { success: false, message: 'Geçersiz tarih formatı; YYYY-MM-DD formatında belirt.' }
-      }
-
-      // Collect custom/extra fields (anything not in the known set)
-      const knownKeys = new Set([
-        'musteri_adi', 'ad_soyad', 'hasta_adi', 'isim', 'adi_soyadi', 'musteri', 'name',
-        'telefon', 'phone', 'tel', 'telefon_numarasi', 'cep_telefonu',
-        'randevu_turu', 'arac_bilgisi', 'plaka', 'sorun_veya_talep',
-        'tarih', 'date', 'randevu_tarihi', 'saat', 'time', 'randevu_saati',
-      ])
-      const extraFields: Record<string, string> = {}
-      for (const [k, v] of Object.entries(args)) {
-        if (!knownKeys.has(k) && v !== undefined && v !== null && v !== '') {
-          extraFields[k] = String(v)
-        }
+      // Ensure telefon is present (AI might omit it after musteriSorgula)
+      if (!args.telefon && lastPhoneUsed) {
+        args.telefon = lastPhoneUsed
       }
 
       let appointment
       try {
-        appointment = await createAppointment({
-          customerName: (rawName as string).trim(),
-          phone: (rawPhone as string).trim(),
-          type: ((args.randevu_turu ?? args.type ?? args.tur ?? args.islem_turu ?? args.islem ?? 'Kontrol') as string),
-          vehicleInfo: (args.arac_bilgisi ?? args.arac) as string | undefined,
-          issueOrRequest: (args.sorun_veya_talep ?? args.talep ?? args.sorun ?? args.aciklama) as string | undefined,
-          date: dateStr,
-          time: timeStr,
-          sessionId: options.dbSessionId,
-          notes: args.plaka ? `Plaka: ${args.plaka}` : undefined,
-          extraFields: Object.keys(extraFields).length > 0 ? extraFields : undefined,
-        })
+        const { createFlowAppointment } = await import('./db/repositories/appointments')
+        appointment = await createFlowAppointment(
+          args as Record<string, unknown>,
+          options.dbSessionId,
+        )
       } catch (dbErr) {
-        console.error('[Randevu:DB_ERROR]', { name: rawName, phone: rawPhone, error: dbErr })
+        console.error('[Randevu:DB_ERROR]', dbErr)
         return { success: false, message: 'Randevu kaydedilirken bir hata oluştu, lütfen tekrar deneyin.' }
       }
-      console.log('[Randevu]', appointment.id, appointment.customerName, args.plaka ? `plaka: ${args.plaka}` : '')
+      console.log('[Randevu:OK]', appointment.id, JSON.stringify(appointment.data).slice(0, 200))
 
       // Sync to dental calendar (fire-and-forget)
       void (async () => {
@@ -267,10 +199,11 @@ export async function createLiveSession(
           await createDentalAppointmentFromVoice({
             customerName: appointment.customerName,
             phone: appointment.phone,
-            type: appointment.type,
+            type: appointment.type || 'kontrol',
             date: appointment.date,
             time: appointment.time,
             notes: appointment.notes,
+            doctorId: (args.doktor_id as string) || null,
           })
           console.log('[Randevu:CalendarSync]', appointment.id)
         } catch (e) { console.error('[Randevu:CalendarSync:ERROR]', e) }
@@ -391,9 +324,14 @@ export async function createLiveSession(
         console.log(`[DB] musteriSorgula: geçersiz numara format (${rawPhone} → ${digits.length} hane)`)
         return { sonuc: 'Geçerli bir telefon numarası değil. Müşteriden 10 haneli telefon numarasını tekrar iste.' }
       }
+      lastPhoneUsed = rawPhone
       console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
         const customer = await getCustomerByPhone(rawPhone)
+        // Dental doctor history lookup
+        const { getPatientDoctorHistory } = await import('./db/repositories/dental')
+        const doktorGecmisi = await getPatientDoctorHistory(rawPhone)
+
         if (!customer) {
           // Bilgi tabanında müşteri kaydı ara
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
@@ -402,7 +340,19 @@ export async function createLiveSession(
             return {
               kayitli: true,
               musteri_adi: knowledgeCustomer.name,
+              doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
               sonuc: `Ad Soyad: ${knowledgeCustomer.name}\n${knowledgeCustomer.content}`,
+            }
+          }
+          if (doktorGecmisi.length > 0) {
+            // Found in dental system but not in appointments
+            const patientName = doktorGecmisi[0].doktor_adi // We need patient name from dental
+            console.log(`[DB] musteriSorgula: dental kayıt bulundu`)
+            return {
+              kayitli: true,
+              musteri_adi: null,
+              doktor_gecmisi: doktorGecmisi,
+              sonuc: `Dental kayıt bulundu.\nDoktor geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`,
             }
           }
           console.log(`[DB] musteriSorgula: bulunamadı`)
@@ -422,6 +372,9 @@ export async function createLiveSession(
           const next = upcomingAppointments[0]
           info.push(`Yaklaşan Randevu: ${next.date} ${next.time} — ${next.issueOrRequest || next.type}`)
         }
+        if (doktorGecmisi.length > 0) {
+          info.push(`Doktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`)
+        }
         // Extract plate from notes if available
         const notesWithPlate = customer.appointmentHistory
           .map(a => a as unknown as { notes?: string })
@@ -435,6 +388,7 @@ export async function createLiveSession(
           musteri_adi: customer.name,
           plaka: plaka || null,
           arac: vehicleInfo || null,
+          doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
           sonuc: info.join('\n'),
         }
       } catch (err) {

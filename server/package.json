@@ -7,10 +7,11 @@
     "dev": "bun --watch --env-file ../.env src/index.ts",
     "start": "bun --env-file ../.env src/index.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun run src/db/migrate.ts",
+    "db:migrate": "bun --env-file ../.env run src/db/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "bun run src/scripts/migrate-seed.ts",
     "db:seed-dental": "bun --env-file ../.env run src/scripts/seed-dental.ts",
+    "db:seed-users": "bun --env-file ../.env run src/scripts/seed-users.ts",
     "db:import-json": "bun --env-file ../.env run src/scripts/migrate-from-json.ts"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "drizzle-orm": "^0.45.2",
     "elysia": "^1.4.28",
     "ioredis": "^5.10.1",
+    "jose": "^6.2.8",
     "postgres": "^3.4.9",
     "redlock": "^5.0.0-beta.2"
   },

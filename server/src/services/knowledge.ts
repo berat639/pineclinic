@@ -56,8 +56,8 @@ export async function embedText(text: string): Promise<number[]> {
 }
 
 // Stub exports for API compatibility
-export async function indexDocument(): Promise<string> { return '' }
-export async function indexDocumentDirect(): Promise<string> { return '' }
-export async function deleteDocument(): Promise<void> {}
-export async function listDocuments(): Promise<[]> { return [] }
-export async function extractTextFromFile(): Promise<string> { return '' }
+export async function indexDocument(...args: any[]): Promise<string> { return '' }
+export async function indexDocumentDirect(...args: any[]): Promise<string> { return '' }
+export async function deleteDocument(...args: any[]): Promise<void> {}
+export async function listDocuments(...args: any[]): Promise<[]> { return [] }
+export async function extractTextFromFile(...args: any[]): Promise<string> { return '' }

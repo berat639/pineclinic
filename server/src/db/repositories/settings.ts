@@ -194,3 +194,34 @@ export async function resetToolDescription(key: string): Promise<void> {
   if (!key.startsWith(TOOLS_PREFIX)) throw new Error('Key must start with tools.')
   await deleteSetting(key)
 }
+
+// ── Branding settings ───────────────────────────────────────────────────────
+export interface BrandingSettings {
+  title: string
+  subtitle: string
+  logoUrl: string
+}
+
+const BRANDING_DEFAULTS: BrandingSettings = {
+  title: 'Asistan',
+  subtitle: 'Randevu · Bilgi',
+  logoUrl: '',
+}
+
+export async function getBranding(): Promise<BrandingSettings> {
+  const map = await getMany(['branding.title', 'branding.subtitle', 'branding.logo_url'])
+  return {
+    title: map['branding.title'] || BRANDING_DEFAULTS.title,
+    subtitle: map['branding.subtitle'] || BRANDING_DEFAULTS.subtitle,
+    logoUrl: map['branding.logo_url'] || BRANDING_DEFAULTS.logoUrl,
+  }
+}
+
+export async function setBranding(patch: Partial<BrandingSettings>): Promise<BrandingSettings> {
+  const updates: Array<Promise<void>> = []
+  if (patch.title !== undefined) updates.push(setSetting('branding.title', patch.title))
+  if (patch.subtitle !== undefined) updates.push(setSetting('branding.subtitle', patch.subtitle))
+  if (patch.logoUrl !== undefined) updates.push(setSetting('branding.logo_url', patch.logoUrl))
+  await Promise.all(updates)
+  return getBranding()
+}

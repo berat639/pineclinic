@@ -3,7 +3,7 @@ import { ThemeProvider } from './theme-provider'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Voice AI — Otomotiv Danışmanı',
+  title: 'Voice AI — Sesli Asistan',
   description: 'Gerçek zamanlı sesli yapay zeka asistanı',
 }
 

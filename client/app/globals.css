@@ -31,6 +31,17 @@
   --logo-filter: brightness(0) invert(1);
   --body-gradient-1: rgba(0,44,95,0.15);
   --body-gradient-2: rgba(96,165,250,0.05);
+  --flow-bg: #0a0f1a;
+  --flow-grid: #1e293b;
+  --flow-node-field: #1e3a5f;
+  --flow-node-field-border: #3b82f6;
+  --flow-node-cond: #4a3520;
+  --flow-node-cond-border: #f59e0b;
+  --flow-node-action: #3b1f5e;
+  --flow-node-action-border: #8b5cf6;
+  --flow-text: #f0f4ff;
+  --flow-text-muted: #94a3b8;
+  --card-bg: #1e293b;
 }
 
 /* ── Light ─────────────────────────────────────────────────────────────────── */
@@ -63,7 +74,50 @@
   --logo-filter: none;
   --body-gradient-1: rgba(0,44,95,0.08);
   --body-gradient-2: rgba(96,165,250,0.06);
+  --flow-bg: #f1f5f9;
+  --flow-grid: #cbd5e1;
+  --flow-node-field: #e0edff;
+  --flow-node-field-border: #3b82f6;
+  --flow-node-cond: #fef3c7;
+  --flow-node-cond-border: #f59e0b;
+  --flow-node-action: #ede9fe;
+  --flow-node-action-border: #8b5cf6;
+  --flow-text: #0f172a;
+  --flow-text-muted: #475569;
+  --card-bg: #ffffff;
 }
+
+/* ── React Flow Controls ────────────────────────────────────────────────────── */
+.react-flow__controls-button { background: var(--card-bg) !important; fill: var(--foreground) !important; border-color: var(--glass-border) !important; }
+.react-flow__controls-button:hover { background: var(--glass-bg-hover) !important; }
+.react-flow__attribution { display: none !important; }
+
+/* ── Resource Calendar ─────────────────────────────────────────────────────── */
+.rc-wrap { border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; background: var(--glass-bg); }
+.rc-header { display: grid; position: sticky; top: 0; z-index: 10; background: var(--background-2); border-bottom: 1px solid var(--divider); }
+.rc-corner { padding: 10px 4px; }
+.rc-col-head { padding: 8px 4px; text-align: center; border-left: 1px solid var(--divider); border-bottom: 3px solid transparent; }
+.rc-col-title { font-size: 0.75rem; font-weight: 700; color: var(--foreground); }
+.rc-col-sub { font-size: 0.6rem; color: var(--foreground-3); margin-top: 1px; }
+.rc-body { position: relative; max-height: 65vh; overflow-y: auto; }
+.rc-grid { display: grid; }
+.rc-time { padding: 4px 4px 4px 0; font-size: 0.63rem; color: var(--foreground-3); text-align: right; height: 48px; border-bottom: 1px solid var(--divider); display: flex; align-items: flex-start; justify-content: flex-end; }
+.rc-cell { height: 48px; border-bottom: 1px solid var(--divider); border-left: 1px solid var(--divider); }
+.rc-cell:hover { background: var(--glass-bg-hover); }
+.rc-event { position: absolute; padding: 2px 5px; border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; overflow: hidden; transition: transform 0.1s, box-shadow 0.1s; z-index: 2; }
+.rc-event:hover { transform: scale(1.02); box-shadow: 0 4px 14px rgba(0,0,0,0.2); z-index: 5; }
+.rc-ev-title { display: block; font-size: 0.65rem; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-ev-time { display: block; font-size: 0.55rem; color: var(--foreground-3); }
+.rc-ev-doc { display: block; font-size: 0.55rem; color: var(--foreground-3); font-style: italic; }
+.rc-month { display: flex; flex-direction: column; }
+.rc-week-row { display: flex; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--divider); align-items: flex-start; }
+.rc-week-row:last-child { border-bottom: none; }
+.rc-week-label { flex: 0 0 130px; font-size: 0.75rem; font-weight: 600; color: var(--foreground); padding-top: 4px; }
+.rc-week-events { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-month-ev { padding: 4px 8px; border-radius: 5px; border-left: 3px solid #3b82f6; cursor: pointer; transition: transform 0.1s; }
+.rc-month-ev:hover { transform: scale(1.03); }
+.rc-empty { font-size: 0.7rem; color: var(--foreground-3); font-style: italic; }
+.rc-more { font-size: 0.65rem; color: var(--accent); font-weight: 600; align-self: center; }
 
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }

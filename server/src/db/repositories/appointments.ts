@@ -6,6 +6,10 @@ import { broadcastSSE } from '../../events'
 export interface Appointment {
   id: string
   createdAt: string
+  sessionId?: string | null
+  calendarEventId?: string | null
+  data: Record<string, unknown>
+  // Legacy fields (backward compat reads)
   customerName: string
   phone: string
   type: string
@@ -13,8 +17,6 @@ export interface Appointment {
   issueOrRequest?: string | null
   date: string
   time: string
-  sessionId?: string | null
-  calendarEventId?: string | null
   ataHsysId?: string | null
   discountRequested?: boolean
   notes?: string | null
@@ -30,18 +32,20 @@ function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
   if (r.extraFields) {
     try { extraFields = JSON.parse(r.extraFields) } catch { /* ignore */ }
   }
+  const data = (r.data ?? {}) as Record<string, unknown>
   return {
     id: r.id,
     createdAt: toIso(r.createdAt),
-    customerName: r.customerName,
-    phone: r.phone,
-    type: r.type,
-    vehicleInfo: r.vehicleInfo,
-    issueOrRequest: r.issueOrRequest,
-    date: r.date,
-    time: r.time,
     sessionId: r.sessionId,
     calendarEventId: r.calendarEventId,
+    data,
+    customerName: (data.musteri_adi as string) || (data.ad_soyad as string) || r.customerName || '',
+    phone: (data.telefon as string) || r.phone || '',
+    type: (data.randevu_turu as string) || r.type || '',
+    vehicleInfo: r.vehicleInfo,
+    issueOrRequest: r.issueOrRequest,
+    date: (data.tarih as string) || r.date || '',
+    time: (data.saat as string) || r.time || '',
     ataHsysId: r.ataHsysId,
     discountRequested: r.discountRequested ?? false,
     notes: r.notes,
@@ -114,6 +118,41 @@ export async function createAppointment(data: {
       discountRequested: data.discountRequested ?? false,
       notes: data.notes ?? null,
       extraFields: data.extraFields ? JSON.stringify(data.extraFields) : null,
+    })
+    .returning()
+
+  const result = rowToAppointment(inserted)
+  try { broadcastSSE('new_appointment', result) } catch {}
+  return result
+}
+
+/** Flow-based appointment: all fields stored in generic JSONB `data` column */
+export async function createFlowAppointment(
+  fields: Record<string, unknown>,
+  sessionId?: string,
+  calendarEventId?: string,
+): Promise<Appointment> {
+  // Sanitize fields to plain JSON (Gemini might pass non-serializable values)
+  const safeFields = JSON.parse(JSON.stringify(fields ?? {}))
+  const name = String(safeFields.musteri_adi ?? safeFields.ad_soyad ?? safeFields.hasta_adi ?? safeFields.isim ?? '')
+  const phone = String(safeFields.telefon ?? safeFields.phone ?? '')
+  const dateVal = String(safeFields.tarih ?? safeFields.date ?? '')
+  const timeVal = String(safeFields.saat ?? safeFields.time ?? '')
+  const typeVal = String(safeFields.randevu_turu ?? safeFields.islem_turu ?? safeFields.tur ?? '')
+
+  console.log('[createFlowAppointment]', { name, phone, dateVal, timeVal, typeVal })
+
+  const [inserted] = await db
+    .insert(appointments)
+    .values({
+      data: safeFields,
+      customerName: name,
+      phone,
+      type: typeVal,
+      date: dateVal,
+      time: timeVal,
+      sessionId: sessionId ?? null,
+      calendarEventId: calendarEventId ?? null,
     })
     .returning()
 

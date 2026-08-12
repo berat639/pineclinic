@@ -1,5 +1,19 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import FlowBuilder from './FlowBuilder'
+
+function Spinner() {
+  return (
+    <div style={{
+      width: 16, height: 16,
+      border: '2px solid rgba(255,255,255,0.08)',
+      borderTopColor: '#0369A1',
+      borderRadius: '50%',
+      animation: 'spin 0.7s linear infinite',
+      flexShrink: 0,
+    }} />
+  )
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -191,6 +205,36 @@ export default function KnowledgeTab() {
   const [saving, setSaving] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  
+  // Greeting state
+  const [greetingText, setGreetingText] = useState('')
+  const [greetingLoading, setGreetingLoading] = useState(true)
+  const [greetingSaving, setGreetingSaving] = useState(false)
+
+  const fetchGreeting = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings/greeting')
+      if (res.ok) {
+        const data = await res.json() as { greeting?: string }
+        if (data.greeting) setGreetingText(data.greeting)
+      }
+    } catch { /* ignore */ }
+    setGreetingLoading(false)
+  }, [])
+
+  const handleSaveGreeting = async () => {
+    if (!greetingText.trim() || greetingSaving) return
+    setGreetingSaving(true)
+    try {
+      await fetch('/api/admin/settings/greeting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ greeting: greetingText.trim() }),
+      })
+    } catch { /* ignore */ }
+    setGreetingSaving(false)
+  }
+
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [catMgmtOpen, setCatMgmtOpen] = useState(false)
   const [newCatSlug, setNewCatSlug] = useState('')
@@ -261,12 +305,14 @@ export default function KnowledgeTab() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    fetchGreeting()
+  }, [load, fetchGreeting])
 
   const filtered = catFilter === 'all' ? docs : docs.filter(d => d.category === catFilter)
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
-
   const handleSave = async (data: { category: Category; title: string; content: string; active: boolean }) => {
     setSaving(true)
     try {
@@ -472,7 +518,10 @@ export default function KnowledgeTab() {
         )}
       </div>
 
-      {/* Loading */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', gap: 16, alignItems: 'start', marginBottom: 24 }}>
+        {/* Sol Kolon: Bilgi Bankası */}
+        <div>
+          {/* Loading */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '4rem', color: '#64748b' }}>⏳ Yükleniyor…</div>
       ) : filtered.length === 0 ? (
@@ -595,6 +644,84 @@ export default function KnowledgeTab() {
           })}
         </div>
       )}
+        </div>
+
+        {/* Sağ Kolon: Karşılama Mesajı card */}
+        <div className="glass-card" style={{ padding: 24 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 18, paddingBottom: 14,
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+              Karşılama Mesajı
+            </span>
+            {greetingLoading ? <Spinner /> : (
+              <span style={{
+                fontSize: 11, color: 'rgba(240,244,255,0.45)',
+                padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+              }}>
+                Sesli AI Açılış
+              </span>
+            )}
+          </div>
+
+          {!greetingLoading && (
+            <>
+              <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
+              </p>
+
+              <textarea
+                value={greetingText}
+                onChange={(e) => setGreetingText(e.target.value)}
+                rows={3}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 8,
+                  color: '#f0f4ff',
+                  resize: 'vertical',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+                placeholder="Merhaba, hoş geldiniz!..."
+              />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                <button
+                  type="button"
+                  onClick={handleSaveGreeting}
+                  disabled={greetingSaving || !greetingText.trim()}
+                  style={{
+                    padding: '8px 18px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
+                    border: '1px solid rgba(52,211,153,0.3)',
+                    borderRadius: 8,
+                    color: '#34d399',
+                    cursor: greetingSaving ? 'wait' : 'pointer',
+                  }}
+                >
+                  {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Alt satır: Konuşma Akışı (tek sütun) */}
+      <div style={{ width: '100%' }}>
+        <FlowBuilder />
+      </div>
+
 
       {/* Modal */}
       {modal.open && (

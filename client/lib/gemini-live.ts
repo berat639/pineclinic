@@ -1,8 +1,6 @@
 import {
   GoogleGenAI,
   Modality,
-  MediaResolution,
-  Type,
   type Session,
   type LiveServerMessage,
   type FunctionDeclaration,
@@ -17,60 +15,17 @@ export type LiveChatCallbacks = {
   onInterrupted: () => void
 }
 
-// ── Tool declarations — bilgi tabanı, randevu, müşteri sorgu ──────────────
-const TOOL_DECLARATIONS: FunctionDeclaration[] = [
-  {
-    name: 'searchKnowledgeBase',
-    description: 'Bilgi tabanında arama yapar.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        sorgu: { type: Type.STRING, description: 'Aranacak konu veya soru' },
-      },
-      required: ['sorgu'],
-    },
-  },
-  {
-    name: 'musteriSorgula',
-    description: 'Telefon numarasıyla müşteri bilgisini getirir.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        telefon: { type: Type.STRING, description: 'Müşterinin telefon numarası' },
-      },
-      required: ['telefon'],
-    },
-  },
-  {
-    name: 'randevuOlustur',
-    description: 'Müşteri için randevu oluşturur.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        musteri_adi: { type: Type.STRING, description: 'Ad soyad' },
-        telefon: { type: Type.STRING, description: 'Telefon' },
-        randevu_turu: { type: Type.STRING, enum: ['service', 'test_drive', 'gallery_visit', 'other'], description: 'Randevu türü' },
-        arac_bilgisi: { type: Type.STRING, description: 'Araç bilgisi' },
-        plaka: { type: Type.STRING, description: 'Plaka' },
-        sorun_veya_talep: { type: Type.STRING, description: 'Şikayet/talep' },
-        tarih: { type: Type.STRING, description: 'YYYY-MM-DD' },
-        saat: { type: Type.STRING, description: 'HH:MM' },
-      },
-      required: ['musteri_adi', 'telefon', 'randevu_turu', 'tarih', 'saat'],
-    },
-  },
-  {
-    name: 'randevuMusaitlikKontrol',
-    description: 'Tarih müsaitliğini kontrol eder.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        tarih: { type: Type.STRING, description: 'YYYY-MM-DD' },
-      },
-      required: [],
-    },
-  },
-]
+export type SessionConfig = {
+  systemPrompt: string
+  toolDeclarations: FunctionDeclaration[]
+  model: string
+  greeting: string
+  branding: {
+    title: string
+    subtitle: string
+    logoUrl: string
+  }
+}
 
 // ── Tool call → server HTTP ────────────────────────────────────────────────
 async function handleToolCall(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -91,38 +46,25 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     case 'searchKnowledgeBase': return post('/api/tools/search-knowledge', { sorgu: args.sorgu })
     case 'musteriSorgula': return post('/api/tools/customer-query', { telefon: args.telefon })
     case 'randevuOlustur': return post('/api/tools/create-appointment', args)
+    case 'randevuGuncelle': return post('/api/tools/create-appointment', { ...args, _update: true })
     case 'randevuMusaitlikKontrol': return post('/api/tools/check-availability', args)
+    case 'gecmisRandevular': return post('/api/tools/customer-query', { telefon: args.telefon })
     default: return { error: `Unknown tool: ${name}` }
   }
-}
-
-// ── System prompt ──────────────────────────────────────────────────────────
-function getSystemPrompt(): string {
-  const today = new Date()
-  const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi']
-  const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
-  return `Sen Türkçe konuşan, sıcak ve profesyonel bir otomotiv müşteri danışmanısın.
-Bugünün tarihi: ${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()} ${days[today.getDay()]}
-
-Müşteriyle doğal ve samimi konuş. Kısa, net cümleler kur.
-Bilgi tabanından bilgi almak için searchKnowledgeBase aracını kullan.
-Müşteri telefon numarası verdiğinde musteriSorgula aracını kullan.
-Randevu oluşturmak için randevuOlustur aracını kullan.
-Müsaitlik kontrolü için randevuMusaitlikKontrol aracını kullan.
-Sadece Türkçe konuş.`
 }
 
 export class GeminiLiveSession {
   private session: Session | null = null
   private callbacks: LiveChatCallbacks
   private _isConnected = false
+  private _sendGuard = false
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
   }
 
-  async connect(apiKey: string, model?: string): Promise<void> {
-    const modelName = model || 'gemini-3.1-flash-live-preview'
+  async connect(apiKey: string, config: SessionConfig): Promise<void> {
+    const modelName = config.model || 'gemini-3.1-flash-live-preview'
 
     return new Promise<void>((resolve, reject) => {
       const ai = new GoogleGenAI({ apiKey })
@@ -144,27 +86,34 @@ export class GeminiLiveSession {
             onerror: (e: ErrorEvent) => {
               console.error('[Live] Error:', e.message || e)
               this._isConnected = false
+              this._sendGuard = true
               this.callbacks.onError(e.message || 'Bağlantı hatası')
               if (!resolved) { resolved = true; reject(new Error(e.message || 'Failed')) }
             },
             onclose: (e: CloseEvent) => {
-              console.log(`[Live] Closed: ${e.code}`)
               this._isConnected = false
+              this._sendGuard = true
               this.callbacks.onConnectionChange(false)
-              if (!resolved) { resolved = true; reject(new Error(`Closed: ${e.reason || e.code}`)) }
+              if (e.code !== 1000) {
+                const reason = e.reason || `Bağlantı kesildi (kod: ${e.code})`
+                console.error(`[Live] Closed: ${e.code} reason: ${e.reason}`)
+                this.callbacks.onError(reason)
+                if (!resolved) { resolved = true; reject(new Error(reason)) }
+              } else {
+                if (!resolved) { resolved = true; resolve() }
+              }
             },
           },
           config: {
             responseModalities: [Modality.AUDIO],
-            mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-            systemInstruction: getSystemPrompt(),
-            tools: [
-              { functionDeclarations: TOOL_DECLARATIONS }
-            ],
+            systemInstruction: config.systemPrompt,
+            tools: config.toolDeclarations.length > 0
+              ? [{ functionDeclarations: config.toolDeclarations }]
+              : undefined,
             contextWindowCompression: {
-              triggerTokens: '104857',
+              triggerTokens: '25600',
               slidingWindow: {
-                targetTokens: '52428',
+                targetTokens: '16000',
               },
             },
             speechConfig: {
@@ -172,6 +121,11 @@ export class GeminiLiveSession {
                 prebuiltVoiceConfig: {
                   voiceName: 'Orus',
                 },
+              },
+            },
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
               },
             },
           },
@@ -189,18 +143,24 @@ export class GeminiLiveSession {
   }
 
   sendAudio(base64PCM: string) {
-    if (!this.session || !this._isConnected) return
+    if (!this.session || !this._isConnected || this._sendGuard) return
     try {
       this.session.sendRealtimeInput({
         audio: { data: base64PCM, mimeType: 'audio/pcm;rate=16000' },
       })
-    } catch { /* ignore */ }
+    } catch {
+      this._isConnected = false
+      this._sendGuard = true
+    }
   }
 
   sendText(text: string) {
-    if (!this.session || !this._isConnected) return
+    if (!this.session || !this._isConnected || this._sendGuard) return
     try {
-      this.session.sendClientContent({ turns: [text] })
+      this.session.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text }] }],
+        turnComplete: true,
+      })
     } catch { /* ignore */ }
   }
 
@@ -247,6 +207,13 @@ export class GeminiLiveSession {
         if (part?.inlineData?.data) this.callbacks.onAudioChunk(part.inlineData.data)
         if (part?.text) this.callbacks.onText(part.text)
       }
+    }
+
+    // Output transcription (text of what AI said in audio mode)
+    const transcript = (message as any).serverContent?.outputTranscription?.text
+    if (transcript) {
+      console.log('[AI]', transcript)
+      this.callbacks.onText(transcript)
     }
 
     if (message.serverContent?.turnComplete) this.callbacks.onTurnComplete()

@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import Link from 'next/link'
 import { ThemeToggle } from './theme-provider'
-import { GeminiLiveSession, type LiveChatCallbacks } from '@/lib/gemini-live'
+import { GeminiLiveSession, type LiveChatCallbacks, type SessionConfig } from '@/lib/gemini-live'
 import { AudioStreamPlayer, MicrophoneCapture } from '@/lib/audio'
 
 type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
@@ -39,8 +38,7 @@ export default function Home() {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [errorMsg, setErrorMsg] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [currentModel, setCurrentModel] = useState('')
-  const [greetingText, setGreetingText] = useState('')
+  const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
 
   const sessionRef = useRef<GeminiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
@@ -48,24 +46,21 @@ export default function Home() {
   const textBufferRef = useRef('')
   const isActive = status !== 'idle' && status !== 'error'
 
-  // Fetch API key, current model, and greeting on mount
+  // Fetch API key and dynamic session config on mount
   useEffect(() => {
-    // Get API key
     fetch('/api/direct-session')
       .then(r => r.json())
       .then((d: { apiKey?: string }) => { if (d.apiKey) setApiKey(d.apiKey) })
       .catch(() => {})
 
-    // Get current model from admin settings
-    fetch('/api/admin/settings/ai')
+    fetch('/api/direct-session-config')
       .then(r => r.json())
-      .then((d: { current?: string }) => { if (d.current) setCurrentModel(d.current) })
-      .catch(() => {})
-
-    // Get greeting text from settings
-    fetch('/api/admin/settings/greeting')
-      .then(r => r.json())
-      .then((d: { greeting?: string }) => { if (d.greeting) setGreetingText(d.greeting) })
+      .then((config: SessionConfig) => {
+        setSessionConfig(config)
+        if (config.branding?.title) {
+          document.title = `Voice AI — ${config.branding.title}`
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -74,9 +69,9 @@ export default function Home() {
   }, [])
 
   const start = useCallback(async () => {
-    if (!apiKey) {
+    if (!apiKey || !sessionConfig) {
       setStatus('error')
-      setErrorMsg('API key bulunamadı. Server ayarlarını kontrol edin.')
+      setErrorMsg('API key veya oturum ayarları bulunamadı. Server ayarlarını kontrol edin.')
       return
     }
 
@@ -105,9 +100,11 @@ export default function Home() {
       },
       onText: (text) => {
         textBufferRef.current += text
+        console.log('[AI Text]', text)
       },
       onTurnComplete: () => {
         if (textBufferRef.current.trim()) {
+          console.log('[AI Turn]', textBufferRef.current.trim())
           addTranscript('model', textBufferRef.current.trim())
           textBufferRef.current = ''
         }
@@ -115,10 +112,17 @@ export default function Home() {
       },
       onConnectionChange: (connected) => {
         if (!connected && sessionRef.current) {
+          micRef.current?.stop()
+          micRef.current = null
+          playerRef.current?.stop()
+          playerRef.current = null
+          sessionRef.current = null
           setStatus('idle')
         }
       },
       onError: (err) => {
+        micRef.current?.stop()
+        micRef.current = null
         setStatus('error')
         setErrorMsg(err)
       },
@@ -135,13 +139,29 @@ export default function Home() {
     sessionRef.current = session
 
     try {
-      await session.connect(apiKey, currentModel || undefined)
+      await session.connect(apiKey, sessionConfig)
+
+      // Wait briefly to confirm session is stable (Gemini may close immediately on errors)
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (session.connected) resolve()
+          else reject(new Error('Oturum hemen kapatıldı'))
+        }, 800)
+        // If already disconnected, reject immediately
+        const check = setInterval(() => {
+          if (!session.connected) {
+            clearTimeout(timer)
+            clearInterval(check)
+            reject(new Error('Oturum hemen kapatıldı'))
+          }
+        }, 100)
+        // Clear interval on success
+        setTimeout(() => clearInterval(check), 800)
+      })
+
       setStatus('listening')
 
-      // Send greeting text to start the conversation automatically
-      if (greetingText) {
-        session.sendText(greetingText)
-      }
+      session.sendText('Sistem bildirimi: Müşteri sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)')
 
       const mic = new MicrophoneCapture()
       micRef.current = mic
@@ -152,7 +172,7 @@ export default function Home() {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
-  }, [apiKey, currentModel, greetingText, addTranscript])
+  }, [apiKey, sessionConfig, addTranscript])
 
   const stop = useCallback(() => {
     micRef.current?.stop()
@@ -188,49 +208,32 @@ export default function Home() {
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <img
-            src="/logo-skoda.svg"
-            alt="Skoda"
-            style={{ height: 24, width: 'auto', filter: 'var(--logo-filter)' }}
-          />
+          {sessionConfig?.branding?.logoUrl ? (
+            <img
+              src={sessionConfig.branding.logoUrl}
+              alt="Logo"
+              style={{ height: 24, width: 'auto', filter: 'var(--logo-filter)' }}
+            />
+          ) : (
+            <div style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #60a5fa, #a78bfa)',
+            }} />
+          )}
           <div style={{
             width: 1,
             height: 20,
             background: 'rgba(255,255,255,0.15)',
           }} />
           <span style={{ color: '#94a3b8', fontSize: '0.8rem', fontWeight: 500, letterSpacing: '0.05em' }}>
-            AI DANIŞMAN
+            {sessionConfig?.branding?.title || 'Asistan'}
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <ThemeToggle />
-          {/* Admin link */}
-          <Link
-            href="/admin"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 14px',
-              borderRadius: 8,
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              color: '#94a3b8',
-              textDecoration: 'none',
-              fontSize: '0.8rem',
-              fontWeight: 500,
-              transition: 'all 0.2s',
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="7" rx="1"/>
-              <rect x="14" y="3" width="7" height="7" rx="1"/>
-              <rect x="3" y="14" width="7" height="7" rx="1"/>
-              <rect x="14" y="14" width="7" height="7" rx="1"/>
-            </svg>
-            Admin Panel
-          </Link>
         </div>
       </nav>
 
@@ -258,10 +261,10 @@ export default function Home() {
             marginBottom: '0.5rem',
             letterSpacing: '-0.02em',
           }}>
-            AI Sesli Asistan
+            {sessionConfig?.branding?.title || 'Asistan'}
           </h1>
           <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 400 }}>
-            Randevu · Bilgi · Danışmanlık
+            {sessionConfig?.branding?.subtitle || 'Randevu · Bilgi'}
           </p>
         </div>
 
@@ -412,14 +415,13 @@ export default function Home() {
         {/* Info cards */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(2, 1fr)',
           gap: '0.75rem',
           width: '100%',
         }}>
           {[
-            { icon: '�', label: 'Randevu\nOluştur' },
+            { icon: '📅', label: 'Randevu\nOluştur' },
             { icon: '❓', label: 'Bilgi\nAl' },
-            { icon: '💬', label: 'Danışmanlık\nİste' },
           ].map((item, i) => (
             <div key={i} className="glass-card" style={{
               padding: '1rem',

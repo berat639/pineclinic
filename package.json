@@ -9,6 +9,12 @@
     "ngrok": "bash scripts/ngrok-voice-ai.sh"
   },
   "devDependencies": {
+    "@dagrejs/dagre": "^3.1.1",
+    "@xyflow/react": "^12.11.2",
+    "client": "^0.0.1",
     "concurrently": "^9.0.0"
+  },
+  "dependencies": {
+    "@fullcalendar/resource-daygrid": "^6.1.21"
   }
 }

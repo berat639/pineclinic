@@ -117,6 +117,41 @@ async function runMigrations() {
     ADD COLUMN IF NOT EXISTS extra_fields TEXT
   `
 
+  // Generic JSONB data column for flow-based appointments
+  await sql`
+    ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb
+  `
+
+  // Make legacy columns optional (for new flow-based appointments)
+  await sql`
+    ALTER TABLE appointments ALTER COLUMN customer_name SET DEFAULT ''
+  `
+  await sql`
+    ALTER TABLE appointments ALTER COLUMN phone SET DEFAULT ''
+  `
+  await sql`
+    ALTER TABLE appointments ALTER COLUMN type SET DEFAULT ''
+  `
+  await sql`
+    ALTER TABLE appointments ALTER COLUMN date SET DEFAULT ''
+  `
+  await sql`
+    ALTER TABLE appointments ALTER COLUMN time SET DEFAULT ''
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS conversation_flows (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name       TEXT NOT NULL DEFAULT 'main',
+      nodes      JSONB NOT NULL DEFAULT '[]'::jsonb,
+      edges      JSONB NOT NULL DEFAULT '[]'::jsonb,
+      is_active  BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
   await sql`
     CREATE TABLE IF NOT EXISTS business_settings (
       key        TEXT PRIMARY KEY,
@@ -215,15 +250,7 @@ async function runMigrations() {
   }
 
   // ── Dental Clinic Tables ───────────────────────────────────────────────────
-  await sql`
-    CREATE TABLE IF NOT EXISTS doctors (
-      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name       TEXT NOT NULL,
-      color      TEXT NOT NULL DEFAULT '#60a5fa',
-      active     BOOLEAN NOT NULL DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT now()
-    )
-  `
+  // doctors table removed — hekim users serve as doctors now
 
   await sql`
     CREATE TABLE IF NOT EXISTS patients (
@@ -239,7 +266,7 @@ async function runMigrations() {
     CREATE TABLE IF NOT EXISTS dental_appointments (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       patient_id UUID NOT NULL REFERENCES patients(id),
-      doctor_id  UUID NOT NULL REFERENCES doctors(id),
+      doctor_id  UUID REFERENCES users(id),
       title      TEXT NOT NULL,
       start_time TIMESTAMPTZ NOT NULL,
       end_time   TIMESTAMPTZ NOT NULL,
@@ -255,6 +282,8 @@ async function runMigrations() {
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       patient_id     UUID NOT NULL REFERENCES patients(id),
       procedure_name TEXT NOT NULL,
+      tooth_number   TEXT,
+      indication     TEXT,
       cost           INTEGER NOT NULL DEFAULT 0,
       status         TEXT NOT NULL DEFAULT 'planned',
       created_at     TIMESTAMPTZ DEFAULT now()
@@ -277,26 +306,363 @@ async function runMigrations() {
     CREATE TABLE IF NOT EXISTS completed_works (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       patient_id  UUID NOT NULL REFERENCES patients(id),
-      doctor_id   UUID NOT NULL REFERENCES doctors(id),
+      doctor_id   UUID NOT NULL REFERENCES users(id),
       date        TEXT NOT NULL,
       description TEXT NOT NULL,
       created_at  TIMESTAMPTZ DEFAULT now()
     )
   `
 
-  // Seed doctors if empty
-  const docCount = await sql`SELECT COUNT(*)::int AS cnt FROM doctors`
-  if ((docCount[0]?.cnt ?? 0) === 0) {
-    await sql`
-      INSERT INTO doctors (name, specialty, color) VALUES
-        ('Dt. Faruk Mutlu',   'İmplant & Protez', '#60a5fa'),
-        ('Dt. Mustafa Çetin', 'Ortodonti',        '#34d399'),
-        ('Dt. Osman Kaya',    'Endodonti',        '#a78bfa')
-    `
-    console.log('[Migration] Varsayılan doktorlar oluşturuldu')
-  }
+  // doctors table removed — seeding hekim users happens via seed-users script
 
-  await sql`ALTER TABLE doctors ADD COLUMN IF NOT EXISTS specialty TEXT NOT NULL DEFAULT 'Genel'`
+  // ── RBAC Tables ────────────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         TEXT NOT NULL UNIQUE,
+      phone         TEXT,
+      password_hash TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      avatar        TEXT,
+      role          TEXT NOT NULL DEFAULT 'host',
+      specialty     TEXT,
+      color         TEXT,
+      active        BOOLEAN NOT NULL DEFAULT true,
+      last_login_at TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ DEFAULT now(),
+      updated_at    TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Drop legacy doctor_id column if exists
+  await sql`ALTER TABLE users DROP COLUMN IF EXISTS doctor_id`
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS specialty TEXT`
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS color TEXT`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID NOT NULL REFERENCES users(id),
+      token_jti  TEXT NOT NULL UNIQUE,
+      ip_address TEXT,
+      user_agent TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS shifts (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID NOT NULL REFERENCES users(id),
+      date       TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time   TEXT NOT NULL,
+      shift_type TEXT NOT NULL DEFAULT 'tam',
+      notes      TEXT,
+      created_by UUID REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS shift_swap_requests (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      requester_id    UUID NOT NULL REFERENCES users(id),
+      target_id       UUID NOT NULL REFERENCES users(id),
+      shift_id        UUID NOT NULL REFERENCES shifts(id),
+      target_shift_id UUID REFERENCES shifts(id),
+      status          TEXT NOT NULL DEFAULT 'pending',
+      reason          TEXT,
+      reviewed_by     UUID REFERENCES users(id),
+      created_at      TIMESTAMPTZ DEFAULT now(),
+      reviewed_at     TIMESTAMPTZ
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID NOT NULL REFERENCES users(id),
+      type       TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      body       TEXT,
+      link       TEXT,
+      read       BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID REFERENCES users(id),
+      action      TEXT NOT NULL,
+      target_type TEXT,
+      target_id   TEXT,
+      metadata    JSONB DEFAULT '{}'::jsonb,
+      ip_address  TEXT,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      category   TEXT NOT NULL DEFAULT 'malzeme',
+      item_name  TEXT NOT NULL,
+      quantity   INTEGER NOT NULL DEFAULT 1,
+      unit_cost  INTEGER NOT NULL DEFAULT 0,
+      total_cost INTEGER NOT NULL DEFAULT 0,
+      entered_by UUID REFERENCES users(id),
+      notes      TEXT,
+      date       TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name             TEXT NOT NULL,
+      category         TEXT NOT NULL DEFAULT 'genel',
+      quantity         INTEGER NOT NULL DEFAULT 0,
+      min_threshold    INTEGER NOT NULL DEFAULT 5,
+      unit             TEXT NOT NULL DEFAULT 'adet',
+      cost_per_unit    INTEGER NOT NULL DEFAULT 0,
+      last_restocked_at TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS device_maintenances (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      device_name      TEXT NOT NULL,
+      maintenance_type TEXT NOT NULL,
+      scheduled_date   TEXT NOT NULL,
+      completed_date   TEXT,
+      notes            TEXT,
+      status           TEXT NOT NULL DEFAULT 'scheduled',
+      created_at       TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS waiting_list (
+      id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id           UUID NOT NULL REFERENCES patients(id),
+      preferred_doctor_id  UUID REFERENCES users(id),
+      preferred_date       TEXT,
+      preferred_time_range TEXT,
+      notes                TEXT,
+      status               TEXT NOT NULL DEFAULT 'waiting',
+      notified_at          TIMESTAMPTZ,
+      created_at           TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS attendance (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id     UUID NOT NULL REFERENCES users(id),
+      date        TEXT NOT NULL,
+      clock_in    TIMESTAMPTZ,
+      clock_out   TIMESTAMPTZ,
+      total_hours INTEGER,
+      notes       TEXT,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS tooth_records (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id   UUID NOT NULL REFERENCES patients(id),
+      tooth_number INTEGER NOT NULL,
+      surface      TEXT,
+      condition    TEXT NOT NULL DEFAULT 'healthy',
+      treatment_id UUID REFERENCES treatment_plans(id),
+      notes        TEXT,
+      recorded_by  UUID REFERENCES users(id),
+      date         TEXT NOT NULL,
+      created_at   TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS procedure_templates (
+      id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doctor_id            UUID REFERENCES users(id),
+      name                 TEXT NOT NULL,
+      default_duration_min INTEGER NOT NULL DEFAULT 30,
+      default_cost         INTEGER NOT NULL DEFAULT 0,
+      tooth_surfaces       TEXT,
+      category             TEXT NOT NULL DEFAULT 'genel',
+      created_at           TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS consultations (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      from_doctor_id UUID NOT NULL REFERENCES users(id),
+      to_doctor_id   UUID NOT NULL REFERENCES users(id),
+      patient_id     UUID NOT NULL REFERENCES patients(id),
+      notes          TEXT,
+      status         TEXT NOT NULL DEFAULT 'pending',
+      created_at     TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS doctor_notes (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doctor_id  UUID NOT NULL REFERENCES users(id),
+      patient_id UUID NOT NULL REFERENCES patients(id),
+      content    TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS patient_anamnesis (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id UUID NOT NULL REFERENCES patients(id),
+      form_data  JSONB NOT NULL DEFAULT '{}'::jsonb,
+      filled_by  UUID REFERENCES users(id),
+      filled_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS doctor_availability (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doctor_id   UUID NOT NULL REFERENCES users(id),
+      day_of_week INTEGER NOT NULL,
+      start_time  TEXT NOT NULL,
+      end_time    TEXT NOT NULL,
+      is_active   BOOLEAN NOT NULL DEFAULT true
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS calendar_blocks (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doctor_id  UUID NOT NULL REFERENCES users(id),
+      date       TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time   TEXT NOT NULL,
+      reason     TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS material_usages (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doctor_id         UUID NOT NULL REFERENCES users(id),
+      patient_id        UUID REFERENCES patients(id),
+      appointment_id    UUID REFERENCES dental_appointments(id),
+      inventory_item_id UUID NOT NULL REFERENCES inventory_items(id),
+      quantity          INTEGER NOT NULL DEFAULT 1,
+      date              TEXT NOT NULL,
+      created_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS installment_plans (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id        UUID NOT NULL REFERENCES patients(id),
+      total_amount      INTEGER NOT NULL,
+      installment_count INTEGER NOT NULL,
+      paid_count        INTEGER NOT NULL DEFAULT 0,
+      installments      JSONB NOT NULL DEFAULT '[]'::jsonb,
+      status            TEXT NOT NULL DEFAULT 'active',
+      created_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS revenue_targets (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      month         INTEGER NOT NULL,
+      year          INTEGER NOT NULL,
+      target_amount INTEGER NOT NULL,
+      created_at    TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Extend patients table
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS birth_date TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS gender TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS tc_no TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS address TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS allergies TEXT[] DEFAULT '{}'`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS medications TEXT[] DEFAULT '{}'`
+
+  // Extend treatment_plans for builder steps
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS steps JSONB DEFAULT '[]'::jsonb`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS total_cost INTEGER DEFAULT 0`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS completed_steps INTEGER DEFAULT 0`
+
+  // Extend dental_appointments: allow nullable doctor_id (already nullable in schema)
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'dental_appointments' AND column_name = 'doctor_id'
+          AND is_nullable = 'NO'
+      ) THEN
+        ALTER TABLE dental_appointments ALTER COLUMN doctor_id DROP NOT NULL;
+      END IF;
+    END $$
+  `
+  
+  // Fix foreign key constraint for doctor_id (it was referencing the removed 'doctors' table)
+  await sql`UPDATE dental_appointments SET doctor_id = NULL WHERE doctor_id NOT IN (SELECT id FROM users)`
+  await sql`ALTER TABLE dental_appointments DROP CONSTRAINT IF EXISTS dental_appointments_doctor_id_fkey`
+  await sql`ALTER TABLE dental_appointments ADD CONSTRAINT dental_appointments_doctor_id_fkey FOREIGN KEY (doctor_id) REFERENCES users(id)`
+
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS time_confirmed BOOLEAN NOT NULL DEFAULT true`
+
+  // Extend inventory_items
+  await sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS brand TEXT`
+  await sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS expiry_date TEXT`
+  await sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS supplier_name TEXT`
+
+  // Extend device_maintenances
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS serial_number TEXT`
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS maintenance_firm TEXT`
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS warranty_end TEXT`
+
+  // Extend treatment_plans
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS tooth_number TEXT`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS indication TEXT`
+
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS device_status TEXT NOT NULL DEFAULT 'active'`
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS is_periodic BOOLEAN NOT NULL DEFAULT false`
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS periodic_days INTEGER`
+  await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS next_maintenance_date TEXT`
+
+  // Inventory movements log
+  await sql`
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      item_id    UUID NOT NULL REFERENCES inventory_items(id),
+      type       TEXT NOT NULL,
+      quantity   INTEGER NOT NULL,
+      notes      TEXT,
+      user_id    UUID REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Extend patient_payments with treatment_plan_id
+  await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS treatment_plan_id UUID REFERENCES treatment_plans(id)`
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
