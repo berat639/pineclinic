@@ -81,6 +81,7 @@ export default function CalendarTab() {
   const [tedaviName, setTedaviName] = useState('')
   const [selectedTooth, setSelectedTooth] = useState<string>('')
   const [tedaviIndication, setTedaviIndication] = useState('')
+  const [showPastTreatmentsModal, setShowPastTreatmentsModal] = useState(false)
   const [templates, setTemplates] = useState<any[]>([])
   
   // Periodic Treatment State
@@ -450,18 +451,25 @@ export default function CalendarTab() {
             <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tedavi Planı</div>
-                <button onClick={() => { setTreatmentDeleteError(null); setShowTedaviForm(true); }} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px dashed var(--glass-border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>
-                  + Tedavi Ekle
-                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {patientTreatments.filter((t: any) => t.status === 'completed').length > 0 && (
+                    <button onClick={() => setShowPastTreatmentsModal(true)} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      🕒 Geçmiş
+                    </button>
+                  )}
+                  <button onClick={() => { setTreatmentDeleteError(null); setShowTedaviForm(true); }} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px dashed var(--glass-border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>
+                    + Tedavi Ekle
+                  </button>
+                </div>
               </div>
               {treatmentDeleteError && (
                 <div style={{ fontSize: '0.7rem', color: '#ef4444', marginBottom: 8, fontWeight: 600 }}>
                   ⚠️ {treatmentDeleteError}
                 </div>
               )}
-              {patientTreatments.length > 0 ? (
+              {patientTreatments.filter((t: any) => t.status !== 'completed').length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {patientTreatments.map((t: any) => (
+                  {patientTreatments.filter((t: any) => t.status !== 'completed').map((t: any) => (
                     <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ color: 'var(--foreground)' }}>
@@ -892,6 +900,54 @@ export default function CalendarTab() {
                   }} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Geçmiş İşlemler Modalı */}
+      {showPastTreatmentsModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, backdropFilter: 'blur(4px)' }}>
+          <div className="glass-card" style={{ width: '90%', maxWidth: 700, padding: 24, borderRadius: 16, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)' }}>Geçmiş Tedaviler</h3>
+              <button onClick={() => setShowPastTreatmentsModal(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--foreground-3)' }}>
+                    <th style={{ padding: '10px 8px', fontWeight: 500 }}>Tarih</th>
+                    <th style={{ padding: '10px 8px', fontWeight: 500 }}>Diş No</th>
+                    <th style={{ padding: '10px 8px', fontWeight: 500 }}>İşlem</th>
+                    <th style={{ padding: '10px 8px', fontWeight: 500 }}>Endikasyon</th>
+                    <th style={{ padding: '10px 8px', fontWeight: 500 }}>Statü</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {patientTreatments.filter((t: any) => t.status === 'completed').map((t: any) => (
+                    <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background 0.2s', cursor: 'default' }} onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'} onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ padding: '10px 8px', color: 'var(--foreground-2)' }}>{new Date(t.createdAt).toLocaleDateString('tr-TR')}</td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>#{t.toothNumber}</span> : '-'}
+                      </td>
+                      <td style={{ padding: '10px 8px', color: 'var(--foreground)' }}>{t.procedureName}</td>
+                      <td style={{ padding: '10px 8px', color: 'var(--foreground-2)' }}>{t.indication || '-'}</td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                          Yapıldı
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {patientTreatments.filter((t: any) => t.status === 'completed').length === 0 && (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-3)', fontSize: '0.85rem' }}>
+                  Geçmiş bir işlem bulunmuyor.
+                </div>
+              )}
             </div>
           </div>
         </div>
