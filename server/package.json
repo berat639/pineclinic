@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/static": "^1.4.10",
     "@google/genai": "^1.0.0",
     "bullmq": "^5.76.8",
     "drizzle-orm": "^0.45.2",

@@ -126,6 +126,7 @@ export const treatmentPlans = pgTable('treatment_plans', {
   indication: text('indication'),
   cost: integer('cost').notNull().default(0),
   status: text('status').notNull().default('planned'),
+  dcmUrl: text('dcm_url'),
   
   // Periodic Notifications
   isPeriodic: boolean('is_periodic').notNull().default(false),

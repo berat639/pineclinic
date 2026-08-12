@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
+import { staticPlugin } from '@elysiajs/static'
 import { randomUUID } from 'crypto'
 import { createReadStream, writeFileSync } from 'fs'
 import { resolve } from 'path'
@@ -244,6 +245,7 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
+  .use(staticPlugin({ assets: 'public', prefix: '/' }))
   .use(authPlugin)
   .use(shiftsPlugin)
   .use(notificationsPlugin)
@@ -386,6 +388,7 @@ const app = new Elysia()
       indication: b.indication, 
       cost: b.cost, 
       status: b.status,
+      dcmUrl: b.dcmUrl,
       clinicId: b.clinicId,
       isPeriodic: b.isPeriodic,
       periodDays: b.periodDays,
@@ -393,6 +396,48 @@ const app = new Elysia()
       notifyPatient: b.notifyPatient,
       notificationType: b.notificationType
     })
+  })
+  .post('/api/dental/upload-dcm', async ({ body, set }) => {
+    const MAX_DCM_SIZE = 20 * 1024 * 1024; // 20 MB
+    const b = body as any
+    if (!b.file) {
+      set.status = 400;
+      return { error: 'No file uploaded' };
+    }
+    const file = b.file as File;
+    if (!file.name.toLowerCase().endsWith('.dcm')) {
+      set.status = 400;
+      return { error: 'Only .dcm files are allowed' };
+    }
+    if (file.size > MAX_DCM_SIZE) {
+      set.status = 413;
+      return { error: `Dosya boyutu çok büyük (maks ${MAX_DCM_SIZE / 1024 / 1024} MB)` };
+    }
+    
+    const uuid = crypto.randomUUID();
+    const fileName = `${uuid}_${file.name}.gz`;
+    const filePath = `public/uploads/dcm/${fileName}`;
+    
+    const raw = new Uint8Array(await file.arrayBuffer());
+    const compressed = Bun.gzipSync(raw);
+    await Bun.write(filePath, compressed);
+    
+    const savedKB = ((raw.byteLength - compressed.byteLength) / 1024).toFixed(0);
+    return { url: `/api/dental/dcm/${fileName}`, originalSize: raw.byteLength, compressedSize: compressed.byteLength, savedKB };
+  })
+  .get('/api/dental/dcm/:filename', async ({ params, set }) => {
+    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '');
+    const filePath = `public/uploads/dcm/${safeName}`;
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) {
+      set.status = 404;
+      return { error: 'Dosya bulunamadı' };
+    }
+    const compressed = new Uint8Array(await file.arrayBuffer());
+    const raw = safeName.endsWith('.gz') ? Bun.gunzipSync(compressed) : compressed;
+    set.headers['content-type'] = 'application/dicom';
+    set.headers['content-disposition'] = `inline; filename="${safeName.replace('.gz', '')}"`;
+    return new Response(raw);
   })
   .put('/api/dental/treatments/:id', async ({ params, body }) => {
     const { updateTreatmentPlan } = await import('./db/repositories/dental')

@@ -112,6 +112,7 @@ export async function createTreatmentPlan(data: {
   nextNotificationDate?: string
   notifyPatient?: boolean
   notificationType?: string
+  dcmUrl?: string
 }) {
   const [row] = await db.insert(treatmentPlans).values({
     patientId: data.patientId,
@@ -120,6 +121,7 @@ export async function createTreatmentPlan(data: {
     indication: data.indication,
     cost: data.cost,
     status: data.status ?? 'planned',
+    dcmUrl: data.dcmUrl,
     clinicId: data.clinicId,
     isPeriodic: data.isPeriodic ?? false,
     periodDays: data.periodDays,

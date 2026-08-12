@@ -227,7 +227,7 @@ export default function KnowledgeTab() {
     setGreetingSaving(true)
     try {
       await fetch('/api/admin/settings/greeting', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ greeting: greetingText.trim() }),
       })
@@ -252,7 +252,7 @@ export default function KnowledgeTab() {
     setCatSaving(true)
     try {
       const res = await fetch('/api/admin/categories', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug: newCatSlug.trim().toLowerCase(), label: newCatLabel.trim(), icon: newCatIcon, color: newCatColor }),
       })
@@ -365,7 +365,7 @@ export default function KnowledgeTab() {
     if (!confirm(`${docs.length} belgenin tamamı yeniden embedding yapılacak. Devam?`)) return
     setReindexing(true)
     try {
-      const r = await fetch('/api/knowledge/reindex', { method: 'POST' })
+      const r = await fetch('/api/knowledge/reindex', { method: 'PUT' })
       const data = await r.json()
       await load()
       showToast(`✅ ${data.results?.success || 0} belge yeniden indekslendi`)
