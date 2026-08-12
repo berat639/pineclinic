@@ -253,6 +253,29 @@ async function runMigrations() {
   // doctors table removed — hekim users serve as doctors now
 
   await sql`
+    CREATE TABLE IF NOT EXISTS clinics (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name            TEXT NOT NULL,
+      netgsm_usercode TEXT,
+      netgsm_password TEXT,
+      sms_sender_id   TEXT,
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS notification_templates (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id  UUID REFERENCES clinics(id),
+      type       TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      content    TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  await sql`
     CREATE TABLE IF NOT EXISTS patients (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name       TEXT NOT NULL,
@@ -596,6 +619,7 @@ async function runMigrations() {
   `
 
   // Extend patients table
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS birth_date TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS gender TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS tc_no TEXT`
@@ -604,6 +628,13 @@ async function runMigrations() {
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS medications TEXT[] DEFAULT '{}'`
 
   // Extend treatment_plans for builder steps
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS is_periodic BOOLEAN NOT NULL DEFAULT false`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS period_days INTEGER`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS next_notification_date TEXT`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS notify_patient BOOLEAN NOT NULL DEFAULT false`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS notification_type TEXT DEFAULT 'sms'`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMPTZ`
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS steps JSONB DEFAULT '[]'::jsonb`
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS total_cost INTEGER DEFAULT 0`
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS completed_steps INTEGER DEFAULT 0`
