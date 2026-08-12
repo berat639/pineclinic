@@ -71,9 +71,9 @@ export default function StokTab() {
   })
 
   const fetchData = useCallback(() => {
-    fetch(`${BACKEND}/api/yonetici/inventory`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setItems).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/inventory/movements`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setMovements).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/device-maintenance`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setDeviceMaintenances).catch(() => {})
+    fetch(`/api/yonetici/inventory`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setItems).catch(() => {})
+    fetch(`/api/yonetici/inventory/movements`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setMovements).catch(() => {})
+    fetch(`/api/yonetici/device-maintenance`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setDeviceMaintenances).catch(() => {})
   }, [])
   useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => {
@@ -86,7 +86,7 @@ export default function StokTab() {
   async function addItem(e: React.FormEvent) {
     e.preventDefault()
     if (recordType === 'malzeme') {
-      const res = await fetch(`${BACKEND}/api/yonetici/inventory`, {
+      const res = await fetch(`/api/yonetici/inventory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -111,7 +111,7 @@ export default function StokTab() {
       return
     }
 
-    const res = await fetch(`${BACKEND}/api/yonetici/inventory`, {
+    const res = await fetch(`/api/yonetici/inventory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -132,7 +132,7 @@ export default function StokTab() {
 
     if (res.ok) {
       if (deviceForm.hasPeriodicMaintenance) {
-        await fetch(`${BACKEND}/api/yonetici/device-maintenance`, {
+        await fetch(`/api/yonetici/device-maintenance`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -165,7 +165,7 @@ export default function StokTab() {
       return
     }
 
-    const res = await fetch(`${BACKEND}/api/yonetici/inventory/movement`, {
+    const res = await fetch(`/api/yonetici/inventory/movement`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

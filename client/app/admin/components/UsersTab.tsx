@@ -25,7 +25,7 @@ export default function UsersTab() {
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
+    fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
   }, [])
 
   const filtered = search
@@ -35,7 +35,7 @@ export default function UsersTab() {
   async function addUser(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    const res = await fetch(`${BACKEND}/api/yonetici/users`, {
+    const res = await fetch(`/api/yonetici/users`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
       body: JSON.stringify(form),
     })
@@ -48,7 +48,7 @@ export default function UsersTab() {
   }
 
   async function toggleActive(u: User) {
-    const res = await fetch(`${BACKEND}/api/yonetici/users/${u.id}`, {
+    const res = await fetch(`/api/yonetici/users/${u.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
       body: JSON.stringify({ active: !u.active }),
     })

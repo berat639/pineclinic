@@ -17,12 +17,12 @@ export default function TedaviTab() {
   const [cat, setCat] = useState('genel')
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/hekim/templates`, { credentials: 'include' }).then(r => r.json()).then(setTemplates).catch(() => {})
+    fetch(`/api/hekim/templates`, { credentials: 'include' }).then(r => r.json()).then(setTemplates).catch(() => {})
   }, [])
 
   async function addTemplate(e: React.FormEvent) {
     e.preventDefault()
-    const res = await fetch(`${BACKEND}/api/hekim/templates`, {
+    const res = await fetch(`/api/hekim/templates`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
       body: JSON.stringify({ name, defaultDurationMin: +dur, defaultCost: +cost, category: cat }),
     })
@@ -30,7 +30,7 @@ export default function TedaviTab() {
   }
 
   async function deleteTemplate(id: string) {
-    await fetch(`${BACKEND}/api/hekim/templates/${id}`, { method: 'DELETE', credentials: 'include' })
+    await fetch(`/api/hekim/templates/${id}`, { method: 'DELETE', credentials: 'include' })
     setTemplates(templates.filter(t => t.id !== id))
   }
 

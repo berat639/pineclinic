@@ -38,8 +38,8 @@ export default function OdemeTab() {
   const [saving, setSaving] = useState(false)
 
   const fetchData = useCallback(() => {
-    fetch(`${BACKEND}/api/dental/payments`).then(r => r.ok ? r.json() : []).then(setPayments).catch(() => {})
-    fetch(`${BACKEND}/api/dental/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {})
+    fetch(`/api/dental/payments`).then(r => r.ok ? r.json() : []).then(setPayments).catch(() => {})
+    fetch(`/api/dental/patients`).then(r => r.ok ? r.json() : []).then(setPatients).catch(() => {})
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -75,12 +75,12 @@ export default function OdemeTab() {
     setSaving(true)
     try {
       if (editId) {
-        await fetch(`${BACKEND}/api/dental/payments/${editId}`, {
+        await fetch(`/api/dental/payments/${editId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ date: formDate, amount: Number(formAmount), method: formMethod, status: formStatus, dueDate: formDueDate || null, notes: formNotes || null }),
         })
       } else {
-        await fetch(`${BACKEND}/api/dental/patients/${formPatient}/payments`, {
+        await fetch(`/api/dental/patients/${formPatient}/payments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ date: formDate, amount: Number(formAmount), method: formMethod, status: formStatus, dueDate: formDueDate || null, notes: formNotes || null }),
         })
@@ -96,7 +96,7 @@ export default function OdemeTab() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Bu ödemeyi silmek istediğinizden emin misiniz?')) return
-    await fetch(`${BACKEND}/api/dental/payments/${id}`, { method: 'DELETE' })
+    await fetch(`/api/dental/payments/${id}`, { method: 'DELETE' })
     fetchData()
   }
 

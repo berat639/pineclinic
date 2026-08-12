@@ -29,32 +29,32 @@ export default function KlinikPersonelTab() {
   const [showShiftForm, setShowShiftForm] = useState(false)
 
   const fetchData = useCallback(() => {
-    fetch(`${BACKEND}/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
-    fetch(`${BACKEND}/api/shifts`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setShifts).catch(() => {})
+    fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
+    fetch(`/api/shifts`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setShifts).catch(() => {})
   }, [])
   useEffect(() => { fetchData() }, [fetchData])
 
   async function addUser(e: React.FormEvent) {
     e.preventDefault(); setError('')
-    const res = await fetch(`${BACKEND}/api/yonetici/users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
+    const res = await fetch(`/api/yonetici/users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
     const data = await res.json()
     if (res.ok) { setUsers([...users, { ...data, active: true }]); setShowUserForm(false); setForm({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' }) }
     else setError(data.error || 'Hata')
   }
 
   async function toggleActive(u: User) {
-    const res = await fetch(`${BACKEND}/api/yonetici/users/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ active: !u.active }) })
+    const res = await fetch(`/api/yonetici/users/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ active: !u.active }) })
     if (res.ok) setUsers(users.map(x => x.id === u.id ? { ...x, active: !x.active } : x))
   }
 
   async function createShift(e: React.FormEvent) {
     e.preventDefault()
-    const res = await fetch(`${BACKEND}/api/shifts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(shiftForm) })
+    const res = await fetch(`/api/shifts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(shiftForm) })
     if (res.ok) { fetchData(); setShowShiftForm(false) }
   }
 
   async function deleteShift(id: string) {
-    await fetch(`${BACKEND}/api/shifts/${id}`, { method: 'DELETE', credentials: 'include' })
+    await fetch(`/api/shifts/${id}`, { method: 'DELETE', credentials: 'include' })
     setShifts(shifts.filter(s => s.id !== id))
   }
 

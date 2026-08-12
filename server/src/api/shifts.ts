@@ -7,7 +7,8 @@ import { authenticateRequest } from '../middleware/auth'
 export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
   .get('/', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const week = query.week as string | undefined
@@ -37,7 +38,8 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
   })
 
   .post('/', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 
@@ -67,7 +69,8 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
   })
 
   .delete('/:id', async ({ params, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 

@@ -8,7 +8,7 @@ export default function DashboardTab() {
   const [stats, setStats] = useState<any>(null)
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/admin/stats`).then(r => r.json()).then(setStats).catch(() => {})
+    fetch(`/api/admin/stats`).then(r => r.json()).then(setStats).catch(() => {})
   }, [])
 
   return (

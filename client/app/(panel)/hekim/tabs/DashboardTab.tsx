@@ -12,7 +12,7 @@ export default function DashboardTab() {
   useEffect(() => {
     if (!user) return
     const today = new Date().toISOString().split('T')[0]
-    fetch(`${BACKEND}/api/dental/appointments?date=${today}`)
+    fetch(`/api/dental/appointments?date=${today}`)
       .then(r => r.json())
       .then(data => {
         const mine = user.role === 'hekim' ? data.filter((a: any) => a.doctorId === user.id) : data

@@ -11,8 +11,8 @@ export default function DashboardTab() {
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
     Promise.all([
-      fetch(`${BACKEND}/api/dental/appointments?date=${today}`).then(r => r.json()),
-      fetch(`${BACKEND}/api/dental/doctors`).then(r => r.json()),
+      fetch(`/api/dental/appointments?date=${today}`).then(r => r.json()),
+      fetch(`/api/dental/doctors`).then(r => r.json()),
     ]).then(([appts, docs]) => { setAppointments(appts); setDoctors(docs) }).catch(() => {})
   }, [])
 

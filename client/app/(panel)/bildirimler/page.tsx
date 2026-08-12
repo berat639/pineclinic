@@ -18,19 +18,19 @@ export default function BildirimlerPage() {
   const [notifications, setNotifications] = useState<Notification[]>([])
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/notifications`, { credentials: 'include' })
+    fetch(`/api/notifications`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
       .then(setNotifications)
       .catch(() => {})
   }, [])
 
   async function markRead(id: string) {
-    await fetch(`${BACKEND}/api/notifications/${id}/read`, { method: 'PUT', credentials: 'include' })
+    await fetch(`/api/notifications/${id}/read`, { method: 'PUT', credentials: 'include' })
     setNotifications(ns => ns.map(n => n.id === id ? { ...n, read: true } : n))
   }
 
   async function markAllRead() {
-    await fetch(`${BACKEND}/api/notifications/read-all`, { method: 'PUT', credentials: 'include' })
+    await fetch(`/api/notifications/read-all`, { method: 'PUT', credentials: 'include' })
     setNotifications(ns => ns.map(n => ({ ...n, read: true })))
   }
 

@@ -35,7 +35,7 @@ export default function YoneticiPage() {
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
   const fetchAppts = useCallback(() => {
-    fetch(`${BACKEND}/api/appointments`).then(r => r.ok ? r.json() : []).then(setAppointments).catch(() => {})
+    fetch(`/api/appointments`).then(r => r.ok ? r.json() : []).then(setAppointments).catch(() => {})
   }, [])
   useEffect(() => { fetchAppts() }, [fetchAppts])
 

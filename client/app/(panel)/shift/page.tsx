@@ -38,15 +38,15 @@ export default function ShiftPage() {
   const weekLabel = `${new Date(days[0]! + 'T00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })} - ${new Date(days[6]! + 'T00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' })}`
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/shifts`, { credentials: 'include' }).then(r => r.json()).then(setShifts).catch(() => {})
+    fetch(`/api/shifts`, { credentials: 'include' }).then(r => r.json()).then(setShifts).catch(() => {})
     if (user?.role === 'yonetici') {
-      fetch(`${BACKEND}/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
+      fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
     }
   }, [user])
 
   async function createShift(e: React.FormEvent) {
     e.preventDefault()
-    const res = await fetch(`${BACKEND}/api/shifts`, {
+    const res = await fetch(`/api/shifts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
       body: JSON.stringify({ userId: formUser, date: formDate, startTime: formStart, endTime: formEnd }),
     })
@@ -54,7 +54,7 @@ export default function ShiftPage() {
   }
 
   async function deleteShift(id: string) {
-    await fetch(`${BACKEND}/api/shifts/${id}`, { method: 'DELETE', credentials: 'include' })
+    await fetch(`/api/shifts/${id}`, { method: 'DELETE', credentials: 'include' })
     setShifts(prev => prev.filter(s => s.id !== id))
   }
 

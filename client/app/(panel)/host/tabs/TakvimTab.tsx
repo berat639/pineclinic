@@ -15,13 +15,13 @@ export default function TakvimTab() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/dental/doctors`).then(r => r.json()).then(setDoctors).catch(() => {})
+    fetch(`/api/dental/doctors`).then(r => r.json()).then(setDoctors).catch(() => {})
   }, [])
 
   async function findSlots() {
     if (!selectedDoc || !date) return
     setLoading(true)
-    const res = await fetch(`${BACKEND}/api/host/available-slots?doctorId=${selectedDoc}&date=${date}&duration=30`, { credentials: 'include' })
+    const res = await fetch(`/api/host/available-slots?doctorId=${selectedDoc}&date=${date}&duration=30`, { credentials: 'include' })
     setSlots(await res.json())
     setLoading(false)
   }

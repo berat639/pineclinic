@@ -17,10 +17,10 @@ export default function FinansalTab() {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily')
 
   useEffect(() => {
-    fetch(`${BACKEND}/api/yonetici/finance/revenue?period=${period}`, { credentials: 'include' }).then(r => r.json()).then(setRevenue).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/finance/expenses`, { credentials: 'include' }).then(r => r.json()).then(setExpenses).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/finance/income-expense-chart?period=${period}`, { credentials: 'include' }).then(r => r.json()).then(setChartData).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/finance/profit-loss`, { credentials: 'include' }).then(r => r.json()).then(setPl).catch(() => {})
+    fetch(`/api/yonetici/finance/revenue?period=${period}`, { credentials: 'include' }).then(r => r.json()).then(setRevenue).catch(() => {})
+    fetch(`/api/yonetici/finance/expenses`, { credentials: 'include' }).then(r => r.json()).then(setExpenses).catch(() => {})
+    fetch(`/api/yonetici/finance/income-expense-chart?period=${period}`, { credentials: 'include' }).then(r => r.json()).then(setChartData).catch(() => {})
+    fetch(`/api/yonetici/finance/profit-loss`, { credentials: 'include' }).then(r => r.json()).then(setPl).catch(() => {})
   }, [period])
 
   return (
