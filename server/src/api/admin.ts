@@ -371,6 +371,32 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
     return { success: true }
   })
 
+  // ── Integrations ───────────────────────────────────────────────────────────
+  .get('/integrations', async () => {
+    const { getIntegrations } = await import('../db/repositories/integrations')
+    return await getIntegrations()
+  })
+
+  .put('/integrations', async ({ body }) => {
+    const { updateIntegrations } = await import('../db/repositories/integrations')
+    await updateIntegrations(body as any)
+    return { success: true }
+  }, {
+    body: t.Object({
+      voipProvider: t.Optional(t.Union([t.String(), t.Null()])),
+      voipLabel: t.Optional(t.Union([t.String(), t.Null()])),
+      voipBaseUrl: t.Optional(t.Union([t.String(), t.Null()])),
+      voipTrunkHost: t.Optional(t.Union([t.String(), t.Null()])),
+      smtpHost: t.Optional(t.Union([t.String(), t.Null()])),
+      smtpPort: t.Optional(t.Union([t.String(), t.Null()])),
+      smtpUser: t.Optional(t.Union([t.String(), t.Null()])),
+      smtpPass: t.Optional(t.Union([t.String(), t.Null()])),
+      smsUsercode: t.Optional(t.Union([t.String(), t.Null()])),
+      smsPassword: t.Optional(t.Union([t.String(), t.Null()])),
+      smsSenderId: t.Optional(t.Union([t.String(), t.Null()])),
+    })
+  })
+
   // ── Knowledge Base ─────────────────────────────────────────────────────────
   .get('/knowledge', async () => {
     return listDocuments()
