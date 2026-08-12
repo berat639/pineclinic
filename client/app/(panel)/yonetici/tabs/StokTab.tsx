@@ -71,9 +71,9 @@ export default function StokTab() {
   })
 
   const fetchData = useCallback(() => {
-    fetch(`${BACKEND}/api/yonetici/inventory`, { credentials: 'include' }).then(r => r.json()).then(setItems).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/inventory/movements`, { credentials: 'include' }).then(r => r.json()).then(setMovements).catch(() => {})
-    fetch(`${BACKEND}/api/yonetici/device-maintenance`, { credentials: 'include' }).then(r => r.json()).then(setDeviceMaintenances).catch(() => {})
+    fetch(`${BACKEND}/api/yonetici/inventory`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setItems).catch(() => {})
+    fetch(`${BACKEND}/api/yonetici/inventory/movements`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setMovements).catch(() => {})
+    fetch(`${BACKEND}/api/yonetici/device-maintenance`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setDeviceMaintenances).catch(() => {})
   }, [])
   useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => {
