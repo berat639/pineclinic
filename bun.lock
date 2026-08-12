@@ -18,6 +18,7 @@
       "name": "@voice-ai/client",
       "version": "0.0.1",
       "dependencies": {
+        "@dagrejs/dagre": "^3.1.1",
         "@fullcalendar/core": "^6.1.15",
         "@fullcalendar/daygrid": "^6.1.15",
         "@fullcalendar/react": "^6.1.15",
@@ -25,6 +26,7 @@
         "@fullcalendar/resource-timegrid": "^6.1.15",
         "@fullcalendar/timegrid": "^6.1.15",
         "@google/genai": "^2.10.0",
+        "@xyflow/react": "^12.11.2",
         "lucide-react": "^1.31.0",
         "next": "^15.0.0",
         "react": "^19.0.0",
@@ -33,6 +35,7 @@
         "recharts": "^3.10.1",
       },
       "devDependencies": {
+        "@types/dagre": "^0.7.54",
         "@types/node": "^22.0.0",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
@@ -283,6 +286,8 @@
     "@types/d3-transition": ["@types/d3-transition@3.0.9", "", { "dependencies": { "@types/d3-selection": "*" } }, "sha512-uZS5shfxzO3rGlu0cC3bjmMFKsXv+SmZZcgp0KD22ts4uGXp5EVYGzu/0YdwZeKmddhcAccYtREJKkPfXkZuCg=="],
 
     "@types/d3-zoom": ["@types/d3-zoom@3.0.8", "", { "dependencies": { "@types/d3-interpolate": "*", "@types/d3-selection": "*" } }, "sha512-iqMC4/YlFCSlO8+2Ii1GGGliCAY4XdeG748w5vQUbevlbDu0zSjH/+jojorQVBK/se0j6DUFNPBGSqD3YWYnDw=="],
+
+    "@types/dagre": ["@types/dagre@0.7.54", "", {}, "sha512-QjcRY+adGbYvBFS7cwv5txhVIwX1XXIUswWl+kSQTbI6NjgZydrZkEKX/etzVd7i+bCsCb40Z/xlBY5eoFuvWQ=="],
 
     "@types/node": ["@types/node@22.19.17", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q=="],
 
