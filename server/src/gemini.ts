@@ -84,61 +84,6 @@ export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
   }
 
   const tools: FunctionDeclaration[] = []
-
-  // Only include randevuOlustur if there are fields to collect
-  if (Object.keys(fieldProps).length > 0) {
-    tools.push({
-      name: 'randevuOlustur',
-      description: desc('tools.randevuOlustur') || 'Müşteri için randevu/kayıt oluşturur.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: fieldProps as Record<string, { type: typeof Type.STRING; description: string }>,
-        required: fieldRequired,
-      },
-    })
-  }
-
-  tools.push(
-    {
-      name: 'searchKnowledgeBase',
-      description: desc('tools.searchKnowledgeBase') || 'Bilgi tabanında arama yapar.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          sorgu: { type: Type.STRING, description: 'Aranacak konu veya soru (Türkçe)' },
-        },
-        required: ['sorgu'],
-      },
-    },
-    {
-      name: 'musteriSorgula',
-      description: desc('tools.musteriSorgula') || 'Telefon numarasıyla müşteri bilgisi getirir.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          telefon: { type: Type.STRING, description: 'Müşterinin söylediği telefon numarası' },
-        },
-        required: ['telefon'],
-      },
-    },
-    {
-      name: 'randevuMusaitlikKontrol',
-      description: desc('tools.randevuMusaitlikKontrol') || 'Tarih müsaitliğini kontrol eder.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD)' },
-        },
-        required: [],
-      },
-    },
-    {
-      name: 'cagriySonlandir',
-      description: desc('tools.cagriySonlandir') || 'Çağrıyı sonlandırır.',
-      parameters: { type: Type.OBJECT, properties: {}, required: [] },
-    },
-  )
-
   return tools
 }
 
@@ -515,10 +460,9 @@ export async function createLiveSession(
 
   const toolDeclarations = await buildToolDeclarations()
 
-  const liveConfig = {
+  const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
     systemInstruction: options.systemPrompt,
-    tools: [{ functionDeclarations: toolDeclarations }],
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: VOICE },
@@ -538,6 +482,10 @@ export async function createLiveSession(
     // Kopuşta resume edebilmek için sunucudan handle iste.
     sessionResumption: {},
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
+  }
+
+  if (toolDeclarations.length > 0) {
+    liveConfig.tools = [{ functionDeclarations: toolDeclarations }]
   }
 
   function buildCallbacks() {

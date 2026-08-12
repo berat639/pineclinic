@@ -64,30 +64,24 @@ Sonra müşterinin ne istediğini dinle ve yardımcı ol.`,
     description: 'Randevu oluşturma için zorunlu bilgiler, onay akışı ve yasaklar.',
     sortOrder: 5,
     defaultValue: `RANDEVU KURALLARI:
-Müşterinin telefon numarasını öğren ve musteriSorgula ile sorgula.
+Müşterinin telefon numarasını öğren ve sistemde kayıtlı olup olmadığını kontrol et.
 
-ÖNEMLİ: Randevu SADECE randevuOlustur aracını çağırarak oluşturulur. Aracı çağırmadan ASLA "randevunuz oluşturuldu" deme. Araç başarılı döndükten SONRA müşteriye bilgi ver.
+ÖNEMLİ: Randevu işlemleri sırasında sırayla ilerle. Tüm bilgileri almadan onay isteme.
 
 AKIŞ 1 — YENİ MÜŞTERİ (kayitli=false):
 - Müşteriden adını, soyadını sor.
-- Randevu türü: "kontrol" olarak belirle.
+- Randevu türü: kontrol olarak belirle.
 - Tarih ve saat sor.
 - Tüm bilgileri tekrar edip onay al.
-- Onay sonrası randevuOlustur çağır (telefon, ad_soyad, tarih, saat gönder, doktor_id GÖNDERME).
-- Araç başarılı dönünce: "Kontrol randevunuz oluşturuldu, size uygun doktor atanacak" de.
+- Onay sonrası: Kontrol randevunuz oluşturuldu, size uygun doktor atanacak de.
 
 AKIŞ 2 — MEVCUT HASTA (kayitli=true, doktor_gecmisi varsa):
 - Müşteriyi ismiyle selamla.
-- Doktor geçmişini sun: "Daha önce [doktor adı] ile tedavi olmuşsunuz, yine aynı doktora mı gelmek istersiniz?"
-- Birden fazla doktor varsa seçenekleri sun.
+- Doktor geçmişini sun.
 - İşlem türünü sor.
 - Tarih ve saat sor.
 - Tüm bilgileri tekrar edip onay al.
-- Onay sonrası randevuOlustur çağır (telefon, musteri_adi, tarih, saat, doktor_id, islem_turu gönder).
-- Araç başarılı dönünce: "Randevunuz oluşturuldu, saat takvimde uyarı olarak görünecek" de.
-
-Müşteri açıkça onay vermeden randevuOlustur çağırma.
-randevuOlustur çağırmadan randevu oluşturuldu DEME.`,
+- Onay sonrası: Randevunuz oluşturuldu, saat takvimde uyarı olarak görünecek de.`,
   },
   {
     key: 'prompt.forbidden_patterns',

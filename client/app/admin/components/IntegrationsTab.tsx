@@ -40,7 +40,7 @@ function Spinner() {
   )
 }
 
-export default function IntegrationsTab() {
+export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' }: { apiPrefix?: string }) {
   // VoIP States
   const [voipProvider, setVoipProvider] = useState<CloudProvider>('netgsm')
   const [voipLabel, setVoipLabel] = useState('Netgsm Bulut Santral')
@@ -68,7 +68,7 @@ export default function IntegrationsTab() {
   }
 
   useEffect(() => {
-    fetch('/api/admin/integrations')
+    fetch(apiPrefix)
       .then(res => res.json())
       .then(data => {
         if (data.voipProvider) setVoipProvider(data.voipProvider as CloudProvider)
@@ -92,7 +92,7 @@ export default function IntegrationsTab() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await fetch('/api/admin/integrations', {
+      const res = await fetch(apiPrefix, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

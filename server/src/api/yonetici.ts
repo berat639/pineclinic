@@ -628,3 +628,21 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (!updated) { set.status = 404; return { error: 'Kullanıcı bulunamadı' } }
     return { id: updated.id, email: updated.email, name: updated.name, role: updated.role, active: updated.active }
   })
+
+  // ── Integrations ───────────────────────────────────────────────────────────
+  .get('/integrations', async ({ cookie, set }) => {
+    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+
+    const { getIntegrations } = await import('../db/repositories/integrations')
+    return await getIntegrations()
+  })
+
+  .put('/integrations', async ({ body, cookie, set }) => {
+    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+
+    const { updateIntegrations } = await import('../db/repositories/integrations')
+    await updateIntegrations(body as any)
+    return { success: true }
+  })

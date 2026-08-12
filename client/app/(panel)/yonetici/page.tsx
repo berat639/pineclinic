@@ -10,12 +10,13 @@ import AppointmentsTab from '../../admin/components/AppointmentsTab'
 import PaymentsTab from '../../admin/components/PaymentsTab'
 import StatsBar from '../../admin/components/StatsBar'
 import KnowledgeTab from '../../admin/components/KnowledgeTab'
+import IntegrationsTab from '../../admin/components/IntegrationsTab'
 
 const FinansalTab = dynamic(() => import('./tabs/FinansalTab'), { ssr: false })
 const StokTab = dynamic(() => import('./tabs/StokTab'), { ssr: false })
 const KlinikPersonelTab = dynamic(() => import('./tabs/KlinikPersonelTab'), { ssr: false })
 
-type Tab = 'calendar' | 'appointments' | 'payments' | 'stok' | 'knowledge' | 'klinik'
+type Tab = 'calendar' | 'appointments' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'calendar', label: 'Takvim' },
@@ -24,6 +25,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'stok', label: 'Stok & Bakım' },
   { id: 'knowledge', label: 'Bilgi Tabanı' },
   { id: 'klinik', label: 'Klinik Personeli' },
+  { id: 'integrations', label: 'Entegrasyonlar (Ayarlar)' },
 ]
 
 export default function YoneticiPage() {
@@ -78,6 +80,7 @@ export default function YoneticiPage() {
           {tab === 'stok' && <StokTab />}
           {tab === 'knowledge' && <KnowledgeTab />}
           {tab === 'klinik' && <KlinikPersonelTab />}
+          {tab === 'integrations' && <IntegrationsTab apiPrefix="/api/yonetici/integrations" />}
         </div>
       </div>
     </div>
