@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { staticPlugin } from '@elysiajs/static'
 import { randomUUID } from 'crypto'
-import { createReadStream, writeFileSync } from 'fs'
+import { createReadStream, writeFileSync, mkdirSync } from 'fs'
 import { resolve } from 'path'
 import { GoogleGenAI } from '@google/genai'
 import { createLiveSession, validateLiveCustomerIdentity } from './gemini'
@@ -48,6 +48,10 @@ import {
 } from './db/repositories/settings'
 import { embedText, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
+
+const PUBLIC_DIR = resolve(import.meta.dir, '../public')
+// Ensure public/uploads/dcm directory exists at startup
+mkdirSync(resolve(PUBLIC_DIR, 'uploads/dcm'), { recursive: true })
 import { listCategories, createCategory, updateCategory, deleteCategory, seedCategories } from './db/repositories/categories'
 import { authPlugin } from './api/auth'
 import { shiftsPlugin } from './api/shifts'
@@ -245,7 +249,7 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
-  .use(staticPlugin({ assets: 'public', prefix: '/' }))
+  .use(staticPlugin({ assets: PUBLIC_DIR, prefix: '/' }))
   .use(authPlugin)
   .use(shiftsPlugin)
   .use(notificationsPlugin)
@@ -416,7 +420,7 @@ const app = new Elysia()
     
     const uuid = crypto.randomUUID();
     const fileName = `${uuid}_${file.name}.gz`;
-    const filePath = `public/uploads/dcm/${fileName}`;
+    const filePath = resolve(PUBLIC_DIR, 'uploads/dcm', fileName);
     
     const raw = new Uint8Array(await file.arrayBuffer());
     const compressed = Bun.gzipSync(raw);
@@ -427,7 +431,7 @@ const app = new Elysia()
   })
   .get('/api/dental/dcm/:filename', async ({ params, set }) => {
     const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '');
-    const filePath = `public/uploads/dcm/${safeName}`;
+    const filePath = resolve(PUBLIC_DIR, 'uploads/dcm', safeName);
     const file = Bun.file(filePath);
     if (!(await file.exists())) {
       set.status = 404;

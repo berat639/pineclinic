@@ -674,6 +674,7 @@ async function runMigrations() {
   // Extend treatment_plans
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS tooth_number TEXT`
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS indication TEXT`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS dcm_url TEXT`
 
   await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS device_status TEXT NOT NULL DEFAULT 'active'`
   await sql`ALTER TABLE device_maintenances ADD COLUMN IF NOT EXISTS is_periodic BOOLEAN NOT NULL DEFAULT false`
