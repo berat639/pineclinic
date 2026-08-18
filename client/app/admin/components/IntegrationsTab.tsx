@@ -57,6 +57,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [smtpPort, setSmtpPort] = useState('')
   const [smtpUser, setSmtpUser] = useState('')
   const [smtpPass, setSmtpPass] = useState('')
+  const [smtpSecure, setSmtpSecure] = useState('none')
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -80,6 +81,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         if (data.smtpPort) setSmtpPort(data.smtpPort)
         if (data.smtpUser) setSmtpUser(data.smtpUser)
         if (data.smtpPass) setSmtpPass(data.smtpPass)
+        if (data.smtpSecure) setSmtpSecure(data.smtpSecure)
         
         if (data.smsUsercode) setSmsUsercode(data.smsUsercode)
         if (data.smsPassword) setSmsPassword(data.smsPassword)
@@ -97,7 +99,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
-          smtpHost, smtpPort, smtpUser, smtpPass,
+          smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
           smsUsercode, smsPassword, smsSenderId
         })
       })
@@ -204,6 +206,14 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           <div>
             <div style={voipLabelStyle}>Şifre</div>
             <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="••••••••" style={voipInputStyle} />
+          </div>
+          <div>
+            <div style={voipLabelStyle}>Şifreleme Türü</div>
+            <select value={smtpSecure} onChange={e => setSmtpSecure(e.target.value)} style={voipInputStyle}>
+              <option value="none">Yok (veya Otomatik)</option>
+              <option value="ssl">SSL (Port 465)</option>
+              <option value="tls">TLS / STARTTLS (Port 587)</option>
+            </select>
           </div>
         </div>
       </div>

@@ -75,7 +75,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
     }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={{
         background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 560,
+        borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 800,
         animation: 'fadeIn 0.2s ease',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>

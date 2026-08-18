@@ -7,3 +7,5 @@ node_modules/
 *.local
 /data/
 temp/
+bun.lock
+bun.lockb

@@ -391,6 +391,7 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
       smtpPort: t.Optional(t.Union([t.String(), t.Null()])),
       smtpUser: t.Optional(t.Union([t.String(), t.Null()])),
       smtpPass: t.Optional(t.Union([t.String(), t.Null()])),
+      smtpSecure: t.Optional(t.Union([t.String(), t.Null()])),
       smsUsercode: t.Optional(t.Union([t.String(), t.Null()])),
       smsPassword: t.Optional(t.Union([t.String(), t.Null()])),
       smsSenderId: t.Optional(t.Union([t.String(), t.Null()])),

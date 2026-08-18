@@ -5,8 +5,12 @@ import {
   patients,
   dentalAppointments,
   treatmentPlans,
+  treatmentGroups,
   patientPayments,
   completedWorks,
+  businessSettings,
+  notificationTemplates,
+  consultations
 } from '../schema'
 
 // ── Doctors (hekim users) ────────────────────────────────────────────────────
@@ -80,6 +84,161 @@ export async function getPatient(id: string) {
   return row ?? null
 }
 
+export async function getPatientFullProfile(patientId: string) {
+  const {
+    patientAnamnesis,
+    patientDiseases,
+    dentalAppointments,
+    treatmentPlans,
+    treatmentGroups,
+    patientPayments,
+    completedWorks,
+    consultations,
+    doctorNotes,
+    toothRecords,
+    materialUsages,
+    inventoryItems,
+    users
+  } = await import('../schema')
+
+  const [
+    patientRes,
+    anamnesisRes,
+    diseasesRes,
+    appointmentsRes,
+    treatmentsRes,
+    groupsRes,
+    paymentsRes,
+    completedRes,
+    consultationsRes,
+    notesRes,
+    toothRecordsRes,
+    materialsRes
+  ] = await Promise.all([
+    // Patient
+    db.select().from(patients).where(eq(patients.id, patientId)).limit(1),
+    
+    // Anamnesis
+    db.select({ formData: patientAnamnesis.formData, filledAt: patientAnamnesis.filledAt })
+      .from(patientAnamnesis).where(eq(patientAnamnesis.patientId, patientId)).orderBy(desc(patientAnamnesis.filledAt)).limit(1),
+
+    // Diseases
+    db.select({ name: patientDiseases.name, status: patientDiseases.status, notes: patientDiseases.notes })
+      .from(patientDiseases).where(eq(patientDiseases.patientId, patientId)),
+
+    // Appointments (visit dates)
+    db.select({
+        id: dentalAppointments.id,
+        startTime: dentalAppointments.startTime,
+        status: dentalAppointments.status,
+      })
+      .from(dentalAppointments)
+      .where(eq(dentalAppointments.patientId, patientId))
+      .orderBy(desc(dentalAppointments.startTime)),
+
+    // Treatment Plans
+    db.select({
+      id: treatmentPlans.id,
+      procedureName: treatmentPlans.procedureName,
+      toothNumber: treatmentPlans.toothNumber,
+      cost: treatmentPlans.cost,
+      status: treatmentPlans.status,
+      createdAt: treatmentPlans.createdAt,
+      doctorName: users.name
+    })
+    .from(treatmentPlans)
+    .leftJoin(users, eq(treatmentPlans.doctorId, users.id))
+    .where(eq(treatmentPlans.patientId, patientId))
+    .orderBy(desc(treatmentPlans.createdAt)),
+
+    // Treatment Groups
+    db.select({ id: treatmentGroups.id, name: treatmentGroups.name, status: treatmentGroups.status })
+      .from(treatmentGroups).where(eq(treatmentGroups.patientId, patientId)),
+
+    // Payments (dates only)
+    db.select({ date: patientPayments.date })
+      .from(patientPayments).where(eq(patientPayments.patientId, patientId)).orderBy(desc(patientPayments.date)),
+
+    // Completed Works
+    db.select({ id: completedWorks.id, date: completedWorks.date, description: completedWorks.description, doctorName: users.name })
+      .from(completedWorks).leftJoin(users, eq(completedWorks.doctorId, users.id))
+      .where(eq(completedWorks.patientId, patientId)).orderBy(desc(completedWorks.date)),
+
+    // Consultations
+    db.select({ id: consultations.id, consultationNote: consultations.consultationNote, diseaseNote: consultations.diseaseNote, createdAt: consultations.createdAt, doctorName: users.name })
+      .from(consultations).leftJoin(users, eq(consultations.doctorId, users.id))
+      .where(eq(consultations.patientId, patientId)).orderBy(desc(consultations.createdAt)),
+
+    // Doctor Notes
+    db.select({ id: doctorNotes.id, content: doctorNotes.content, createdAt: doctorNotes.createdAt, doctorName: users.name })
+      .from(doctorNotes).leftJoin(users, eq(doctorNotes.doctorId, users.id))
+      .where(eq(doctorNotes.patientId, patientId)).orderBy(desc(doctorNotes.createdAt)),
+
+    // Tooth Records
+    db.select({ toothNumber: toothRecords.toothNumber, surface: toothRecords.surface, condition: toothRecords.condition, date: toothRecords.date })
+      .from(toothRecords).where(eq(toothRecords.patientId, patientId)).orderBy(desc(toothRecords.date)),
+
+    // Material Usages
+    db.select({ date: materialUsages.date, quantity: materialUsages.quantity, itemName: inventoryItems.name })
+      .from(materialUsages).leftJoin(inventoryItems, eq(materialUsages.inventoryItemId, inventoryItems.id))
+      .where(eq(materialUsages.patientId, patientId)).orderBy(desc(materialUsages.date)),
+  ])
+
+  const patient = patientRes[0]
+  if (!patient) return null
+
+  const visitDates = appointmentsRes.filter(a => a.status === 'completed' || a.status === 'confirmed').map(a => a.startTime)
+  const totalVisits = visitDates.length
+  
+  const sortedVisits = [...visitDates].sort((a, b) => a.getTime() - b.getTime())
+  const firstVisit = sortedVisits.length > 0 ? sortedVisits[0].toISOString() : null
+  const lastVisit = sortedVisits.length > 0 ? sortedVisits[sortedVisits.length - 1].toISOString() : null
+
+  let avgVisitFrequencyDays = null
+  if (sortedVisits.length > 1) {
+    const diffMs = sortedVisits[sortedVisits.length - 1].getTime() - sortedVisits[0].getTime()
+    const diffDays = diffMs / (1000 * 60 * 60 * 24)
+    avgVisitFrequencyDays = Math.round(diffDays / (sortedVisits.length - 1))
+  }
+
+  const doctorCounts: Record<string, number> = {}
+  completedRes.forEach(c => {
+    if (c.doctorName) doctorCounts[c.doctorName] = (doctorCounts[c.doctorName] || 0) + 1
+  })
+  let topDoctor = null
+  let maxCount = 0
+  for (const [doc, count] of Object.entries(doctorCounts)) {
+    if (count > maxCount) { maxCount = count; topDoctor = doc }
+  }
+
+  const totalTreatments = treatmentsRes.length
+  const completedTreatments = treatmentsRes.filter(t => t.status === 'completed' || t.status === 'yapıldı' || t.status === '✓ Tamamlandı' || t.status === 'tamamlandı').length
+  const treatmentCompletionRate = totalTreatments > 0 ? Math.round((completedTreatments / totalTreatments) * 100) : 0
+
+  return {
+    patient,
+    anamnesis: anamnesisRes[0] ?? null,
+    diseases: diseasesRes,
+    appointments: appointmentsRes,
+    treatments: treatmentsRes,
+    treatmentGroups: groupsRes,
+    payments: paymentsRes,
+    completedWorks: completedRes,
+    consultations: consultationsRes,
+    doctorNotes: notesRes,
+    toothRecords: toothRecordsRes,
+    materialUsages: materialsRes,
+    stats: {
+      totalVisits,
+      firstVisit,
+      lastVisit,
+      avgVisitFrequencyDays,
+      topDoctor,
+      treatmentCompletionRate
+    }
+  }
+}
+
 export async function listPatients() {
   return db.select().from(patients).orderBy(desc(patients.createdAt))
 }
@@ -93,6 +252,67 @@ export async function createPatient(data: { name: string; phone?: string; balanc
   return row
 }
 
+// ── Treatment Groups ─────────────────────────────────────────────────────────
+
+export async function getPatientTreatmentGroups(patientId: string) {
+  const groups = await db.select().from(treatmentGroups)
+    .where(eq(treatmentGroups.patientId, patientId))
+    .orderBy(desc(treatmentGroups.createdAt))
+  
+  // For each group, fetch its treatment plans
+  const result = []
+  for (const group of groups) {
+    const plans = await db.select().from(treatmentPlans)
+      .where(and(eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id)))
+      .orderBy(desc(treatmentPlans.createdAt))
+    result.push({ ...group, treatments: plans })
+  }
+  
+  // Also fetch ungrouped treatments
+  const ungrouped = await db.select().from(treatmentPlans)
+    .where(and(eq(treatmentPlans.patientId, patientId), sql`group_id IS NULL`))
+    .orderBy(desc(treatmentPlans.createdAt))
+  
+  return { groups: result, ungrouped }
+}
+
+export async function createTreatmentGroup(data: {
+  patientId: string
+  name: string
+  description?: string
+}) {
+  const [row] = await db.insert(treatmentGroups).values({
+    patientId: data.patientId,
+    name: data.name,
+    description: data.description,
+  }).returning()
+  return row
+}
+
+export async function updateTreatmentGroup(id: string, data: {
+  name?: string
+  description?: string
+  status?: string
+}) {
+  const values: Record<string, unknown> = {}
+  if (data.name !== undefined) values.name = data.name
+  if (data.description !== undefined) values.description = data.description
+  if (data.status !== undefined) values.status = data.status
+  if (Object.keys(values).length === 0) return null
+  const [row] = await db.update(treatmentGroups)
+    .set(values)
+    .where(eq(treatmentGroups.id, id))
+    .returning()
+  return row ?? null
+}
+
+export async function deleteTreatmentGroup(id: string): Promise<boolean> {
+  // First unlink treatments from this group
+  await db.update(treatmentPlans).set({ groupId: null }).where(eq(treatmentPlans.groupId, id))
+  const rows = await db.delete(treatmentGroups).where(eq(treatmentGroups.id, id)).returning({ id: treatmentGroups.id })
+  return rows.length > 0
+}
+
 // ── Treatment Plans ──────────────────────────────────────────────────────────
 
 export async function getPatientTreatments(patientId: string) {
@@ -101,12 +321,14 @@ export async function getPatientTreatments(patientId: string) {
 
 export async function createTreatmentPlan(data: {
   patientId: string
+  doctorId?: string
   procedureName: string
   toothNumber?: string
   indication?: string
   cost: number
   status?: string
   clinicId?: string
+  groupId?: string
   isPeriodic?: boolean
   periodDays?: number
   nextNotificationDate?: string
@@ -116,6 +338,7 @@ export async function createTreatmentPlan(data: {
 }) {
   const [row] = await db.insert(treatmentPlans).values({
     patientId: data.patientId,
+    doctorId: data.doctorId,
     procedureName: data.procedureName,
     toothNumber: data.toothNumber,
     indication: data.indication,
@@ -123,6 +346,7 @@ export async function createTreatmentPlan(data: {
     status: data.status ?? 'planned',
     dcmUrl: data.dcmUrl,
     clinicId: data.clinicId,
+    groupId: data.groupId,
     isPeriodic: data.isPeriodic ?? false,
     periodDays: data.periodDays,
     nextNotificationDate: data.nextNotificationDate,
@@ -132,9 +356,13 @@ export async function createTreatmentPlan(data: {
   return row
 }
 
-export async function updateTreatmentPlan(id: string, data: { status?: string }) {
+export async function updateTreatmentPlan(id: string, data: { status?: string; groupId?: string | null }) {
+  const values: Record<string, unknown> = {}
+  if (data.status !== undefined) values.status = data.status
+  if (data.groupId !== undefined) values.groupId = data.groupId
+  if (Object.keys(values).length === 0) return null
   const [row] = await db.update(treatmentPlans)
-    .set({ status: data.status })
+    .set(values)
     .where(eq(treatmentPlans.id, id))
     .returning()
   return row ?? null
@@ -386,6 +614,8 @@ export async function updateDentalAppointment(id: string, data: {
   startTime?: Date
   endTime?: Date
   notes?: string
+  type?: string
+  complaint?: string
 }) {
   const values: Record<string, unknown> = {}
   if (data.doctorId !== undefined) values.doctorId = data.doctorId
@@ -394,10 +624,90 @@ export async function updateDentalAppointment(id: string, data: {
   if (data.startTime !== undefined) values.startTime = data.startTime
   if (data.endTime !== undefined) values.endTime = data.endTime
   if (data.notes !== undefined) values.notes = data.notes
+  if (data.type !== undefined) values.type = data.type
+  if (data.complaint !== undefined) values.complaint = data.complaint
   if (Object.keys(values).length === 0) return null
   const [row] = await db.update(dentalAppointments)
     .set(values)
     .where(eq(dentalAppointments.id, id))
     .returning()
   return row ?? null
+}
+
+// ── Consultations ────────────────────────────────────────────────────────────
+
+export async function deleteConsultation(id: string) {
+  const { consultations } = await import('../schema')
+  const rows = await db.delete(consultations).where(eq(consultations.id, id)).returning({ id: consultations.id })
+  return rows.length > 0
+}
+
+// ── Diseases (Hastalıklar) ───────────────────────────────────────────────────
+
+export async function getPatientDiseases(patientId: string) {
+  const { patientDiseases } = await import('../schema')
+  return db.select().from(patientDiseases).where(eq(patientDiseases.patientId, patientId)).orderBy(desc(patientDiseases.createdAt))
+}
+
+export async function createPatientDisease(data: { patientId: string, name: string, notes?: string }) {
+  const { patientDiseases } = await import('../schema')
+  const [row] = await db.insert(patientDiseases).values({
+    patientId: data.patientId,
+    name: data.name,
+    notes: data.notes ?? null,
+  }).returning()
+  return row
+}
+
+export async function deletePatientDisease(id: string) {
+  const { patientDiseases } = await import('../schema')
+  const rows = await db.delete(patientDiseases).where(eq(patientDiseases.id, id)).returning({ id: patientDiseases.id })
+  return rows.length > 0
+}
+
+export async function createConsultation(data: {
+  patientId: string
+  clinicId?: string
+  doctorId?: string
+  consultationNote: string
+  diseaseNote?: string
+}) {
+  const [row] = await db.insert(consultations).values({
+    patientId: data.patientId,
+    clinicId: data.clinicId,
+    doctorId: data.doctorId,
+    consultationNote: data.consultationNote,
+    diseaseNote: data.diseaseNote,
+  }).returning()
+  return row
+}
+
+export async function getPatientConsultations(patientId: string) {
+  return await db.query.consultations.findMany({
+    where: eq(consultations.patientId, patientId),
+    orderBy: [desc(consultations.createdAt)]
+  })
+}
+
+export async function getClinicConsultationAutocomplete(clinicId: string) {
+  const rows = await db.select({
+    consultationNote: consultations.consultationNote,
+    diseaseNote: consultations.diseaseNote
+  })
+  .from(consultations)
+  .where(eq(consultations.clinicId, clinicId))
+  
+  // Get distinct combinations manually since distinct is limited in some ORM versions
+  const uniqueConsultations = new Set<string>()
+  const uniqueDiseases = new Set<string>()
+  
+  for (const r of rows) {
+    if (r.consultationNote) uniqueConsultations.add(r.consultationNote)
+    if (r.diseaseNote) uniqueDiseases.add(r.diseaseNote)
+  }
+  
+  return {
+    consultationNotes: Array.from(uniqueConsultations),
+    diseaseNotes: Array.from(uniqueDiseases)
+  }
 }

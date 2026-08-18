@@ -22,6 +22,27 @@
       "when": 1786641355769,
       "tag": "0002_long_kinsey_walden",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786848460657,
+      "tag": "0003_rich_blackheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787067221009,
+      "tag": "0004_omniscient_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787082972376,
+      "tag": "0005_nosy_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

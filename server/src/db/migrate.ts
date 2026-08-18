@@ -697,6 +697,45 @@ async function runMigrations() {
   // Extend patient_payments with treatment_plan_id
   await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS treatment_plan_id UUID REFERENCES treatment_plans(id)`
 
+  // ── Treatment Groups ──────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS treatment_groups (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id  UUID NOT NULL REFERENCES patients(id),
+      name        TEXT NOT NULL,
+      description TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES treatment_groups(id)`
+
+  // ── Patient Diseases ──────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS patient_diseases (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id  UUID NOT NULL REFERENCES patients(id),
+      name        TEXT NOT NULL,
+      notes       TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // ── Consultations Updates ─────────────────────────────────────────────────
+  await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`.catch(() => {})
+  await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES users(id)`.catch(() => {})
+  await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS consultation_note TEXT`.catch(() => {})
+  await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS disease_note TEXT`.catch(() => {})
+
+  // ── Unique Constraints ────────────────────────────────────────────────────
+  await sql`ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email)`.catch(() => {})
+  await sql`ALTER TABLE user_sessions ADD CONSTRAINT user_sessions_token_jti_unique UNIQUE (token_jti)`.catch(() => {})
+  await sql`ALTER TABLE knowledge_categories ADD CONSTRAINT knowledge_categories_slug_unique UNIQUE (slug)`.catch(() => {})
+
+  // ── Drop Deprecated ───────────────────────────────────────────────────────
+  await sql`DROP TABLE IF EXISTS doctors CASCADE`.catch(() => {})
+
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }

@@ -1,32 +1,76 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings } from 'lucide-react'
+import ShiftContextMenu from "./ShiftContextMenu"
 import DentalCalendar from './DentalCalendar'
-import ThreeDicomViewer from './ThreeDicomViewer'
+import { ToothChip, inputStyle } from './ToothChip'
+import PatientSidePanel from './PatientSidePanel'
+import AdvancedTedaviModal from './AdvancedTedaviModal';
 
-const ToothChip = ({ number, selected, onClick, onDragOver, onDrop, hasDraft }: any) => (
-  <button
-    onClick={onClick}
-    onDragOver={onDragOver}
-    onDrop={onDrop}
-    title={`Diş ${number}`}
-    style={{
-      position: 'relative',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-      background: selected ? 'var(--accent)' : 'transparent',
-      border: `1px solid ${selected ? 'var(--accent)' : 'var(--glass-border)'}`,
-      borderRadius: 6, padding: '3px 2px', cursor: 'pointer',
-      color: selected ? '#fff' : 'var(--foreground-2)',
-      minWidth: 22, width: 22, flexShrink: 0,
-      transition: 'all 0.15s'
-    }}
-  >
-    {hasDraft && <div style={{ position: 'absolute', top: -4, right: -4, width: 8, height: 8, borderRadius: '50%', background: '#ef4444', border: '1px solid var(--background)' }} />}
-    <svg width="12" height="14" viewBox="0 0 24 28" fill={selected ? 'rgba(255,255,255,0.6)' : 'rgba(100,120,180,0.3)'} stroke={selected ? '#fff' : '#6b7fc4'} strokeWidth="2">
-      <path d="M6 2C3 2 2 5 2 8s1 8 2 16c.3 1.5 1 2 2.5 2s2.3-1 2.5-2.5v-4h6v4c.2 1.5 1 2.5 2.5 2.5S20 24.5 20 23c1-8 2-13 2-16 0-3-1-6-4-6-2.5 0-4 2-5 3.5C12 3 10.5 2 8 2z"/>
-    </svg>
-    <span style={{ fontSize: 8, fontWeight: 700, lineHeight: 1 }}>{number}</span>
-  </button>
-)
+import DicomViewer from './DicomViewer'
+
+import Slider from 'rc-slider'
+import 'rc-slider/assets/index.css'
+
+const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
+  const [range, setRange] = useState([
+    new Date(selectedEvent.startTime).getHours() * 60 + new Date(selectedEvent.startTime).getMinutes(),
+    new Date(selectedEvent.endTime).getHours() * 60 + new Date(selectedEvent.endTime).getMinutes()
+  ]);
+
+  useEffect(() => {
+    setRange([
+      new Date(selectedEvent.startTime).getHours() * 60 + new Date(selectedEvent.startTime).getMinutes(),
+      new Date(selectedEvent.endTime).getHours() * 60 + new Date(selectedEvent.endTime).getMinutes()
+    ]);
+  }, [selectedEvent.startTime, selectedEvent.endTime]);
+
+  const startHH = String(Math.floor(range[0] / 60)).padStart(2, '0');
+  const startMM = String(range[0] % 60).padStart(2, '0');
+  const endHH = String(Math.floor(range[1] / 60)).padStart(2, '0');
+  const endMM = String(range[1] % 60).padStart(2, '0');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--foreground)', fontSize: '0.85rem', fontWeight: 600 }}>
+        <span>Başlangıç: <span style={{ color: 'var(--brand)' }}>{startHH}:{startMM}</span></span>
+        <span>Bitiş: <span style={{ color: 'var(--brand)' }}>{endHH}:{endMM}</span></span>
+      </div>
+      <div style={{ padding: '0 10px' }}>
+        <Slider 
+          range
+          min={480}
+          max={1200}
+          step={15}
+          value={range}
+          onChange={(val: any) => setRange(val)}
+          onChangeComplete={(val: any) => {
+             const sh = String(Math.floor(val[0] / 60)).padStart(2, '0');
+             const sm = String(val[0] % 60).padStart(2, '0');
+             const eh = String(Math.floor(val[1] / 60)).padStart(2, '0');
+             const em = String(val[1] % 60).padStart(2, '0');
+             onSave(sh, sm, eh, em);
+          }}
+          allowCross={false}
+          pushable={15}
+          styles={{
+            track: { backgroundColor: 'var(--brand)', height: 6 },
+            rail: { backgroundColor: 'rgba(156,163,175,0.2)', height: 6 },
+            handle: { 
+              borderColor: 'transparent', 
+              backgroundColor: 'var(--brand)', 
+              opacity: 1, 
+              width: 8, 
+              height: 18, 
+              marginTop: -6, 
+              borderRadius: 4,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+            }
+          }}
+        />
+      </div>
+    </div>
+  )
+}
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: '📅 Planlandı',
@@ -39,8 +83,7 @@ const STATUS_LABELS: Record<string, string> = {
   no_show: '🚫 Gelmedi',
 }
 
-const UPPER_TEETH = [18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28];
-const LOWER_TEETH = [48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38];
+
 
 interface Doctor {
   id: string
@@ -60,6 +103,7 @@ interface CalendarEvent {
   type: string
   notes?: string
   timeConfirmed?: boolean
+  complaint?: string
 }
 
 interface Patient {
@@ -75,79 +119,30 @@ export default function CalendarTab() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [shifts, setShifts] = useState<any[]>([])
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [patientPanelOpen, setPatientPanelOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
+  const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
+  const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [showDocForm, setShowDocForm] = useState(false)
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [activeTab, setActiveTab] = useState<'appointment' | 'info' | 'treatment'>('appointment')
-  
+
   const [selectedDcmUrl, setSelectedDcmUrl] = useState<string | null>(null)
   const [view, setView] = useState<'day' | 'week' | 'month'>('day')
   const [patientTreatments, setPatientTreatments] = useState<any[]>([])
   const [patientPayments, setPatientPayments] = useState<any[]>([])
   const [patientInfo, setPatientInfo] = useState<Patient | null>(null)
-  
+
   // Treatment Form state
   const [showTedaviForm, setShowTedaviForm] = useState(false)
-  const [tedaviNames, setTedaviNames] = useState<string[]>([''])
-  const [selectedTeeth, setSelectedTeeth] = useState<string[]>([])
-  const [lastSelectedTooth, setLastSelectedTooth] = useState<string | null>(null)
-  const [tedaviIndications, setTedaviIndications] = useState<string[]>([''])
-  
-  // Single DICOM file for the entire treatment
-  const [treatmentDcmFile, setTreatmentDcmFile] = useState<File | null>(null)
-  
-  // Drag and Drop States
-  const [procTemplates, setProcTemplates] = useState<{name: string, price: number, materialId?: string}[]>([
-    { name: "Kompozit Dolgu", price: 500 },
-    { name: "Kanal Tedavisi", price: 1500 },
-    { name: "Çekim", price: 300 },
-    { name: "Detertraj", price: 400 },
-    { name: "İmplant", price: 5000 }
-  ])
-  const [indTemplates, setIndTemplates] = useState<string[]>(["Derin Çürük", "Kırık", "Apikal Lezyon", "Kök Kırığı", "Ağrı"])
-  const [toothDrafts, setToothDrafts] = useState<Record<string, { procedures: {name: string, price: number, materialId?: string}[], indications: string[], cost: number }>>({})
-  const [newTemplateInput, setNewTemplateInput] = useState('')
-  const [newTemplatePrice, setNewTemplatePrice] = useState<number>(0)
-  const [newTemplateMaterial, setNewTemplateMaterial] = useState<string>('')
-  const [newTemplateType, setNewTemplateType] = useState<'procedure' | 'indication'>('procedure')
-  const [discount, setDiscount] = useState<number>(0)
-  const [discountType, setDiscountType] = useState<'amount'|'percentage'>('amount')
+  const [tedaviName, setTedaviName] = useState('')
+  const [selectedTooth, setSelectedTooth] = useState<string>('')
+  const [tedaviIndication, setTedaviIndication] = useState('')
   const [inventoryItems, setInventoryItems] = useState<any[]>([])
-
-  const handleToothClick = (n: number, e: React.MouseEvent) => {
-    const toothStr = String(n);
-    if (e.shiftKey && lastSelectedTooth) {
-      const upperIndex1 = UPPER_TEETH.indexOf(Number(lastSelectedTooth));
-      const upperIndex2 = UPPER_TEETH.indexOf(n);
-      const lowerIndex1 = LOWER_TEETH.indexOf(Number(lastSelectedTooth));
-      const lowerIndex2 = LOWER_TEETH.indexOf(n);
-
-      let range: number[] = [];
-      if (upperIndex1 !== -1 && upperIndex2 !== -1) {
-        const start = Math.min(upperIndex1, upperIndex2);
-        const end = Math.max(upperIndex1, upperIndex2);
-        range = UPPER_TEETH.slice(start, end + 1);
-      } else if (lowerIndex1 !== -1 && lowerIndex2 !== -1) {
-        const start = Math.min(lowerIndex1, lowerIndex2);
-        const end = Math.max(lowerIndex1, lowerIndex2);
-        range = LOWER_TEETH.slice(start, end + 1);
-      }
-
-      if (range.length > 0) {
-        const rangeStrs = range.map(String);
-        setSelectedTeeth(prev => Array.from(new Set([...prev, ...rangeStrs])));
-      } else {
-        setSelectedTeeth(prev => prev.includes(toothStr) ? prev.filter(t => t !== toothStr) : [...prev, toothStr]);
-      }
-    } else {
-      setSelectedTeeth(prev => prev.includes(toothStr) ? prev.filter(t => t !== toothStr) : [...prev, toothStr]);
-    }
-    setLastSelectedTooth(toothStr);
-  };
   const [showPastTreatmentsModal, setShowPastTreatmentsModal] = useState(false)
-  const [templates, setTemplates] = useState<any[]>([])
-  
+
   // Periodic Treatment State
   const [isPeriodic, setIsPeriodic] = useState(false)
   const [notifyPatient, setNotifyPatient] = useState(false)
@@ -170,11 +165,13 @@ export default function CalendarTab() {
   const [treatmentDeleteError, setTreatmentDeleteError] = useState<string | null>(null)
 
   // Appointment form state
+  const [patients, setPatients] = useState<any[]>([])
+  const [formPatientId, setFormPatientId] = useState('')
   const [formDoctor, setFormDoctor] = useState('')
   const [formName, setFormName] = useState('')
   const [formPhone, setFormPhone] = useState('')
   const [formTime, setFormTime] = useState('09:00')
-  const [formDuration, setFormDuration] = useState('30')
+  const [formEndTime, setFormEndTime] = useState('09:30')
   const [formType, setFormType] = useState('')
   const [formNotes, setFormNotes] = useState('')
   const [formSaving, setFormSaving] = useState(false)
@@ -186,37 +183,91 @@ export default function CalendarTab() {
   const [docSaving, setDocSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
-    try {
-      const [docRes, evtRes, shiftRes, invRes] = await Promise.all([
-        fetch('/api/dental/doctors'),
-        fetch('/api/dental/appointments'),
-        fetch('/api/shifts'),
-        fetch('/api/yonetici/inventory')
-      ])
-      if (docRes.ok) setDoctors(await docRes.json())
-      if (evtRes.ok) setEvents(await evtRes.json())
-      if (shiftRes.ok) setShifts(await shiftRes.json())
-      if (invRes.ok) setInventoryItems(await invRes.json())
-    } catch (e) {
-      console.error('Calendar fetch error:', e)
+    const fetchSafe = async (url: string) => {
+      try {
+        const res = await fetch(url)
+        if (res.ok) return await res.json()
+        return null
+      } catch (e) {
+        console.warn(`Fetch error for ${url}:`, e)
+        return null
+      }
     }
+
+    const [docs, evts, shiftsData, invs, pats] = await Promise.all([
+      fetchSafe('/api/dental/doctors'),
+      fetchSafe('/api/dental/appointments'),
+      fetchSafe('/api/shifts'),
+      fetchSafe('/api/yonetici/inventory'),
+      fetchSafe('/api/dental/patients')
+    ])
+
+    if (docs) setDoctors(docs)
+    if (evts) setEvents(evts)
+    if (shiftsData) setShifts(shiftsData)
+    if (invs) setInventoryItems(invs)
+    if (pats) setPatients(pats)
   }, [currentDate])
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      // Ignore right clicks or simulated right clicks (Ctrl+Click on Mac)
+      if (e.button !== 0 || e.ctrlKey) return;
+
+      // Don't close if clicking inside a context menu
+      const target = e.target as HTMLElement;
+      if (target.closest('.context-menu-container')) return;
+
+      setShiftContextMenu(null);
+      // Let's not close eventContextMenu on global click because it contains inputs that need to be interacted with.
+      // We will rely on its onClose or Cancel buttons for eventContextMenu.
+    }
+    window.addEventListener('mousedown', handleGlobalClick);
+    return () => window.removeEventListener('mousedown', handleGlobalClick);
+  }, [])
+
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      if (e.button !== 0 || e.ctrlKey) return;
+      const target = e.target as HTMLElement;
+      if (target.closest('.context-menu-container')) return;
+      setShiftContextMenu(null);
+      setEventContextMenu(null);
+    }
+
+    const handleScroll = (e: Event) => {
+      const target = e.target as HTMLElement;
+      // Don't close if scrolling INSIDE the context menu itself
+      if (target.closest && target.closest('.context-menu-container')) return;
+      setShiftContextMenu(null);
+      setEventContextMenu(null);
+    }
+
+    window.addEventListener('mousedown', handleGlobalClick);
+    window.addEventListener('scroll', handleScroll, { capture: true });
+    return () => {
+      window.removeEventListener('mousedown', handleGlobalClick);
+      window.removeEventListener('scroll', handleScroll, { capture: true });
+    };
+  }, [])
+
   const handleEventClick = (eventId: string, event: CalendarEvent) => {
+    setShiftContextMenu(null);
+    setEventContextMenu(null);
     setSelectedEvent(event)
     setPanelOpen(true)
     setPatientTreatments([])
     setPatientPayments([])
     setPatientInfo(null)
     if (event.patientId) {
-      fetch(`/api/dental/patients/${event.patientId}`).then(r => r.ok ? r.json() : null).then(d => d && setPatientInfo(d)).catch(() => {})
-      fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : []).then(setPatientTreatments).catch(() => {})
-      fetch(`/api/dental/patients/${event.patientId}/payments`).then(r => r.ok ? r.json() : []).then(setPatientPayments).catch(() => {})
+      fetch(`/api/dental/patients/${event.patientId}`).then(r => r.ok ? r.json() : null).then(d => d && setPatientInfo(d)).catch(() => { })
+      fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : []).then(setPatientTreatments).catch(() => { })
+      fetch(`/api/dental/patients/${event.patientId}/payments`).then(r => r.ok ? r.json() : []).then(setPatientPayments).catch(() => { })
     }
     const docQuery = event.doctorId ? `?doctorId=${event.doctorId}` : ''
-    fetch(`/api/hekim/templates${docQuery}`).then(r => r.ok ? r.json() : []).then(setTemplates).catch(() => {})
+
   }
 
   const handleDeleteEvent = async () => {
@@ -226,7 +277,7 @@ export default function CalendarTab() {
       setPanelOpen(false)
       setSelectedEvent(null)
       fetchData()
-    } catch {}
+    } catch { }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -235,23 +286,28 @@ export default function CalendarTab() {
     setFormSaving(true)
     try {
       const startTime = new Date(`${currentDate}T${formTime}:00+03:00`)
-      const endTime = new Date(startTime.getTime() + parseInt(formDuration) * 60_000)
+      const endTime = new Date(`${currentDate}T${formEndTime}:00+03:00`)
 
-      // Create patient first
-      const pRes = await fetch('/api/dental/patients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: formName, phone: formPhone || undefined }),
-      })
-      if (!pRes.ok) throw new Error('Patient creation failed')
-      const patient = await pRes.json()
+      let finalPatientId = formPatientId;
+
+      if (!finalPatientId) {
+        // Create patient first if not selected from autocomplete
+        const pRes = await fetch('/api/dental/patients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: formName, phone: formPhone || undefined }),
+        })
+        if (!pRes.ok) throw new Error('Patient creation failed')
+        const patient = await pRes.json()
+        finalPatientId = patient.id
+      }
 
       // Create appointment
       const aRes = await fetch('/api/dental/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          patientId: patient.id,
+          patientId: finalPatientId,
           doctorId: formDoctor,
           title: `${formName} - ${formType || 'Randevu'}`,
           startTime: startTime.toISOString(),
@@ -262,7 +318,7 @@ export default function CalendarTab() {
       })
       if (aRes.ok) {
         setShowForm(false)
-        setFormName(''); setFormPhone(''); setFormType(''); setFormNotes('')
+        setFormName(''); setFormPatientId(''); setFormPhone(''); setFormType(''); setFormNotes('')
         fetchData()
       }
     } catch (err) {
@@ -342,6 +398,21 @@ export default function CalendarTab() {
           />
           <button onClick={() => goDate(1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>▶</button>
           <button
+            onClick={() => setPatientPanelOpen(true)}
+            style={{
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--glass-border)',
+              background: 'var(--glass-bg)',
+              color: 'var(--foreground)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            👥 Hastalar
+          </button>
+          <button
             onClick={() => setShowForm(!showForm)}
             style={{
               padding: '7px 14px',
@@ -359,36 +430,23 @@ export default function CalendarTab() {
         </div>
       </div>
 
-      {/* Doctor chips */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-        {doctors.map(d => (
-          <span key={d.id} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '4px 10px', borderRadius: 6,
-            background: 'var(--glass-bg)', border: '1px solid var(--glass-border)',
-            fontSize: '0.75rem', color: 'var(--foreground)',
-          }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.color }} />
-            {d.name}
-            <span style={{ color: 'var(--foreground-3)', fontSize: '0.7rem' }}>({d.specialty})</span>
-          </span>
-        ))}
-      </div>
-
       {/* Appointment Form */}
       {showForm && (
         <form onSubmit={handleSubmit} style={{
           padding: 16, marginBottom: 16, borderRadius: 10,
           background: 'var(--glass-bg)', border: '1px solid var(--glass-border)',
-          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px 24px', alignItems: 'end'
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {!doctors.some(d => shifts.some(s => s.userId === d.id && s.date === currentDate)) && (
-              <span style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: 600 }}>⚠️ Bu tarihte vardiyalı doktor yok</span>
-            )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Doktor Seçimi</span>
+              {!doctors.some(d => shifts.some(s => s.userId === d.id && s.date === currentDate)) && (
+                <span style={{ color: '#f59e0b', fontSize: '0.65rem' }}>⚠️ Vardiyalı hekim yok</span>
+              )}
+            </div>
             <select
               value={formDoctor} onChange={e => setFormDoctor(e.target.value)} required
-              style={inputStyle}
+              style={{...inputStyle, width: '100%'}}
             >
               <option value="">Doktor Seç...</option>
               {doctors
@@ -397,20 +455,55 @@ export default function CalendarTab() {
               }
             </select>
           </div>
-          <input placeholder="Hasta Adı *" value={formName} onChange={e => setFormName(e.target.value)} required style={inputStyle} />
-          <input placeholder="Telefon" value={formPhone} onChange={e => setFormPhone(e.target.value)} style={inputStyle} />
-          <input type="time" value={formTime} onChange={e => setFormTime(e.target.value)} required style={inputStyle} />
-          <select value={formDuration} onChange={e => setFormDuration(e.target.value)} style={inputStyle}>
-            <option value="15">15 dk</option>
-            <option value="30">30 dk</option>
-            <option value="45">45 dk</option>
-            <option value="60">1 saat</option>
-            <option value="90">1.5 saat</option>
-            <option value="120">2 saat</option>
-          </select>
-          <input placeholder="İşlem Türü (ör. Dolgu, İmplant)" value={formType} onChange={e => setFormType(e.target.value)} style={inputStyle} />
-          <input placeholder="Not (opsiyonel)" value={formNotes} onChange={e => setFormNotes(e.target.value)} style={{ ...inputStyle, gridColumn: '1/-1' }} />
-          <div style={{ gridColumn: '1/-1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+
+          <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Hasta Adı *</div>
+            <input
+              placeholder="İsim Soyisim"
+              value={formName}
+              onChange={e => {
+                setFormName(e.target.value)
+                setFormPatientId('')
+              }}
+              required
+              style={{ ...inputStyle, width: '100%' }}
+            />
+            {formName && formName.length >= 2 && !formPatientId && patients.filter(p => p.name.toLowerCase().includes(formName.toLowerCase())).length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 200, overflowY: 'auto', marginTop: 4, backdropFilter: 'blur(10px)', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                {patients.filter(p => p.name.toLowerCase().includes(formName.toLowerCase())).map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setFormName(p.name)
+                      setFormPatientId(p.id)
+                      if (p.phone) setFormPhone(p.phone)
+                    }}
+                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', color: 'var(--foreground)' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ fontWeight: 500, fontSize: '0.85rem' }}>{p.name}</div>
+                    {p.phone && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>{p.phone}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Telefon Numarası</div>
+            <input placeholder="05XX XXX XX XX" value={formPhone} onChange={e => setFormPhone(e.target.value)} style={{...inputStyle, width: '100%'}} />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Randevu Saati (Başlangıç - Bitiş)</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input type="time" value={formTime} onChange={e => setFormTime(e.target.value)} required style={{ ...inputStyle, flex: 1, width: '100%' }} />
+              <input type="time" value={formEndTime} onChange={e => setFormEndTime(e.target.value)} required style={{ ...inputStyle, flex: 1, width: '100%' }} />
+            </div>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
             <button type="button" onClick={() => setShowForm(false)} style={{ ...btnStyle, background: 'var(--glass-bg)', color: 'var(--foreground-2)' }}>İptal</button>
             <button type="submit" disabled={formSaving} style={btnStyle}>
               {formSaving ? 'Kaydediliyor...' : 'Kaydet'}
@@ -422,6 +515,39 @@ export default function CalendarTab() {
       <DentalCalendar
         doctors={doctors}
         events={events}
+        onHeaderContextMenu={(e, doctorId) => {
+          e.preventDefault()
+          setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId, date: currentDate })
+        }}
+        onUnassignedHeaderContextMenu={(e) => {
+          e.preventDefault()
+          setUnassignedListMenu({ x: e.clientX, y: e.clientY })
+        }}
+        onEventContextMenu={(e, event) => {
+          console.log("Event right clicked!", event.title)
+          e.preventDefault()
+          const date = event.startTime.slice(0, 10)
+          const startTime = new Date(event.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+          const endTime = new Date(event.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+          setEventContextMenu({ x: e.clientX, y: e.clientY, event, doctorId: event.doctorId || '', date, startTime, endTime })
+        }}
+        onEventUpdate={async (updatedEvent) => {
+          console.log("Event updated via drag/resize", updatedEvent);
+          try {
+            await fetch(`/api/dental/appointments/${updatedEvent.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                startTime: updatedEvent.startTime,
+                endTime: updatedEvent.endTime,
+                doctorId: updatedEvent.doctorId
+              })
+            });
+            fetchData();
+          } catch (e) {
+            console.error("Failed to update event", e);
+          }
+        }}
         shifts={shifts}
         currentDate={currentDate}
         onEventClick={handleEventClick}
@@ -449,71 +575,130 @@ export default function CalendarTab() {
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Randevu Bilgisi</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)' }}>Doktor</div>
-                  <div style={{ fontSize: '0.8rem', color: selectedEvent.doctorId ? 'var(--foreground)' : '#9ca3af', fontStyle: selectedEvent.doctorId ? 'normal' : 'italic' }}>
-                    {doctors.find(d => d.id === selectedEvent.doctorId)?.name || '⚠️ Atanmamış'}
+                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Doktor</div>
+                  <select 
+                    value={selectedEvent.doctorId || ''} 
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      let newStatus = selectedEvent.status;
+                      if (val && selectedEvent.status === 'pending_assignment') {
+                        newStatus = 'scheduled';
+                      }
+                      const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ doctorId: val || null, status: newStatus })
+                      });
+                      if (res.ok) {
+                        const updated = await res.json();
+                        setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                        setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                      }
+                    }}
+                    style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: selectedEvent.doctorId ? 'var(--foreground)' : '#9ca3af' }}
+                  >
+                    <option value="">⚠️ Atanmamış</option>
+                    {doctors
+                      .filter(d => {
+                        const evtDate = new Date(selectedEvent.startTime).toLocaleDateString('sv')
+                        const hasShift = shifts.some(s => s.userId === d.id && s.date === evtDate)
+                        return hasShift || d.id === selectedEvent.doctorId
+                      })
+                      .map(d => <option key={d.id} value={d.id}>{d.name}</option>)
+                    }
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Tür</div>
+                  <select 
+                    value={selectedEvent.type || 'general'} 
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: val })
+                      });
+                      if (res.ok) {
+                        const updated = await res.json();
+                        setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                        setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                      }
+                    }}
+                    style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--foreground)' }}
+                  >
+                    <option value="general">Normal</option>
+
+                    <option value="urgent">Acil</option>
+                    <option value="priority">Öncelikli</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Durum</div>
+                  <select
+                    value={selectedEvent.status}
+                    onChange={async (e) => {
+                      const status = e.target.value
+                      try {
+                        const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ status }),
+                        })
+                        if (res.ok) { 
+                           const updated = await res.json();
+                           setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                           setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                        }
+                      } catch { }
+                    }}
+                    style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--foreground)' }}
+                  >
+                    <option value="scheduled">📅 Planlandı</option>
+                    <option value="in_progress">🔄 Devam Ediyor</option>
+                    <option value="completed">✓ Tamamlandı</option>
+                    <option value="cancelled">❌ İptal</option>
+                    <option value="postponed">⏳ Ertelendi</option>
+                    <option value="no_show">🚫 Gelmedi</option>
+                    <option value="pending_assignment">⚠️ Atama Bekliyor</option>
+                    <option value="waiting_in_clinic">🏥 Klinikte Bekliyor</option>
+                  </select>
+                </div>
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <div style={{ flex: 1, padding: '8px 10px', background: 'rgba(156,163,175,0.05)', borderRadius: 6, border: '1px solid var(--glass-border)' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Tarih</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--foreground)', fontWeight: 600 }}>{new Date(selectedEvent.startTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                  </div>
+                  <div style={{ flex: 1, padding: '8px 10px', background: 'rgba(156,163,175,0.05)', borderRadius: 6, border: '1px solid var(--glass-border)' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Saat</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--foreground)', fontWeight: 600 }}>{new Date(selectedEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} - {new Date(selectedEvent.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)' }}>Tür</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--foreground)' }}>{selectedEvent.type}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)' }}>Tarih</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--foreground)' }}>{new Date(selectedEvent.startTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)' }}>Saat</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--foreground)' }}>{new Date(selectedEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} - {new Date(selectedEvent.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
-                </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)' }}>Durum</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--foreground)' }}>{STATUS_LABELS[selectedEvent.status] || selectedEvent.status}</div>
-                </div>
+
               </div>
-              {selectedEvent.notes && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 8, borderTop: '1px solid var(--glass-border)', paddingTop: 6 }}>📝 {selectedEvent.notes}</div>}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 4 }}>Hasta Şikayeti / İlk Talep</div>
+                <textarea 
+                  defaultValue={selectedEvent.complaint || ''}
+                  placeholder="Hastanın şikayetini veya talebini buraya girin (Opsiyonel)"
+                  onBlur={async (e) => {
+                    const val = e.target.value;
+                    if (val === selectedEvent.complaint) return;
+                    const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ complaint: val })
+                    });
+                    if (res.ok) {
+                      const updated = await res.json();
+                      setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                      setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                    }
+                  }}
+                  style={{ width: '100%', fontSize: '0.75rem', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--foreground)', minHeight: 40, resize: 'vertical' }}
+                />
+              </div>
+              {selectedEvent.notes && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 8, borderTop: '1px solid var(--glass-border)', paddingTop: 6 }}>📝 Randevu Notu: {selectedEvent.notes}</div>}
             </div>
 
-            {/* ── Ödeme Bilgisi ── */}
-            <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Ödeme Bilgisi</div>
-                <button onClick={() => { setPaymentIdBeingEdited(null); setPaymentDate(new Date().toISOString().slice(0, 10)); setPaymentMethod('Nakit'); setPaymentStatus('completed'); setPaymentDueDate(''); setPaymentTreatmentId(''); setPaymentNote(''); setPaymentAmount(''); setShowPaymentModal(true); }} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px dashed var(--glass-border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>+ Ödeme Ekle</button>
-              </div>
-
-              {patientPayments.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {patientPayments.map((p: any) => (
-                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
-                      <span style={{ color: 'var(--foreground-2)' }}>{p.date}</span>
-                      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span style={{ color: '#10b981', fontWeight: 600 }}>{p.amount} ₺</span>
-                        <span style={{ color: 'var(--foreground-3)', fontSize: '0.65rem' }}>{p.method}</span>
-                        <button onClick={(e) => {
-                          e.preventDefault();
-                          setPaymentIdBeingEdited(p.id);
-                          setPaymentAmount(p.amount.toString());
-                          setPaymentDate(p.date);
-                          setPaymentMethod(p.method);
-                          setPaymentStatus(p.status || 'completed');
-                          setPaymentDueDate(p.dueDate || '');
-                          setPaymentTreatmentId(p.treatmentPlanId || '');
-                          setPaymentNote(p.notes || '');
-                          setShowPaymentModal(true);
-                        }} style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }} title="Düzelt">✏️</button>
-                        <button onClick={(e) => {
-                          e.preventDefault();
-                          fetch(`/api/dental/payments/${p.id}`, { method: 'DELETE' })
-                            .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/payments`).then(r => r.json()).then(setPatientPayments))
-                            .catch(() => {})
-                        }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }} title="Sil">🗑️</button>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)' }}>Ödeme kaydı yok</div>}
-            </div>
-{/* ── Tedavi Planı & Odontogram ── */}
+            {/* ── Tedavi Planı & Odontogram ── */}
             <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tedavi Planı</div>
@@ -523,7 +708,7 @@ export default function CalendarTab() {
                       🕒 Geçmiş
                     </button>
                   )}
-                  <button onClick={() => { setTreatmentDeleteError(null); setShowTedaviForm(true); }} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px dashed var(--glass-border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>
+                  <button onClick={() => { setTreatmentDeleteError(null); setShiftContextMenu(null); setEventContextMenu(null); setShowTedaviForm(true); }} style={{ fontSize: '0.6rem', padding: '2px 6px', borderRadius: 4, border: '1px dashed var(--glass-border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>
                     + Tedavi Ekle
                   </button>
                 </div>
@@ -539,7 +724,7 @@ export default function CalendarTab() {
                     <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ color: 'var(--foreground)' }}>
-                          {t.toothNumber ? <span style={{color: 'var(--accent)', fontWeight: 600, marginRight: 4}}>#{t.toothNumber}</span> : null}
+                          {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600, marginRight: 4 }}>#{t.toothNumber}</span> : null}
                           {t.procedureName}
                         </span>
                         {t.indication && <span style={{ fontSize: '0.65rem', color: 'var(--foreground-3)', marginTop: 2 }}>Endikasyon: {t.indication}</span>}
@@ -554,7 +739,7 @@ export default function CalendarTab() {
                           fetch(`/api/dental/treatments/${t.id}`, {
                             method: 'PUT', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ status: e.target.value })
-                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments)).catch(() => {})
+                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments)).catch(() => { })
                         }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer' }}>
                           <option value="planned">Planlandı</option>
                           <option value="in_progress">Devam Ediyor</option>
@@ -572,7 +757,7 @@ export default function CalendarTab() {
                             }
                             fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' })
                               .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments))
-                              .catch(() => {})
+                              .catch(() => { })
                           }}
                           style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem', display: 'flex', alignItems: 'center' }}
                           title="Sil"
@@ -588,100 +773,63 @@ export default function CalendarTab() {
           </div>
 
           <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* Doctor assignment + date/time change */}
-            <div style={{ padding: 12, borderRadius: 8, background: selectedEvent.doctorId ? 'var(--glass-bg)' : 'rgba(156,163,175,0.1)', border: selectedEvent.doctorId ? '1px solid var(--glass-border)' : '1px dashed #9ca3af' }}>
-              <div style={{ fontSize: '0.7rem', color: selectedEvent.doctorId ? 'var(--foreground-3)' : '#9ca3af', marginBottom: 6, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{selectedEvent.doctorId ? '👨‍⚕️ Doktor Değiştir' : '⚠️ Doktor Ata'}</span>
-                {!doctors.some(d => shifts.some(s => s.userId === d.id && s.date === new Date(selectedEvent.startTime).toLocaleDateString('sv'))) && (
-                  <span style={{ fontSize: '0.65rem', color: '#f59e0b' }}>⚠️ Vardiyalı doktor yok</span>
-                )}
-              </div>
-              <select
-                defaultValue={selectedEvent.doctorId || ""}
-                onChange={async (e) => {
-                  const doctorId = e.target.value || null
-                  try {
-                    const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ doctorId }),
-                    })
-                    if (res.ok) {
-                      setPanelOpen(false); setSelectedEvent(null); fetchData()
-                    }
-                  } catch {}
-                }}
-                style={inputStyle}
-              >
-                <option value="">Atanmamış (Boş Bırak)</option>
-                {doctors
-                  .filter(d => {
-                    const evtDate = new Date(selectedEvent.startTime).toLocaleDateString('sv')
-                    const hasShift = shifts.some(s => s.userId === d.id && s.date === evtDate)
-                    return hasShift || d.id === selectedEvent.doctorId
-                  })
-                  .map(d => <option key={d.id} value={d.id}>{d.name} ({d.specialty})</option>)
-                }
-              </select>
-            </div>
+
             {/* Date/time edit */}
             <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
               <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', marginBottom: 6, fontWeight: 600 }}>📅 Tarih/Saat Değiştir</div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
                 <input
-                  type="datetime-local"
-                  defaultValue={selectedEvent.startTime.slice(0, 16)}
-                  id="edit-datetime"
-                  style={{ ...inputStyle, flex: 1 }}
+                  type="date"
+                  defaultValue={selectedEvent.startTime.slice(0, 10)}
+                  id="edit-date"
+                  onChange={async (e) => {
+                    const dateVal = e.target.value;
+                    if (!dateVal) return;
+                    const startHH = String(new Date(selectedEvent.startTime).getHours()).padStart(2, '0');
+                    const startMM = String(new Date(selectedEvent.startTime).getMinutes()).padStart(2, '0');
+                    const endHH = String(new Date(selectedEvent.endTime).getHours()).padStart(2, '0');
+                    const endMM = String(new Date(selectedEvent.endTime).getMinutes()).padStart(2, '0');
+                    const startTime = new Date(`${dateVal}T${startHH}:${startMM}:00+03:00`);
+                    const endTime = new Date(`${dateVal}T${endHH}:${endMM}:00+03:00`);
+                    try {
+                      const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ startTime: startTime.toISOString(), endTime: endTime.toISOString(), timeConfirmed: true }),
+                      });
+                      if (res.ok) {
+                         const updated = await res.json();
+                         setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                         setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                      }
+                    } catch { }
+                  }}
+                  style={{ ...inputStyle, width: '100%' }}
                 />
-                <button
-                  onClick={async () => {
-                    const el = document.getElementById('edit-datetime') as HTMLInputElement
-                    if (!el?.value) return
-                    const startTime = new Date(el.value + ':00+03:00')
-                    const duration = new Date(selectedEvent.endTime).getTime() - new Date(selectedEvent.startTime).getTime()
-                    const endTime = new Date(startTime.getTime() + duration)
+                <TimeRangeEditor 
+                  selectedEvent={selectedEvent} 
+                  onSave={async (startHH: string, startMM: string, endHH: string, endMM: string) => {
+                    const dateEl = document.getElementById('edit-date') as HTMLInputElement
+                    if (!dateEl?.value) return
+                    const startTime = new Date(`${dateEl.value}T${startHH}:${startMM}:00+03:00`)
+                    const endTime = new Date(`${dateEl.value}T${endHH}:${endMM}:00+03:00`)
                     try {
                       const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ startTime: startTime.toISOString(), endTime: endTime.toISOString(), timeConfirmed: true }),
                       })
-                      if (res.ok) { setPanelOpen(false); setSelectedEvent(null); fetchData() }
-                    } catch {}
-                  }}
-                  style={btnStyle}
-                >Kaydet</button>
+                      if (res.ok) {
+                         const updated = await res.json();
+                         setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
+                         setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                      }
+                    } catch { }
+                  }} 
+                />
               </div>
             </div>
-            {/* Status select */}
-            <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', marginBottom: 6, fontWeight: 600 }}>📋 Durum</div>
-              <select
-                defaultValue={selectedEvent.status}
-                onChange={async (e) => {
-                  const status = e.target.value
-                  try {
-                    const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ status }),
-                    })
-                    if (res.ok) { setPanelOpen(false); setSelectedEvent(null); fetchData() }
-                  } catch {}
-                }}
-                style={inputStyle}
-              >
-                <option value="scheduled">📅 Planlandı</option>
-                <option value="confirmed">✅ Onaylandı</option>
-                <option value="in_progress">🔄 Devam Ediyor</option>
-                <option value="completed">✓ Tamamlandı</option>
-                <option value="cancelled">❌ İptal</option>
-                <option value="pending_assignment">⚠️ Atama Bekliyor</option>
-                <option value="postponed">⏳ Ertelendi</option>
-                <option value="no_show">🚫 Gelmedi</option>
-              </select>
-            </div>
+
             {/* Time confirmation for pending time appointments */}
             {selectedEvent.timeConfirmed === false && (
               <button
@@ -695,7 +843,7 @@ export default function CalendarTab() {
                     if (res.ok) {
                       setPanelOpen(false); setSelectedEvent(null); fetchData()
                     }
-                  } catch {}
+                  } catch { }
                 }}
                 style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.15)', color: '#f59e0b', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}
               >
@@ -710,489 +858,17 @@ export default function CalendarTab() {
       )}
       {/* Tedavi Ekle Modal */}
       {showTedaviForm && selectedEvent && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '90%', maxWidth: 1000, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>Tedavi Planı Oluştur</h3>
-              <button onClick={() => { setShowTedaviForm(false); setSelectedTeeth([]); setLastSelectedTooth(null); setTedaviNames(['']); setTedaviIndications(['']); setToothDrafts({}); setNewTemplateInput(''); setDiscount(0); }} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.5rem' }}>×</button>
-            </div>
-
-            <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              
-              {/* LEFT COLUMN: Odontogram and Templates AND Viewer */}
-              <div style={{ width: '40%', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', paddingRight: 8 }}>
-                
-                    {/* Odontogram Tooth Selector */}
-                    <div style={{ padding: 16, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
-                      <div style={{ fontSize: 12, color: 'var(--foreground-3)', marginBottom: 12, textAlign: 'center', fontWeight: 500 }}>Hedef Dişleri Seçin veya İşlemi Üzerine Sürükleyin</div>
-                  
-                  {/* Compact 2-row grid: Upper & Lower jaws */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {/* Upper jaw label */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                      {UPPER_TEETH.map(n => (
-                        <ToothChip 
-                          key={n} 
-                          number={n} 
-                          selected={selectedTeeth.includes(String(n))} 
-                          hasDraft={!!toothDrafts[String(n)]}
-                          onClick={(e: React.MouseEvent) => handleToothClick(n, e)}
-                          onDragOver={(e: React.DragEvent) => e.preventDefault()}
-                          onDrop={(e: React.DragEvent) => {
-                            e.preventDefault();
-                            const type = e.dataTransfer.getData("type");
-                            const val = e.dataTransfer.getData("value");
-                            if (!val) return;
-                            const targetTeeth = selectedTeeth.includes(String(n)) ? selectedTeeth : [String(n)];
-                            
-                            setToothDrafts(prev => {
-                              const next = { ...prev };
-                              targetTeeth.forEach(t => {
-                                if (!next[t]) next[t] = { procedures: [], indications: [], cost: 0 };
-                                if (type === 'procedure') {
-                                  const parsed = JSON.parse(val);
-                                  if (!next[t].procedures.find((p: any) => p.name === parsed.name)) {
-                                    next[t].procedures = [...next[t].procedures, parsed];
-                                  }
-                                }
-                                if (type === 'indication' && !next[t].indications.includes(val)) {
-                                  next[t].indications = [...next[t].indications, val];
-                                }
-                              });
-                              return next;
-                            });
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <div style={{ height: 1, background: 'var(--glass-border)', margin: '0 4px' }} />
-                    {/* Lower jaw */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                      {LOWER_TEETH.map(n => (
-                        <ToothChip 
-                          key={n} 
-                          number={n} 
-                          selected={selectedTeeth.includes(String(n))} 
-                          hasDraft={!!toothDrafts[String(n)]}
-                          onClick={(e: React.MouseEvent) => handleToothClick(n, e)}
-                          onDragOver={(e: React.DragEvent) => e.preventDefault()}
-                          onDrop={(e: React.DragEvent) => {
-                            e.preventDefault();
-                            const type = e.dataTransfer.getData("type");
-                            const val = e.dataTransfer.getData("value");
-                            if (!val) return;
-                            const targetTeeth = selectedTeeth.includes(String(n)) ? selectedTeeth : [String(n)];
-                            
-                            setToothDrafts(prev => {
-                              const next = { ...prev };
-                              targetTeeth.forEach(t => {
-                                if (!next[t]) next[t] = { procedures: [], indications: [], cost: 0 };
-                                if (type === 'procedure') {
-                                  const parsed = JSON.parse(val);
-                                  if (!next[t].procedures.find((p: any) => p.name === parsed.name)) {
-                                    next[t].procedures = [...next[t].procedures, parsed];
-                                  }
-                                }
-                                if (type === 'indication' && !next[t].indications.includes(val)) {
-                                  next[t].indications = [...next[t].indications, val];
-                                }
-                              });
-                              return next;
-                            });
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Templates Pool */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      Sık Kullanılan İşlemler
-                      <span style={{ fontSize: 10, color: 'var(--foreground-3)', fontWeight: 400 }}>(Sürükle bırak)</span>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {procTemplates.map((proc, i) => (
-                        <div 
-                          key={i} 
-                          draggable 
-                          onDragStart={(e) => { e.dataTransfer.setData("type", "procedure"); e.dataTransfer.setData("value", JSON.stringify(proc)); }}
-                          style={{ padding: '6px 12px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 20, fontSize: '0.8rem', color: 'var(--foreground)', cursor: 'grab', display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {proc.name} <span style={{ opacity: 0.5, fontSize: '0.7rem' }}>{proc.price}₺</span>
-                          {proc.materialId && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', marginLeft: 2 }} title="Stoka Bağlı" />}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      Sık Kullanılan Endikasyonlar
-                      <span style={{ fontSize: 10, color: 'var(--foreground-3)', fontWeight: 400 }}>(Sürükle bırak)</span>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {indTemplates.map((ind, i) => (
-                        <div 
-                          key={i} 
-                          draggable 
-                          onDragStart={(e) => { e.dataTransfer.setData("type", "indication"); e.dataTransfer.setData("value", ind); }}
-                          style={{ padding: '6px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 20, fontSize: '0.8rem', color: '#ef4444', cursor: 'grab' }}>
-                          {ind}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  {/* Yeni Şablon Ekleme */}
-                  <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px dashed var(--glass-border)' }}>
-                    <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8 }}>Yeni Şablon Ekle</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <select value={newTemplateType} onChange={e => setNewTemplateType(e.target.value as 'procedure'|'indication')} style={{ ...inputStyle, width: 100, fontSize: '0.8rem', padding: '6px' }}>
-                          <option value="procedure">İşlem</option>
-                          <option value="indication">Endikasyon</option>
-                        </select>
-                        <input type="text" value={newTemplateInput} onChange={e => setNewTemplateInput(e.target.value)} placeholder="Şablon Adı" style={{ ...inputStyle, flex: 1, fontSize: '0.8rem', padding: '6px' }} />
-                      </div>
-                      
-                      {newTemplateType === 'procedure' && (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input type="number" value={newTemplatePrice || ''} onChange={e => setNewTemplatePrice(Number(e.target.value))} placeholder="Fiyat (₺)" style={{ ...inputStyle, width: 100, fontSize: '0.8rem', padding: '6px' }} />
-                          <select value={newTemplateMaterial} onChange={e => setNewTemplateMaterial(e.target.value)} style={{ ...inputStyle, flex: 1, fontSize: '0.8rem', padding: '6px' }}>
-                            <option value="">-- Stok Malzemesi Bağla (Opsiyonel) --</option>
-                            {inventoryItems.map((item: any) => (
-                              <option key={item.id} value={item.id}>{item.name} ({item.quantity} {item.unit} mevcut)</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      
-                      <button 
-                        onClick={() => {
-                          if (!newTemplateInput.trim()) return;
-                          if (newTemplateType === 'procedure') {
-                            setProcTemplates(prev => [...prev, { name: newTemplateInput.trim(), price: newTemplatePrice, materialId: newTemplateMaterial || undefined }]);
-                          } else {
-                            setIndTemplates(prev => Array.from(new Set([...prev, newTemplateInput.trim()])));
-                          }
-                          setNewTemplateInput('');
-                          setNewTemplatePrice(0);
-                          setNewTemplateMaterial('');
-                        }}
-                        style={{ padding: '6px', borderRadius: 6, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}
-                      >
-                        Şablonu Ekle
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Single DICOM Upload and Inline Viewer */}
-                <div style={{ padding: 16, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-2)' }}>
-                    Genel Tedavi Röntgeni Yükle (.dcm)
-                  </div>
-                  <label style={{ display: 'inline-block', cursor: 'pointer', padding: '8px 12px', background: treatmentDcmFile ? 'rgba(59, 130, 246, 0.2)' : 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, fontSize: '0.8rem', color: treatmentDcmFile ? '#3b82f6' : 'var(--foreground-2)', textAlign: 'center' }}>
-                    {treatmentDcmFile ? treatmentDcmFile.name : 'Dosya Seç (Tüm tedavi için)'}
-                    <input type="file" accept=".dcm" style={{ display: 'none' }} onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file && file.size > 20 * 1024 * 1024) {
-                        alert('Dosya boyutu 20 MB\'dan büyük olamaz');
-                        e.target.value = '';
-                        return;
-                      }
-                      if (file) setTreatmentDcmFile(file);
-                    }} />
-                  </label>
-                  {treatmentDcmFile && (
-                    <div style={{ height: 400, borderRadius: 8, overflow: 'hidden', position: 'relative', marginTop: 8 }}>
-                      <ThreeDicomViewer file={treatmentDcmFile} inline={true} onClose={() => setTreatmentDcmFile(null)} />
-                    </div>
-                  )}
-                </div>
-
-              </div>
-
-              {/* RIGHT COLUMN: Cart Table & Save */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, borderLeft: '1px solid var(--glass-border)', paddingLeft: 24, overflowY: 'auto' }}>
-                
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    🛒 Atanan İşlemler Sepeti
-                    {Object.keys(toothDrafts).length > 0 && <span style={{ background: 'var(--accent)', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10 }}>{Object.keys(toothDrafts).length} Diş</span>}
-                  </div>
-                  
-                  {Object.keys(toothDrafts).length === 0 ? (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--foreground-3)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>
-                      <BriefcaseMedical size={32} style={{ marginBottom: 12, opacity: 0.3 }} />
-                      İşlem ve endikasyon şablonlarını dişlerin üzerine sürükleyip bırakarak sepetinize ekleyin.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                      <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: 8, background: 'var(--glass-bg)' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
-                          <thead style={{ background: 'rgba(0,0,0,0.2)', color: 'var(--foreground-2)' }}>
-                            <tr>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)' }}>Diş</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)' }}>İşlem</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)' }}>Endikasyon</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)', width: 100, textAlign: 'right' }}>Ücret (₺)</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)', width: 40, textAlign: 'center' }}></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.entries(toothDrafts).map(([tooth, draft]) => {
-                              const toothPrice = draft.procedures.reduce((s, p: any) => s + p.price, 0);
-                              return (
-                                <tr key={tooth} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                                  <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--accent)' }}>#{tooth}</td>
-                                  <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
-                                    {draft.procedures.length > 0 ? draft.procedures.map(p => p.name).join(', ') : <span style={{ color: 'var(--foreground-3)' }}>-</span>}
-                                  </td>
-                                  <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
-                                    {draft.indications.length > 0 ? draft.indications.join(', ') : <span style={{ color: 'var(--foreground-3)' }}>-</span>}
-                                  </td>
-                                  <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>
-                                    {toothPrice} ₺
-                                  </td>
-                                  <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                    <button onClick={() => {
-                                      setToothDrafts(prev => {
-                                        const next = { ...prev };
-                                        delete next[tooth];
-                                        return next;
-                                      });
-                                    }} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 0 }}><X size={14} /></button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                      
-                      {/* Financial Summary */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <div style={{ width: 250, padding: 16, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
-                            <span>Ara Toplam:</span>
-                            <span>{Object.values(toothDrafts).reduce((sum, draft) => sum + draft.procedures.reduce((s, p: any) => s + p.price, 0), 0)} ₺</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
-                            <span>İskonto:</span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 120 }}>
-                              <input type="number" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: '100%', padding: '4px 8px', fontSize: '0.8rem', textAlign: 'right' }} />
-                              <select value={discountType} onChange={e => setDiscountType(e.target.value as 'amount'|'percentage')} style={{ ...inputStyle, padding: '4px', fontSize: '0.8rem', background: 'var(--glass-bg)', border: 'none', cursor: 'pointer' }}>
-                                <option value="amount">₺</option>
-                                <option value="percentage">%</option>
-                              </select>
-                            </div>
-                          </div>
-                          <div style={{ height: 1, background: 'var(--glass-border)' }} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                            <span>Genel Toplam:</span>
-                            <span>{Math.max(0, Object.values(toothDrafts).reduce((sum, draft) => sum + draft.procedures.reduce((s, p: any) => s + p.price, 0), 0) - (discountType === 'percentage' ? (Object.values(toothDrafts).reduce((sum, draft) => sum + draft.procedures.reduce((s, p: any) => s + p.price, 0), 0) * (discount / 100)) : discount))} ₺</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 16 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--foreground-2)', cursor: 'pointer', marginBottom: isPeriodic ? 12 : 0 }}>
-                    <input type="checkbox" checked={isPeriodic} onChange={e => setIsPeriodic(e.target.checked)} />
-                    Bu periyodik bir işlem mi? (Kontrol/Tekrar)
-                  </label>
-                  
-                  {isPeriodic && (
-                    <div style={{ padding: 12, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4 }}>Hatırlatma Periyodu</label>
-                        <select value={periodDays} onChange={e => setPeriodDays(Number(e.target.value))} style={{ ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '6px' }}>
-                          <option value={30}>1 Ay Sonra</option>
-                          <option value={90}>3 Ay Sonra</option>
-                          <option value={180}>6 Ay Sonra</option>
-                          <option value={365}>1 Yıl Sonra</option>
-                        </select>
-                      </div>
-
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={notifyPatient} onChange={e => setNotifyPatient(e.target.checked)} />
-                        Zamanı gelince bildirim yapılsın
-                      </label>
-
-                      {notifyPatient && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4 }}>Bildirim Yöntemi</label>
-                          <select value={notificationType} onChange={e => setNotificationType(e.target.value)} style={{ ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '6px' }}>
-                            <option value="sms">Sadece SMS</option>
-                            <option value="email">Sadece E-posta</option>
-                            <option value="both">İkisi de</option>
-                          </select>
-                          
-                          {( (notificationType === 'sms' || notificationType === 'both') && !patientInfo?.phone || (notificationType === 'email' || notificationType === 'both') && !patientInfo?.email ) && (
-                            <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                              <div style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 600, marginBottom: 8 }}>
-                                ⚠️ Eksik İletişim Bilgisi
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                {(notificationType === 'sms' || notificationType === 'both') && !patientInfo?.phone && (
-                                  <input type="tel" placeholder="Telefon Numarası" value={missingPhone} onChange={e => setMissingPhone(e.target.value)} style={{ ...inputStyle, width: '100%', borderColor: 'rgba(239,68,68,0.3)', padding: '6px', fontSize: '0.8rem' }} />
-                                )}
-                                {(notificationType === 'email' || notificationType === 'both') && !patientInfo?.email && (
-                                  <input type="email" placeholder="E-posta" value={missingEmail} onChange={e => setMissingEmail(e.target.value)} style={{ ...inputStyle, width: '100%', borderColor: 'rgba(239,68,68,0.3)', padding: '6px', fontSize: '0.8rem' }} />
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-                    <button onClick={() => { setShowTedaviForm(false); setSelectedTeeth([]); setLastSelectedTooth(null); setTedaviNames(['']); setTedaviIndications(['']); setToothDrafts({}); setIsPeriodic(false); setNotifyPatient(false); setMissingPhone(''); setMissingEmail(''); setDiscount(0); setTreatmentDcmFile(null); }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 600 }}>İptal</button>
-                    <button onClick={async () => {
-                      if (Object.keys(toothDrafts).length === 0) {
-                        alert('Lütfen önce dişlere işlem veya endikasyon atayın.');
-                        return;
-                      }
-
-                      // Check if any draft is missing procedure
-                      const hasMissingProc = Object.values(toothDrafts).some(d => d.procedures.length === 0);
-                      if (hasMissingProc) {
-                        if (!confirm('Bazı dişlere sadece endikasyon atanmış (işlem adı yok). Yine de devam etmek istiyor musunuz?')) return;
-                      }
-                      
-                      const isPhoneMissing = notifyPatient && (notificationType === 'sms' || notificationType === 'both') && !patientInfo?.phone
-                      const isEmailMissing = notifyPatient && (notificationType === 'email' || notificationType === 'both') && !patientInfo?.email
-
-                      if (isPhoneMissing && !missingPhone.trim()) {
-                        alert('Lütfen eksik olan telefon numarasını giriniz.');
-                        return;
-                      }
-                      if (isEmailMissing && !missingEmail.trim()) {
-                        alert('Lütfen eksik olan e-posta adresini giriniz.');
-                        return;
-                      }
-
-                      if (notifyPatient && (missingPhone.trim() || missingEmail.trim())) {
-                        try {
-                          await fetch(`/api/dental/patients/${selectedEvent.patientId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              phone: missingPhone.trim() || undefined,
-                              email: missingEmail.trim() || undefined
-                            })
-                          })
-                          setPatientInfo(prev => prev ? { ...prev, phone: missingPhone.trim() || prev.phone, email: missingEmail.trim() || prev.email } : prev)
-                        } catch (err) {}
-                      }
-                      
-                      let nextNotificationDate: string | undefined = undefined
-                      if (isPeriodic && notifyPatient) {
-                        const d = new Date()
-                        d.setDate(d.getDate() + periodDays)
-                        nextNotificationDate = d.toISOString().slice(0, 10)
-                      }
-                      
-                      // Calculate Discount Factor
-                      const subtotal = Object.values(toothDrafts).reduce((sum, draft) => sum + draft.procedures.reduce((s, p: any) => s + p.price, 0), 0);
-                      
-                      let actualDiscount = 0;
-                      if (discountType === 'percentage') {
-                        actualDiscount = subtotal * (Math.min(100, discount) / 100);
-                      } else {
-                        actualDiscount = Math.min(discount, subtotal); // prevent discount > subtotal
-                      }
-                      
-                      const discountFactor = subtotal > 0 ? (subtotal - actualDiscount) / subtotal : 1;
-
-                      // Upload Global DCM file once
-                      let uploadedDcmUrl = undefined;
-                      if (treatmentDcmFile) {
-                        const formData = new FormData();
-                        formData.append('file', treatmentDcmFile);
-                        try {
-                          const uploadRes = await fetch('/api/dental/upload-dcm', {
-                            method: 'POST',
-                            body: formData
-                          });
-                          if (uploadRes.ok) {
-                            const upData = await uploadRes.json();
-                            uploadedDcmUrl = upData.url;
-                          }
-                        } catch (e) {
-                          console.error('DCM Upload Error:', e);
-                        }
-                      }
-
-                      // Save all drafts
-                      try {
-                        for (const [tooth, draft] of Object.entries(toothDrafts)) {
-                          
-                          const toothOriginalPrice = draft.procedures.reduce((s, p: any) => s + p.price, 0);
-                          const toothFinalPrice = Math.round(toothOriginalPrice * discountFactor);
-                          
-                          const res = await fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                              procedureName: draft.procedures.length > 0 ? draft.procedures.map((p:any) => p.name).join(', ') : 'Belirtilmedi', 
-                              toothNumber: tooth, 
-                              indication: draft.indications.length > 0 ? draft.indications.join(', ') : undefined, 
-                              cost: toothFinalPrice, 
-                              status: 'planned',
-                              dcmUrl: uploadedDcmUrl,
-                              isPeriodic,
-                              periodDays,
-                              notifyPatient,
-                              notificationType,
-                              nextNotificationDate,
-                              clinicId: clinicId || undefined
-                            })
-                          });
-                          if (!res.ok) {
-                            console.error('Kayıt hatası:', await res.text());
-                            throw new Error('Kayıt başarısız');
-                          }
-                          
-                          // Handle Inventory Deductions
-                          for (const p of draft.procedures) {
-                            if (p.materialId) {
-                              try {
-                                await fetch('/api/hekim/material-usage', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    patientId: selectedEvent.patientId,
-                                    appointmentId: selectedEvent.id,
-                                    inventoryItemId: p.materialId,
-                                    quantity: 1
-                                  })
-                                });
-                              } catch (invErr) {
-                                console.error('Stok düşümü hatası:', invErr);
-                              }
-                            }
-                          }
-                        }
-                        
-                        setTedaviNames(['']); setSelectedTeeth([]); setLastSelectedTooth(null); setTedaviIndications(['']); setToothDrafts({}); setShowTedaviForm(false);
-                        setIsPeriodic(false); setNotifyPatient(false); setMissingPhone(''); setMissingEmail(''); setDiscount(0);
-                        fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments)
-                      } catch (err) {
-                        alert('Kayıt sırasında bir hata oluştu. Lütfen tekrar deneyin.');
-                      }
-                    }} style={{ padding: '10px 16px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, flex: 1 }}>Kaydet</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <AdvancedTedaviModal
+          selectedEvent={selectedEvent}
+          patientInfo={patientInfo}
+          clinicId={clinicId}
+          doctors={doctors}
+          onClose={() => setShowTedaviForm(false)}
+          onSaved={() => {
+            setShowTedaviForm(false);
+            fetchData();
+          }}
+        />
       )}
 
       {/* Ödeme Bilgisi Modal */}
@@ -1270,11 +946,11 @@ export default function CalendarTab() {
                   <button onClick={() => { setShowPaymentModal(false); setPaymentIdBeingEdited(null); }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer' }}>İptal</button>
                   <button onClick={() => {
                     if (!paymentAmount) return
-                    const endpoint = paymentIdBeingEdited 
-                      ? `/api/dental/payments/${paymentIdBeingEdited}` 
+                    const endpoint = paymentIdBeingEdited
+                      ? `/api/dental/payments/${paymentIdBeingEdited}`
                       : `/api/dental/patients/${selectedEvent.patientId}/payments`
                     const method = paymentIdBeingEdited ? 'PUT' : 'POST'
-                    
+
                     fetch(endpoint, {
                       method,
                       headers: { 'Content-Type': 'application/json' },
@@ -1292,7 +968,7 @@ export default function CalendarTab() {
                       setPaymentAmount(''); setPaymentTreatmentId(''); setPaymentNote('');
                       setPaymentMethod('Nakit'); setPaymentStatus('completed'); setPaymentDueDate('');
                       fetch(`/api/dental/patients/${selectedEvent.patientId}/payments`).then(r => r.json()).then(setPatientPayments)
-                    }).catch(() => {})
+                    }).catch(() => { })
                   }} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
                 </div>
               </div>
@@ -1309,7 +985,7 @@ export default function CalendarTab() {
               <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)' }}>Geçmiş Tedaviler</h3>
               <button onClick={() => setShowPastTreatmentsModal(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
             </div>
-            
+
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                 <thead>
@@ -1350,21 +1026,154 @@ export default function CalendarTab() {
       )}
 
       {selectedDcmUrl && (
-        <ThreeDicomViewer dcmUrl={selectedDcmUrl} onClose={() => setSelectedDcmUrl(null)} />
+        <DicomViewer isModal={true} dcmUrl={selectedDcmUrl} onClose={() => setSelectedDcmUrl(null)} />
       )}
+      {/* --- FLOATING CONTEXT MENUS --- */}
+      {eventContextMenu && (
+        <div
+          className="context-menu-container"
+          style={{
+            position: 'fixed', top: eventContextMenu.y, left: eventContextMenu.x, zIndex: 9999,
+            background: 'var(--background-2)', border: '1px solid var(--glass-border)',
+            borderRadius: 8, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', width: 220
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12 }}>Randevu Ata</div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 4 }}>Doktor</div>
+            <select
+              value={eventContextMenu.doctorId}
+              onChange={e => setEventContextMenu({ ...eventContextMenu, doctorId: e.target.value })}
+              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }}
+            >
+              <option value="">Seçiniz...</option>
+              {doctors
+                .filter(d => shifts.some(s => s.userId === d.id && s.date === eventContextMenu.date))
+                .map(d => <option key={d.id} value={d.id}>{d.name}</option>)
+              }
+            </select>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 4 }}>Tarih / Saat Aralığı</div>
+            <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+              <input
+                type="date"
+                value={eventContextMenu.date}
+                onChange={e => setEventContextMenu({ ...eventContextMenu, date: e.target.value })}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }}
+              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="time"
+                  value={eventContextMenu.startTime}
+                  onChange={e => setEventContextMenu({ ...eventContextMenu, startTime: e.target.value })}
+                  style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }}
+                />
+                <input
+                  type="time"
+                  value={eventContextMenu.endTime}
+                  onChange={e => setEventContextMenu({ ...eventContextMenu, endTime: e.target.value })}
+                  style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }}
+                />
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+            <button onClick={() => setEventContextMenu(null)} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '0.8rem' }}>İptal</button>
+            <button onClick={async () => {
+              const startTime = new Date(`${eventContextMenu.date}T${eventContextMenu.startTime}:00+03:00`)
+              const endTime = new Date(`${eventContextMenu.date}T${eventContextMenu.endTime}:00+03:00`)
+              await fetch(`/api/dental/appointments/${eventContextMenu.event.id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ doctorId: eventContextMenu.doctorId || null, startTime: startTime.toISOString(), endTime: endTime.toISOString() })
+              })
+              setEventContextMenu(null)
+              fetchData()
+            }} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>Kaydet</button>
+          </div>
+        </div>
+      )}
+
+      {unassignedListMenu && (
+        <div
+          onClick={() => setUnassignedListMenu(null)}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'fixed', top: Math.min(unassignedListMenu.y, window.innerHeight - 300), left: Math.min(unassignedListMenu.x, window.innerWidth - 250), zIndex: 9999,
+              background: 'var(--background-2)', border: '1px solid var(--glass-border)',
+              borderRadius: 8, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', width: 250, maxHeight: 300, overflowY: 'auto'
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+              <span>⚠️ Bekleyen Randevular</span>
+              <button onClick={() => setUnassignedListMenu(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer' }}>✕</button>
+            </div>
+            {events.filter(e => !e.doctorId).length === 0 ? (
+              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)' }}>Bekleyen randevu yok.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {events.filter(e => !e.doctorId).map(e => (
+                  <div
+                    key={e.id}
+                    onClick={() => {
+                      setCurrentDate(e.startTime.slice(0, 10))
+                      setView('day')
+                      setUnassignedListMenu(null)
+                    }}
+                    style={{
+                      padding: '8px 10px', borderRadius: 6, border: '1px solid var(--glass-border)',
+                      background: 'var(--glass-bg)', cursor: 'pointer', fontSize: '0.8rem'
+                    }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'var(--glass-bg)'}
+                  >
+                    <div style={{ fontWeight: 600, color: 'var(--foreground)', marginBottom: 2 }}>{e.title}</div>
+                    <div style={{ color: 'var(--foreground-3)', fontSize: '0.7rem' }}>
+                      {new Date(e.startTime).toLocaleDateString('tr-TR')} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(!showTedaviForm && shiftContextMenu) && (
+        <div className="context-menu-container">
+          <ShiftContextMenu
+            x={shiftContextMenu.x}
+            y={shiftContextMenu.y}
+            doctorId={shiftContextMenu.doctorId}
+            date={shiftContextMenu.date}
+            onClose={() => setShiftContextMenu(null)}
+            onSave={async (shift) => {
+              await fetch('/api/shifts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(shift)
+              })
+              setShiftContextMenu(null)
+              window.location.reload()
+            }}
+          />
+        </div>
+      )}
+
+      <PatientSidePanel 
+        isOpen={patientPanelOpen} 
+        onClose={() => setPatientPanelOpen(false)} 
+        patients={patients} 
+      />
+
     </div>
   )
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  borderRadius: 8,
-  border: '1px solid var(--input-border)',
-  background: 'var(--input-bg)',
-  color: 'var(--foreground)',
-  fontSize: '0.8rem',
-  outline: 'none',
-}
+
 
 const btnStyle: React.CSSProperties = {
   padding: '8px 16px',

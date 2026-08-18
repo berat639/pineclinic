@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../../../../lib/auth-context'
+import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
+import CircularTimePicker from '../../../admin/components/CircularTimePicker'
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
@@ -27,6 +29,30 @@ export default function KlinikPersonelTab() {
   const [weekOffset, setWeekOffset] = useState(0)
   const [shiftForm, setShiftForm] = useState({ userId: '', date: '', startTime: '09:00', endTime: '18:00' })
   const [showShiftForm, setShowShiftForm] = useState(false)
+  const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
+  
+  const [shiftTemplates, setShiftTemplates] = useState<{name: string, start: number, end: number}[]>([])
+  const [newTemplateName, setNewTemplateName] = useState('')
+  const [newTemplateRange, setNewTemplateRange] = useState<[number, number]>([9, 17])
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('shiftTemplates')
+      if (stored) setShiftTemplates(JSON.parse(stored))
+      else setShiftTemplates([
+        { name: 'Sabahçı', start: 9, end: 19 },
+        { name: 'Öğlenci', start: 12, end: 20 },
+        { name: 'Tam Gün', start: 9, end: 20 }
+      ])
+    } catch {}
+  }, [])
+
+  const saveTemplates = (t: {name: string, start: number, end: number}[]) => {
+    setShiftTemplates(t)
+    localStorage.setItem('shiftTemplates', JSON.stringify(t))
+    // trigger custom event so other components can refresh templates
+    window.dispatchEvent(new Event('shiftTemplatesUpdated'))
+  }
 
   const fetchData = useCallback(() => {
     fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
@@ -96,7 +122,15 @@ export default function KlinikPersonelTab() {
         {users.map(u => {
           const role = ROLE_META[u.role] || ROLE_META.host
           return (
-            <div key={u.id} className="glass-card" style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div 
+              key={u.id} 
+              className="glass-card" 
+              style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10 }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId: u.id, date: new Date().toISOString().split('T')[0] })
+              }}
+            >
               {u.color && <span style={{ width: 10, height: 10, borderRadius: '50%', background: u.color, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name}</div>
@@ -138,12 +172,39 @@ export default function KlinikPersonelTab() {
       )}
 
       {/* Week grid - responsive */}
+      {shiftContextMenu && (
+        <ShiftContextMenu
+          x={shiftContextMenu.x}
+          y={shiftContextMenu.y}
+          doctorId={shiftContextMenu.doctorId}
+          users={users}
+          date={shiftContextMenu.date}
+          onClose={() => setShiftContextMenu(null)}
+          onSave={async (shift) => {
+            await fetch('/api/shifts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(shift)
+            })
+            setShiftContextMenu(null)
+            fetchData()
+          }}
+        />
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 6 }}>
         {days.map(d => {
           const dayShifts = shifts.filter(s => s.date === d)
           const isToday = d === new Date().toISOString().split('T')[0]
           return (
-            <div key={d} className="glass-card" style={{ padding: 10, minHeight: 90, borderLeft: isToday ? '3px solid var(--accent)' : undefined }}>
+            <div 
+            key={d} 
+            className="glass-card" 
+            style={{ padding: 10, minHeight: 90, borderLeft: isToday ? '3px solid var(--accent)' : undefined, cursor: 'context-menu' }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId: '', date: d })
+            }}
+            >
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: isToday ? 'var(--accent)' : 'var(--foreground)', marginBottom: 6 }}>
                 {new Date(d + 'T00:00').toLocaleDateString('tr-TR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
               </div>
@@ -162,6 +223,59 @@ export default function KlinikPersonelTab() {
           )
         })}
       </div>
+
+      {/* Vardiya Türleri (Şablon) Yönetimi */}
+      <div style={{ marginTop: 32, padding: 20, background: 'var(--glass-bg)', borderRadius: 12, border: '1px solid var(--glass-border)' }}>
+        <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', marginBottom: 16 }}>Vardiya Şablonları</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
+          
+          {/* List */}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Mevcut Şablonlar</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {shiftTemplates.map((t, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--foreground)' }}>{t.name}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>
+                      {Math.floor(t.start).toString().padStart(2, '0')}:{(t.start % 1 === 0.5) ? '30' : '00'} - {Math.floor(t.end).toString().padStart(2, '0')}:{(t.end % 1 === 0.5) ? '30' : '00'}
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => saveTemplates(shiftTemplates.filter((_, i) => i !== idx))}
+                    style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.8rem' }}
+                  >Sil</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Add New */}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Yeni Şablon Ekle</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <input 
+                placeholder="Vardiya Adı (Örn: Gece Nöbeti)" 
+                value={newTemplateName} 
+                onChange={e => setNewTemplateName(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+              <CircularTimePicker range={newTemplateRange} onChange={setNewTemplateRange} />
+              <button 
+                onClick={() => {
+                  if (newTemplateName.trim()) {
+                    saveTemplates([...shiftTemplates, { name: newTemplateName.trim(), start: newTemplateRange[0], end: newTemplateRange[1] }])
+                    setNewTemplateName('')
+                  }
+                }}
+                style={{ ...btnStyle, alignSelf: 'flex-start' }}
+              >Şablonu Ekle</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
     </div>
   )
 }

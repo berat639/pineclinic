@@ -112,8 +112,18 @@ export const dentalAppointments = pgTable('dental_appointments', {
   endTime: timestamp('end_time', { withTimezone: true }).notNull(),
   status: text('status').notNull().default('scheduled'),
   type: text('type').notNull().default('general'),
+  complaint: text('complaint'),
   notes: text('notes'),
   timeConfirmed: boolean('time_confirmed').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const treatmentGroups = pgTable('treatment_groups', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  name: text('name').notNull(),
+  description: text('description'),
+  status: text('status').notNull().default('active'), // active, completed, cancelled
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -121,6 +131,8 @@ export const treatmentPlans = pgTable('treatment_plans', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
+  doctorId: uuid('doctor_id').references(() => users.id),
+  groupId: uuid('group_id').references(() => treatmentGroups.id),
   procedureName: text('procedure_name').notNull(),
   toothNumber: text('tooth_number'),
   indication: text('indication'),
@@ -390,11 +402,11 @@ export const procedureTemplates = pgTable('procedure_templates', {
 
 export const consultations = pgTable('consultations', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  fromDoctorId: uuid('from_doctor_id').notNull().references(() => users.id),
-  toDoctorId: uuid('to_doctor_id').notNull().references(() => users.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
-  notes: text('notes'),
-  status: text('status').notNull().default('pending'),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
+  doctorId: uuid('doctor_id').references(() => users.id),
+  consultationNote: text('consultation_note').notNull(),
+  diseaseNote: text('disease_note'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -413,6 +425,15 @@ export const patientAnamnesis = pgTable('patient_anamnesis', {
   formData: jsonb('form_data').notNull().default({}),
   filledBy: uuid('filled_by').references(() => users.id),
   filledAt: timestamp('filled_at', { withTimezone: true }).defaultNow(),
+})
+
+export const patientDiseases = pgTable('patient_diseases', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  name: text('name').notNull(),
+  notes: text('notes'),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
 export const doctorAvailability = pgTable('doctor_availability', {
@@ -469,3 +490,7 @@ export type NewUser = typeof users.$inferInsert
 export type Shift = typeof shifts.$inferSelect
 export type Notification = typeof notifications.$inferSelect
 export type NewKnowledgeCategory = typeof knowledgeCategories.$inferInsert
+export type PatientDisease = typeof patientDiseases.$inferSelect
+export type NewPatientDisease = typeof patientDiseases.$inferInsert
+
+

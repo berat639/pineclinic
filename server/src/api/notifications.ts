@@ -7,7 +7,7 @@ import { authenticateRequest } from '../middleware/auth'
 export const notificationsPlugin = new Elysia({ prefix: '/api/notifications' })
 
   .get('/', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const limit = Math.min(parseInt(query.limit as string) || 50, 100)
@@ -20,7 +20,7 @@ export const notificationsPlugin = new Elysia({ prefix: '/api/notifications' })
   })
 
   .get('/unread-count', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const [result] = await db.select({ count: sql<number>`count(*)::int` })
@@ -31,7 +31,7 @@ export const notificationsPlugin = new Elysia({ prefix: '/api/notifications' })
   })
 
   .put('/:id/read', async ({ params, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     await db.update(notifications)
@@ -42,7 +42,7 @@ export const notificationsPlugin = new Elysia({ prefix: '/api/notifications' })
   })
 
   .put('/read-all', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     await db.update(notifications)

@@ -39,7 +39,7 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
   })
 
   .post('/logout', async ({ cookie, set }) => {
-    const token = (cookie.token?.value as string | undefined)
+    const token = ((cookie.token?.value as string | undefined) as string | undefined)
     if (!token) { set.status = 200; return { ok: true } }
 
     const { verifyToken } = await import('../middleware/auth')
@@ -51,13 +51,13 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
   })
 
   .get('/me', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     return user
   })
 
   .put('/password', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const { currentPassword, newPassword } = body as { currentPassword: string; newPassword: string }

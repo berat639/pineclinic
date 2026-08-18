@@ -57,8 +57,6 @@ import { authPlugin } from './api/auth'
 import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
-import { hekimPlugin } from './api/hekim'
-import { hostPlugin } from './api/host'
 import { startReminderCron } from './cron/reminders'
 
 const callerRegistry = new Map<string, string>()
@@ -254,8 +252,6 @@ const app = new Elysia()
   .use(shiftsPlugin)
   .use(notificationsPlugin)
   .use(yoneticiPlugin)
-  .use(hekimPlugin)
-  .use(hostPlugin)
 
   // ── Users API (admin) ──────────────────────────────────────────────────────
   .get('/api/admin/users', async () => {
@@ -314,6 +310,9 @@ const app = new Elysia()
       status: b.status as string | undefined,
       startTime: b.startTime ? new Date(b.startTime as string) : undefined,
       endTime: b.endTime ? new Date(b.endTime as string) : undefined,
+      type: b.type as string | undefined,
+      complaint: b.complaint as string | undefined,
+      notes: b.notes as string | undefined,
     })
     if (!updated) { set.status = 404; return { error: 'Not found' } }
     return updated
@@ -364,6 +363,12 @@ const app = new Elysia()
     if (!p) { set.status = 404; return { error: 'Patient not found' } }
     return p
   })
+  .get('/api/dental/patients/:id/profile', async ({ params, set }) => {
+    const { getPatientFullProfile } = await import('./db/repositories/dental')
+    const p = await getPatientFullProfile(params.id)
+    if (!p) { set.status = 404; return { error: 'Patient not found' } }
+    return p
+  })
   .put('/api/dental/patients/:id', async ({ params, body, set }) => {
     const { db } = await import('./db/client')
     const { patients } = await import('./db/schema')
@@ -377,6 +382,27 @@ const app = new Elysia()
     await db.update(patients).set(updateData).where(eq(patients.id, params.id))
     return { success: true }
   })
+  .get('/api/dental/patients/:id/treatment-groups', async ({ params }) => {
+    const { getPatientTreatmentGroups } = await import('./db/repositories/dental')
+    return await getPatientTreatmentGroups(params.id)
+  })
+  .post('/api/dental/patients/:id/treatment-groups', async ({ params, body, set }) => {
+    const { createTreatmentGroup } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.name) { set.status = 400; return { error: 'name gerekli' } }
+    return await createTreatmentGroup({ patientId: params.id, name: b.name, description: b.description })
+  })
+  .put('/api/dental/treatment-groups/:id', async ({ params, body }) => {
+    const { updateTreatmentGroup } = await import('./db/repositories/dental')
+    const b = body as any
+    return await updateTreatmentGroup(params.id, { name: b.name, description: b.description, status: b.status })
+  })
+  .delete('/api/dental/treatment-groups/:id', async ({ params, set }) => {
+    const { deleteTreatmentGroup } = await import('./db/repositories/dental')
+    const success = await deleteTreatmentGroup(params.id)
+    if (!success) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
+  })
   .get('/api/dental/patients/:id/treatments', async ({ params }) => {
     const { getPatientTreatments } = await import('./db/repositories/dental')
     return await getPatientTreatments(params.id)
@@ -387,6 +413,7 @@ const app = new Elysia()
     if (!b.procedureName || b.cost === undefined) { set.status = 400; return { error: 'Missing fields' } }
     return await createTreatmentPlan({ 
       patientId: params.id, 
+      doctorId: b.doctorId,
       procedureName: b.procedureName, 
       toothNumber: b.toothNumber, 
       indication: b.indication, 
@@ -394,12 +421,33 @@ const app = new Elysia()
       status: b.status,
       dcmUrl: b.dcmUrl,
       clinicId: b.clinicId,
+      groupId: b.groupId,
       isPeriodic: b.isPeriodic,
       periodDays: b.periodDays,
       nextNotificationDate: b.nextNotificationDate,
       notifyPatient: b.notifyPatient,
       notificationType: b.notificationType
     })
+  })
+  .get('/api/dental/patients/:id/consultations', async ({ params }) => {
+    const { getPatientConsultations } = await import('./db/repositories/dental')
+    return await getPatientConsultations(params.id)
+  })
+  .post('/api/dental/patients/:id/consultations', async ({ params, body, set }) => {
+    const { createConsultation } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.consultationNote) { set.status = 400; return { error: 'Missing fields' } }
+    return await createConsultation({
+      patientId: params.id,
+      clinicId: b.clinicId,
+      doctorId: b.doctorId,
+      consultationNote: b.consultationNote,
+      diseaseNote: b.diseaseNote
+    })
+  })
+  .get('/api/dental/clinics/:id/consultations/autocomplete', async ({ params }) => {
+    const { getClinicConsultationAutocomplete } = await import('./db/repositories/dental')
+    return await getClinicConsultationAutocomplete(params.id)
   })
   .post('/api/dental/upload-dcm', async ({ body, set }) => {
     const MAX_DCM_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -446,7 +494,7 @@ const app = new Elysia()
   .put('/api/dental/treatments/:id', async ({ params, body }) => {
     const { updateTreatmentPlan } = await import('./db/repositories/dental')
     const b = body as any
-    return await updateTreatmentPlan(params.id, { status: b.status })
+    return await updateTreatmentPlan(params.id, { status: b.status, groupId: b.groupId })
   })
   .delete('/api/dental/treatments/:id', async ({ params, set }) => {
     const { deleteTreatmentPlan } = await import('./db/repositories/dental')
@@ -473,6 +521,44 @@ const app = new Elysia()
     const b = body as any
     if (!b.doctorId || !b.date || !b.description) { set.status = 400; return { error: 'Missing fields' } }
     return await createCompletedWork({ patientId: params.id, doctorId: b.doctorId, date: b.date, description: b.description })
+  })
+  .get('/api/dental/patients/:id/consultations', async ({ params }) => {
+    const { getPatientConsultations } = await import('./db/repositories/dental')
+    return await getPatientConsultations(params.id)
+  })
+  .post('/api/dental/patients/:id/consultations', async ({ params, body, set }) => {
+    const { createConsultation } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.consultationNote) { set.status = 400; return { error: 'Missing consultation note' } }
+    return await createConsultation({ 
+      patientId: params.id, 
+      doctorId: b.doctorId,
+      clinicId: b.clinicId,
+      consultationNote: b.consultationNote,
+      diseaseNote: b.diseaseNote
+    })
+  })
+  .delete('/api/dental/consultations/:id', async ({ params, set }) => {
+    const { deleteConsultation } = await import('./db/repositories/dental')
+    const success = await deleteConsultation(params.id)
+    if (!success) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
+  })
+  .get('/api/dental/patients/:id/diseases', async ({ params }) => {
+    const { getPatientDiseases } = await import('./db/repositories/dental')
+    return await getPatientDiseases(params.id)
+  })
+  .post('/api/dental/patients/:id/diseases', async ({ params, body, set }) => {
+    const { createPatientDisease } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.name) { set.status = 400; return { error: 'Missing fields' } }
+    return await createPatientDisease({ patientId: params.id, name: b.name, notes: b.notes })
+  })
+  .delete('/api/dental/diseases/:id', async ({ params, set }) => {
+    const { deletePatientDisease } = await import('./db/repositories/dental')
+    const success = await deletePatientDisease(params.id)
+    if (!success) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
   })
 
   .get('/api/appointments', async () => await readAppointments())
@@ -655,7 +741,7 @@ const app = new Elysia()
   // User-scoped SSE for notifications
   .get('/api/notifications/stream', async ({ cookie, set }) => {
     const { authenticateRequest } = await import('./middleware/auth')
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     set.headers['Content-Type'] = 'text/event-stream'

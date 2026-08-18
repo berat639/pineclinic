@@ -8,7 +8,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
   .get('/', async ({ query, cookie, set }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'
-    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const week = query.week as string | undefined
@@ -39,7 +39,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
   .post('/', async ({ body, cookie, set }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'
-    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 
@@ -70,7 +70,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
   .delete('/:id', async ({ params, cookie, set }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'
-    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 
@@ -80,7 +80,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
   // Swap requests
   .get('/swap-requests', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const rows = await db.select().from(shiftSwapRequests).orderBy(shiftSwapRequests.createdAt)
@@ -88,7 +88,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
   })
 
   .post('/swap-request', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const b = body as any
@@ -108,7 +108,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
   })
 
   .put('/swap-requests/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 

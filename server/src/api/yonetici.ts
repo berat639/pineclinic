@@ -25,7 +25,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Finance ────────────────────────────────────────────────────────────────
   .get('/finance/revenue', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const period = (query.period as string) || 'daily'
@@ -53,7 +53,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/finance/income-expense-chart', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const period = (query.period as string) || 'daily'
@@ -105,14 +105,14 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/finance/expenses', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     return db.select().from(expenses).orderBy(desc(expenses.createdAt)).limit(100)
   })
 
   .post('/finance/expenses', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -133,7 +133,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/finance/profit-loss', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const month = (query.month as string) || new Date().toISOString().slice(0, 7)
@@ -152,13 +152,13 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/finance/targets', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
     return db.select().from(revenueTargets).orderBy(desc(revenueTargets.year), desc(revenueTargets.month))
   })
 
   .post('/finance/targets', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -169,7 +169,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/finance/debtors', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     return db.select().from(patients).where(sql`balance < 0`).orderBy(patients.balance)
@@ -177,7 +177,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Attendance ─────────────────────────────────────────────────────────────
   .get('/attendance', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const rows = await db.select({
@@ -198,7 +198,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .post('/attendance/clock-in', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const today = new Date().toISOString().split('T')[0]!
@@ -209,7 +209,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .post('/attendance/clock-out', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const today = new Date().toISOString().split('T')[0]!
@@ -232,7 +232,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Analytics ──────────────────────────────────────────────────────────────
   .get('/analytics/ai-calls', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const rows = await db.select({
@@ -244,7 +244,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/analytics/treatments', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     return db.select({
@@ -254,7 +254,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/analytics/no-shows', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const [total] = await db.select({ count: sql<number>`count(*)::int` }).from(dentalAppointments)
@@ -265,7 +265,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/analytics/occupancy', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const rows = await db.select({
@@ -278,13 +278,13 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Inventory ──────────────────────────────────────────────────────────────
   .get('/inventory', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
     return db.select().from(inventoryItems).orderBy(inventoryItems.name)
   })
 
   .post('/inventory', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -318,7 +318,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/inventory/movements', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
     const { inventoryMovements, users: u } = await import('../db/schema')
     return db.select({
@@ -330,7 +330,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .post('/inventory/movement', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -401,7 +401,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/inventory/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -417,13 +417,13 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Device Maintenance ─────────────────────────────────────────────────────
   .get('/device-maintenance', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
     return db.select().from(deviceMaintenances).orderBy(deviceMaintenances.scheduledDate)
   })
 
   .post('/device-maintenance', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -496,7 +496,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/device-maintenance/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -510,7 +510,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── KVKK / GDPR ───────────────────────────────────────────────────────────
   .post('/gdpr/anonymize/:patientId', async ({ params, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     await db.update(patients).set({
@@ -526,7 +526,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .get('/audit-log', async ({ query, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const limit = Math.min(parseInt(query.limit as string) || 50, 200)
@@ -547,7 +547,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Automation Settings ────────────────────────────────────────────────────
   .get('/automation/settings', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { db: dbClient } = await import('../db/client')
@@ -561,7 +561,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/automation/settings', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { db: dbClient } = await import('../db/client')
@@ -579,7 +579,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── User Management (CRUD) ────────────────────────────────────────────────
   .post('/users', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const b = body as any
@@ -609,7 +609,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/users/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { updateUser } = await import('../db/repositories/users')
@@ -631,7 +631,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
   // ── Integrations ───────────────────────────────────────────────────────────
   .get('/integrations', async ({ cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { getIntegrations } = await import('../db/repositories/integrations')
@@ -639,7 +639,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/integrations', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest((cookie.token?.value as string | undefined))
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { updateIntegrations } = await import('../db/repositories/integrations')

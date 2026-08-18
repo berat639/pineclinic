@@ -15,6 +15,7 @@ export interface IntegrationsSettings {
   smtpPort?: string | null
   smtpUser?: string | null
   smtpPass?: string | null
+  smtpSecure?: string | null
   
   // SMS (NetGSM)
   smsUsercode?: string | null
@@ -31,13 +32,14 @@ const KEYS = {
   SMTP_PORT: 'smtp.port',
   SMTP_USER: 'smtp.user',
   SMTP_PASS: 'smtp.pass',
+  SMTP_SECURE: 'smtp.secure',
 }
 
 export async function getIntegrations(): Promise<IntegrationsSettings> {
   // Get business settings
   const [
     voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
-    smtpHost, smtpPort, smtpUser, smtpPass
+    smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure
   ] = await Promise.all([
     getSetting(KEYS.VOIP_PROVIDER),
     getSetting(KEYS.VOIP_LABEL),
@@ -46,7 +48,8 @@ export async function getIntegrations(): Promise<IntegrationsSettings> {
     getSetting(KEYS.SMTP_HOST),
     getSetting(KEYS.SMTP_PORT),
     getSetting(KEYS.SMTP_USER),
-    getSetting(KEYS.SMTP_PASS)
+    getSetting(KEYS.SMTP_PASS),
+    getSetting(KEYS.SMTP_SECURE)
   ])
 
   // Get clinic settings (assume the first clinic for now)
@@ -62,6 +65,7 @@ export async function getIntegrations(): Promise<IntegrationsSettings> {
     smtpPort,
     smtpUser,
     smtpPass,
+    smtpSecure,
     smsUsercode: clinic?.netgsmUsercode || null,
     smsPassword: clinic?.netgsmPassword || null,
     smsSenderId: clinic?.smsSenderId || null,
@@ -82,6 +86,7 @@ export async function updateIntegrations(patch: IntegrationsSettings): Promise<v
   if (patch.smtpPort !== undefined) updates.push(setSetting(KEYS.SMTP_PORT, patch.smtpPort || ''))
   if (patch.smtpUser !== undefined) updates.push(setSetting(KEYS.SMTP_USER, patch.smtpUser || ''))
   if (patch.smtpPass !== undefined) updates.push(setSetting(KEYS.SMTP_PASS, patch.smtpPass || ''))
+  if (patch.smtpSecure !== undefined) updates.push(setSetting(KEYS.SMTP_SECURE, patch.smtpSecure || ''))
 
   await Promise.all(updates)
 
