@@ -93,7 +93,7 @@ export default function PromptEditor() {
   if (loading) {
     return (
       <div className="glass-card" style={{ padding: 24 }}>
-        <div style={{ fontSize: 13, color: 'rgba(240,244,255,0.4)' }}>Yükleniyor...</div>
+        <div style={{ fontSize: 13, color: 'var(--foreground-3)' }}>Yükleniyor...</div>
       </div>
     )
   }
@@ -103,12 +103,12 @@ export default function PromptEditor() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>🔄 Konuşma Akışı</div>
-          <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.4)', marginTop: 4 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--foreground)' }}>🔄 Konuşma Akışı</div>
+          <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 4 }}>
             AI bu sırayla bilgi toplar → Randevu oluşturur → DB&apos;ye kaydeder
           </div>
         </div>
-        <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(255,255,255,0.05)', padding: '3px 8px', borderRadius: 4 }}>
+        <span style={{ fontSize: 10, color: 'var(--foreground-3)', background: 'rgba(255,255,255,0.05)', padding: '3px 8px', borderRadius: 4 }}>
           {activeFields.length} aktif alan
         </span>
       </div>
@@ -142,8 +142,8 @@ export default function PromptEditor() {
                     <span style={{ fontSize: 9, padding: '1px 6px', background: 'rgba(251,146,60,0.12)', border: '1px solid rgba(251,146,60,0.25)', borderRadius: 10, color: '#fb923c', fontWeight: 600 }}>zorunlu</span>
                   )}
                   <div style={{ flex: 1 }} />
-                  <button onClick={() => moveField(idx, -1)} disabled={idx === 0 || fieldsSaving} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 11, padding: '2px 4px', opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
-                  <button onClick={() => moveField(idx, 1)} disabled={idx === customFields.length - 1 || fieldsSaving} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 11, padding: '2px 4px', opacity: idx === customFields.length - 1 ? 0.3 : 1 }}>↓</button>
+                  <button onClick={() => moveField(idx, -1)} disabled={idx === 0 || fieldsSaving} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: 11, padding: '2px 4px', opacity: idx === 0 ? 0.3 : 1 }}>↑</button>
+                  <button onClick={() => moveField(idx, 1)} disabled={idx === customFields.length - 1 || fieldsSaving} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: 11, padding: '2px 4px', opacity: idx === customFields.length - 1 ? 0.3 : 1 }}>↓</button>
                   <button onClick={() => toggleRequired(idx)} disabled={fieldsSaving} title={field.required ? 'Opsiyonel yap' : 'Zorunlu yap'} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, padding: '2px 4px', color: field.required ? '#fb923c' : '#475569' }}>{field.required ? '★' : '☆'}</button>
                   <button onClick={() => toggleField(idx)} disabled={fieldsSaving} style={{ width: 30, height: 16, borderRadius: 8, border: 'none', cursor: 'pointer', background: isActive ? '#22c55e' : 'rgba(255,255,255,0.1)', position: 'relative', transition: 'background 0.2s' }}>
                     <span style={{ position: 'absolute', top: 2, width: 12, height: 12, left: isActive ? 16 : 2, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
@@ -154,12 +154,12 @@ export default function PromptEditor() {
                 {/* Description - click to edit */}
                 {isEditing ? (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input autoFocus value={editDesc} onChange={e => setEditDesc(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEditDesc(idx); if (e.key === 'Escape') setEditingIdx(null) }} style={{ flex: 1, padding: '4px 8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 5, color: '#f0f4ff', fontSize: 11, outline: 'none' }} />
+                    <input autoFocus value={editDesc} onChange={e => setEditDesc(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveEditDesc(idx); if (e.key === 'Escape') setEditingIdx(null) }} style={{ flex: 1, padding: '4px 8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 5, color: 'var(--foreground)', fontSize: 11, outline: 'none' }} />
                     <button onClick={() => saveEditDesc(idx)} style={{ background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer', fontSize: 11 }}>✓</button>
-                    <button onClick={() => setEditingIdx(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 11 }}>✕</button>
+                    <button onClick={() => setEditingIdx(null)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: 11 }}>✕</button>
                   </div>
                 ) : (
-                  <div onClick={() => { setEditingIdx(idx); setEditDesc(field.description) }} style={{ fontSize: 11, color: '#94a3b8', cursor: 'pointer', lineHeight: 1.5, padding: '2px 0' }} title="Tıklayarak düzenle">
+                  <div onClick={() => { setEditingIdx(idx); setEditDesc(field.description) }} style={{ fontSize: 11, color: 'var(--foreground-3)', cursor: 'pointer', lineHeight: 1.5, padding: '2px 0' }} title="Tıklayarak düzenle">
                     💬 {field.description}
                   </div>
                 )}
@@ -179,26 +179,26 @@ export default function PromptEditor() {
       {customFields.length === 0 && (
         <div style={{ textAlign: 'center', padding: '24px 16px', marginBottom: 16, background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: 10 }}>
           <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Henüz alan eklenmedi</div>
+          <div style={{ fontSize: 12, color: 'var(--foreground-3)' }}>Henüz alan eklenmedi</div>
           <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>Aşağıdan ilk alanınızı ekleyin</div>
         </div>
       )}
 
       {/* Add new field */}
       <div style={{ padding: 16, background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 12 }}>+ Yeni Alan Ekle</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-3)', marginBottom: 12 }}>+ Yeni Alan Ekle</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: '0 0 140px' }}>
-            <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 4 }}>Alan Adı</label>
-            <input value={newFieldName} onChange={e => setNewFieldName(e.target.value)} placeholder="telefon" onKeyDown={e => { if (e.key === 'Enter') addField() }} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#f0f4ff', fontSize: 12, fontFamily: 'monospace', outline: 'none' }} />
+            <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Alan Adı</label>
+            <input value={newFieldName} onChange={e => setNewFieldName(e.target.value)} placeholder="telefon" onKeyDown={e => { if (e.key === 'Enter') addField() }} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--foreground)', fontSize: 12, fontFamily: 'monospace', outline: 'none' }} />
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 4 }}>AI Talimatı (nasıl soracak)</label>
-            <input value={newFieldDesc} onChange={e => setNewFieldDesc(e.target.value)} placeholder="Telefon numaranızı öğrenebilir miyim?" onKeyDown={e => { if (e.key === 'Enter') addField() }} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: '#f0f4ff', fontSize: 12, outline: 'none' }} />
+            <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>AI Talimatı (nasıl soracak)</label>
+            <input value={newFieldDesc} onChange={e => setNewFieldDesc(e.target.value)} placeholder="Telefon numaranızı öğrenebilir miyim?" onKeyDown={e => { if (e.key === 'Enter') addField() }} style={{ width: '100%', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} />
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--foreground-3)', cursor: 'pointer' }}>
             <input type="checkbox" checked={newFieldReq} onChange={e => setNewFieldReq(e.target.checked)} style={{ accentColor: '#fb923c' }} />
             Zorunlu
           </label>
@@ -210,8 +210,8 @@ export default function PromptEditor() {
 
       {/* Info footer */}
       <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(59,130,246,0.04)', border: '1px solid rgba(59,130,246,0.1)' }}>
-        <div style={{ fontSize: 10, color: '#64748b', lineHeight: 1.7 }}>
-          <strong style={{ color: '#94a3b8' }}>Nasıl çalışır:</strong> AI alanları yukarıdaki sırayla sorar. Açıklama = AI&apos;nın sorusu. ↑↓ sıra değiştir. ★ zorunlu yap. Toggle ile kapat. Tıklayarak düzenle.
+        <div style={{ fontSize: 10, color: 'var(--foreground-3)', lineHeight: 1.7 }}>
+          <strong style={{ color: 'var(--foreground-3)' }}>Nasıl çalışır:</strong> AI alanları yukarıdaki sırayla sorar. Açıklama = AI&apos;nın sorusu. ↑↓ sıra değiştir. ★ zorunlu yap. Toggle ile kapat. Tıklayarak düzenle.
         </div>
       </div>
     </div>

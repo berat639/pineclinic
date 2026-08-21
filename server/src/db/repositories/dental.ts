@@ -308,7 +308,7 @@ export async function updateTreatmentGroup(id: string, data: {
 
 export async function deleteTreatmentGroup(id: string): Promise<boolean> {
   // First unlink treatments from this group
-  await db.update(treatmentPlans).set({ groupId: null }).where(eq(treatmentPlans.groupId, id))
+  await db.delete(treatmentPlans).where(eq(treatmentPlans.groupId, id))
   const rows = await db.delete(treatmentGroups).where(eq(treatmentGroups.id, id)).returning({ id: treatmentGroups.id })
   return rows.length > 0
 }
@@ -710,4 +710,58 @@ export async function getClinicConsultationAutocomplete(clinicId: string) {
     consultationNotes: Array.from(uniqueConsultations),
     diseaseNotes: Array.from(uniqueDiseases)
   }
+}
+
+export async function createPatientsBulk(patientList: {
+  name: string
+  phone?: string
+  tcIdentity?: string
+  gender?: string
+  birthDate?: string
+}[]) {
+  if (patientList.length === 0) return []
+  const { patients } = await import('../schema')
+  const mapped = patientList.map(p => ({ ...p, birthDate: p.birthDate ? new Date(p.birthDate) : null }))
+  return await db.insert(patients).values(mapped).returning()
+}
+
+export async function updateTreatmentGroupFull(groupId: string, data: {
+  name: string
+  description?: string
+  patientId: string
+  treatments: any[]
+}) {
+  await updateTreatmentGroup(groupId, { name: data.name, description: data.description })
+  
+  const existing = await db.select().from(treatmentPlans).where(eq(treatmentPlans.groupId, groupId))
+  const existingIds = existing.map(t => t.id)
+  const incomingIds = data.treatments.filter(t => t.id).map(t => t.id)
+  const idsToDelete = existingIds.filter(id => !incomingIds.includes(id))
+  
+  for (const id of idsToDelete) {
+    await db.delete(treatmentPlans).where(eq(treatmentPlans.id, id))
+  }
+  
+  for (const t of data.treatments) {
+    if (t.id) {
+       await db.update(treatmentPlans).set({
+         procedureName: t.procedureName,
+         toothNumber: t.toothNumber,
+         indication: t.indication,
+         cost: t.cost,
+         doctorId: t.doctorId
+       }).where(eq(treatmentPlans.id, t.id))
+    } else {
+       await createTreatmentPlan({ 
+         patientId: data.patientId,
+         procedureName: t.procedureName,
+         toothNumber: t.toothNumber,
+         indication: t.indication,
+         cost: t.cost,
+         doctorId: t.doctorId,
+         groupId 
+       })
+    }
+  }
+  return true
 }

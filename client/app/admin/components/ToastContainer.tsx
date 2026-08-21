@@ -74,10 +74,10 @@ export default function ToastContainer({ onNewAppointment }: { onNewAppointment?
             <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{s.icon}</span>
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: 2 }}>{t.title}</div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{t.message}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>{t.message}</div>
             </div>
             <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.9rem', padding: 0, flexShrink: 0 }}>✕</button>
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '0.9rem', padding: 0, flexShrink: 0 }}>✕</button>
           </div>
         )
       })}

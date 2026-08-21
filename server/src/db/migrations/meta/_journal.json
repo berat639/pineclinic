@@ -43,6 +43,13 @@
       "when": 1787082972376,
       "tag": "0005_nosy_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787154607066,
+      "tag": "0006_strong_northstar",
+      "breakpoints": true
     }
   ]
 }

@@ -132,11 +132,13 @@ export default function CalendarTab() {
   const [selectedDcmUrl, setSelectedDcmUrl] = useState<string | null>(null)
   const [view, setView] = useState<'day' | 'week' | 'month'>('day')
   const [patientTreatments, setPatientTreatments] = useState<any[]>([])
+  const [treatmentGroups, setTreatmentGroups] = useState<any[]>([])
   const [patientPayments, setPatientPayments] = useState<any[]>([])
   const [patientInfo, setPatientInfo] = useState<Patient | null>(null)
 
   // Treatment Form state
   const [showTedaviForm, setShowTedaviForm] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<any>(null)
   const [tedaviName, setTedaviName] = useState('')
   const [selectedTooth, setSelectedTooth] = useState<string>('')
   const [tedaviIndication, setTedaviIndication] = useState('')
@@ -258,12 +260,12 @@ export default function CalendarTab() {
     setEventContextMenu(null);
     setSelectedEvent(event)
     setPanelOpen(true)
-    setPatientTreatments([])
+    setPatientTreatments([]); setTreatmentGroups([])
     setPatientPayments([])
     setPatientInfo(null)
     if (event.patientId) {
       fetch(`/api/dental/patients/${event.patientId}`).then(r => r.ok ? r.json() : null).then(d => d && setPatientInfo(d)).catch(() => { })
-      fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : []).then(setPatientTreatments).catch(() => { })
+      fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : {treatments:[], groups:[]}).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }).catch(() => { })
       fetch(`/api/dental/patients/${event.patientId}/payments`).then(r => r.ok ? r.json() : []).then(setPatientPayments).catch(() => { })
     }
     const docQuery = event.doctorId ? `?doctorId=${event.doctorId}` : ''
@@ -719,8 +721,84 @@ export default function CalendarTab() {
                 </div>
               )}
               {patientTreatments.filter((t: any) => t.status !== 'completed').length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {patientTreatments.filter((t: any) => t.status !== 'completed').map((t: any) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {Array.isArray(treatmentGroups) && treatmentGroups.map((g: any) => {
+                    const groupTreatments = patientTreatments.filter((t: any) => t.status !== 'completed' && t.groupId === g.id);
+                    if (groupTreatments.length === 0) return null;
+                    return (
+                      <div key={g.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid var(--glass-border)' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>{g.name}</span>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setEditingGroup({ ...g, treatments: patientTreatments.filter((t: any) => t.groupId === g.id) });
+                                setShowTedaviForm(true);
+                              }}
+                              style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                            >
+                              ✏️ Düzenle
+                            </button>
+                            <button
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                if (!confirm('Bu grubun tamamını silmek istediğinize emin misiniz?')) return;
+                                await fetch(`/api/dental/treatment-groups/${g.id}`, { method: 'DELETE' });
+                                fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); });
+                              }}
+                              style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                            >
+                              🗑️ Tüm Planı Sil
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {groupTreatments.map((t: any) => (
+                            <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ color: 'var(--foreground)' }}>
+                                  {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600, marginRight: 4 }}>#{t.toothNumber}</span> : null}
+                                  {t.procedureName}
+                                </span>
+                                {t.indication && <span style={{ fontSize: '0.65rem', color: 'var(--foreground-3)', marginTop: 2 }}>Endikasyon: {t.indication}</span>}
+                              </div>
+                              <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                {t.dcmUrl && (
+                                  <button onClick={() => setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`)} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer' }}>
+                                    Röntgen
+                                  </button>
+                                )}
+                                <select defaultValue={t.status} onChange={(e) => {
+                                  fetch(`/api/dental/treatments/${t.id}`, {
+                                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: e.target.value })
+                                  }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                                  <option value="planned">Planlandı</option>
+                                  <option value="in_progress">Devam Ediyor</option>
+                                  <option value="completed">Yapıldı</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' })
+                                      .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }))
+                                      .catch(() => { })
+                                  }}
+                                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }}
+                                >🗑️</button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  
+                  {/* Ungrouped Treatments */}
+                  {patientTreatments.filter((t: any) => t.status !== 'completed' && !t.groupId).map((t: any) => (
                     <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ color: 'var(--foreground)' }}>
@@ -739,7 +817,7 @@ export default function CalendarTab() {
                           fetch(`/api/dental/treatments/${t.id}`, {
                             method: 'PUT', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ status: e.target.value })
-                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments)).catch(() => { })
+                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
                         }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer' }}>
                           <option value="planned">Planlandı</option>
                           <option value="in_progress">Devam Ediyor</option>
@@ -749,21 +827,12 @@ export default function CalendarTab() {
                           type="button"
                           onClick={(e) => {
                             e.preventDefault();
-                            setTreatmentDeleteError(null);
-                            const hasLinkedPayment = patientPayments.some((p: any) => p.treatmentPlanId === t.id);
-                            if (hasLinkedPayment) {
-                              setTreatmentDeleteError('Bu tedaviyi silmek için önce ilgili ödemeyi siliniz.');
-                              return;
-                            }
                             fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' })
-                              .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(setPatientTreatments))
+                              .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }))
                               .catch(() => { })
                           }}
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem', display: 'flex', alignItems: 'center' }}
-                          title="Sil"
-                        >
-                          🗑️
-                        </button>
+                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }}
+                        >🗑️</button>
                       </span>
                     </div>
                   ))}
@@ -863,9 +932,14 @@ export default function CalendarTab() {
           patientInfo={patientInfo}
           clinicId={clinicId}
           doctors={doctors}
-          onClose={() => setShowTedaviForm(false)}
+          editingGroup={editingGroup}
+          onClose={() => {
+            setShowTedaviForm(false);
+            setEditingGroup(null);
+          }}
           onSaved={() => {
             setShowTedaviForm(false);
+            setEditingGroup(null);
             fetchData();
           }}
         />

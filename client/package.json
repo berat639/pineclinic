@@ -26,7 +26,8 @@
     "react-dom": "^19.0.0",
     "react-odontogram": "^0.5.6",
     "recharts": "^3.10.1",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/dagre": "^0.7.54",

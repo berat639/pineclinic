@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const activeProcs = procNames.length > 0 ? procNames : defaultProcs
     const activeInds = indNames.length > 0 ? indNames : defaultInds
 
-    const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli olarak söylediği komutlardan tedavi işlemlerini, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
+const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli olarak söylediği komutlardan tedavi işlemlerini, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
 Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesnesi döndür. Asla markdown \`\`\`json ekleme, SADECE JSON nesnesi döndür.
 
 ÖNEMLİ KURAL 1: 
@@ -28,32 +28,29 @@ Kullanıcının söylediği endikasyonu SADECE aşağıdaki "Sık Kullanılan En
 
 ÖNEMLİ KURAL 2:
 Kullanıcı olumsuz bir şey söylerse ("yapılmadı", "demedim", "iptal", "sil", "yanlış") "intent" alanını "DELETE" olarak ayarla.
+Eğer kullanıcı "onayla", "kaydet", "işlemleri kaydet" diyorsa ana objenin içine "globalIntent": "CONFIRM" ekle.
 
 Sık Kullanılan İşlemler: ${activeProcs.map((p: string) => `"${p}"`).join(', ')}
 Sık Kullanılan Endikasyonlar: ${activeInds.map((i: string) => `"${i}"`).join(', ')}
 Kabul Edilen Hastalıklar (Anamnez): ${diseaseNames.length > 0 ? diseaseNames.map((d: string) => `"${d}"`).join(', ') : '"Diyabet", "Hipertansiyon", "Astım", "Alerji"'}
 Kabul Edilen Konsültasyonlar: ${consultationNames.length > 0 ? consultationNames.map((c: string) => `"${c}"`).join(', ') : '"Kardiyoloji", "Ortodonti", "Endodonti"'}
 
-ÖNEMLİ KURAL 3:
-Eğer kullanıcı bir hastalıktan bahsediyorsa bunu "diseases" dizisine ekle. ANCAK sadece "Kabul Edilen Hastalıklar" listesindekilerle eşleşiyorsa ekle.
-Eğer kullanıcı konsültasyon istiyorsa bunu "consultations" dizisine ekle. ANCAK sadece "Kabul Edilen Konsültasyonlar" listesindekilerle eşleşiyorsa ekle.
-Eğer listede yoksa, "name" alanını SADECE listedeki en uygun olana eşle. Eşleşmiyorsa ekleme!
-
 Format:
 {
+  "globalIntent": "NONE", // Eğer tüm işlemleri kaydetme/onaylama komutu varsa "CONFIRM", yoksa "NONE"
   "treatments": [
     {
       "procedureName": "İşlem adı",
       "toothNumbers": ["15", "16"],
       "indication": "Endikasyon",
       "cost": 1500,
-      "intent": "ADD" // "ekle", "kaydet" varsa "CONFIRM", "sil", "çıkar", "iptal" varsa "DELETE", aksi halde "ADD"
+      "intent": "ADD" // "ekle" ise "ADD", "sil", "çıkar", "iptal" ise "DELETE"
     }
   ],
   "diseases": [
     {
       "name": "Diyabet",
-      "intent": "ADD" // "ekle" ise "ADD", "sil" ise "DELETE"
+      "intent": "ADD"
     }
   ],
   "consultations": [
@@ -64,12 +61,21 @@ Format:
   ]
 }
 
-Örnek cümle 1: "15 numaralı dişe dolgu ekle, sebebi derin çürük. Hastanın diyabeti var ve kardiyoloji konsültasyonu iste."
-Döndürmen gereken:
+Örnek 1: "18 kompozit dolgu ekle"
 {
-  "treatments": [{"procedureName": "Kompozit Dolgu", "toothNumbers": ["15"], "indication": "Derin Çürük", "intent": "CONFIRM"}],
-  "diseases": [{"name": "Diyabet", "intent": "ADD"}],
-  "consultations": [{"name": "Kardiyoloji Konsültasyonu", "intent": "ADD"}]
+  "globalIntent": "NONE",
+  "treatments": [{"procedureName": "Kompozit Dolgu", "toothNumbers": ["18"], "intent": "ADD"}]
+}
+
+Örnek 2: "18 numarayı iptal et"
+{
+  "globalIntent": "NONE",
+  "treatments": [{"toothNumbers": ["18"], "intent": "DELETE"}]
+}
+
+Örnek 3: "işlemleri onayla"
+{
+  "globalIntent": "CONFIRM"
 }`
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']

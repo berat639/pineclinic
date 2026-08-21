@@ -11,7 +11,7 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
     </div>
   )
 
-  const { patient, stats, appointments, treatments, payments, consultations } = profile
+  const { patient, appointments, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
 
   const cardStyle = {
     background: '#ffffff',
@@ -46,24 +46,91 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
         <div style={headerStyle}>📋 Demografik Bilgiler</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div><span style={{ color: 'var(--foreground-3)' }}>Ad:</span> {patient.name}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Tel:</span> {patient.phone || '-'}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>E-posta:</span> {patient.email || '-'}</div>
+          {patient.phone && <div><span style={{ color: 'var(--foreground-3)' }}>Tel:</span> {patient.phone}</div>}
+          {patient.email && <div><span style={{ color: 'var(--foreground-3)' }}>E-posta:</span> {patient.email}</div>}
           <div><span style={{ color: 'var(--foreground-3)' }}>Kayıt:</span> {formatDate(patient.createdAt)}</div>
+          {payments && payments.length > 0 && <div><span style={{ color: 'var(--foreground-3)' }}>Son Ödeme:</span> {formatDate(payments[0].date)}</div>}
         </div>
       </div>
 
-      {/* İstatistikler */}
-      <div style={cardStyle}>
-        <div style={headerStyle}>📊 Özet İstatistikler</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Toplam Ziyaret:</span> {stats.totalVisits}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Sıklık:</span> {stats.avgVisitFrequencyDays ? `~${stats.avgVisitFrequencyDays} günde 1` : '-'}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>İlk Ziyaret:</span> {formatDate(stats.firstVisit)}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Son Ziyaret:</span> {formatDate(stats.lastVisit)}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Tedavi Oranı:</span> %{stats.treatmentCompletionRate}</div>
-          <div><span style={{ color: 'var(--foreground-3)' }}>Ana Doktor:</span> {stats.topDoctor || '-'}</div>
+      {/* Hastalıklar & Alerjiler */}
+      {diseases && diseases.length > 0 && (
+        <div style={cardStyle}>
+          <div style={headerStyle}>🩺 Hastalıklar & Alerjiler ({diseases.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {diseases.map((d: any, idx: number) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--glass-border)', paddingBottom: 2 }}>
+                <span>{d.name}</span>
+                <span style={{ color: d.status === 'active' ? '#ef4444' : '#10b981' }}>{d.status === 'active' ? 'Aktif' : 'Pasif'}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Tamamlanan İşlemler */}
+      {completedWorks && completedWorks.length > 0 && (
+        <div style={cardStyle}>
+          <div style={headerStyle}>✅ Tamamlanan İşlemler ({completedWorks.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {completedWorks.map((w: any) => (
+              <div key={w.id} style={{ background: 'var(--input-bg)', padding: 8, borderRadius: 6 }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4 }}>
+                  {w.doctorName || 'Doktor'} - {formatDate(w.date)}
+                </div>
+                <div>{w.description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Hekim Notları */}
+      {doctorNotes && doctorNotes.length > 0 && (
+        <div style={cardStyle}>
+          <div style={headerStyle}>✍️ Hekim Notları ({doctorNotes.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {doctorNotes.map((n: any) => (
+              <div key={n.id} style={{ background: 'var(--input-bg)', padding: 8, borderRadius: 6 }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4 }}>
+                  {n.doctorName || 'Doktor'} - {formatDate(n.createdAt)}
+                </div>
+                <div>{n.content}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ağız & Diş Kayıtları */}
+      {toothRecords && toothRecords.length > 0 && (
+        <div style={cardStyle}>
+          <div style={headerStyle}>🦷 Ağız & Diş Kayıtları ({toothRecords.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {toothRecords.map((tr: any, idx: number) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--glass-border)', paddingBottom: 2 }}>
+                <span>Diş #{tr.toothNumber} {tr.surface ? `(${tr.surface})` : ''}</span>
+                <span style={{ color: 'var(--foreground-2)' }}>{tr.condition}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Kullanılan Malzemeler */}
+      {materialUsages && materialUsages.length > 0 && (
+        <div style={cardStyle}>
+          <div style={headerStyle}>📦 Kullanılan Malzemeler ({materialUsages.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {materialUsages.map((m: any, idx: number) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--glass-border)', paddingBottom: 2 }}>
+                <span>{m.itemName}</span>
+                <span style={{ color: 'var(--foreground-2)' }}>{m.quantity} Adet</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Randevular */}
       {appointments && appointments.length > 0 && (

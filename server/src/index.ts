@@ -357,6 +357,12 @@ const app = new Elysia()
     if (!b.name) { set.status = 400; return { error: 'Name required' } }
     return await createPatient({ name: b.name, phone: b.phone, balance: b.balance })
   })
+  .post("/api/dental/patients/bulk", async ({ body, set }) => {
+    const { createPatientsBulk } = await import("./db/repositories/dental")
+    const b = body as any
+    if (!b.patients || !Array.isArray(b.patients)) { set.status = 400; return { error: "Geçersiz veri" } }
+    return await createPatientsBulk(b.patients)
+  })
   .get('/api/dental/patients/:id', async ({ params, set }) => {
     const { getPatient } = await import('./db/repositories/dental')
     const p = await getPatient(params.id)
@@ -392,6 +398,12 @@ const app = new Elysia()
     if (!b.name) { set.status = 400; return { error: 'name gerekli' } }
     return await createTreatmentGroup({ patientId: params.id, name: b.name, description: b.description })
   })
+  .put("/api/dental/treatment-groups/:id/full", async ({ params, body, set }) => {
+    const { updateTreatmentGroupFull } = await import("./db/repositories/dental")
+    const b = body as any
+    if (!b.name || !b.patientId || !b.treatments) { set.status = 400; return { error: "Missing fields" } }
+    return await updateTreatmentGroupFull(params.id, { name: b.name, description: b.description, patientId: b.patientId, treatments: b.treatments })
+  })
   .put('/api/dental/treatment-groups/:id', async ({ params, body }) => {
     const { updateTreatmentGroup } = await import('./db/repositories/dental')
     const b = body as any
@@ -404,14 +416,98 @@ const app = new Elysia()
     return { success: true }
   })
   .get('/api/dental/patients/:id/treatments', async ({ params }) => {
-    const { getPatientTreatments } = await import('./db/repositories/dental')
-    return await getPatientTreatments(params.id)
+    const { getPatientTreatments, getPatientTreatmentGroups } = await import('./db/repositories/dental')
+    const treatments = await getPatientTreatments(params.id)
+    const groups = await getPatientTreatmentGroups(params.id)
+    return { treatments, groups: groups.groups }
+  })
+  .post('/api/dental/patients/:id/treatments/bulk', async ({ params, body, set }) => {
+    const { createTreatmentGroup, createTreatmentPlan } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.treatments || !Array.isArray(b.treatments)) { set.status = 400; return { error: 'Missing treatments array' } }
+    
+    // Create treatment group
+    const groupName = b.groupName || `Tedavi Planı - ${new Date().toLocaleDateString('tr-TR')}`
+    const group = await createTreatmentGroup({ patientId: params.id, name: groupName })
+    if (!group) { set.status = 500; return { error: 'Failed to create group' } }
+    
+    const results = []
+    
+    const { db } = await import('./db/client')
+    const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
+    const { eq, sql } = await import('drizzle-orm')
+    
+    for (const t of b.treatments) {
+      const treatmentResult = await createTreatmentPlan({
+        patientId: params.id,
+        doctorId: t.doctorId || b.doctorId,
+        procedureName: t.procedureName,
+        toothNumber: t.toothNumber,
+        indication: t.indication,
+        cost: t.cost,
+        status: t.status || 'planned',
+        dcmUrl: t.dcmUrl,
+        clinicId: t.clinicId || b.clinicId,
+        groupId: group.id,
+        isPeriodic: t.isPeriodic,
+        periodDays: t.periodDays,
+        nextNotificationDate: t.nextNotificationDate,
+        notifyPatient: t.notifyPatient,
+        notificationType: t.notificationType
+      })
+      results.push(treatmentResult)
+      
+      // Process materials for this treatment
+      if (t.materials && Array.isArray(t.materials) && t.materials.length > 0) {
+        try {
+          for (const mat of t.materials) {
+            if (!mat.inventoryItemId || !mat.quantity) continue
+            await db.update(inventoryItems)
+              .set({ quantity: sql`quantity - ${mat.quantity}` })
+              .where(eq(inventoryItems.id, mat.inventoryItemId))
+            
+            await db.insert(inventoryMovements).values({
+              itemId: mat.inventoryItemId,
+              type: 'cikis',
+              quantity: mat.quantity,
+              notes: `Tedavi (Toplu): ${t.procedureName}`,
+            })
+            
+            const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, mat.inventoryItemId)).limit(1)
+            if (item) {
+              if (t.doctorId || b.doctorId) {
+                await db.insert(materialUsages).values({
+                  doctorId: t.doctorId || b.doctorId,
+                  patientId: params.id,
+                  inventoryItemId: mat.inventoryItemId,
+                  quantity: mat.quantity,
+                  date: new Date().toISOString().split('T')[0]
+                })
+              }
+              await db.insert(expenses).values({
+                category: 'malzeme',
+                itemName: item.name,
+                quantity: mat.quantity,
+                unitCost: item.costPerUnit,
+                totalCost: mat.quantity * item.costPerUnit,
+                date: new Date().toISOString().split('T')[0],
+                notes: `Tedavi (Toplu): ${t.procedureName}`
+              })
+            }
+          }
+        } catch (err) {
+          console.error("Error processing materials for bulk:", err)
+        }
+      }
+    }
+    
+    return { success: true, groupId: group.id, count: results.length }
   })
   .post('/api/dental/patients/:id/treatments', async ({ params, body, set }) => {
     const { createTreatmentPlan } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.procedureName || b.cost === undefined) { set.status = 400; return { error: 'Missing fields' } }
-    return await createTreatmentPlan({ 
+    const treatmentResult = await createTreatmentPlan({ 
       patientId: params.id, 
       doctorId: b.doctorId,
       procedureName: b.procedureName, 
@@ -428,6 +524,68 @@ const app = new Elysia()
       notifyPatient: b.notifyPatient,
       notificationType: b.notificationType
     })
+    
+    // Process used materials if any
+    if (b.materials && Array.isArray(b.materials) && b.materials.length > 0) {
+      try {
+        const { db } = await import('./db/client')
+        const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
+        const { eq, sql } = await import('drizzle-orm')
+        
+        for (const mat of b.materials) {
+          if (!mat.inventoryItemId || !mat.quantity) continue
+          
+          // Deduct stock
+          await db.update(inventoryItems)
+            .set({ quantity: sql`quantity - ${mat.quantity}` })
+            .where(eq(inventoryItems.id, mat.inventoryItemId))
+            
+          // Record movement
+          await db.insert(inventoryMovements).values({
+            itemId: mat.inventoryItemId,
+            type: 'cikis',
+            quantity: mat.quantity,
+            notes: `Tedavi (Modal): ${b.procedureName}`,
+          })
+          
+          // Fetch item to get cost
+          const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, mat.inventoryItemId)).limit(1)
+          
+          if (item) {
+            // Record usage
+            if (b.doctorId) {
+              await db.insert(materialUsages).values({
+                doctorId: b.doctorId,
+                patientId: params.id,
+                inventoryItemId: mat.inventoryItemId,
+                quantity: mat.quantity,
+                date: new Date().toISOString().split('T')[0]
+              })
+            }
+            
+            // Record expense
+            await db.insert(expenses).values({
+              category: 'malzeme',
+              itemName: item.name,
+              quantity: mat.quantity,
+              unitCost: item.costPerUnit,
+              totalCost: mat.quantity * item.costPerUnit,
+              date: new Date().toISOString().split('T')[0],
+              notes: `Tedavi (Modal): ${b.procedureName}`
+            })
+          }
+        }
+      } catch (err) {
+        console.error("Error processing materials:", err)
+      }
+    }
+    return treatmentResult;
+    
+  })
+  .get('/api/dental/inventory', async () => {
+    const { db } = await import('./db/client')
+    const { inventoryItems } = await import('./db/schema')
+    return db.select().from(inventoryItems).orderBy(inventoryItems.name)
   })
   .get('/api/dental/patients/:id/consultations', async ({ params }) => {
     const { getPatientConsultations } = await import('./db/repositories/dental')
@@ -436,14 +594,26 @@ const app = new Elysia()
   .post('/api/dental/patients/:id/consultations', async ({ params, body, set }) => {
     const { createConsultation } = await import('./db/repositories/dental')
     const b = body as any
-    if (!b.consultationNote) { set.status = 400; return { error: 'Missing fields' } }
+    if (!b.consultationNote && !b.diseaseNote) { set.status = 400; return { error: 'Missing fields' } }
     return await createConsultation({
       patientId: params.id,
-      clinicId: b.clinicId,
-      doctorId: b.doctorId,
-      consultationNote: b.consultationNote,
-      diseaseNote: b.diseaseNote
+      clinicId: b.clinicId || undefined,
+      doctorId: b.doctorId || undefined,
+      consultationNote: b.consultationNote || "",
+      diseaseNote: b.diseaseNote || undefined
     })
+  })
+  .put('/api/dental/consultations/:id', async ({ params, body }) => {
+    const { db } = await import('./db/client')
+    const { consultations } = await import('./db/schema')
+    const { eq } = await import('drizzle-orm')
+    const b = body as any
+    const updateData: any = {}
+    if (b.consultationNote !== undefined) updateData.consultationNote = b.consultationNote || ""
+    if (b.diseaseNote !== undefined) updateData.diseaseNote = b.diseaseNote
+    if (Object.keys(updateData).length === 0) return { success: true }
+    await db.update(consultations).set(updateData).where(eq(consultations.id, params.id))
+    return { success: true }
   })
   .get('/api/dental/clinics/:id/consultations/autocomplete', async ({ params }) => {
     const { getClinicConsultationAutocomplete } = await import('./db/repositories/dental')
@@ -529,13 +699,13 @@ const app = new Elysia()
   .post('/api/dental/patients/:id/consultations', async ({ params, body, set }) => {
     const { createConsultation } = await import('./db/repositories/dental')
     const b = body as any
-    if (!b.consultationNote) { set.status = 400; return { error: 'Missing consultation note' } }
+    if (!b.consultationNote && !b.diseaseNote) { set.status = 400; return { error: 'Missing fields' } }
     return await createConsultation({ 
       patientId: params.id, 
-      doctorId: b.doctorId,
-      clinicId: b.clinicId,
-      consultationNote: b.consultationNote,
-      diseaseNote: b.diseaseNote
+      doctorId: b.doctorId || undefined,
+      clinicId: b.clinicId || undefined,
+      consultationNote: b.consultationNote || "",
+      diseaseNote: b.diseaseNote || undefined
     })
   })
   .delete('/api/dental/consultations/:id', async ({ params, set }) => {
@@ -1137,6 +1307,47 @@ const app = new Elysia()
     const { getDefaultToolDescription } = await import('./data/default-tools')
     await resetToolDescription(key)
     return { success: true, key, value: getDefaultToolDescription(key) }
+  })
+
+  // ── Voice AI Settings ────────────────────────────────────────────────────────
+  .get('/api/admin/settings/voice', async () => {
+    const { getSetting } = await import('./db/repositories/settings')
+    return {
+      googleSearchGrounding: (await getSetting('ai.google_search_grounding')) === 'true',
+      codeExecution: (await getSetting('ai.code_execution')) === 'true',
+      urlContext: (await getSetting('ai.url_context')) === 'true',
+      
+      startWaitSeconds: Number(await getSetting('ai.start_wait_seconds')) || 0.4,
+      startOnPunctuationSeconds: Number(await getSetting('ai.start_punctuation_seconds')) || 0.1,
+      startNoPunctuationSeconds: Number(await getSetting('ai.start_no_punctuation_seconds')) || 1.5,
+      
+      stopNumWords: Number(await getSetting('ai.stop_num_words')) || 0,
+      stopVoiceSeconds: Number(await getSetting('ai.stop_voice_seconds')) || 0.2,
+      stopBackoffSeconds: Number(await getSetting('ai.stop_backoff_seconds')) || 0.2,
+      
+      callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
+      callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
+    }
+  })
+  .put('/api/admin/settings/voice', async ({ body }) => {
+    const { setSetting } = await import('./db/repositories/settings')
+    const config = body as any
+    if (config.googleSearchGrounding !== undefined) await setSetting('ai.google_search_grounding', String(config.googleSearchGrounding))
+    if (config.codeExecution !== undefined) await setSetting('ai.code_execution', String(config.codeExecution))
+    if (config.urlContext !== undefined) await setSetting('ai.url_context', String(config.urlContext))
+    
+    if (config.startWaitSeconds !== undefined) await setSetting('ai.start_wait_seconds', String(config.startWaitSeconds))
+    if (config.startOnPunctuationSeconds !== undefined) await setSetting('ai.start_punctuation_seconds', String(config.startOnPunctuationSeconds))
+    if (config.startNoPunctuationSeconds !== undefined) await setSetting('ai.start_no_punctuation_seconds', String(config.startNoPunctuationSeconds))
+    
+    if (config.stopNumWords !== undefined) await setSetting('ai.stop_num_words', String(config.stopNumWords))
+    if (config.stopVoiceSeconds !== undefined) await setSetting('ai.stop_voice_seconds', String(config.stopVoiceSeconds))
+    if (config.stopBackoffSeconds !== undefined) await setSetting('ai.stop_backoff_seconds', String(config.stopBackoffSeconds))
+    
+    if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
+    if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
+    
+    return { success: true }
   })
 
   // ── Knowledge Categories ────────────────────────────────────────────────────

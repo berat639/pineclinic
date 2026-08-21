@@ -1,0 +1,267 @@
+'use client'
+import React, { useState, useEffect, useRef } from 'react'
+import * as XLSX from 'xlsx'
+import PatientProfileCard from './PatientProfileCard'
+import Pagination from './Pagination'
+
+interface Patient {
+  id: string
+  name: string
+  phone: string | null
+  email: string | null
+  tcIdentity: string | null
+  gender: string | null
+  birthDate: string | null
+  balance: number
+  createdAt: string
+}
+
+export default function PatientsTab() {
+  const [patients, setPatients] = useState<Patient[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
+  const [profileData, setProfileData] = useState<any>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const loadPatients = () => {
+    fetch('/api/dental/patients')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setPatients(data)
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error("Failed to fetch patients:", err)
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    loadPatients()
+  }, [])
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async (evt) => {
+      const bstr = evt.target?.result
+      if (!bstr) return
+      try {
+        const wb = XLSX.read(bstr, { type: 'binary' })
+        const wsname = wb.SheetNames[0]
+        const ws = wb.Sheets[wsname]
+        const data = XLSX.utils.sheet_to_json(ws) as any[]
+        
+        const mappedPatients = data.map(row => ({
+          name: row['Ad Soyad'] || row['Name'] || row['Adı Soyadı'] || row['hastaAdiSoyadi'],
+          phone: row['Telefon'] || row['Phone'] || row['hastaTelefonu'],
+          tcIdentity: String(row['TC Kimlik'] || row['TC'] || row['TC Kimlik No'] || row['tcKimlikNo'] || ''),
+          gender: row['Cinsiyet'] || row['Gender'] || '',
+          birthDate: row['Doğum Tarihi'] || row['BirthDate'] || null,
+        })).filter(p => p.name)
+
+        if (mappedPatients.length === 0) {
+          alert('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "Ad Soyad" sütunu olduğundan emin olun.')
+          return
+        }
+
+        const res = await fetch('/api/dental/patients/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patients: mappedPatients })
+        })
+
+        if (res.ok) {
+          alert(`${mappedPatients.length} hasta başarıyla eklendi!`)
+          loadPatients()
+        } else {
+          const err = await res.json()
+          alert('Hata: ' + (err.error || 'Bilinmeyen hata'))
+        }
+      } catch (err) {
+        console.error('Excel parse error:', err)
+        alert('Excel dosyası okunurken bir hata oluştu.')
+      }
+    }
+    reader.readAsBinaryString(file)
+    // reset input
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  useEffect(() => {
+    if (selectedPatientId) {
+      setProfileLoading(true)
+      fetch(`/api/dental/patients/${selectedPatientId}/profile`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.error) setProfileData(data)
+          setProfileLoading(false)
+        })
+        .catch(err => {
+          console.error(err)
+          setProfileLoading(false)
+        })
+    } else {
+      setProfileData(null)
+    }
+  }, [selectedPatientId])
+
+  const filtered = patients.filter(p => {
+    const term = searchTerm.toLowerCase()
+    return (
+      (p.name && p.name.toLowerCase().includes(term)) ||
+      (p.phone && p.phone.toLowerCase().includes(term)) ||
+      (p.tcIdentity && p.tcIdentity.toLowerCase().includes(term))
+    )
+  })
+
+  const totalPages = Math.ceil(filtered.length / pageSize)
+  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+  const fmtDate = (iso: string | null) => {
+    if (!iso) return '—'
+    return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingBottom: '2rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Hastalar Yönetimi</h2>
+        
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <input
+            type="file"
+            accept=".xlsx, .xls, .csv"
+            style={{ display: 'none' }}
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: '8px 16px', background: 'rgba(34, 197, 94, 0.2)',
+              border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: 8,
+              color: '#4ade80', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}
+          >
+            📊 Excel İçe Aktar
+          </button>
+
+          <input
+            type="text"
+            placeholder="Hasta adı, telefon veya TC Kimlik..."
+            value={searchTerm}
+            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1) }}
+            style={{
+              padding: '8px 12px', background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,
+              color: 'var(--foreground)', fontSize: '0.85rem', outline: 'none',
+              minWidth: 280
+            }}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Yükleniyor...</div>
+      ) : filtered.length === 0 ? (
+        <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>📭</div>
+          <div>Hasta bulunamadı</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: selectedPatientId ? '1fr 400px' : '1fr', gap: '1rem', alignItems: 'start' }}>
+          
+          <div className="glass-card" style={{ overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    {['Ad Soyad', 'TC Kimlik', 'Telefon', 'Cinsiyet', 'Doğum Tarihi', 'Kayıt', ''].map((h, i) => (
+                      <th key={i} style={{ padding: '0.8rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.map((p, i) => (
+                    <tr
+                      key={p.id}
+                      onClick={() => setSelectedPatientId(selectedPatientId === p.id ? null : p.id)}
+                      style={{
+                        borderBottom: i < paginated.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                        background: selectedPatientId === p.id ? 'rgba(96,165,250,0.1)' : 'transparent'
+                      }}
+                    >
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--foreground)' }}>
+                        {p.name}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
+                        {p.tcIdentity || '—'}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
+                        {p.phone || '—'}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
+                        {p.gender === 'E' ? 'Erkek' : p.gender === 'K' ? 'Kadın' : p.gender || '—'}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
+                        {fmtDate(p.birthDate)}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
+                        {fmtDate(p.createdAt)}
+                      </td>
+                      <td style={{ padding: '0.8rem 1rem', textAlign: 'right' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#60a5fa' }}>Detay &rarr;</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            <div style={{ padding: '1rem', borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'center' }}>
+              <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
+            </div>
+          </div>
+
+          {selectedPatientId && (
+            <div className="glass-card" style={{ padding: '1.2rem', position: 'sticky', top: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)' }}>Hasta Detayı</h3>
+                <button
+                  onClick={() => setSelectedPatientId(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.1rem' }}
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                {profileLoading ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Profil yükleniyor...</div>
+                ) : profileData ? (
+                  <PatientProfileCard profile={profileData} />
+                ) : (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#ef4444' }}>Profil yüklenemedi.</div>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+    </div>
+  )
+}

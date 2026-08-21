@@ -159,105 +159,162 @@ function calculateEventLayout(events: CalendarEvent[]) {
 }
 
 export default function DentalCalendar({ doctors, events, shifts, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void }) {
+  
   const gridRef = useRef<HTMLDivElement>(null);
-  const [interaction, setInteraction] = useState<{
-    eventId: string, type: 'move' | 'resize-top' | 'resize-bottom',
-    startY: number, startX: number,
-    initialStartTime: string, initialEndTime: string,
-    initialColIdx: number,
-    deltaMins: number, deltaCols: number
-  } | null>(null);
+  
+  // Calculate displayDoctors at the top so handleMouseUp can use it
+  const dayShifts = shifts?.filter(s => s.date === currentDate) || [];
+  let displayDoctors = doctors;
+  if (view === 'day' && dayShifts.length > 0) {
+    const doctorsWithShift = dayShifts.map(s => s.userId);
+    displayDoctors = doctors.filter(d => doctorsWithShift.includes(d.id));
+  }
+
+  
+  const dragRef = useRef<{
+    element: HTMLElement | null;
+    type: 'move' | 'resize-top' | 'resize-bottom';
+    startY: number;
+    startX: number;
+    initialStartTime: string;
+    initialEndTime: string;
+    initialColIdx: number;
+    eventId: string;
+    originalTop: string;
+    originalHeight: string;
+    originalLeft: string;
+    originalZIndex: string;
+    originalOpacity: string;
+  }>({
+    element: null, type: 'move', startY: 0, startX: 0,
+    initialStartTime: '', initialEndTime: '', initialColIdx: 0, eventId: '',
+    originalTop: '', originalHeight: '', originalLeft: '', originalZIndex: '', originalOpacity: ''
+  });
+
+  const startInteraction = (evt: React.MouseEvent, e: CalendarEvent, type: 'move' | 'resize-top' | 'resize-bottom', initialColIdx: number) => {
+    if (evt.button !== 0) return;
+    evt.stopPropagation();
+    
+    const element = (evt.currentTarget as HTMLElement).closest('.rc-event') as HTMLElement;
+    if (!element) return;
+
+    dragRef.current = {
+      element, type,
+      startY: evt.clientY, startX: evt.clientX,
+      initialStartTime: e.startTime, initialEndTime: e.endTime,
+      initialColIdx, eventId: e.id,
+      originalTop: element.style.top, originalHeight: element.style.height, originalLeft: element.style.left,
+      originalZIndex: element.style.zIndex, originalOpacity: element.style.opacity
+    };
+
+    element.style.zIndex = '50';
+    element.style.opacity = '0.8';
+    element.style.transition = 'none';
+    document.body.style.userSelect = 'none';
+  };
 
   useEffect(() => {
-    if (!interaction) return;
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaY = e.clientY - interaction.startY;
-      // 48px = 30mins -> 1.6px = 1min
-      const rawMins = deltaY / 1.6;
-      
-      let deltaMins = 0;
-      if (interaction.type === 'resize-top') {
-        const s = new Date(interaction.initialStartTime);
-        const startMinsOfDay = s.getHours() * 60 + s.getMinutes();
-        const rawNewStartMins = startMinsOfDay + rawMins;
-        deltaMins = Math.round(rawNewStartMins / 15) * 15 - startMinsOfDay;
-      } else if (interaction.type === 'resize-bottom') {
-        const eTime = new Date(interaction.initialEndTime);
-        const endMinsOfDay = eTime.getHours() * 60 + eTime.getMinutes();
-        const rawNewEndMins = endMinsOfDay + rawMins;
-        deltaMins = Math.round(rawNewEndMins / 15) * 15 - endMinsOfDay;
-      } else {
-        const s = new Date(interaction.initialStartTime);
-        const startMinsOfDay = s.getHours() * 60 + s.getMinutes();
-        const rawNewStartMins = startMinsOfDay + rawMins;
-        deltaMins = Math.round(rawNewStartMins / 15) * 15 - startMinsOfDay;
-      }
-      
-      let deltaCols = 0;
-      if (gridRef.current && interaction.type === 'move') {
-        const gridRect = gridRef.current.getBoundingClientRect();
-        const availableWidth = gridRect.width - 56; // minus time column
-        const numCols = view === 'day' ? (doctors.length || 1) : 7;
-        const colWidthPx = availableWidth / numCols;
-        
-        const mouseXRelative = e.clientX - (gridRect.left + 56);
-        let currentMouseCol = Math.floor(mouseXRelative / colWidthPx);
-        
-        if (mouseXRelative < -10 || mouseXRelative > availableWidth + 10 || e.clientY < gridRect.top - 10 || e.clientY > gridRect.bottom + 10) {
-          deltaCols = -999;
-        } else {
-          currentMouseCol = Math.max(0, Math.min(numCols - 1, currentMouseCol));
-          deltaCols = currentMouseCol - interaction.initialColIdx;
-        }
-      }
+      const state = dragRef.current;
+      if (!state.element) return;
 
-      setInteraction(prev => prev ? { ...prev, deltaMins, deltaCols } : null);
+      const deltaY = e.clientY - state.startY;
+      const deltaX = e.clientX - state.startX;
+
+      if (state.type === 'move') {
+        state.element.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+      } else if (state.type === 'resize-bottom') {
+        state.element.style.height = `calc(${state.originalHeight} + ${deltaY}px)`;
+      } else if (state.type === 'resize-top') {
+        state.element.style.top = `calc(${state.originalTop} + ${deltaY}px)`;
+        state.element.style.height = `calc(${state.originalHeight} - ${deltaY}px)`;
+      }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
-      if (!interaction) return;
-      // Calculate final
-      if (onEventUpdate && (interaction.deltaMins !== 0 || interaction.deltaCols !== 0)) {
-        const targetEvent = events.find(ev => ev.id === interaction.eventId);
-        if (targetEvent) {
-          const s = new Date(interaction.initialStartTime);
-          const e = new Date(interaction.initialEndTime);
-          
-          let newStartTime = new Date(s);
-          let newEndTime = new Date(e);
-          let newDoctorId = targetEvent.doctorId;
-          let newDate = targetEvent.startTime.slice(0, 10);
+      const state = dragRef.current;
+      if (!state.element) return;
 
-          if (interaction.type === 'move') {
-            newStartTime = new Date(s.getTime() + interaction.deltaMins * 60000);
-            newEndTime = new Date(e.getTime() + interaction.deltaMins * 60000);
+      const deltaY = e.clientY - state.startY;
+      const rawMins = deltaY / 1.6;
+
+      let deltaMins = 0;
+      if (state.type === 'resize-top' || state.type === 'resize-bottom' || state.type === 'move') {
+        const timeRef = new Date(state.type === 'resize-bottom' ? state.initialEndTime : state.initialStartTime);
+        const minsOfDay = timeRef.getHours() * 60 + timeRef.getMinutes();
+        const rawNewMins = minsOfDay + rawMins;
+        deltaMins = Math.round(rawNewMins / 15) * 15 - minsOfDay;
+      }
+
+      const targetEvent = events.find(ev => ev.id === state.eventId);
+      
+      let newDoctorId = targetEvent ? targetEvent.doctorId : null;
+      let newDate = targetEvent ? targetEvent.startTime.slice(0, 10) : currentDate;
+
+      if (gridRef.current && state.type === 'move') {
+        const gridRect = gridRef.current.getBoundingClientRect();
+        const availableWidth = gridRect.width - 56;
+        const mouseXRelative = e.clientX - (gridRect.left + 56);
+        
+        if (mouseXRelative < -10 || mouseXRelative > availableWidth + 10 || e.clientY < gridRect.top - 10 || e.clientY > gridRect.bottom + 10) {
+          newDoctorId = null; // Unassign if dropped outside
+        } else {
+          if (view === 'day') {
+            const numCols = displayDoctors.length || 1;
+            const colWidthPx = availableWidth / numCols;
+            const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
+            newDoctorId = displayDoctors[dropCol]?.id || null;
+          } else if (view === 'week') {
+            const numCols = 7;
+            const colWidthPx = availableWidth / numCols;
+            const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
+            const weekDays = getWeekDays(currentDate);
+            newDate = weekDays[dropCol]?.date || newDate;
+          }
+        }
+      }
+
+      // Cleanup DOM
+      state.element.style.transform = '';
+      state.element.style.height = state.originalHeight;
+      state.element.style.top = state.originalTop;
+      state.element.style.zIndex = state.originalZIndex;
+      state.element.style.opacity = state.originalOpacity;
+      state.element.style.transition = '';
+      document.body.style.userSelect = '';
+      
+      const { type: t, initialStartTime: iStart, initialEndTime: iEnd } = state;
+      state.element = null;
+
+      if (onEventUpdate && targetEvent) {
+        const timeChanged = deltaMins !== 0;
+        const doctorChanged = targetEvent.doctorId !== newDoctorId;
+        const dateChanged = targetEvent.startTime.slice(0, 10) !== newDate;
+
+        if (timeChanged || doctorChanged || dateChanged || t === 'resize-top' || t === 'resize-bottom') {
+          const s = new Date(iStart);
+          const e_time = new Date(iEnd);
+          let newStartTime = new Date(s);
+          let newEndTime = new Date(e_time);
+
+          if (t === 'move') {
+            newStartTime = new Date(s.getTime() + deltaMins * 60000);
+            newEndTime = new Date(e_time.getTime() + deltaMins * 60000);
             
-            if (interaction.deltaCols === -999) {
-              newDoctorId = null;
-            } else {
-              const numCols = view === 'day' ? (doctors.length || 1) : 7;
-              const finalCol = Math.max(0, Math.min(numCols - 1, interaction.initialColIdx + interaction.deltaCols));
-              
-              if (view === 'day') {
-                newDoctorId = doctors[finalCol]?.id || null;
-              } else if (view === 'week') {
-                const weekDays = getWeekDays(currentDate);
-                newDate = weekDays[finalCol]?.date || newDate;
-                // adjust date part of start/endTime
-                const datePart = newDate;
-                newStartTime = new Date(`${datePart}T${newStartTime.toISOString().slice(11, 16)}:00+03:00`);
-                newEndTime = new Date(`${datePart}T${newEndTime.toISOString().slice(11, 16)}:00+03:00`);
-              }
+            if (view === 'week') {
+              const formatTime = (d: Date) => `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+              newStartTime = new Date(`${newDate}T${formatTime(newStartTime)}:00+03:00`);
+              newEndTime = new Date(`${newDate}T${formatTime(newEndTime)}:00+03:00`);
             }
-          } else if (interaction.type === 'resize-top') {
-            newStartTime = new Date(s.getTime() + interaction.deltaMins * 60000);
-            if (newStartTime.getTime() >= newEndTime.getTime() - 5 * 60000) {
-              newStartTime = new Date(newEndTime.getTime() - 5 * 60000); // min 5 mins
+          } else if (t === 'resize-top') {
+            newStartTime = new Date(s.getTime() + deltaMins * 60000);
+            if (newStartTime.getTime() >= newEndTime.getTime() - 15 * 60000) {
+              newStartTime = new Date(newEndTime.getTime() - 15 * 60000);
             }
-          } else if (interaction.type === 'resize-bottom') {
-            newEndTime = new Date(e.getTime() + interaction.deltaMins * 60000);
-            if (newEndTime.getTime() <= newStartTime.getTime() + 5 * 60000) {
-              newEndTime = new Date(newStartTime.getTime() + 5 * 60000);
+          } else if (t === 'resize-bottom') {
+            newEndTime = new Date(e_time.getTime() + deltaMins * 60000);
+            if (newEndTime.getTime() <= newStartTime.getTime() + 15 * 60000) {
+              newEndTime = new Date(newStartTime.getTime() + 15 * 60000);
             }
           }
 
@@ -269,7 +326,6 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           });
         }
       }
-      setInteraction(null);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -278,7 +334,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [interaction, events, onEventUpdate, view, doctors, currentDate]);
+  }, [events, onEventUpdate, view, doctors, currentDate]);
   const slots = generateTimeSlots(9, 22)
 
   const globalUnassigned = events.filter(e => !e.doctorId)
@@ -340,145 +396,59 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const docEvents = dayEvents.filter(e => e.doctorId === d.id);
             const layout = calculateEventLayout(docEvents);
             return layout.map(({ event: e, col, maxCol }) => {
-              const isInteracting = interaction?.eventId === e.id;
-              
-              let currentStartTime = e.startTime;
-              let currentEndTime = e.endTime;
-              let currentOffsetCol = colIdx;
-              
-              let isUnassigning = false;
-              if (isInteracting) {
-                const s = new Date(interaction.initialStartTime);
-                const end = new Date(interaction.initialEndTime);
-                if (interaction.type === 'move') {
-                  currentStartTime = new Date(s.getTime() + interaction.deltaMins * 60000).toISOString();
-                  currentEndTime = new Date(end.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (interaction.deltaCols === -999) {
-                    isUnassigning = true;
-                  } else {
-                    currentOffsetCol = Math.max(0, Math.min(cols - 1, interaction.initialColIdx + interaction.deltaCols));
-                  }
-                } else if (interaction.type === 'resize-top') {
-                  currentStartTime = new Date(s.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (new Date(currentStartTime).getTime() >= end.getTime() - 5*60000) currentStartTime = new Date(end.getTime() - 5*60000).toISOString();
-                } else if (interaction.type === 'resize-bottom') {
-                  currentEndTime = new Date(end.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (new Date(currentEndTime).getTime() <= s.getTime() + 5*60000) currentEndTime = new Date(s.getTime() + 5*60000).toISOString();
-                }
-              }
-
-              const { top, height } = eventPosition(currentStartTime, currentEndTime, 9)
+              const { top, height } = eventPosition(e.startTime, e.endTime, 9)
               const isTimeWarning = e.timeConfirmed === false
-              const colors = isTimeWarning ? TIME_WARNING_STYLE : (isUnassigning ? STATUS_COLORS.pending_assignment : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled))
+              const colors = isTimeWarning ? TIME_WARNING_STYLE : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled)
               
               const colWidth = `((100% - 56px) / ${cols})`
-              let left = `calc(56px + (100% - 56px) * ${currentOffsetCol} / ${cols} + 2px + (${colWidth} - 4px) / ${maxCol} * ${col})`
-              let width = `calc((${colWidth} - 4px) / ${maxCol})`
-              
-              if (isUnassigning) {
-                left = `calc(56px + 2px)`;
-                width = `calc(100% - 56px - 4px)`;
-              }
+              const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px + (${colWidth} - 4px) / ${maxCol} * ${col})`
+              const width = `calc((${colWidth} - 4px) / ${maxCol})`
               
               const isShort = height < 36
               
               return (
-                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border, zIndex: isInteracting ? 50 : undefined, opacity: isInteracting ? 0.8 : 1, transition: isInteracting ? 'none' : undefined }} 
+                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border }} 
                      onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
-                     onContextMenu={(evt) => { evt.preventDefault(); console.log("EVENT NATIVE", e.title); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
+                     onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
                      title={e.title}
-                     onMouseDown={(evt) => {
-                       if (evt.button !== 0) return;
-                       evt.stopPropagation();
-                       setInteraction({ eventId: e.id, type: 'move', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                     }}
+                     onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                 >
-                  {true && (
-                    <div 
-                      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }}
-                      onMouseDown={(evt) => {
-                        if (evt.button !== 0) return;
-                        evt.stopPropagation();
-                        setInteraction({ eventId: e.id, type: 'resize-top', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                      }}
-                    />
-                  )}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
                   <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
-                  {!isShort && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(currentStartTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(currentEndTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
-                  {height > 56 && <span className="rc-ev-doc" style={{ pointerEvents: 'none' }}>{displayDoctors[currentOffsetCol]?.name || d.name}</span>}
-                  
-                  {true && (
-                    <div 
-                      style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }}
-                      onMouseDown={(evt) => {
-                        if (evt.button !== 0) return;
-                        evt.stopPropagation();
-                        setInteraction({ eventId: e.id, type: 'resize-bottom', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                      }}
-                    />
-                  )}
+                  {!isShort && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                  {height > 56 && <span className="rc-ev-doc" style={{ pointerEvents: 'none' }}>{d.name}</span>}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
                 </div>
               )
             })
           })}
           {/* Unassigned events spanning all columns */}
           {hasUnassigned && calculateEventLayout(unassigned).map(({ event: e, col, maxCol }) => {
-            const isInteracting = interaction?.eventId === e.id;
-            
-            let currentStartTime = e.startTime;
-            let currentEndTime = e.endTime;
-            let left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
-            let width = `calc((100% - 56px - 4px) / ${maxCol})`;
-            let currentOffsetCol = 0;
-            let isUnassigning = true;
-            
-            if (isInteracting) {
-              const s = new Date(interaction.initialStartTime);
-              const end = new Date(interaction.initialEndTime);
-              if (interaction.type === 'move') {
-                currentStartTime = new Date(s.getTime() + interaction.deltaMins * 60000).toISOString();
-                currentEndTime = new Date(end.getTime() + interaction.deltaMins * 60000).toISOString();
-                if (interaction.deltaCols !== -999) {
-                  isUnassigning = false;
-                  currentOffsetCol = Math.max(0, Math.min(cols - 1, interaction.initialColIdx + interaction.deltaCols));
-                }
-              }
-              
-              if (!isUnassigning) {
-                const colWidth = `((100% - 56px) / ${cols})`;
-                left = `calc(56px + (100% - 56px) * ${currentOffsetCol} / ${cols} + 2px)`;
-                width = `calc(${colWidth} - 4px)`;
-              }
-            }
-            
-            const { top, height } = eventPosition(currentStartTime, currentEndTime, 9);
+            const left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
+            const width = `calc((100% - 56px - 4px) / ${maxCol})`;
+            const { top, height } = eventPosition(e.startTime, e.endTime, 9);
             const isTimeWarning = e.timeConfirmed === false;
             const colors = isTimeWarning ? TIME_WARNING_STYLE : STATUS_COLORS.pending_assignment;
             
             return (
-              <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border, borderStyle: 'dashed', zIndex: isInteracting ? 50 : 10, opacity: isInteracting ? 0.8 : 0.9, transition: isInteracting ? 'none' : undefined }} 
+              <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border, borderStyle: 'dashed' }} 
                    onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
-                   onContextMenu={(evt) => { evt.preventDefault(); console.log("EVENT NATIVE", e.title); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
+                   onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
                    title={`${e.title} — Atanmamış`}
                    onMouseDown={(evt) => {
-                     if (evt.button !== 0) return;
-                     evt.stopPropagation();
                      let initialColIdx = 0;
                      if (gridRef.current) {
                        const gridRect = gridRef.current.getBoundingClientRect();
-                       const availableWidth = gridRect.width - 56;
-                       const colWidthPx = availableWidth / cols;
-                       const mouseXRelative = evt.clientX - (gridRect.left + 56);
-                       initialColIdx = Math.floor(mouseXRelative / colWidthPx);
-                       initialColIdx = Math.max(0, Math.min(cols - 1, initialColIdx));
+                       const colWidthPx = (gridRect.width - 56) / cols;
+                       initialColIdx = Math.max(0, Math.min(cols - 1, Math.floor((evt.clientX - (gridRect.left + 56)) / colWidthPx)));
                      }
-                     setInteraction({ eventId: e.id, type: 'move', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx, deltaMins: 0, deltaCols: 0 });
+                     startInteraction(evt, e, 'move', initialColIdx);
                    }}
               >
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => { if (evt.button !== 0) return; evt.stopPropagation(); setInteraction({ eventId: e.id, type: 'resize-top', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: 0, deltaMins: 0, deltaCols: 0 }); }} />
-                <span className="rc-ev-title">⚠️ {e.title}</span>
-                {height > 36 && <span className="rc-ev-time">{new Date(currentStartTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(currentEndTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => { if (evt.button !== 0) return; evt.stopPropagation(); setInteraction({ eventId: e.id, type: 'resize-bottom', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: 0, deltaMins: 0, deltaCols: 0 }); }} />
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', 0)} />
+                <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>⚠️ {e.title}</span>
+                {height > 36 && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', 0)} />
               </div>
             )
           })}
@@ -533,76 +503,27 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const dayEvents = events.filter(e => e.startTime.slice(0, 10) === day.date);
             const layout = calculateEventLayout(dayEvents);
             return layout.map(({ event: e, col, maxCol }) => {
-              const isInteracting = interaction?.eventId === e.id;
-              
-              let currentStartTime = e.startTime;
-              let currentEndTime = e.endTime;
-              let currentOffsetCol = colIdx;
-              
-              let isUnassigning = false;
-              if (isInteracting) {
-                const s = new Date(interaction.initialStartTime);
-                const end = new Date(interaction.initialEndTime);
-                if (interaction.type === 'move') {
-                  currentStartTime = new Date(s.getTime() + interaction.deltaMins * 60000).toISOString();
-                  currentEndTime = new Date(end.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (interaction.deltaCols === -999) {
-                    isUnassigning = true;
-                  } else {
-                    currentOffsetCol = Math.max(0, Math.min(cols - 1, interaction.initialColIdx + interaction.deltaCols));
-                  }
-                } else if (interaction.type === 'resize-top') {
-                  currentStartTime = new Date(s.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (new Date(currentStartTime).getTime() >= end.getTime() - 5*60000) currentStartTime = new Date(end.getTime() - 5*60000).toISOString();
-                } else if (interaction.type === 'resize-bottom') {
-                  currentEndTime = new Date(end.getTime() + interaction.deltaMins * 60000).toISOString();
-                  if (new Date(currentEndTime).getTime() <= s.getTime() + 5*60000) currentEndTime = new Date(s.getTime() + 5*60000).toISOString();
-                }
-              }
-
-              const { top, height } = eventPosition(currentStartTime, currentEndTime, 9)
+              const { top, height } = eventPosition(e.startTime, e.endTime, 9)
               const isTimeWarning = e.timeConfirmed === false
-              const isUnassigned = !e.doctorId || isUnassigning
+              const isUnassigned = !e.doctorId
               const colors = isTimeWarning ? TIME_WARNING_STYLE : (isUnassigned ? STATUS_COLORS.pending_assignment : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled))
               
               const colWidth = `((100% - 56px) / ${cols})`
-              const left = `calc(56px + (100% - 56px) * ${currentOffsetCol} / ${cols} + 1px + (${colWidth} - 2px) / ${maxCol} * ${col})`
+              const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 1px + (${colWidth} - 2px) / ${maxCol} * ${col})`
               const width = `calc((${colWidth} - 2px) / ${maxCol})`
               
               const doc = doctors.find(d => d.id === e.doctorId)
 
               return (
-                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: doc?.color || colors.border, borderStyle: isUnassigned ? 'dashed' : undefined, zIndex: isInteracting ? 50 : undefined, opacity: isInteracting ? 0.8 : 1, transition: isInteracting ? 'none' : undefined }} 
+                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: doc?.color || colors.border, borderStyle: isUnassigned ? 'dashed' : undefined }} 
                      onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
-                     onContextMenu={(evt) => { evt.preventDefault(); console.log("EVENT NATIVE", e.title); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
+                     onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
                      title={e.title}
-                     onMouseDown={(evt) => {
-                       if (evt.button !== 0) return;
-                       evt.stopPropagation();
-                       setInteraction({ eventId: e.id, type: 'move', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                     }}
+                     onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                 >
-                  {true && (
-                    <div 
-                      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }}
-                      onMouseDown={(evt) => {
-                        if (evt.button !== 0) return;
-                        evt.stopPropagation();
-                        setInteraction({ eventId: e.id, type: 'resize-top', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                      }}
-                    />
-                  )}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
                   <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{(isUnassigned || isTimeWarning) ? '⚠️ ' : ''}{e.title}</span>
-                  {true && (
-                    <div 
-                      style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }}
-                      onMouseDown={(evt) => {
-                        if (evt.button !== 0) return;
-                        evt.stopPropagation();
-                        setInteraction({ eventId: e.id, type: 'resize-bottom', startY: evt.clientY, startX: evt.clientX, initialStartTime: e.startTime, initialEndTime: e.endTime, initialColIdx: colIdx, deltaMins: 0, deltaCols: 0 });
-                      }}
-                    />
-                  )}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
                 </div>
               )
             })

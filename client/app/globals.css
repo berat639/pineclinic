@@ -321,18 +321,6 @@ body {
   color: var(--foreground) !important;
 }
 
-/* Button text: override hardcoded #94a3b8 / #f0f4ff on buttons */
-[data-theme="light"] .admin-content button {
-  color: var(--foreground) !important;
-}
-/* Keep primary save buttons white text */
-[data-theme="light"] .admin-content button.btn-primary,
-[data-theme="light"] .admin-content button[style*="background: var(--accent)"],
-[data-theme="light"] .admin-content button[style*="background: #0ea5e9"],
-[data-theme="light"] .admin-content button[style*="background: #2563eb"] {
-  color: #fff !important;
-}
-
 /* Keep specific semantic colors */
 [data-theme="light"] .admin-content .keep-accent  { color: var(--accent)   !important; }
 [data-theme="light"] .admin-content .keep-success { color: var(--success)  !important; }
@@ -350,13 +338,6 @@ body {
 [data-theme="light"] .admin-content [style*="rgba(255,255,255,0.08)"] {
   background: var(--glass-bg) !important;
   border-color: var(--glass-border) !important;
-}
-
-/* hover states: force readable colors */
-[data-theme="light"] .admin-content button:hover,
-[data-theme="light"] .admin-content a:hover {
-  background: var(--glass-bg-hover) !important;
-  color: var(--foreground) !important;
 }
 
 /* nav item hover (HomeClient) */
@@ -391,24 +372,43 @@ body {
 
 /* Dark backgrounds used as card-inner panels */
 [data-theme="light"] .admin-content [style*="rgba(0,0,0,0.2"],
+[data-theme="light"] .admin-content [style*="rgba(0, 0, 0, 0.2"],
 [data-theme="light"] .admin-content [style*="rgba(0,0,0,0.15"],
-[data-theme="light"] .admin-content [style*="rgba(0,0,0,0.25"] {
+[data-theme="light"] .admin-content [style*="rgba(0, 0, 0, 0.15"],
+[data-theme="light"] .admin-content [style*="rgba(0,0,0,0.25"],
+[data-theme="light"] .admin-content [style*="rgba(0, 0, 0, 0.25"] {
   background: rgba(0,0,0,0.04) !important;
 }
 
 /* Dark standalone backgrounds (#0d1829 etc.) */
-[data-theme="light"] .admin-content [style*="background: rgb(13"] {
+[data-theme="light"] .admin-content [style*="background: rgb(13"],
+[data-theme="light"] .admin-content [style*="background: rgb(13, 24, 41)"] {
   background: var(--background-2) !important;
 }
 
 /* inline rgba(240,244,255,…) → dark foreground in light mode */
-[data-theme="light"] .admin-content [style*="rgba(240,244,255"] {
+[data-theme="light"] .admin-content [style*="rgba(240,244,255"],
+[data-theme="light"] .admin-content [style*="rgba(240, 244, 255"],
+[data-theme="light"] .admin-content [style*="rgb(240, 244, 255)"],
+[data-theme="light"] .admin-content [style*="#f0f4ff"],
+[data-theme="light"] .admin-content [style*="#94a3b8"],
+[data-theme="light"] .admin-content [style*="#64748b"],
+[data-theme="light"] .admin-content [style*="#e2e8f0"],
+[data-theme="light"] .admin-content [style*="rgba(255, 255, 255"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255"] {
   color: var(--foreground) !important;
 }
 /* inline rgba color for muted descriptions (0.4–0.6 alpha) */
 [data-theme="light"] .admin-content [style*="rgba(240,244,255,0.3"],
+[data-theme="light"] .admin-content [style*="rgba(240, 244, 255, 0.3"],
 [data-theme="light"] .admin-content [style*="rgba(240,244,255,0.4"],
-[data-theme="light"] .admin-content [style*="rgba(240,244,255,0.5"] {
+[data-theme="light"] .admin-content [style*="rgba(240, 244, 255, 0.4"],
+[data-theme="light"] .admin-content [style*="rgba(240,244,255,0.5"],
+[data-theme="light"] .admin-content [style*="rgba(240, 244, 255, 0.5"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.4"],
+[data-theme="light"] .admin-content [style*="rgba(255, 255, 255, 0.4"],
+[data-theme="light"] .admin-content [style*="rgba(255,255,255,0.5"],
+[data-theme="light"] .admin-content [style*="rgba(255, 255, 255, 0.5"] {
   color: var(--foreground-3) !important;
 }
 

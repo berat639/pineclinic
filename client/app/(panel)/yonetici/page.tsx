@@ -6,7 +6,7 @@ import { useAuth } from '../../../lib/auth-context'
 import { ThemeToggle } from '../../theme-provider'
 
 import CalendarTab from '../../admin/components/CalendarTab'
-import AppointmentsTab from '../../admin/components/AppointmentsTab'
+import PatientsTab from '../../admin/components/PatientsTab'
 import PaymentsTab from '../../admin/components/PaymentsTab'
 import StatsBar from '../../admin/components/StatsBar'
 import KnowledgeTab from '../../admin/components/KnowledgeTab'
@@ -16,11 +16,11 @@ const FinansalTab = dynamic(() => import('./tabs/FinansalTab'), { ssr: false })
 const StokTab = dynamic(() => import('./tabs/StokTab'), { ssr: false })
 const KlinikPersonelTab = dynamic(() => import('./tabs/KlinikPersonelTab'), { ssr: false })
 
-type Tab = 'calendar' | 'appointments' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations'
+type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'calendar', label: 'Takvim' },
-  { id: 'appointments', label: 'Randevular' },
+  { id: 'patients', label: 'Hastalar' },
   { id: 'payments', label: 'Ödemeler & Finans' },
   { id: 'stok', label: 'Stok & Bakım' },
   { id: 'knowledge', label: 'Bilgi Tabanı' },
@@ -40,7 +40,7 @@ export default function YoneticiPage() {
   useEffect(() => { fetchAppts() }, [fetchAppts])
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--background)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 'clamp(0.8rem, 2vw, 1.5rem) clamp(0.7rem, 2vw, 1rem)' }}>
+    <div className="admin-content" style={{ minHeight: '100vh', background: 'var(--background)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 'clamp(0.8rem, 2vw, 1.5rem) clamp(0.7rem, 2vw, 1rem)' }}>
       <div style={{ width: '100%', maxWidth: 1200, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 'clamp(1rem, 2.6vw, 1.1rem)', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Yönetici Paneli</h1>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -70,7 +70,7 @@ export default function YoneticiPage() {
 
         <div>
           {tab === 'calendar' && <CalendarTab />}
-          {tab === 'appointments' && <AppointmentsTab appointments={appointments} onDelete={id => setAppointments(prev => prev.filter(a => a.id !== id))} />}
+          {tab === 'patients' && <PatientsTab />}
           {tab === 'payments' && (
             <div style={{ width: '100%' }}>
               <PaymentsTab />

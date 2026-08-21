@@ -195,5 +195,15 @@ export function flowToPromptText(flow: ConversationFlow): string {
   }
 
   traverse(startNode.id, 0)
+  
+  // Ayrıca START düğümüne bağlı olmayan (bağımsız) akış parçalarını da işle
+  const unvisitedRoots = flow.nodes.filter(n => !visited.has(n.id) && !flow.edges.some(e => e.target === n.id))
+  for (const root of unvisitedRoots) {
+    if (root.type !== 'END') { // END düğümleri tek başına anlam ifade etmez
+      lines.push(`\nBAĞIMSIZ AKIŞ KURALI (Şartlar sağlanırsa çalıştır):`)
+      traverse(root.id, 0)
+    }
+  }
+
   return lines.join('\n')
 }

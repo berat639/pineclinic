@@ -386,7 +386,7 @@ export function VoiceInputButton({ onTranscript, size = 'md', label, continuous 
           maxWidth: 300,
           textAlign: 'center',
           fontSize: 12,
-          color: '#e2e8f0',
+          color: 'var(--foreground)',
           zIndex: 999,
           boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
           animation: 'fadeIn 0.2s ease-out',

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, type CSSProperties } from 'react'
-import AppointmentsTab from './components/AppointmentsTab'
+import PatientsTab from './components/PatientsTab'
 import StatsBar from './components/StatsBar'
 import ToastContainer from './components/ToastContainer'
 import FlowBuilder from './components/FlowBuilder'
@@ -14,7 +14,7 @@ import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Tab = 'calendar' | 'appointments' | 'payments' | 'knowledge' | 'settings' | 'users' | 'integrations'
+type Tab = 'calendar' | 'patients' | 'payments' | 'knowledge' | 'settings' | 'users' | 'integrations'
 
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
@@ -175,7 +175,7 @@ function hexToRgb(hex: string): string {
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'calendar',     label: 'Takvim' },
-  { id: 'appointments', label: 'Randevular' },
+  { id: 'patients',     label: 'Hastalar' },
   { id: 'payments',     label: 'Ödemeler' },
   { id: 'knowledge',    label: 'Bilgi Tabanı' },
   { id: 'settings',     label: 'Ayarlar' },
@@ -361,7 +361,7 @@ const CLOUD_PROVIDER_META: Record<CloudProvider, {
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('appointments')
+  const [activeTab, setActiveTab] = useState<Tab>('patients')
 
   // Appointments
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -670,12 +670,9 @@ export default function AdminPage() {
           {/* ── Tab: Takvim ──────────────────────────────────────────── */}
           {activeTab === 'calendar' && <CalendarTab />}
 
-          {/* ── Tab: Randevular ─────────────────────────────────────────── */}
-          {activeTab === 'appointments' && (
-            <AppointmentsTab
-              appointments={appointments}
-              onDelete={id => setAppointments(prev => prev.filter(a => a.id !== id))}
-            />
+          {/* ── Tab: Hastalar ─────────────────────────────────────────── */}
+          {activeTab === 'patients' && (
+            <PatientsTab />
           )}
 
           {/* ── Tab: Bilgi Tabanı ───────────────────────────────────────── */}

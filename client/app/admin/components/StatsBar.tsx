@@ -35,7 +35,7 @@ export default function StatsBar() {
           }}>{c.icon}</div>
           <div>
             <div style={{ fontSize: '1.8rem', fontWeight: 700, color: c.color, lineHeight: 1 }}>{c.value}</div>
-            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 3, fontWeight: 500 }}>{c.label}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginTop: 3, fontWeight: 500 }}>{c.label}</div>
           </div>
           {c.pulse && (
             <span style={{ marginLeft: 'auto', background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 20, border: '1px solid rgba(34,197,94,0.3)' }}>

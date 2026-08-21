@@ -80,15 +80,15 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-            {isEdit ? '✏️ Belge Düzenle' : '➕ Yeni Belge'}
+            {isEdit ? '✏️ Belge Düzenle' : '+ Yeni Belge'}
           </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
           {/* Kategori */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
               Kategori
             </label>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -107,7 +107,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
 
           {/* Başlık */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
               Başlık
             </label>
             <input
@@ -117,7 +117,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
               required
               style={{
                 width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: '#f0f4ff',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
                 fontSize: '0.875rem', outline: 'none',
               }}
             />
@@ -125,7 +125,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
 
           {/* İçerik */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
               İçerik <span style={{ color: '#475569', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(AI bu metni okuyacak)</span>
             </label>
             <textarea
@@ -136,7 +136,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
               rows={7}
               style={{
                 width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: '#f0f4ff',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
                 fontSize: '0.875rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
                 lineHeight: 1.6,
               }}
@@ -235,6 +235,54 @@ export default function KnowledgeTab() {
     setGreetingSaving(false)
   }
 
+  // Voice Settings state
+  const [voiceSettings, setVoiceSettings] = useState<any>({
+    googleSearchGrounding: false,
+    codeExecution: false,
+    urlContext: false,
+    startWaitSeconds: 0.4,
+    startOnPunctuationSeconds: 0.1,
+    startNoPunctuationSeconds: 1.5,
+    stopNumWords: 0,
+    stopVoiceSeconds: 0.2,
+    stopBackoffSeconds: 0.2,
+    callSilenceTimeout: 30,
+    callMaxDuration: 600,
+  })
+  const [voiceLoading, setVoiceLoading] = useState(true)
+  const [voiceSaving, setVoiceSaving] = useState(false)
+
+  const fetchVoiceSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings/voice')
+      if (res.ok) {
+        const data = await res.json()
+        setVoiceSettings(data)
+      }
+    } catch { /* ignore */ }
+    setVoiceLoading(false)
+  }, [])
+
+  const handleSaveVoiceSettings = async () => {
+    if (voiceSaving) return
+    setVoiceSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/voice', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(voiceSettings),
+      })
+      if (res.ok) {
+        showToast('✅ Sesli AI Ayarları Kaydedildi')
+      } else {
+        showToast('Kayıt Başarısız', 'error')
+      }
+    } catch {
+      showToast('Kayıt Başarısız', 'error')
+    }
+    setVoiceSaving(false)
+  }
+
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [catMgmtOpen, setCatMgmtOpen] = useState(false)
   const [newCatSlug, setNewCatSlug] = useState('')
@@ -308,7 +356,8 @@ export default function KnowledgeTab() {
   useEffect(() => {
     load()
     fetchGreeting()
-  }, [load, fetchGreeting])
+    fetchVoiceSettings()
+  }, [load, fetchGreeting, fetchVoiceSettings])
 
   const filtered = catFilter === 'all' ? docs : docs.filter(d => d.category === catFilter)
 
@@ -416,7 +465,7 @@ export default function KnowledgeTab() {
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
               background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 8, fontSize: '0.78rem', color: '#64748b',
+              borderRadius: 8, fontSize: '0.78rem', color: 'var(--foreground-3)',
             }}>
               <span style={{ color: totalEmbedded === docs.length && docs.length > 0 ? '#22c55e' : '#f59e0b' }}>
                 ⚡
@@ -439,7 +488,7 @@ export default function KnowledgeTab() {
             className="btn btn-primary"
             style={{ fontSize: '0.8rem', padding: '6px 16px' }}
           >
-            ➕ Yeni Belge
+            + Yeni Belge
           </button>
         </div>
       </div>
@@ -450,8 +499,8 @@ export default function KnowledgeTab() {
           width: '100%', background: 'none', border: 'none', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
         }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>⚙️ Kategori Yönetimi</span>
-          <span style={{ fontSize: 12, color: '#64748b', transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-3)' }}>⚙️ Kategori Yönetimi</span>
+          <span style={{ fontSize: 12, color: 'var(--foreground-3)', transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
         </button>
 
         {catMgmtOpen && (
@@ -480,28 +529,28 @@ export default function KnowledgeTab() {
             {/* Add new category */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ flex: '1 1 100px' }}>
-                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Slug (key)</label>
+                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Slug (key)</label>
                 <input value={newCatSlug} onChange={e => setNewCatSlug(e.target.value)} placeholder="ornek" style={{
                   width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none',
                 }} />
               </div>
               <div style={{ flex: '1 1 120px' }}>
-                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Etiket</label>
+                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Etiket</label>
                 <input value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)} placeholder="Örnek Kategori" style={{
                   width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none',
+                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none',
                 }} />
               </div>
               <div style={{ flex: '0 0 50px' }}>
-                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>İkon</label>
+                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>İkon</label>
                 <input value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} style={{
                   width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: '#f0f4ff', fontSize: 11, outline: 'none', textAlign: 'center',
+                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none', textAlign: 'center',
                 }} />
               </div>
               <div style={{ flex: '0 0 60px' }}>
-                <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Renk</label>
+                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Renk</label>
                 <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{
                   width: '100%', height: 28, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent',
                 }} />
@@ -523,16 +572,16 @@ export default function KnowledgeTab() {
         <div>
           {/* Loading */}
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '4rem', color: '#64748b' }}>⏳ Yükleniyor…</div>
+        <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--foreground-3)' }}>⏳ Yükleniyor…</div>
       ) : filtered.length === 0 ? (
-        <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: '#64748b' }}>
+        <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🧠</div>
           <div style={{ marginBottom: '0.5rem' }}>Bilgi bankası boş</div>
           <div style={{ fontSize: '0.8rem', marginBottom: '1.25rem', color: '#475569' }}>
             Yeni belge ekleyerek AI'ı bilgilendirin
           </div>
           <button onClick={() => setModal({ open: true, doc: null })} className="btn btn-primary" style={{ fontSize: '0.875rem' }}>
-            ➕ İlk Belgeyi Ekle
+            + İlk Belgeyi Ekle
           </button>
         </div>
       ) : (
@@ -561,7 +610,7 @@ export default function KnowledgeTab() {
                         {getCatIcon(doc.category)} {getCatLabel(doc.category)}
                       </span>
                     </div>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', lineHeight: 1.3 }}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.3 }}>
                       {doc.title}
                     </h3>
                   </div>
@@ -588,7 +637,7 @@ export default function KnowledgeTab() {
                 {/* Content accordion */}
                 <div>
                   <p style={{
-                    fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.55, margin: 0,
+                    fontSize: '0.8rem', color: 'var(--foreground-3)', lineHeight: 1.55, margin: 0,
                     ...(expandedId === doc.id ? {} : {
                       display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
                     }),
@@ -646,74 +695,151 @@ export default function KnowledgeTab() {
       )}
         </div>
 
-        {/* Sağ Kolon: Karşılama Mesajı card */}
-        <div className="glass-card" style={{ padding: 24 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 18, paddingBottom: 14,
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
-              Karşılama Mesajı
-            </span>
-            {greetingLoading ? <Spinner /> : (
-              <span style={{
-                fontSize: 11, color: 'rgba(240,244,255,0.45)',
-                padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
-              }}>
-                Sesli AI Açılış
+        {/* Sağ Kolon: Karşılama Mesajı ve Gelişmiş Ayarlar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Karşılama Mesajı card */}
+          <div className="glass-card" style={{ padding: 24 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 18, paddingBottom: 14,
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                Karşılama Mesajı
               </span>
+              {greetingLoading ? <Spinner /> : (
+                <span style={{
+                  fontSize: 11, color: 'var(--foreground-3)',
+                  padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                }}>
+                  Sesli AI Açılış
+                </span>
+              )}
+            </div>
+
+            {!greetingLoading && (
+              <>
+                <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginBottom: 14, lineHeight: 1.6 }}>
+                  Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
+                </p>
+
+                <textarea
+                  value={greetingText}
+                  onChange={(e) => setGreetingText(e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 8,
+                    color: 'var(--foreground)',
+                    resize: 'vertical',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                  }}
+                  placeholder="Merhaba, hoş geldiniz!..."
+                />
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button
+                    type="button"
+                    onClick={handleSaveGreeting}
+                    disabled={greetingSaving || !greetingText.trim()}
+                    style={{
+                      padding: '8px 18px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
+                      border: '1px solid rgba(52,211,153,0.3)',
+                      borderRadius: 8,
+                      color: '#34d399',
+                      cursor: greetingSaving ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                  </button>
+                </div>
+              </>
             )}
           </div>
 
-          {!greetingLoading && (
-            <>
-              <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
-                Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
-              </p>
+          {/* Gelişmiş Ayarlar card */}
+          <div className="glass-card" style={{ padding: 24 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 18, paddingBottom: 14,
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                Gelişmiş Yapay Zeka Ayarları
+              </span>
+              {voiceLoading ? <Spinner /> : (
+                <span style={{
+                  fontSize: 11, color: 'var(--foreground-3)',
+                  padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                }}>
+                  Gemini API & Telephony
+                </span>
+              )}
+            </div>
 
-              <textarea
-                value={greetingText}
-                onChange={(e) => setGreetingText(e.target.value)}
-                rows={3}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 8,
-                  color: '#f0f4ff',
-                  resize: 'vertical',
-                  outline: 'none',
-                  fontFamily: 'inherit',
-                }}
-                placeholder="Merhaba, hoş geldiniz!..."
-              />
+            {!voiceLoading && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Checkboxes */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={voiceSettings.googleSearchGrounding} onChange={e => setVoiceSettings({...voiceSettings, googleSearchGrounding: e.target.checked})} />
+                    Google Arama Grounding
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={voiceSettings.codeExecution} onChange={e => setVoiceSettings({...voiceSettings, codeExecution: e.target.checked})} />
+                    Kod Çalıştırma (Code Execution)
+                  </label>
+                </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                <button
-                  type="button"
-                  onClick={handleSaveGreeting}
-                  disabled={greetingSaving || !greetingText.trim()}
-                  style={{
-                    padding: '8px 18px',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
-                    border: '1px solid rgba(52,211,153,0.3)',
-                    borderRadius: 8,
-                    color: '#34d399',
-                    cursor: greetingSaving ? 'wait' : 'pointer',
-                  }}
-                >
-                  {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
-                </button>
+                {/* Konuşmaya Başlama */}
+                <div>
+                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Konuşmaya Başlama (Start Speaking Plan)</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Bekleme Süresi (s)</label>
+                      <input type="number" step="0.1" value={voiceSettings.startWaitSeconds} onChange={e => setVoiceSettings({...voiceSettings, startWaitSeconds: parseFloat(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Noktalama Beklemesi (s)</label>
+                      <input type="number" step="0.1" value={voiceSettings.startOnPunctuationSeconds} onChange={e => setVoiceSettings({...voiceSettings, startOnPunctuationSeconds: parseFloat(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Çağrı Zaman Aşımı */}
+                <div>
+                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Çağrı Zaman Aşımı (Timeout)</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Sessizlik Aşımı (s)</label>
+                      <input type="number" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Max Çağrı Süresi (s)</label>
+                      <input type="number" value={voiceSettings.callMaxDuration} onChange={e => setVoiceSettings({...voiceSettings, callMaxDuration: parseInt(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button onClick={handleSaveVoiceSettings} disabled={voiceSaving} style={{ padding: '8px 18px', fontSize: 12, fontWeight: 600, background: voiceSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 8, color: '#34d399', cursor: voiceSaving ? 'wait' : 'pointer' }}>
+                    {voiceSaving ? 'Kaydediliyor...' : 'Ayarları Kaydet'}
+                  </button>
+                </div>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
