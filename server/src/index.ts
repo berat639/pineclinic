@@ -94,7 +94,7 @@ function createAI(): GoogleGenAI {
 const ai = createAI()
 
 // ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
-const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Skoda otomotiv asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
+const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
 
 /**
  * Build system prompt dynamically from DB sections.
