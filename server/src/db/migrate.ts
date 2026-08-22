@@ -662,6 +662,11 @@ async function runMigrations() {
   await sql`ALTER TABLE dental_appointments ADD CONSTRAINT dental_appointments_doctor_id_fkey FOREIGN KEY (doctor_id) REFERENCES users(id)`
 
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS time_confirmed BOOLEAN NOT NULL DEFAULT true`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS complaint TEXT`
+
+  await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed'`
+  await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS due_date TEXT`
+
 
   // Extend inventory_items
   await sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS brand TEXT`
