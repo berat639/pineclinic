@@ -13,15 +13,17 @@ set -eu
 : "${BACKEND_HTTP_PORT:=3000}"
 : "${RTP_START:=10000}"
 : "${RTP_END:=10200}"
+: "${ASTERISK_AMI_SECRET:=pineclinic_ami_secret_123}"
 
 export NETGSM_SIP_HOST NETGSM_SIP_PORT NETGSM_SIP_TRANSPORT \
        NETGSM_SIP_USER NETGSM_SIP_PASSWORD NETGSM_PUBLIC_IP \
-       AUDIOSOCKET_HOST AUDIOSOCKET_PORT BACKEND_HTTP_PORT RTP_START RTP_END
+       AUDIOSOCKET_HOST AUDIOSOCKET_PORT BACKEND_HTTP_PORT RTP_START RTP_END \
+       ASTERISK_AMI_SECRET
 
 TEMPLATE_DIR=/etc/asterisk-templates
 TARGET_DIR=/etc/asterisk
 
-for f in pjsip.conf extensions.conf rtp.conf; do
+for f in pjsip.conf extensions.conf rtp.conf manager.conf; do
     if [ -f "${TEMPLATE_DIR}/${f}.tmpl" ]; then
         case "$f" in
           extensions.conf)

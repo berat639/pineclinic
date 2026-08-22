@@ -18,14 +18,14 @@ writeprotect=no
 exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
 exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
@@ -33,6 +33,18 @@ exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
 exten => 100,1,NoOp(Test AudioSocket bridge)
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
+
+; ─────────────────────────────────────────────────────────────────────────────
+; Dinamik Transfer Context: AMI Redirect ile buraya aktarılır
+; ─────────────────────────────────────────────────────────────────────────────
+[dynamic-forward]
+exten => _X.,1,NoOp(Dinamik Yonlendirme: ${EXTEN})
+ same => n,Dial(PJSIP/${EXTEN}@netgsm-trunk,30)
+ same => n,Hangup()
+
+exten => s,1,NoOp(Dinamik Yonlendirme default)
+ same => n,Hangup()
+

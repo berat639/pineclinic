@@ -736,6 +736,19 @@ async function runMigrations() {
   await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS consultation_note TEXT`.catch(() => {})
   await sql`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS disease_note TEXT`.catch(() => {})
 
+  // ── Patient Notes ────────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS patient_notes (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      patient_id  UUID REFERENCES patients(id),
+      phone       TEXT,
+      content     TEXT NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'voice',
+      status      TEXT NOT NULL DEFAULT 'unread',
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
   // ── Unique Constraints ────────────────────────────────────────────────────
   await sql`ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email)`.catch(() => {})
   await sql`ALTER TABLE user_sessions ADD CONSTRAINT user_sessions_token_jti_unique UNIQUE (token_jti)`.catch(() => {})

@@ -488,6 +488,16 @@ export const revenueTargets = pgTable('revenue_targets', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+export const patientNotes = pgTable('patient_notes', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  patientId: uuid('patient_id').references(() => patients.id),
+  phone: text('phone'),
+  content: text('content').notNull(),
+  source: text('source').notNull().default('voice'),
+  status: text('status').notNull().default('unread'),
+  createdAt: timestamp('created_at', { withTimezone: true }).default(sql`now()`),
+})
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Shift = typeof shifts.$inferSelect
@@ -495,5 +505,8 @@ export type Notification = typeof notifications.$inferSelect
 export type NewKnowledgeCategory = typeof knowledgeCategories.$inferInsert
 export type PatientDisease = typeof patientDiseases.$inferSelect
 export type NewPatientDisease = typeof patientDiseases.$inferInsert
+export type PatientNote = typeof patientNotes.$inferSelect
+export type NewPatientNote = typeof patientNotes.$inferInsert
+
 
 

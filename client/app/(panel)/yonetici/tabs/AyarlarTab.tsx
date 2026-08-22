@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import PromptEditor from '../../../admin/components/PromptEditor'
 import FlowBuilder from '../../../admin/components/FlowBuilder'
 
-type InnerTab = 'conversation' | 'system'
+type InnerTab = 'conversation' | 'system' | 'phonebook'
 
 type CalendarStatus = {
   connected: boolean
@@ -14,6 +14,7 @@ type CalendarStatus = {
 }
 
 type CalendarItem = { id: string; name: string; isPrimary: boolean }
+type PhonebookEntry = { label: string; number: string }
 
 const cardStyle: React.CSSProperties = {
   padding: '14px 16px',
@@ -59,6 +60,53 @@ export default function AyarlarTab() {
   const [calendars, setCalendars] = useState<CalendarItem[]>([])
   const [selectedCalId, setSelectedCalId] = useState('')
   const [calendarSaving, setCalendarSaving] = useState(false)
+
+  // Phonebook state
+  const [phonebook, setPhonebook] = useState<PhonebookEntry[]>([])
+  const [phonebookLoading, setPhonebookLoading] = useState(false)
+  const [phonebookSaving, setPhonebookSaving] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [newNumber, setNewNumber] = useState('')
+
+  const loadPhonebook = useCallback(async () => {
+    setPhonebookLoading(true)
+    try {
+      const res = await fetch('/api/admin/settings/transfer-phonebook')
+      const data = await res.json()
+      if (Array.isArray(data)) setPhonebook(data)
+    } catch {
+      // ignore
+    }
+    setPhonebookLoading(false)
+  }, [])
+
+  const savePhonebook = async (updated: PhonebookEntry[]) => {
+    setPhonebookSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/transfer-phonebook', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phonebook: updated }),
+      })
+      if (res.ok) setPhonebook(updated)
+    } catch {
+      // ignore
+    }
+    setPhonebookSaving(false)
+  }
+
+  const addPhonebookEntry = () => {
+    if (!newLabel.trim() || !newNumber.trim()) return
+    const updated = [...phonebook, { label: newLabel.trim(), number: newNumber.trim() }]
+    savePhonebook(updated)
+    setNewLabel('')
+    setNewNumber('')
+  }
+
+  const deletePhonebookEntry = (idx: number) => {
+    const updated = phonebook.filter((_, i) => i !== idx)
+    savePhonebook(updated)
+  }
 
   const loadGreeting = useCallback(async () => {
     setGreetingLoading(true)
@@ -113,12 +161,15 @@ export default function AyarlarTab() {
   }, [])
 
   useEffect(() => {
-    if (innerTab !== 'system') return
-    loadGreeting()
-    loadConnMode()
-    loadAi()
-    loadCalendar()
-  }, [innerTab, loadGreeting, loadConnMode, loadAi, loadCalendar])
+    if (innerTab === 'system') {
+      loadGreeting()
+      loadConnMode()
+      loadAi()
+      loadCalendar()
+    } else if (innerTab === 'phonebook') {
+      loadPhonebook()
+    }
+  }, [innerTab, loadGreeting, loadConnMode, loadAi, loadCalendar, loadPhonebook])
 
   const saveGreeting = async () => {
     if (!greeting.trim() || greetingSaving) return
@@ -218,6 +269,16 @@ export default function AyarlarTab() {
           Konuşma Akışı
         </button>
         <button
+          onClick={() => setInnerTab('phonebook')}
+          style={{
+            ...buttonStyle,
+            background: innerTab === 'phonebook' ? 'var(--accent)' : 'var(--glass-bg)',
+            color: innerTab === 'phonebook' ? '#fff' : 'var(--foreground-2)',
+          }}
+        >
+          📞 Aktarım Telefon Defteri
+        </button>
+        <button
           onClick={() => setInnerTab('system')}
           style={{
             ...buttonStyle,
@@ -236,6 +297,60 @@ export default function AyarlarTab() {
             <FlowBuilder />
           </div>
         </>
+      )}
+
+      {innerTab === 'phonebook' && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="glass-card" style={cardStyle}>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--foreground)', marginBottom: 4 }}>
+              📞 Çağrı Aktarım Telefon Defteri
+            </div>
+            <div style={{ fontSize: '0.76rem', color: 'var(--foreground-3)', marginBottom: 16 }}>
+              Yapay zekanın çağrıları aktarabileceği yetkili birim ve dahili numaraları buradan tanımlayabilirsiniz. Akış oluşturucuda bu isimlerle seçilecektir.
+            </div>
+
+            {/* List */}
+            <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+              {phonebookLoading && <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)' }}>Yükleniyor...</div>}
+              {!phonebookLoading && phonebook.length === 0 && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)' }}>Kayıtlı aktarım numarası bulunmuyor.</div>
+              )}
+              {phonebook.map((entry, idx) => (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--foreground)' }}>{entry.label}</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--accent)', fontFamily: 'monospace' }}>{entry.number}</div>
+                  </div>
+                  <button onClick={() => deletePhonebookEntry(idx)} disabled={phonebookSaving} style={{ ...buttonStyle, color: '#ef4444', borderColor: 'rgba(239,68,68,0.2)' }}>
+                    Sil
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Add New */}
+            <div style={{ padding: 14, background: 'rgba(0,0,0,0.15)', borderRadius: 8, border: '1px dashed var(--glass-border)' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 8 }}>+ Yeni Numara Ekle</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  value={newLabel}
+                  onChange={e => setNewLabel(e.target.value)}
+                  placeholder="Birim Adı (Örn: Resepsiyon, Dr. Ahmet)"
+                  style={{ ...inputStyle, flex: 1, minWidth: 160 }}
+                />
+                <input
+                  value={newNumber}
+                  onChange={e => setNewNumber(e.target.value)}
+                  placeholder="Telefon / Dahili (Örn: 08503096119)"
+                  style={{ ...inputStyle, flex: 1, minWidth: 160 }}
+                />
+                <button onClick={addPhonebookEntry} disabled={phonebookSaving || !newLabel.trim() || !newNumber.trim()} style={{ ...buttonStyle, background: 'var(--accent)', color: '#fff' }}>
+                  {phonebookSaving ? '...' : '+ Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {innerTab === 'system' && (

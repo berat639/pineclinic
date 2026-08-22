@@ -70,6 +70,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
       GEMINI_EMBEDDING_DIMENSIONS: ${GEMINI_EMBEDDING_DIMENSIONS:-768}
+      ASTERISK_AMI_HOST: voiceai-asterisk
     depends_on:
       postgres:
         condition: service_healthy

@@ -45,6 +45,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-voiceai}:${POSTGRES_PASSWORD:-voiceai_secret}@postgres:5432/voiceai
       REDIS_URL: redis://redis:6379
       PORT: "3001"
+      ASTERISK_AMI_HOST: asterisk
     depends_on:
       postgres:
         condition: service_healthy

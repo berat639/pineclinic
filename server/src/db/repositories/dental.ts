@@ -10,7 +10,8 @@ import {
   completedWorks,
   businessSettings,
   notificationTemplates,
-  consultations
+  consultations,
+  patientNotes
 } from '../schema'
 
 // ── Doctors (hekim users) ────────────────────────────────────────────────────
@@ -520,11 +521,12 @@ export async function createCompletedWork(data: {
 export async function createDentalAppointmentFromVoice(data: {
   customerName: string
   phone: string
-  type: string
+  type?: string
   date: string
   time: string
   notes?: string | null
   doctorId?: string | null
+  complaint?: string
 }) {
   // Find or create patient
   let [patient] = await db.select().from(patients)
@@ -538,37 +540,71 @@ export async function createDentalAppointmentFromVoice(data: {
   }
 
   const startTime = new Date(`${data.date}T${data.time}:00+03:00`)
+  // 15 min control slot
+  const endTime = new Date(startTime.getTime() + 15 * 60_000)
 
-  if (data.doctorId) {
-    // Existing patient flow: 15min, time not confirmed
-    const endTime = new Date(startTime.getTime() + 15 * 60_000)
-    const [row] = await db.insert(dentalAppointments).values({
-      patientId: patient.id,
-      doctorId: data.doctorId,
-      title: `${data.customerName} - ${data.type}`,
-      startTime,
-      endTime,
-      status: 'scheduled',
-      type: data.type,
-      notes: data.notes ?? null,
-      timeConfirmed: false,
-    }).returning()
-    return row
-  }
-
-  // New patient flow: no doctor, pending assignment, 30min
-  const endTime = new Date(startTime.getTime() + 30 * 60_000)
   const [row] = await db.insert(dentalAppointments).values({
     patientId: patient.id,
-    doctorId: null,
-    title: `${data.customerName} - ${data.type}`,
+    doctorId: data.doctorId || null,
+    title: `${data.customerName} - ${data.type || 'kontrol'}`,
     startTime,
     endTime,
-    status: 'pending_assignment',
+    status: data.doctorId ? 'scheduled' : 'pending_assignment',
     type: data.type || 'kontrol',
-    notes: data.notes ?? null,
-    timeConfirmed: true,
+    notes: data.notes ?? (data.complaint ? `Şikayet: ${data.complaint}` : null),
+    complaint: data.complaint ?? null,
+    timeConfirmed: false, // Voice appointments require reception verification
   }).returning()
+  return row
+}
+
+// ── Patient Notes (Voice & Manual) ──────────────────────────────────────────
+
+export async function createPatientNote(data: {
+  phone: string
+  content: string
+  patientId?: string | null
+  source?: string
+}) {
+  let pId = data.patientId
+  if (!pId && data.phone) {
+    const [p] = await db.select({ id: patients.id }).from(patients).where(eq(patients.phone, data.phone)).limit(1)
+    if (p) pId = p.id
+  }
+  const [row] = await db.insert(patientNotes).values({
+    patientId: pId || null,
+    phone: data.phone,
+    content: data.content,
+    source: data.source || 'voice',
+    status: 'unread',
+  }).returning()
+  return row
+}
+
+export async function listPatientNotes(status?: string) {
+  const query = db
+    .select({
+      id: patientNotes.id,
+      patientId: patientNotes.patientId,
+      patientName: patients.name,
+      phone: patientNotes.phone,
+      content: patientNotes.content,
+      source: patientNotes.source,
+      status: patientNotes.status,
+      createdAt: patientNotes.createdAt,
+    })
+    .from(patientNotes)
+    .leftJoin(patients, eq(patientNotes.patientId, patients.id))
+    .orderBy(desc(patientNotes.createdAt))
+
+  if (status) {
+    return query.where(eq(patientNotes.status, status))
+  }
+  return query
+}
+
+export async function markPatientNoteRead(id: string) {
+  const [row] = await db.update(patientNotes).set({ status: 'read' }).where(eq(patientNotes.id, id)).returning()
   return row
 }
 

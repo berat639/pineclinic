@@ -66,26 +66,27 @@ function StartNode() {
   )
 }
 
+const PATIENT_FIELDS = [
+  { value: 'hastaAdiSoyadi', label: 'Hasta Adı ve Soyadı', type: 'text', desc: 'Adınızı ve soyadınızı alabilir miyim?' },
+  { value: 'hastaTelefonu', label: 'Telefon Numarası', type: 'text', desc: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?' },
+  { value: 'hastaSikayeti', label: 'Şikayet / Endikasyon', type: 'text', desc: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?' },
+  { value: 'randevuTarihi', label: 'Randevu Tarihi', type: 'date', desc: 'Hangi tarihe randevu oluşturmak istersiniz?' },
+  { value: 'randevuSaati', label: 'Randevu Saati', type: 'time', desc: 'Saat kaç için randevu istersiniz?' },
+  { value: 'doktor_id', label: 'Doktor Seçimi', type: 'user', desc: 'Hangi doktora gelmek istersiniz?' },
+];
+
 function FieldNode({ data }: { data: FieldData }) {
-  // Find matching field in the predefined list, else use the raw field name
-  const PATIENT_FIELDS = [
-    { value: 'hastaAdiSoyadi', label: 'Hasta Adı ve Soyadı' },
-    { value: 'hastaTelefonu', label: 'Telefon Numarası' },
-    { value: 'tcKimlikNo', label: 'TC Kimlik Numarası' },
-    { value: 'hastaSikayeti', label: 'Şikayet / Endikasyon' },
-    { value: 'randevuTarihi', label: 'Randevu Tarihi' },
-    { value: 'randevuSaati', label: 'Randevu Saati' },
-    { value: 'doktor_id', label: 'Doktor Seçimi' },
-    { value: 'tercihEdilenHekim', label: 'Tercih Edilen Hekim (Eski)' }
-  ];
   const fieldInfo = PATIENT_FIELDS.find(f => f.value === data.fieldName);
+  const isCustomField = data.fieldName && !fieldInfo;
   const displayLabel = fieldInfo ? fieldInfo.label : (data.fieldName || 'Alan Seçilmedi');
 
   return (
-    <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--flow-node-field)', border: '1px solid var(--flow-node-field-border)', minWidth: 220 }}>
+    <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--flow-node-field)', border: isCustomField ? '1px solid #ef4444' : '1px solid var(--flow-node-field-border)', minWidth: 220 }}>
       <Handle type="target" position={Position.Top} style={{ background: 'var(--flow-node-field-border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <code style={{ fontSize: 11, fontWeight: 600, color: '#7dd3fc', background: 'rgba(0,0,0,0.2)', padding: '1px 6px', borderRadius: 4 }}>{displayLabel}</code>
+        <code style={{ fontSize: 11, fontWeight: 600, color: isCustomField ? '#ef4444' : '#7dd3fc', background: 'rgba(0,0,0,0.2)', padding: '1px 6px', borderRadius: 4 }}>
+          {isCustomField ? `⚠️ ${displayLabel}` : displayLabel}
+        </code>
         {data.required && <span style={{ fontSize: 9, padding: '1px 5px', background: 'rgba(251,146,60,0.2)', borderRadius: 8, color: '#fb923c', fontWeight: 600 }}>zorunlu</span>}
         {data.fieldType !== 'text' && <span style={{ fontSize: 9, padding: '1px 5px', background: 'rgba(139,92,246,0.2)', borderRadius: 8, color: '#a78bfa' }}>{data.fieldType}</span>}
       </div>
@@ -94,9 +95,9 @@ function FieldNode({ data }: { data: FieldData }) {
     </div>
   )
 }
-
 function ConditionNode({ data }: { data: ConditionData }) {
   const labels: Record<string, string> = {
+    'is_registered': 'Hasta kayıtlı mı?',
     'kayitli': 'Hasta kayıtlı mı?',
   }
   const humanLabel = labels[data.conditionField] || (data.conditionField ? `${data.conditionField} kontrol` : 'Koşul')
@@ -117,14 +118,14 @@ function ConditionNode({ data }: { data: ConditionData }) {
 }
 
 function ActionNode({ data }: { data: ActionData }) {
-  const labelMap: any = {
-     'save_record': '💾 Veritabanına Kaydet',
-     'randevuOlustur': '💾 Randevu Oluştur (Kayıt)',
-     'webhook': '🔗 Webhook İsteği',
-     'end_call': '👋 Bilgi Ver & Kapat',
-     'transfer': '📞 Operatöre Aktar'
+  const labelMap: Record<string, string> = {
+    'save_appointment_pending': '📝 Randevu Talebi Oluştur (Onay Bekler)',
+    'save_patient_note': '🗒️ Hastadan Not Al (Bankoya İlet)',
+    'webhook': '🔗 Dış Sisteme Gönder (Webhook)',
+    'end_call': '👋 Bilgi Ver ve Bitir',
+    'transfer_call': '📞 Aramayı Aktar (Akıllı Beklemeli)',
   }
-  const displayLabel = labelMap[data.action] || data.label || '⚡ İşlem';
+  const displayLabel = labelMap[data.action] || data.label || '⚡ İşlem'
   return (
     <div style={{ padding: '10px 20px', borderRadius: 10, background: 'var(--flow-node-action)', border: '1px solid var(--flow-node-action-border)', minWidth: 180, textAlign: 'center' }}>
       <Handle type="target" position={Position.Top} style={{ background: 'var(--flow-node-action-border)' }} />
@@ -151,27 +152,26 @@ const nodeTypes: NodeTypes = {
   endNode: EndNode,
 }
 
-
-const PATIENT_FIELDS = [
-  { value: 'hastaAdiSoyadi', label: 'Hasta Adı ve Soyadı', type: 'text', desc: 'Adınızı ve soyadınızı alabilir miyim?' },
-  { value: 'hastaTelefonu', label: 'Telefon Numarası', type: 'text', desc: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?' },
-  { value: 'tcKimlikNo', label: 'TC Kimlik Numarası', type: 'text', desc: 'Kayıt için TC kimlik numaranızı rica edebilir miyim?' },
-  { value: 'hastaSikayeti', label: 'Şikayet / Endikasyon', type: 'text', desc: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?' },
-  { value: 'randevuTarihi', label: 'Randevu Tarihi', type: 'date', desc: 'Hangi tarihe randevu oluşturmak istersiniz?' },
-  { value: 'randevuSaati', label: 'Randevu Saati', type: 'time', desc: 'Saat kaç için randevu istersiniz?' },
-  { value: 'doktor_id', label: 'Doktor Seçimi', type: 'user', desc: 'Hangi doktora gelmek istersiniz?' },
-  { value: 'tercihEdilenHekim', label: 'Tercih Edilen Hekim (Eski)', type: 'user', desc: 'Tercih ettiğiniz özel bir hekim var mı?' }
-];
-
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function FlowBuilder() {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any)
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [phonebook, setPhonebook] = useState<Array<{ label: string; number: string }>>([])
   
   // Sidebar state
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+
+  // Load phonebook
+  useEffect(() => {
+    fetch('/api/admin/settings/transfer-phonebook')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setPhonebook(data)
+      })
+      .catch(() => {})
+  }, [])
 
   // Field names for condition dropdown
   const fieldNames = useMemo(() => {
@@ -230,7 +230,7 @@ export default function FlowBuilder() {
       
       // Hayır (Kayıtlı değil) dalı
       { id: 'field_adsoyad', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'hastaAdiSoyadi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
-      { id: 'field_tc', type: 'fieldNode', position: { x: 50, y: 380 }, data: { fieldName: 'tcKimlikNo', fieldType: 'text', description: 'Kayıt için TC kimlik numaranızı rica edebilir miyim?', required: true } },
+      { id: 'field_tel', type: 'fieldNode', position: { x: 50, y: 380 }, data: { fieldName: 'hastaTelefonu', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
       
       // Evet dalı veya kayıt sonrası
       { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'hastaSikayeti', fieldType: 'text', description: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?', required: false } },
@@ -238,15 +238,15 @@ export default function FlowBuilder() {
       { id: 'field_saat', type: 'fieldNode', position: { x: 450, y: 510 }, data: { fieldName: 'randevuSaati', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
       
       // İşlem ve bitiş
-      { id: 'action_randevu', type: 'actionNode', position: { x: 250, y: 640 }, data: { action: 'randevuOlustur', label: 'Randevu Oluştur' } },
+      { id: 'action_randevu', type: 'actionNode', position: { x: 250, y: 640 }, data: { action: 'save_appointment_pending', label: 'Randevu Talebi Oluştur (Onay Bekler)' } },
       { id: 'end', type: 'endNode', position: { x: 250, y: 760 }, data: { label: 'Bitti' } }
     ];
     
     const sampleEdges: Edge[] = [
       { id: 'e_s_c', source: 'start', target: 'cond_kayitli', markerEnd: { type: MarkerType.ArrowClosed } },
       { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_adsoyad', markerEnd: { type: MarkerType.ArrowClosed } },
-      { id: 'e_ad_tc', source: 'field_adsoyad', target: 'field_tc', markerEnd: { type: MarkerType.ArrowClosed } },
-      { id: 'e_tc_sik', source: 'field_tc', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
+      { id: 'e_ad_tel', source: 'field_adsoyad', target: 'field_tel', markerEnd: { type: MarkerType.ArrowClosed } },
+      { id: 'e_tel_sik', source: 'field_tel', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
       
       { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
       
@@ -284,23 +284,23 @@ export default function FlowBuilder() {
     
     let newNode: Node;
     if (type === 'field') {
-      const fieldId = `alan_${Math.floor(Math.random() * 1000)}`
+      const defaultField = PATIENT_FIELDS[0]
       newNode = {
         id, type: 'fieldNode',
         position: { x: 100, y: nodes.length * 80 + 20 },
-        data: { label: fieldId, fieldName: fieldId, description: '', required: false, fieldType: 'text' } as FieldData,
+        data: { label: defaultField.label, fieldName: defaultField.value, description: defaultField.desc, required: true, fieldType: defaultField.type } as FieldData,
       }
     } else if (type === 'condition') {
       newNode = {
         id, type: 'conditionNode',
         position: { x: 100, y: nodes.length * 80 + 20 },
-        data: { label: 'Koşul', conditionField: '', operator: 'equals', conditionValue: '' } as ConditionData,
+        data: { label: 'Koşul', conditionField: 'is_registered', operator: 'equals', conditionValue: 'true' } as ConditionData,
       }
     } else {
       newNode = {
         id, type: 'actionNode',
         position: { x: 100, y: nodes.length * 80 + 20 },
-        data: { label: 'Randevu Oluştur', action: 'randevuOlustur' } as ActionData,
+        data: { label: 'Randevu Talebi Oluştur (Onay Bekler)', action: 'save_appointment_pending' } as ActionData,
       }
     }
     
@@ -422,15 +422,8 @@ export default function FlowBuilder() {
                   </select>
                 </div>
                 {isCustomField && (
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Özel Alan Adı</label>
-                    <input 
-                      type="text" 
-                      value={d.fieldName} 
-                      onChange={e => updateSelectedNode({ fieldName: e.target.value })} 
-                      style={inputStyle} 
-                      placeholder="Örn: doktor_id"
-                    />
+                  <div style={{ padding: '10px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, fontSize: 11, color: '#ef4444' }}>
+                    ⚠️ Bu alan (<strong>{d.fieldName}</strong>) eski bir özel alan. Yeni sistemde özel alan kullanımı kısıtlanmıştır. Lütfen listeden geçerli bir alan seçin.
                   </div>
                 )}
                 <div>
@@ -518,7 +511,7 @@ export default function FlowBuilder() {
 
           {selectedNode?.type === 'actionNode' && (() => {
             const d = selectedNode.data as ActionData;
-            const validActions = ['save_record', 'webhook', 'end_call', 'transfer', 'randevuOlustur'];
+            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'save_record', 'transfer', 'randevuOlustur'];
             const isCustomAction = d.action && !validActions.includes(d.action);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -527,17 +520,22 @@ export default function FlowBuilder() {
                   <select value={d.action || ''} onChange={e => updateSelectedNode({ action: e.target.value, label: e.target.options[e.target.selectedIndex].text })} style={inputStyle}>
                     <option value="">Bir işlem seçin...</option>
                     {isCustomAction && <option value={d.action}>{d.action} (Özel İşlem)</option>}
-                    <option value="save_record">Veritabanına Kaydet (Randevu/Talep/Anket)</option>
-                    <option value="webhook">Dış Sisteme Gönder (Webhook API)</option>
-                    <option value="end_call">Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
-                    <option value="transfer">Canlı Destek / Operatöre Aktar</option>
-                    <option value="randevuOlustur">Eski: Randevu Oluştur</option>
+                    <option value="save_appointment_pending">📝 Randevu Talebi Oluştur (Onay Bekler)</option>
+                    <option value="save_patient_note">🗒️ Hastadan Not Al (Bankoya İlet)</option>
+                    <option value="webhook">🔗 Dış Sisteme Gönder (Webhook API)</option>
+                    <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
+                    <option value="transfer_call">📞 Aramayı Aktar (Akıllı Beklemeli)</option>
+                    
+                    {/* Old deprecated actions shown only if they are currently selected */}
+                    {d.action === 'save_record' && <option value="save_record">⚠️ Eski: Veritabanına Kaydet</option>}
+                    {d.action === 'transfer' && <option value="transfer">⚠️ Eski: Canlı Destek / Operatöre Aktar</option>}
+                    {d.action === 'randevuOlustur' && <option value="randevuOlustur">⚠️ Eski: Randevu Oluştur</option>}
                   </select>
                 </div>
 
-                {(d.action === 'save_record' || d.action === 'randevuOlustur') && (
+                {(d.action === 'save_appointment_pending' || d.action === 'save_patient_note') && (
                   <div style={{ fontSize: 11, color: 'var(--foreground-3)', lineHeight: 1.6, background: 'rgba(168,85,247,0.1)', padding: 12, borderRadius: 8, border: '1px solid rgba(168,85,247,0.2)' }}>
-                    Toplanan tüm bilgiler CRM'e kaydedilir.
+                    Toplanan tüm bilgiler kliniğin sistemine düşer ve bildirim gönderilir.
                   </div>
                 )}
 
@@ -555,10 +553,44 @@ export default function FlowBuilder() {
                   </div>
                 )}
 
-                {d.action === 'transfer' && (
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Aktarılacak Telefon Numarası</label>
-                    <input value={d.transferNumber || ''} onChange={e => updateSelectedNode({ transferNumber: e.target.value })} placeholder="+90555..." style={inputStyle} />
+                {d.action === 'transfer_call' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Aktarılacak Telefon Defteri Kaydı</label>
+                      <select 
+                        value={d.transferNumber || (phonebook[0]?.label || 'resepsiyon')} 
+                        onChange={e => updateSelectedNode({ transferNumber: e.target.value })} 
+                        style={inputStyle}
+                      >
+                        {phonebook.map(p => (
+                          <option key={p.label} value={p.label}>
+                            {p.label} ({p.number})
+                          </option>
+                        ))}
+                        {phonebook.length === 0 && (
+                          <>
+                            <option value="resepsiyon">Resepsiyon</option>
+                            <option value="banko">Banko</option>
+                            <option value="acil">Acil Hat</option>
+                          </>
+                        )}
+                      </select>
+                      <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
+                        ℹ️ Numaraları Yönetici Paneli &gt; Ayarlar &gt; Aktarım Telefon Defteri&apos;nden yönetebilirsiniz.
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Tetikleyici Anahtar Kelimeler (Opsiyonel)</label>
+                      <input 
+                        value={(d.triggerKeywords as string) || ''} 
+                        onChange={e => updateSelectedNode({ triggerKeywords: e.target.value })} 
+                        placeholder="Örn: resepsiyona bağla, operatöre aktar, yetkili biri" 
+                        style={inputStyle} 
+                      />
+                      <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
+                        Müşteri akışın herhangi bir yerinde bu kelimeleri söylerse aktarım otomatik tetiklenir.
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

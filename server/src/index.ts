@@ -59,7 +59,7 @@ import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
 import { startReminderCron } from './cron/reminders'
 
-const callerRegistry = new Map<string, string>()
+const callerRegistry = new Map<string, { phone: string; channel?: string }>()
 
 const PORT = Number(process.env.PORT) || 3001
 
@@ -731,6 +731,34 @@ const app = new Elysia()
     return { success: true }
   })
 
+  // ── Patient Notes ──────────────────────────────────────────────────────────
+  .get('/api/patient-notes', async ({ query }) => {
+    const { listPatientNotes } = await import('./db/repositories/dental')
+    return await listPatientNotes(query.status as string | undefined)
+  })
+
+  .post('/api/patient-notes', async ({ body, set }) => {
+    const b = (body ?? {}) as { phone?: string; content?: string; patientId?: string; source?: string }
+    if (!b.content || !b.content.trim()) {
+      set.status = 400
+      return { error: 'Not içeriği zorunludur' }
+    }
+    const { createPatientNote } = await import('./db/repositories/dental')
+    return await createPatientNote({
+      phone: b.phone || '',
+      content: b.content.trim(),
+      patientId: b.patientId,
+      source: b.source || 'manual',
+    })
+  })
+
+  .patch('/api/patient-notes/:id/read', async ({ params, set }) => {
+    const { markPatientNoteRead } = await import('./db/repositories/dental')
+    const updated = await markPatientNoteRead(params.id)
+    if (!updated) { set.status = 404; return { error: 'Not bulunamadı' } }
+    return { success: true, note: updated }
+  })
+
   .get('/api/appointments', async () => await readAppointments())
 
   .delete('/api/appointments/:id', async ({ params, set }) => {
@@ -875,8 +903,9 @@ const app = new Elysia()
   .get('/api/telephony/register', ({ query }) => {
     const uuid = query.uuid as string | undefined
     const caller = query.caller as string | undefined
+    const channel = query.channel as string | undefined
     if (uuid && caller) {
-      callerRegistry.set(uuid, caller)
+      callerRegistry.set(uuid, { phone: caller, channel })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
     }
     return { ok: true }
@@ -1249,6 +1278,32 @@ const app = new Elysia()
     const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
     const prompt = await buildSystemPrompt(greeting)
     return { prompt: dateHeader + prompt }
+  })
+
+  // ── Transfer Phonebook Settings ─────────────────────────────────────────────
+  .get('/api/admin/settings/transfer-phonebook', async () => {
+    const { getSetting } = await import('./db/repositories/settings')
+    const raw = await getSetting('transfer.phonebook')
+    if (!raw) {
+      // Default phonebook seeds if not configured yet
+      return [
+        { label: 'Resepsiyon', number: '08503096119' },
+        { label: 'Banko', number: '08503096119' },
+        { label: 'Acil Hat', number: '08503096119' }
+      ]
+    }
+    try { return JSON.parse(raw) } catch { return [] }
+  })
+
+  .put('/api/admin/settings/transfer-phonebook', async ({ body, set }) => {
+    const { phonebook } = (body ?? {}) as { phonebook?: Array<{ label: string; number: string }> }
+    if (!Array.isArray(phonebook)) {
+      set.status = 400
+      return { error: 'phonebook dizisi zorunludur' }
+    }
+    const { setSetting } = await import('./db/repositories/settings')
+    await setSetting('transfer.phonebook', JSON.stringify(phonebook))
+    return { success: true, phonebook }
   })
 
   // ── Tool Description Settings ───────────────────────────────────────────────

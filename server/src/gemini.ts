@@ -81,7 +81,120 @@ export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
     fieldProps['musteri_adi'] = { type: Type.STRING, description: 'Müşteri adı soyadı (kayıtlı müşteri için musteriSorgula\'dan gelen ad)' }
   }
 
-  const tools: FunctionDeclaration[] = []
+  const tools: FunctionDeclaration[] = [
+    {
+      name: 'randevuOlustur',
+      description: 'Müşteri randevu almak istediğinde randevu oluşturur ve kaydeder. Aynı arama içinde birden fazla kişi için sırayla birden fazla kez çağrılabilir.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          musteri_adi: { type: Type.STRING, description: 'Hasta adı ve soyadı' },
+          telefon: { type: Type.STRING, description: 'Hasta telefon numarası' },
+          tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD formatında)' },
+          saat: { type: Type.STRING, description: 'Randevu saati (HH:MM formatında)' },
+          sikayet: { type: Type.STRING, description: 'Hastanın şikayeti veya işlem talebi' },
+          doktor_id: { type: Type.STRING, description: 'Tercih edilen hekim ID\'si' },
+          ...fieldProps,
+        },
+        required: ['musteri_adi', 'telefon', 'tarih', 'saat'],
+      },
+    },
+    {
+      name: 'randevuGuncelle',
+      description: 'Mevcut bir randevunun tarih, saat veya diğer bilgilerini günceller.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          randevu_id: { type: Type.STRING, description: 'Güncellenecek randevu ID\'si' },
+          musteri_adi: { type: Type.STRING, description: 'Müşteri adı soyadı' },
+          telefon: { type: Type.STRING, description: 'Telefon numarası' },
+          tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
+          saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
+          sorun_veya_talep: { type: Type.STRING, description: 'Şikayet / talep' },
+        },
+        required: ['randevu_id'],
+      },
+    },
+    {
+      name: 'musteriSorgula',
+      description: 'Arayan telefon numarasına göre hastayı sorgular; kayıtlı ise ad soyad ve geçmiş randevularını döndürür.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          telefon: { type: Type.STRING, description: 'Sorgulanacak telefon numarası' },
+        },
+        required: ['telefon'],
+      },
+    },
+    {
+      name: 'gecmisRandevular',
+      description: 'Müşterinin geçmiş randevu listesini döndürür.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          telefon: { type: Type.STRING, description: 'Telefon numarası' },
+          limit: { type: Type.INTEGER, description: 'Maksimum kayıt sayısı' },
+        },
+        required: ['telefon'],
+      },
+    },
+    {
+      name: 'randevuMusaitlikKontrol',
+      description: 'Belirli bir tarihteki randevu yoğunluğunu ve müsaitliği kontrol eder.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          tarih: { type: Type.STRING, description: 'Kontrol edilecek tarih (YYYY-MM-DD)' },
+          baslangic_tarih: { type: Type.STRING, description: 'Başlangıç tarihi (YYYY-MM-DD)' },
+          bitis_tarih: { type: Type.STRING, description: 'Bitiş tarihi (YYYY-MM-DD)' },
+        },
+      },
+    },
+    {
+      name: 'searchKnowledgeBase',
+      description: 'Klinik hakkında, doktorlar, hizmetler veya çalışma saatleri hakkında bilgi tabanında arama yapar.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          sorgu: { type: Type.STRING, description: 'Aranacak kelime veya soru' },
+        },
+        required: ['sorgu'],
+      },
+    },
+    {
+      name: 'hastaNotKaydet',
+      description: 'Hasta randevu oluşturmayıp kliniğe bir not, mesaj veya şikayet iletmek istediğinde bankonun görmesi için not kaydeder.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          telefon: { type: Type.STRING, description: 'Hastanın telefon numarası' },
+          not: { type: Type.STRING, description: 'Hastanın kliniğe iletmek istediği not veya mesaj' },
+          hasta_adi: { type: Type.STRING, description: 'Hastanın adı ve soyadı (biliniyorsa)' },
+        },
+        required: ['telefon', 'not'],
+      },
+    },
+    {
+      name: 'aramaAktar',
+      description: 'Aramayı yetkili birime (resepsiyon, banko, acil veya ilgili dahili) aktarır.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          hedef: { type: Type.STRING, description: 'Aktarılacak hedef: "resepsiyon", "banko", "acil" veya telefon numarası' },
+          sebep: { type: Type.STRING, description: 'Aktarım sebebi' },
+        },
+        required: ['hedef'],
+      },
+    },
+    {
+      name: 'cagriySonlandir',
+      description: 'Müşteri ile görüşme tamamlandığında veya müşteri vedalaştığında çağrıyı sonlandırır.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {},
+      },
+    },
+  ]
   return tools
 }
 
@@ -107,6 +220,7 @@ export async function createLiveSession(
     model: string
     voiceName?: string
     realtimeInputConfig?: RealtimeInputConfig
+    telephonyChannel?: string
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -136,7 +250,7 @@ export async function createLiveSession(
       }
       console.log('[Randevu:OK]', appointment.id, JSON.stringify(appointment.data).slice(0, 200))
 
-      // Sync to dental calendar (fire-and-forget)
+      // Sync to dental calendar (fire-and-forget, timeConfirmed=false for reception approval)
       void (async () => {
         try {
           const { createDentalAppointmentFromVoice } = await import('./db/repositories/dental')
@@ -147,91 +261,119 @@ export async function createLiveSession(
             date: appointment.date,
             time: appointment.time,
             notes: appointment.notes,
+            complaint: (args.sikayet as string) || (args.hastaSikayeti as string) || undefined,
             doctorId: (args.doktor_id as string) || null,
           })
           console.log('[Randevu:CalendarSync]', appointment.id)
         } catch (e) { console.error('[Randevu:CalendarSync:ERROR]', e) }
       })()
 
-      // Google Calendar side effect — fire-and-forget arka planda
-      // çalışır. Burada `await` etmiyoruz çünkü 500-2000ms
-      // sürebilen dış API çağrısıdır; tool response'unu bloklamak Gemini
-      // event loop'unu kilitler → müşteri AI'yı duymaz.
-      const TYPE_LABELS: Record<string, string> = {
-        service: 'Servis',
-        test_drive: 'Test Sürüşü',
-        gallery_visit: 'Galeri Ziyareti',
-        other: 'Randevu',
-      }
-      const typeLabel = TYPE_LABELS[appointment.type] ?? 'Randevu'
-      const eventDescription = [
-        `Müşteri: ${appointment.customerName}`,
-        `Telefon: ${appointment.phone}`,
-        `Randevu Türü: ${typeLabel}`,
-        appointment.vehicleInfo ? `Araç: ${appointment.vehicleInfo}` : null,
-        appointment.issueOrRequest ? `Talep/Sorun: ${appointment.issueOrRequest}` : null,
-      ].filter(Boolean).join('\n')
-
-      void createCalendarEvent({
-        title: `${typeLabel} — ${appointment.customerName}`,
-        description: eventDescription,
-        date: appointment.date,
-        time: appointment.time,
-        attendeePhone: appointment.phone,
-      })
-        .then(async (r) => {
-          if (r.success) {
-            console.log('[Calendar] Etkinlik oluşturuldu:', r.eventId)
-            await updateAppointment(appointment.id, { calendarEventId: r.eventId }).catch(() => {})
-          }
-        })
-        .catch((err) => console.error('[Calendar] hata:', err))
-
       return {
         success: true,
-        message: `Randevu ${appointment.date} ${appointment.time} için kaydedildi.`,
+        message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı. Başka biri için de randevu oluşturmak ister misiniz, yoksa yardımcı olabileceğim başka bir konu var mı?`,
         id: appointment.id,
-        calendar_event_id: null,
+      }
+    }
+
+    if (name === 'hastaNotKaydet') {
+      const phone = (args.telefon as string | undefined) || lastPhoneUsed || ''
+      const noteContent = (args.not as string | undefined) || (args.mesaj as string | undefined) || ''
+      const patientName = (args.hasta_adi as string | undefined) || (args.musteri_adi as string | undefined) || null
+
+      if (!noteContent.trim()) {
+        return { success: false, message: 'Kaydedilecek bir not metni belirtilmedi.' }
+      }
+
+      try {
+        const { createPatientNote } = await import('./db/repositories/dental')
+        const fullContent = patientName ? `[${patientName}] ${noteContent}` : noteContent
+        await createPatientNote({
+          phone,
+          content: fullContent,
+          source: 'voice',
+        })
+        return {
+          success: true,
+          message: 'Notunuz başarıyla kaydedildi ve klinik bankosuna iletildi. Yetkililerimiz en kısa sürede size dönüş sağlayacaktır.',
+        }
+      } catch (err) {
+        console.error('[hastaNotKaydet] Hata:', err)
+        return { success: false, message: 'Not kaydedilirken bir hata oluştu.' }
+      }
+    }
+
+    if (name === 'aramaAktar') {
+      const targetKey = (args.hedef as string | undefined)?.toLowerCase().trim() || 'resepsiyon'
+      console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${args.sebep || 'Belirtilmedi'}`)
+
+      try {
+        const { getSetting } = await import('./db/repositories/settings')
+        const phonebookRaw = await getSetting('transfer.phonebook')
+        let phonebook: Array<{ label: string; number: string }> = []
+        if (phonebookRaw) {
+          try { phonebook = JSON.parse(phonebookRaw) } catch {}
+        }
+
+        // Match from phonebook or default settings
+        let targetNumber = ''
+        const found = phonebook.find(p => p.label.toLowerCase().includes(targetKey) || targetKey.includes(p.label.toLowerCase()))
+        if (found) {
+          targetNumber = found.number
+        } else if (/^\+?\d{7,15}$/.test(targetKey)) {
+          targetNumber = targetKey
+        } else {
+          const directSetting = await getSetting(`transfer.${targetKey}`)
+          if (directSetting) {
+            targetNumber = directSetting
+          } else if (phonebook.length > 0) {
+            targetNumber = phonebook[0].number
+          }
+        }
+
+        if (!targetNumber) {
+          console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
+          return {
+            success: false,
+            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp ekibimize iletebilirim.',
+          }
+        }
+
+        if (options.telephonyChannel) {
+          const { transferCall } = await import('./services/asterisk-ami')
+          const result = await transferCall(options.telephonyChannel, targetNumber)
+          if (result.success) {
+            return {
+              success: true,
+              message: 'Aramanız yetkili birimimize aktarılıyor, lütfen hattan ayrılmayın.',
+            }
+          }
+        }
+
+        return {
+          success: false,
+          message: 'Şu an operatörlerimizin tümü meşgul, çağrınızı aktaramadım. Dilerseniz notunuzu alabilirim, size dönüş yaparlar.',
+        }
+      } catch (err) {
+        console.error('[aramaAktar] Hata:', err)
+        return {
+          success: false,
+          message: 'Aktarım sırasında bir sorun oluştu. Dilerseniz notunuzu alabilirim.',
+        }
       }
     }
 
     if (name === 'randevuGuncelle') {
       const appointmentId = args.randevu_id as string
-      const calendarEventId = args.calendar_event_id as string | undefined
-
       const updateData: Parameters<typeof updateAppointment>[1] = {}
       if (args.musteri_adi) updateData.customerName = args.musteri_adi as string
       if (args.telefon) updateData.phone = args.telefon as string
       if (args.randevu_turu) updateData.type = args.randevu_turu as string
-      if (args.arac_bilgisi !== undefined) updateData.vehicleInfo = args.arac_bilgisi as string
       if (args.sorun_veya_talep !== undefined) updateData.issueOrRequest = args.sorun_veya_talep as string
       if (args.tarih) updateData.date = args.tarih as string
       if (args.saat) updateData.time = args.saat as string
 
       const updated = await updateAppointment(appointmentId, updateData)
       if (!updated) return { success: false, message: 'Randevu bulunamadı.' }
-
-      // Update Google Calendar event if we have an eventId
-      const eventId = calendarEventId ?? updated.calendarEventId ?? null
-      if (eventId && (args.tarih || args.saat || args.musteri_adi || args.randevu_turu)) {
-        const TYPE_LABELS: Record<string, string> = {
-          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
-        }
-        const typeLabel = TYPE_LABELS[updated.type] ?? 'Randevu'
-        void updateCalendarEvent(eventId, {
-          title: `${typeLabel} — ${updated.customerName}`,
-          description: [
-            `Müşteri: ${updated.customerName}`,
-            `Telefon: ${updated.phone}`,
-            `Randevu Türü: ${typeLabel}`,
-            updated.vehicleInfo ? `Araç: ${updated.vehicleInfo}` : null,
-            updated.issueOrRequest ? `Talep/Sorun: ${updated.issueOrRequest}` : null,
-          ].filter(Boolean).join('\n'),
-          date: updated.date,
-          time: updated.time,
-          attendeePhone: updated.phone,
-        }).then(r => { if (r.success) console.log('[Calendar] Etkinlik güncellendi:', r.eventId) }).catch(() => {})
-      }
 
       return {
         success: true,
@@ -262,47 +404,38 @@ export async function createLiveSession(
       if (!rawPhone.trim()) {
         return { sonuc: 'Telefon numarası gerekli.' }
       }
-      // Türk telefon numarası formatı kontrolü: en az 10 rakam olmalı
       const digits = rawPhone.replace(/\D/g, '')
       if (digits.length < 10) {
-        console.log(`[DB] musteriSorgula: geçersiz numara format (${rawPhone} → ${digits.length} hane)`)
         return { sonuc: 'Geçerli bir telefon numarası değil. Müşteriden 10 haneli telefon numarasını tekrar iste.' }
       }
       lastPhoneUsed = rawPhone
       console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
         const customer = await getCustomerByPhone(rawPhone)
-        // Dental doctor history lookup
         const { getPatientDoctorHistory } = await import('./db/repositories/dental')
         const doktorGecmisi = await getPatientDoctorHistory(rawPhone)
 
         if (!customer) {
-          // Bilgi tabanında müşteri kaydı ara
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
           if (knowledgeCustomer) {
-            console.log(`[DB] musteriSorgula: bilgi tabanından bulundu → ${knowledgeCustomer.name}`)
             return {
               kayitli: true,
               musteri_adi: knowledgeCustomer.name,
               doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
-              sonuc: `Ad Soyad: ${knowledgeCustomer.name}\n${knowledgeCustomer.content}`,
+              sonuc: `Hasta Adı: ${knowledgeCustomer.name}`,
             }
           }
           if (doktorGecmisi.length > 0) {
-            // Found in dental system but not in appointments
-            const patientName = doktorGecmisi[0].doktor_adi // We need patient name from dental
-            console.log(`[DB] musteriSorgula: dental kayıt bulundu`)
             return {
               kayitli: true,
               musteri_adi: null,
               doktor_gecmisi: doktorGecmisi,
-              sonuc: `Dental kayıt bulundu.\nDoktor geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`,
+              sonuc: `Kayıtlı hasta bulundu.\nDoktor geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}`,
             }
           }
-          console.log(`[DB] musteriSorgula: bulunamadı`)
-          return { kayitli: false, sonuc: 'Bu numara ile kayıtlı müşteri bulunamadı. Müşteriden ad soyadını sor.' }
+          return { kayitli: false, sonuc: 'Bu numara ile kayıtlı hasta bulunamadı. Hastadan ad ve soyadını sor.' }
         }
-        console.log(`[DB] musteriSorgula: bulundu → ${customer.name}`)
+        
         const info: string[] = []
         info.push(`Ad Soyad: ${customer.name}`)
         info.push(`Telefon: ${customer.phone}`)
@@ -310,7 +443,7 @@ export async function createLiveSession(
         const upcomingAppointments = customer.appointmentHistory.filter(a => !a.isPast)
         if (pastAppointments.length > 0) {
           const last = pastAppointments[0]
-          info.push(`Son Randevu: ${last.date} ${last.time} — ${last.issueOrRequest || last.type}${last.vehicleInfo ? ` (${last.vehicleInfo})` : ''}`)
+          info.push(`Son Randevu: ${last.date} ${last.time} — ${last.issueOrRequest || last.type}`)
         }
         if (upcomingAppointments.length > 0) {
           const next = upcomingAppointments[0]
@@ -319,19 +452,9 @@ export async function createLiveSession(
         if (doktorGecmisi.length > 0) {
           info.push(`Doktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`)
         }
-        // Extract plate from notes if available
-        const notesWithPlate = customer.appointmentHistory
-          .map(a => a as unknown as { notes?: string })
-          .find(a => a.notes?.startsWith('Plaka:'))
-        const plaka = notesWithPlate ? (notesWithPlate.notes as string).replace('Plaka: ', '') : null
-        if (plaka) info.push(`Plaka: ${plaka}`)
-        const vehicleInfo = customer.appointmentHistory.find(a => a.vehicleInfo)?.vehicleInfo
-        if (vehicleInfo) info.push(`Araç: ${vehicleInfo}`)
         return {
           kayitli: true,
           musteri_adi: customer.name,
-          plaka: plaka || null,
-          arac: vehicleInfo || null,
           doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
           sonuc: info.join('\n'),
         }

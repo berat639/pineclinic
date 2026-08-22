@@ -177,7 +177,7 @@ export interface TelephonyDeps {
   resolveLiveModel: () => Promise<string>
   sessions: Map<string, SharedSessionInfo>
   notifyAdmins: (event: string, payload: unknown) => void
-  callerRegistry: Map<string, string>
+  callerRegistry: Map<string, { phone: string; channel?: string } | string>
 }
 
 // Müşteri sessizlik timeout'u — AI soru sorup cevap beklerken müşteri
@@ -200,6 +200,7 @@ interface CallState {
   hangupPending: boolean
   callerId?: string
   callerPhone?: string
+  callerChannel?: string
   audioQueue: Buffer[]
   noiseGate: NoiseGate
   // Zaman aşımı timer'ları
@@ -431,6 +432,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               systemPrompt,
               model,
               voiceName,
+              telephonyChannel: state.callerChannel,
               realtimeInputConfig: {
                 // NO_INTERRUPTION: müşteri konuşmaya başlasa bile AI kendi
                 // cümlesini/sorusunu sonuna kadar söyler, yarıda kesilmez.
@@ -546,12 +548,17 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           if (ev.type === 'uuid') {
             const channelUuid = ev.uuid
             state.callerId = channelUuid
-            const phone = callerRegistry.get(channelUuid)
-            if (phone) {
-              state.callerPhone = phone
+            const reg = callerRegistry.get(channelUuid)
+            if (reg) {
+              if (typeof reg === 'string') {
+                state.callerPhone = reg
+              } else {
+                state.callerPhone = reg.phone
+                state.callerChannel = reg.channel
+              }
               callerRegistry.delete(channelUuid)
             }
-            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}`)
+            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
             if (!info.session) continue

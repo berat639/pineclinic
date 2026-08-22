@@ -178,10 +178,23 @@ export function flowToPromptText(flow: ConversationFlow): string {
         }
         return
       }
-      case 'ACTION':
-        lines.push(`${prefix}${step}. Tüm bilgileri topladıktan sonra randevuOlustur çağır`)
+      case 'ACTION': {
+        const act = (node.data as Record<string, unknown>).action
+        const target = (node.data as Record<string, unknown>).transferNumber || ''
+        const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
+        if (act === 'transfer_call') {
+          lines.push(`${prefix}${step}. ARAMAYI AKTAR: ${target ? `"${target}" birimine ` : ''}aramaAktar aracını çağır.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
+        } else if (act === 'save_patient_note') {
+          lines.push(`${prefix}${step}. HASTADAN NOT AL: Hastanın mesajını hastaNotKaydet aracını çağırarak bankoya ilet.`)
+        } else if (act === 'end_call') {
+          const msg = (node.data as Record<string, unknown>).message || ''
+          lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${msg ? `"${msg}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
+        } else {
+          lines.push(`${prefix}${step}. Randevu bilgilerini toplayıp randevuOlustur aracını çağır.`)
+        }
         step++
         break
+      }
       case 'END':
         return
     }
