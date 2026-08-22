@@ -10,6 +10,7 @@ import PaymentsTab from './components/PaymentsTab'
 import UsersTab from './components/UsersTab'
 import KnowledgeTab from './components/KnowledgeTab'
 import IntegrationsTab from './components/IntegrationsTab'
+import PhonebookManager from './components/PhonebookManager'
 import { ThemeToggle } from '../theme-provider'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -714,6 +715,9 @@ export default function AdminPage() {
                   </div>
                 </div>
               </div>
+
+              <PhonebookManager />
+
               {/* Alt satır: Karşılama Mesajı (sol) + Konuşma Akışı (sağ) */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
 
