@@ -1327,6 +1327,7 @@ const app = new Elysia()
       
       callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
       callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
+      voiceName: (await getSetting('ai.voice_name')) || 'Aoede',
     }
   })
   .put('/api/admin/settings/voice', async ({ body }) => {
@@ -1346,6 +1347,7 @@ const app = new Elysia()
     
     if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
     if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
+    if (config.voiceName !== undefined) await setSetting('ai.voice_name', String(config.voiceName))
     
     return { success: true }
   })
@@ -1612,7 +1614,9 @@ app.ws('/ws', {
         const greeting = await getGreeting() ?? DEFAULT_GREETING
         const systemPrompt = dateHeader + await buildSystemPrompt(greeting) + ragContext
         const model = await resolveLiveModel()
-        console.log(`[${shortId}] Gemini Live model: ${model}`)
+        const { getSetting } = await import('./db/repositories/settings')
+        const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
+        console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
 
         const session = await createLiveSession(ai, {
           onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
@@ -1636,7 +1640,7 @@ app.ws('/ws', {
             sessions.delete(shortId)
             notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
           },
-        }, { dbSessionId: shortId, systemPrompt, model })
+        }, { dbSessionId: shortId, systemPrompt, model, voiceName })
 
         info.session = session
         ;(ws.data as any).sessionId = shortId

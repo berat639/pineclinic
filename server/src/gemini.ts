@@ -18,8 +18,6 @@ import { findCustomerDocByPhone } from './db/repositories/knowledge'
 import { getToolDescriptions } from './db/repositories/settings'
 import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription } from './data/default-tools'
 
-const VOICE = process.env.GEMINI_LIVE_VOICE || 'Orus'
-
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
   if (!customerName || !phone) return 'Müşteri adı ve telefon zorunludur; lütfen müşteriden tekrar alın.'
@@ -107,6 +105,7 @@ export async function createLiveSession(
     dbSessionId: string
     systemPrompt: string
     model: string
+    voiceName?: string
     realtimeInputConfig?: RealtimeInputConfig
   }
 ) {
@@ -465,7 +464,7 @@ export async function createLiveSession(
     systemInstruction: options.systemPrompt,
     speechConfig: {
       voiceConfig: {
-        prebuiltVoiceConfig: { voiceName: VOICE },
+        prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
       languageCode: 'tr-TR',
     },

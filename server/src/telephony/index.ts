@@ -369,8 +369,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             resolveLiveModel(),
           ])
 
+          const { getSetting } = await import('../db/repositories/settings')
+          const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}`)
+          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
 
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
@@ -428,6 +430,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               dbSessionId: shortId,
               systemPrompt,
               model,
+              voiceName,
               realtimeInputConfig: {
                 // NO_INTERRUPTION: müşteri konuşmaya başlasa bile AI kendi
                 // cümlesini/sorusunu sonuna kadar söyler, yarıda kesilmez.

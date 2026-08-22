@@ -237,6 +237,7 @@ export default function KnowledgeTab() {
 
   // Voice Settings state
   const [voiceSettings, setVoiceSettings] = useState<any>({
+    voiceName: 'Aoede',
     googleSearchGrounding: false,
     codeExecution: false,
     urlContext: false,
@@ -790,6 +791,32 @@ export default function KnowledgeTab() {
 
             {!voiceLoading && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Asistan Sesi Seçimi */}
+                <div>
+                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Asistan Sesi Seçimi</h4>
+                  <select
+                    value={voiceSettings.voiceName || 'Aoede'}
+                    onChange={e => setVoiceSettings({ ...voiceSettings, voiceName: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      fontSize: 13,
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 6,
+                      color: 'var(--foreground)',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="Aoede" style={{ background: '#111' }}>Kadın (Sıcak ve Dost Canlısı)</option>
+                    <option value="Puck" style={{ background: '#111' }}>Erkek (Dinamik ve Genç)</option>
+                    <option value="Charon" style={{ background: '#111' }}>Erkek (Sakin ve Güven Verici)</option>
+                    <option value="Kore" style={{ background: '#111' }}>Kadın (Profesyonel ve Net)</option>
+                    <option value="Fenrir" style={{ background: '#111' }}>Erkek (Derin ve Olgun)</option>
+                  </select>
+                </div>
+
                 {/* Checkboxes */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
