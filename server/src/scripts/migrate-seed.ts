@@ -50,58 +50,6 @@ async function seedDefaultAccount() {
   console.log('[Seed] Varsayılan hesap eklendi:', projectId)
 }
 
-async function seedAppointments() {
-  // Path relative to project root
-  const jsonPath = resolve(process.cwd(), 'data/appointments.json')
-
-  let appointments: Array<{
-    id: string
-    createdAt: string
-    customerName: string
-    phone: string
-    type: string
-    vehicleInfo?: string
-    issueOrRequest?: string
-    date: string
-    time: string
-  }>
-
-  try {
-    appointments = JSON.parse(readFileSync(jsonPath, 'utf-8'))
-  } catch {
-    console.log('[Seed] appointments.json bulunamadı — atlandı')
-    return
-  }
-
-  if (!appointments.length) {
-    console.log('[Seed] appointments.json boş — atlandı')
-    return
-  }
-
-  // Check if appointments table is already seeded
-  const existing = await sql`SELECT COUNT(*) AS count FROM appointments`
-  if (Number(existing[0]?.count) > 0) {
-    console.log(`[Seed] ${existing[0]?.count} randevu zaten mevcut — atlandı`)
-    return
-  }
-
-  for (const appt of appointments) {
-    await sql`
-      INSERT INTO appointments (customer_name, phone, type, vehicle_info, issue_or_request, date, time)
-      VALUES (
-        ${appt.customerName},
-        ${appt.phone},
-        ${appt.type},
-        ${appt.vehicleInfo ?? null},
-        ${appt.issueOrRequest ?? null},
-        ${appt.date},
-        ${appt.time}
-      )
-    `
-  }
-  console.log(`[Seed] ${appointments.length} randevu aktarıldı`)
-}
-
 async function seedKnowledgePrompts() {
   // Vertex embedding gerektirir; creds yoksa atla (belge embedding'siz
   // eklenirse retrieveTopK 'embedding IS NOT NULL' filtresinden geçmez).
@@ -153,7 +101,6 @@ async function main() {
   console.log('[Seed] Başlıyor...')
   try {
     await seedDefaultAccount()
-    await seedAppointments()
     await seedKnowledgePrompts()
     console.log('[Seed] Tamamlandı')
   } catch (err) {
