@@ -711,6 +711,7 @@ async function runMigrations() {
     )
   `
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES treatment_groups(id)`
+  await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES users(id)`
 
   // ── Patient Diseases ──────────────────────────────────────────────────────
   await sql`
