@@ -10,6 +10,12 @@ export async function PUT(req: NextRequest) {
     headers: { 'Content-Type': 'application/json', cookie: `token=${token}` },
     body: JSON.stringify(body),
   })
-  const data = await res.json()
+  let data
+  try {
+    const text = await res.text()
+    data = text ? JSON.parse(text) : {}
+  } catch (e) {
+    data = { error: 'Invalid response from server' }
+  }
   return NextResponse.json(data, { status: res.status })
 }

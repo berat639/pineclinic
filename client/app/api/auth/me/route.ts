@@ -10,6 +10,12 @@ export async function GET(req: NextRequest) {
     headers: { cookie: `token=${token}` },
   })
 
-  const data = await res.json()
+  let data
+  try {
+    const text = await res.text()
+    data = text ? JSON.parse(text) : {}
+  } catch (e) {
+    data = { error: 'Invalid response from server' }
+  }
   return NextResponse.json(data, { status: res.status })
 }

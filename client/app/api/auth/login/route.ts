@@ -15,7 +15,13 @@ export async function POST(req: NextRequest) {
     body: JSON.stringify(body),
   })
 
-  const data = await res.json()
+  let data
+  try {
+    const text = await res.text()
+    data = text ? JSON.parse(text) : {}
+  } catch (e) {
+    data = { error: 'Invalid response from server' }
+  }
   const response = NextResponse.json(data, { status: res.status })
 
   const setCookie = res.headers.get('set-cookie')
