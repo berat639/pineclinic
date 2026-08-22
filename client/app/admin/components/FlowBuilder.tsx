@@ -556,16 +556,17 @@ export default function FlowBuilder() {
                 {d.action === 'transfer_call' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div>
-                      <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Aktarılacak Telefon Defteri Kaydı</label>
-                      <select 
-                        value={d.transferNumber || (phonebook[0]?.label || 'resepsiyon')} 
+                      <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Aktarılacak Hedef (Rehberden Seç veya Numara Yaz)</label>
+                      <input 
+                        list="phonebook-options"
+                        value={d.transferNumber || ''} 
                         onChange={e => updateSelectedNode({ transferNumber: e.target.value })} 
+                        placeholder="Örn: resepsiyon, banko veya +90538..." 
                         style={inputStyle}
-                      >
+                      />
+                      <datalist id="phonebook-options">
                         {phonebook.map(p => (
-                          <option key={p.label} value={p.label}>
-                            {p.label} ({p.number})
-                          </option>
+                          <option key={p.label} value={p.number || p.label}>{p.label}</option>
                         ))}
                         {phonebook.length === 0 && (
                           <>
