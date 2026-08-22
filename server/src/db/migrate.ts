@@ -625,7 +625,7 @@ async function runMigrations() {
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS birth_date TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS email TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS gender TEXT`
-  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS tc_no TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS tc_identity TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS address TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS allergies TEXT[] DEFAULT '{}'`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS medications TEXT[] DEFAULT '{}'`
