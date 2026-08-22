@@ -6,7 +6,7 @@ services:
     container_name: pineclinic-asterisk
     restart: always
     environment:
-      AUDIOSOCKET_HOST: voiceai-pineclinic
+      AUDIOSOCKET_HOST: voiceai-pineclinic-gycmpw
       AUDIOSOCKET_PORT: 12000
       BACKEND_HTTP_PORT: 3001
       TELEPHONY_ENABLED: 1
