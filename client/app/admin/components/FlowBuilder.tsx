@@ -575,7 +575,7 @@ export default function FlowBuilder() {
                             <option value="acil">Acil Hat</option>
                           </>
                         )}
-                      </select>
+                      </datalist>
                       <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
                         ℹ️ Numaraları Yönetici Paneli &gt; Ayarlar &gt; Aktarım Telefon Defteri&apos;nden yönetebilirsiniz.
                       </div>
@@ -585,7 +585,7 @@ export default function FlowBuilder() {
                       <input 
                         value={(d.triggerKeywords as string) || ''} 
                         onChange={e => updateSelectedNode({ triggerKeywords: e.target.value })} 
-                        placeholder="Örn: resepsiyona bağla, operatöre aktar, yetkili biri" 
+                        placeholder="Örn: emre bey, yönetici, yetkili, aktar, bağlan" 
                         style={inputStyle} 
                       />
                       <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
