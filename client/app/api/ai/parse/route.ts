@@ -125,8 +125,8 @@ Format:
     }
 
     if (!data || data.error) {
-      console.error('Gemini API Error:', data?.error || fetchError)
-      return NextResponse.json({ error: 'Gemini API Hatası', details: data?.error || 'Unknown error' }, { status: 500 })
+      console.error('AI API Error:', data?.error || fetchError)
+      return NextResponse.json({ error: 'AI API Hatası', details: data?.error || 'Unknown error' }, { status: 500 })
     }
 
     const contentText = data.candidates?.[0]?.content?.parts?.[0]?.text
@@ -138,7 +138,7 @@ Format:
     try {
       parsed = JSON.parse(contentText)
     } catch (e) {
-      console.error('Gemini JSON Parse Error:', e, contentText)
+      console.error('AI JSON Parse Error:', e, contentText)
       // markdown temizlemeyi deneyelim
       try {
         const cleaned = contentText.replace(/```json/g, '').replace(/```/g, '').trim()

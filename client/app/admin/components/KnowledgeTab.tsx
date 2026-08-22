@@ -784,7 +784,7 @@ export default function KnowledgeTab() {
                   padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
                   border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
                 }}>
-                  Gemini API & Telephony
+                  Yapay Zeka & Telephony
                 </span>
               )}
             </div>

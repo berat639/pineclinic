@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ThemeToggle } from './theme-provider'
-import { GeminiLiveSession, type LiveChatCallbacks, type SessionConfig } from '@/lib/gemini-live'
+import { AiLiveSession, type LiveChatCallbacks, type SessionConfig } from '@/lib/ai-live'
 import { AudioStreamPlayer, MicrophoneCapture } from '@/lib/audio'
 
 type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
@@ -40,7 +40,7 @@ export default function Home() {
   const [apiKey, setApiKey] = useState('')
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
 
-  const sessionRef = useRef<GeminiLiveSession | null>(null)
+  const sessionRef = useRef<AiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
   const micRef = useRef<MicrophoneCapture | null>(null)
   const textBufferRef = useRef('')
@@ -135,13 +135,13 @@ export default function Home() {
       },
     }
 
-    const session = new GeminiLiveSession(callbacks)
+    const session = new AiLiveSession(callbacks)
     sessionRef.current = session
 
     try {
       await session.connect(apiKey, sessionConfig)
 
-      // Wait briefly to confirm session is stable (Gemini may close immediately on errors)
+      // Wait briefly to confirm session is stable (AI may close immediately on errors)
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
           if (session.connected) resolve()

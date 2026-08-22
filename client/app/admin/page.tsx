@@ -185,7 +185,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
   'gemini-3.1-flash-live-preview': {
-    label: 'Gemini API — Live 1.0',
+    label: 'Yapay Zeka API — Live 1.0',
     tagline: 'API Key ile çalışır. Düşük gecikme, audio-to-audio, en yeni model.',
     tier: 'Premium',
   },

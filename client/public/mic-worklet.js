@@ -29,7 +29,7 @@ class MicProcessor extends AudioWorkletProcessor {
       const chunk = this.buffer.splice(0, 320)
 
       // Noise gate: compute RMS energy of the chunk. If below threshold (0.02),
-      // send silence instead of actual audio to prevent Gemini VAD from treating
+      // send silence instead of actual audio to prevent AI VAD from treating
       // ambient sounds (keyboard clicks, glass on table, etc.) as speech.
       let sumSq = 0
       for (let j = 0; j < chunk.length; j++) sumSq += chunk[j] * chunk[j]

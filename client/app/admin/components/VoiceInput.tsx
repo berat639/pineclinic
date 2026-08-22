@@ -253,7 +253,7 @@ export function parseTreatmentVoice(text: string): ParsedTreatment {
   return result
 }
 
-// ── AI Parser (Gemini) ────────────────────────────────────────────────────
+// ── AI Parser ───────────────────────────────────────────────────────────────
 export async function parseTreatmentsAI(text: string, procNames: string[] = [], indNames: string[] = [], diseaseNames: string[] = [], consultationNames: string[] = []): Promise<AIParsedData> {
   try {
     const res = await fetch('/api/ai/parse', {
