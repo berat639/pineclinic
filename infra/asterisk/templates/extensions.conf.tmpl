@@ -42,7 +42,7 @@ exten => 100,1,NoOp(Test AudioSocket bridge)
 ; ─────────────────────────────────────────────────────────────────────────────
 [dynamic-forward]
 exten => _X.,1,NoOp(Dinamik Yonlendirme: ${EXTEN})
- same => n,Dial(PJSIP/${EXTEN}@netgsm-trunk,30)
+ same => n,Dial(PJSIP/${EXTEN}@netgsm-endpoint,30)
  same => n,Hangup()
 
 exten => s,1,NoOp(Dinamik Yonlendirme default)
