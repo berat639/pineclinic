@@ -210,7 +210,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
-  }, [setNodes, setEdges])
+  }, [setNodes, setEdges, direction])
 
   const onConnect = useCallback((params: Connection) => {
     setEdges(eds => addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: '#64748b' } }, eds))
@@ -222,6 +222,31 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
   
   const loadSampleFlow = () => {
+    if (direction === 'outbound') {
+      if(!window.confirm("Örnek hasta memnuniyet anket akışını yüklemek mevcut giden arama akışınızı silecektir. Onaylıyor musunuz?")) return;
+      
+      const surveyNodes: Node[] = [
+        { id: 'start', type: 'startNode', position: { x: 250, y: 0 }, data: { label: 'Arama Başladı' } },
+        { id: 'field_memnuniyet', type: 'fieldNode', position: { x: 250, y: 140 }, data: { fieldName: 'memnuniyet', fieldType: 'text', description: 'Son kliniğimize ziyaretinizden ve tedavinizden memnun kaldınız mı?', required: true } },
+        { id: 'field_puan', type: 'fieldNode', position: { x: 250, y: 280 }, data: { fieldName: 'puan', fieldType: 'text', description: 'Hizmetimizi 1 ile 10 arasında değerlendirecek olsanız kaç puan verirsiniz?', required: false } },
+        { id: 'field_oneri', type: 'fieldNode', position: { x: 250, y: 420 }, data: { fieldName: 'hastaNotu', fieldType: 'text', description: 'Bizlere iletmek istediğiniz özel bir notunuz veya öneriniz var mı?', required: false } },
+        { id: 'action_not', type: 'actionNode', position: { x: 250, y: 560 }, data: { action: 'notBirak', label: 'Anket Yanıtını Hasta Notlarına Kaydet' } },
+        { id: 'end', type: 'endNode', position: { x: 250, y: 700 }, data: { label: 'Görüşmeyi Teşekkürle Bitir' } }
+      ];
+
+      const surveyEdges: Edge[] = [
+        { id: 'e1', source: 'start', target: 'field_memnuniyet', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e2', source: 'field_memnuniyet', target: 'field_puan', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e3', source: 'field_puan', target: 'field_oneri', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e4', source: 'field_oneri', target: 'action_not', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e5', source: 'action_not', target: 'end', markerEnd: { type: MarkerType.ArrowClosed } }
+      ];
+
+      setNodes(surveyNodes);
+      setEdges(surveyEdges);
+      return;
+    }
+
     if(!window.confirm("Örnek hasta kayıt ve randevu akışını yüklemek mevcut akışınızı silecektir. Onaylıyor musunuz?")) return;
     
     const sampleNodes: Node[] = [

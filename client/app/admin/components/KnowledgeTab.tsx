@@ -58,10 +58,6 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   const [callDirection, setCallDirection] = useState<'inbound' | 'outbound' | 'both'>((doc?.callDirection as 'inbound' | 'outbound' | 'both') || 'both')
   const [active, setActive] = useState(doc?.active !== false)
 
-  const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
-  const getCatIcon = (slug: string) => categories.find(c => c.slug === slug)?.icon ?? '📁'
-  const getCatLabel = (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !content.trim()) return
@@ -146,23 +142,23 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
           </div>
 
           {/* Yön (Arama Yönü) Seçimi */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-              Arama Yönü
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-2)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+              🔀 Arama Yönü (Kullanım Alanı)
             </label>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
                 <input
                   type="radio"
                   name="callDirection"
                   value="both"
                   checked={callDirection === 'both'}
                   onChange={() => setCallDirection('both')}
-                  style={{ accentColor: '#3b82f6' }}
+                  style={{ accentColor: '#a855f7' }}
                 />
-                İkisi de
+                🔄 İkisi de (Gelen & Giden)
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
                 <input
                   type="radio"
                   name="callDirection"
@@ -171,19 +167,24 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
                   onChange={() => setCallDirection('inbound')}
                   style={{ accentColor: '#3b82f6' }}
                 />
-                Sadece Gelen Arama
+                📥 Sadece Gelen Arama
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
                 <input
                   type="radio"
                   name="callDirection"
                   value="outbound"
                   checked={callDirection === 'outbound'}
                   onChange={() => setCallDirection('outbound')}
-                  style={{ accentColor: '#3b82f6' }}
+                  style={{ accentColor: '#10b981' }}
                 />
-                Sadece Giden Arama
+                📤 Sadece Giden Arama
               </label>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginTop: 6 }}>
+              {callDirection === 'both' && 'Bu bilgi hem kliniği arayan hastalara hem de robotun aradığı hastalara sunulur.'}
+              {callDirection === 'inbound' && 'Bu bilgi yalnızca kliniği arayan hastalara verilir.'}
+              {callDirection === 'outbound' && 'Bu bilgi yalnızca robot dış arama yaptığında (anket, hatırlatma vb.) kullanılır.'}
             </div>
           </div>
 
@@ -225,6 +226,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 function hexToRgb(hex: string): string {
+  if (!hex || hex.length < 7) return '96, 165, 250'
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
   const b = parseInt(hex.slice(5, 7), 16)
@@ -245,14 +247,23 @@ export default function KnowledgeTab() {
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<CategoryDef[]>([])
   const [catFilter, setCatFilter] = useState<Category | 'all'>('all')
+  const [directionFilter, setDirectionFilter] = useState<'all' | 'inbound' | 'outbound' | 'both'>('all')
   const [modal, setModal] = useState<{ open: boolean; doc: Partial<KnowledgeDoc> | null }>({ open: false, doc: null })
   const [saving, setSaving] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   
+  // Greeting state
+  const [greetingTab, setGreetingTab] = useState<'inbound' | 'outbound' | 'callerid'>('inbound')
   const [greetingText, setGreetingText] = useState('')
+  const [greetingOutboundText, setGreetingOutboundText] = useState('')
+  const [outboundCallerId, setOutboundCallerId] = useState('08503096119')
   const [greetingLoading, setGreetingLoading] = useState(true)
   const [greetingSaving, setGreetingSaving] = useState(false)
+  const [callerIdSaving, setCallerIdSaving] = useState(false)
+
+  // Flow Builder Direction State
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound'>('inbound')
 
   // Outbound Call Modal state
   const [callModalOpen, setCallModalOpen] = useState(false)
@@ -287,24 +298,59 @@ export default function KnowledgeTab() {
     try {
       const res = await fetch('/api/admin/settings/greeting')
       if (res.ok) {
-        const data = await res.json() as { greeting?: string }
+        const data = await res.json() as { greeting?: string; greetingOutbound?: string }
         if (data.greeting) setGreetingText(data.greeting)
+        if (data.greetingOutbound) setGreetingOutboundText(data.greetingOutbound)
+      }
+      const callerRes = await fetch('/api/admin/settings/outbound-caller-id')
+      if (callerRes.ok) {
+        const callerData = await callerRes.json() as { callerId?: string }
+        if (callerData.callerId) setOutboundCallerId(callerData.callerId)
       }
     } catch { /* ignore */ }
     setGreetingLoading(false)
   }, [])
 
-  const handleSaveGreeting = async () => {
-    if (!greetingText.trim() || greetingSaving) return
+  const handleSaveGreeting = async (type: 'inbound' | 'outbound') => {
+    const textToSave = type === 'inbound' ? greetingText : greetingOutboundText
+    if (!textToSave.trim() || greetingSaving) return
     setGreetingSaving(true)
     try {
-      await fetch('/api/admin/settings/greeting', {
+      const bodyPayload = type === 'inbound' ? { greeting: greetingText.trim() } : { greetingOutbound: greetingOutboundText.trim() }
+      const res = await fetch('/api/admin/settings/greeting', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ greeting: greetingText.trim() }),
+        body: JSON.stringify(bodyPayload),
       })
-    } catch { /* ignore */ }
+      if (res.ok) {
+        showToast(type === 'inbound' ? '✅ Gelen Karşılama Mesajı kaydedildi' : '✅ Giden Karşılama Mesajı kaydedildi')
+      } else {
+        showToast('Kayıt başarısız', 'error')
+      }
+    } catch {
+      showToast('Kayıt başarısız', 'error')
+    }
     setGreetingSaving(false)
+  }
+
+  const handleSaveCallerId = async () => {
+    if (!outboundCallerId.trim() || callerIdSaving) return
+    setCallerIdSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/outbound-caller-id', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerId: outboundCallerId.trim() }),
+      })
+      if (res.ok) {
+        showToast('✅ Dış Arama CallerID kaydedildi')
+      } else {
+        showToast('Kayıt başarısız', 'error')
+      }
+    } catch {
+      showToast('Kayıt başarısız', 'error')
+    }
+    setCallerIdSaving(false)
   }
 
   // Voice Settings state
@@ -432,10 +478,15 @@ export default function KnowledgeTab() {
     fetchVoiceSettings()
   }, [load, fetchGreeting, fetchVoiceSettings])
 
-  const filtered = catFilter === 'all' ? docs : docs.filter(d => d.category === catFilter)
+  // Filter both by category and call direction
+  const filtered = docs.filter(d => {
+    const matchCat = catFilter === 'all' || d.category === catFilter
+    const matchDir = directionFilter === 'all' || d.callDirection === directionFilter || (directionFilter === 'both' && (!d.callDirection || d.callDirection === 'both'))
+    return matchCat && matchDir
+  })
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
-  const handleSave = async (data: { category: Category; title: string; content: string; active: boolean }) => {
+  const handleSave = async (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean }) => {
     setSaving(true)
     try {
       const isEdit = !!modal.doc?.id
@@ -516,61 +567,100 @@ export default function KnowledgeTab() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="glass-card" style={{ padding: '0.85rem 1.25rem', marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Kategori filtre */}
-          {(['all', ...categories.map(c => c.slug)] as const).map(cat => (
-            <button key={cat} onClick={() => setCatFilter(cat as Category | 'all')} style={{
-              padding: '5px 12px', borderRadius: 8, border: '1px solid', fontSize: '0.77rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s',
-              background: catFilter === cat ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.04)',
-              borderColor: catFilter === cat ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.08)',
-              color: catFilter === cat ? '#60a5fa' : '#94a3b8',
-            }}>
-              {cat === 'all' ? 'Tümü' : `${getCatIcon(cat)} ${getCatLabel(cat)}`}
+      {/* Header & Filter Controls */}
+      <div className="glass-card" style={{ padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {/* Top bar: Action buttons */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              🧠 Bilgi Bankası & Yapay Zeka Akışları
+            </h2>
+            <p style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', margin: '2px 0 0' }}>
+              Gelen ve giden aramalar için bilgi belgeleri, karşılama mesajları ve senaryolar
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {!loading && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 8, fontSize: '0.78rem', color: 'var(--foreground-3)',
+              }}>
+                <span style={{ color: totalEmbedded === docs.length && docs.length > 0 ? '#22c55e' : '#f59e0b' }}>
+                  ⚡
+                </span>
+                {totalEmbedded}/{docs.length} embedding hazır
+              </div>
+            )}
+
+            <button
+              onClick={handleReindex}
+              disabled={reindexing || docs.length === 0}
+              className="btn btn-ghost"
+              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+            >
+              {reindexing ? '⏳ İndeksleniyor…' : '🔄 Tümünü Yenile'}
             </button>
-          ))}
+
+            <button
+              onClick={() => setModal({ open: true, doc: null })}
+              className="btn btn-primary"
+              style={{ fontSize: '0.8rem', padding: '6px 16px' }}
+            >
+              + Yeni Belge
+            </button>
+            
+            <button
+              onClick={() => setCallModalOpen(true)}
+              className="btn btn-primary"
+              style={{ fontSize: '0.8rem', padding: '6px 16px', background: '#ec4899', borderColor: '#ec4899' }}
+            >
+              📞 Yapay Zeka ile Ara
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Embedding stats */}
-          {!loading && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
-              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 8, fontSize: '0.78rem', color: 'var(--foreground-3)',
-            }}>
-              <span style={{ color: totalEmbedded === docs.length && docs.length > 0 ? '#22c55e' : '#f59e0b' }}>
-                ⚡
-              </span>
-              {totalEmbedded}/{docs.length} embedding hazır
-            </div>
-          )}
+        {/* Filter bars */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          {/* Direction filters */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--foreground-3)', marginRight: 4 }}>Yön:</span>
+            {[
+              { id: 'all', label: 'Tüm Yönler' },
+              { id: 'inbound', label: '📥 Gelen Arama' },
+              { id: 'outbound', label: '📤 Giden Arama' },
+              { id: 'both', label: '🔄 Ortak / İkisi' },
+            ].map(d => (
+              <button
+                key={d.id}
+                onClick={() => setDirectionFilter(d.id as any)}
+                style={{
+                  padding: '4px 10px', borderRadius: 8, border: '1px solid', fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                  background: directionFilter === d.id ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.03)',
+                  borderColor: directionFilter === d.id ? '#a855f7' : 'rgba(255,255,255,0.08)',
+                  color: directionFilter === d.id ? '#d8b4fe' : 'var(--foreground-3)',
+                }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
 
-          <button
-            onClick={handleReindex}
-            disabled={reindexing || docs.length === 0}
-            className="btn btn-ghost"
-            style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-          >
-            {reindexing ? '⏳ İndeksleniyor…' : '🔄 Tümünü Yenile'}
-          </button>
-
-          <button
-            onClick={() => setModal({ open: true, doc: null })}
-            className="btn btn-primary"
-            style={{ fontSize: '0.8rem', padding: '6px 16px' }}
-          >
-            + Yeni Belge
-          </button>
-          
-          <button
-            onClick={() => setCallModalOpen(true)}
-            className="btn btn-primary"
-            style={{ fontSize: '0.8rem', padding: '6px 16px', background: 'var(--accent)', borderColor: 'var(--accent)' }}
-          >
-            📞 Yapay Zeka ile Ara
-          </button>
+          {/* Category filters */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--foreground-3)', marginRight: 4 }}>Kategori:</span>
+            {(['all', ...categories.map(c => c.slug)] as const).map(cat => (
+              <button key={cat} onClick={() => setCatFilter(cat as Category | 'all')} style={{
+                padding: '4px 10px', borderRadius: 8, border: '1px solid', fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s',
+                background: catFilter === cat ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.03)',
+                borderColor: catFilter === cat ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.08)',
+                color: catFilter === cat ? '#60a5fa' : '#94a3b8',
+              }}>
+                {cat === 'all' ? 'Tümü' : `${getCatIcon(cat)} ${getCatLabel(cat)}`}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -649,244 +739,329 @@ export default function KnowledgeTab() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', gap: 16, alignItems: 'start', marginBottom: 24 }}>
-        {/* Sol Kolon: Bilgi Bankası */}
+        {/* Sol Kolon: Bilgi Bankası Belgeleri */}
         <div>
           {/* Loading */}
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--foreground-3)' }}>⏳ Yükleniyor…</div>
-      ) : filtered.length === 0 ? (
-        <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🧠</div>
-          <div style={{ marginBottom: '0.5rem' }}>Bilgi bankası boş</div>
-          <div style={{ fontSize: '0.8rem', marginBottom: '1.25rem', color: '#475569' }}>
-            Yeni belge ekleyerek AI'ı bilgilendirin
-          </div>
-          <button onClick={() => setModal({ open: true, doc: null })} className="btn btn-primary" style={{ fontSize: '0.875rem' }}>
-            + İlk Belgeyi Ekle
-          </button>
-        </div>
-      ) : (
-        /* Doc grid */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '1rem' }}>
-          {filtered.map(doc => {
-            const color = getCatColor(doc.category)
-            const hasEmbedding = !!doc.embeddedAt
-
-            return (
-              <div key={doc.id} className="glass-card" style={{
-                padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem',
-                borderLeft: `3px solid ${color}`, opacity: doc.active ? 1 : 0.55,
-                transition: 'opacity 0.2s',
-              }}>
-                {/* Top row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <span style={{
-                        fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-                        color, background: `rgba(${hexToRgb(color)}, 0.15)`,
-                        padding: '2px 8px', borderRadius: 20, border: `1px solid rgba(${hexToRgb(color)}, 0.25)`,
-                        flexShrink: 0,
-                      }}>
-                        {getCatIcon(doc.category)} {getCatLabel(doc.category)}
-                      </span>
-                    </div>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.3 }}>
-                      {doc.title}
-                    </h3>
-                  </div>
-
-                  {/* Active toggle */}
-                  <button
-                    onClick={() => handleToggle(doc.id)}
-                    disabled={togglingId === doc.id}
-                    title={doc.active ? 'Pasif yap' : 'Aktif yap'}
-                    style={{
-                      width: 38, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
-                      transition: 'all 0.2s', position: 'relative', flexShrink: 0,
-                      background: doc.active ? '#22c55e' : 'rgba(255,255,255,0.12)',
-                      opacity: togglingId === doc.id ? 0.5 : 1,
-                    }}
-                  >
-                    <span style={{
-                      position: 'absolute', top: 3, left: doc.active ? 19 : 3, width: 16, height: 16,
-                      borderRadius: '50%', background: 'white', transition: 'left 0.2s',
-                    }} />
-                  </button>
-                </div>
-
-                {/* Content accordion */}
-                <div>
-                  <p style={{
-                    fontSize: '0.8rem', color: 'var(--foreground-3)', lineHeight: 1.55, margin: 0,
-                    ...(expandedId === doc.id ? {} : {
-                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                    }),
-                  }}>
-                    {doc.content}
-                  </p>
-                  <button
-                    onClick={() => setExpandedId(expandedId === doc.id ? null : doc.id)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 0',
-                      fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    {expandedId === doc.id ? '▲ Küçült' : '▼ Tamamını gör'}
-                  </button>
-                </div>
-
-                {/* Footer */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div style={{ fontSize: '0.68rem', color: '#475569' }}>
-                    {hasEmbedding ? (
-                      <span style={{ color: '#22c55e' }}>✅ Embedding hazır</span>
-                    ) : (
-                      <span style={{ color: '#f59e0b' }}>⚠️ Embedding yok</span>
-                    )}
-                    {doc.embeddedAt && (
-                      <span style={{ marginLeft: 6, color: '#334155' }}>
-                        {fmtDate(doc.embeddedAt)}
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button
-                      onClick={() => setModal({ open: true, doc })}
-                      className="btn btn-ghost"
-                      style={{ padding: '4px 10px', fontSize: '0.73rem' }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => handleDelete(doc.id)}
-                      disabled={deletingId === doc.id}
-                      className="btn btn-danger"
-                      style={{ padding: '4px 10px', fontSize: '0.73rem', opacity: deletingId === doc.id ? 0.5 : 1 }}
-                    >
-                      {deletingId === doc.id ? '…' : '🗑'}
-                    </button>
-                  </div>
-                </div>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--foreground-3)' }}>⏳ Yükleniyor…</div>
+          ) : filtered.length === 0 ? (
+            <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🧠</div>
+              <div style={{ marginBottom: '0.5rem' }}>Filtrelere uygun belge bulunamadı</div>
+              <div style={{ fontSize: '0.8rem', marginBottom: '1.25rem', color: '#475569' }}>
+                Yeni belge ekleyerek AI'ı bilgilendirin
               </div>
-            )
-          })}
-        </div>
-      )}
+              <button onClick={() => setModal({ open: true, doc: null })} className="btn btn-primary" style={{ fontSize: '0.875rem' }}>
+                + İlk Belgeyi Ekle
+              </button>
+            </div>
+          ) : (
+            /* Doc grid */
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '1rem' }}>
+              {filtered.map(doc => {
+                const color = getCatColor(doc.category)
+                const hasEmbedding = !!doc.embeddedAt
+                const dir = doc.callDirection || 'both'
+
+                return (
+                  <div key={doc.id} className="glass-card" style={{
+                    padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem',
+                    borderLeft: `3px solid ${color}`, opacity: doc.active ? 1 : 0.55,
+                    transition: 'opacity 0.2s',
+                  }}>
+                    {/* Top row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                            color, background: `rgba(${hexToRgb(color)}, 0.15)`,
+                            padding: '2px 8px', borderRadius: 20, border: `1px solid rgba(${hexToRgb(color)}, 0.25)`,
+                            flexShrink: 0,
+                          }}>
+                            {getCatIcon(doc.category)} {getCatLabel(doc.category)}
+                          </span>
+
+                          {/* Direction Badge */}
+                          <span style={{
+                            fontSize: '0.68rem', fontWeight: 600,
+                            padding: '2px 8px', borderRadius: 20,
+                            background: dir === 'inbound' ? 'rgba(59,130,246,0.15)' : dir === 'outbound' ? 'rgba(16,185,129,0.15)' : 'rgba(168,85,247,0.15)',
+                            border: `1px solid ${dir === 'inbound' ? 'rgba(59,130,246,0.3)' : dir === 'outbound' ? 'rgba(16,185,129,0.3)' : 'rgba(168,85,247,0.3)'}`,
+                            color: dir === 'inbound' ? '#60a5fa' : dir === 'outbound' ? '#34d399' : '#c084fc',
+                          }}>
+                            {dir === 'inbound' ? '📥 Gelen Arama' : dir === 'outbound' ? '📤 Giden Arama' : '🔄 Gelen & Giden'}
+                          </span>
+                        </div>
+                        <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.3 }}>
+                          {doc.title}
+                        </h3>
+                      </div>
+
+                      {/* Active toggle */}
+                      <button
+                        onClick={() => handleToggle(doc.id)}
+                        disabled={togglingId === doc.id}
+                        title={doc.active ? 'Pasif yap' : 'Aktif yap'}
+                        style={{
+                          width: 38, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
+                          transition: 'all 0.2s', position: 'relative', flexShrink: 0,
+                          background: doc.active ? '#22c55e' : 'rgba(255,255,255,0.12)',
+                          opacity: togglingId === doc.id ? 0.5 : 1,
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute', top: 3, left: doc.active ? 19 : 3, width: 16, height: 16,
+                          borderRadius: '50%', background: 'white', transition: 'left 0.2s',
+                        }} />
+                      </button>
+                    </div>
+
+                    {/* Content accordion */}
+                    <div>
+                      <p style={{
+                        fontSize: '0.8rem', color: 'var(--foreground-3)', lineHeight: 1.55, margin: 0,
+                        ...(expandedId === doc.id ? {} : {
+                          display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                        }),
+                      }}>
+                        {doc.content}
+                      </p>
+                      <button
+                        onClick={() => setExpandedId(expandedId === doc.id ? null : doc.id)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 0',
+                          fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        {expandedId === doc.id ? '▲ Küçült' : '▼ Tamamını gör'}
+                      </button>
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#475569' }}>
+                        {hasEmbedding ? (
+                          <span style={{ color: '#22c55e' }}>✅ Embedding hazır</span>
+                        ) : (
+                          <span style={{ color: '#f59e0b' }}>⚠️ Embedding yok</span>
+                        )}
+                        {doc.embeddedAt && (
+                          <span style={{ marginLeft: 6, color: '#334155' }}>
+                            {fmtDate(doc.embeddedAt)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => setModal({ open: true, doc })}
+                          className="btn btn-ghost"
+                          style={{ padding: '4px 10px', fontSize: '0.73rem' }}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc.id)}
+                          disabled={deletingId === doc.id}
+                          className="btn btn-danger"
+                          style={{ padding: '4px 10px', fontSize: '0.73rem', opacity: deletingId === doc.id ? 0.5 : 1 }}
+                        >
+                          {deletingId === doc.id ? '…' : '🗑'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Sağ Kolon: Karşılama Mesajı ve Gelişmiş Ayarlar */}
+        {/* Sağ Kolon: Gelen & Giden Karşılama Mesajları ve Ses Ayarları */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Karşılama Mesajı card */}
-          <div className="glass-card" style={{ padding: 24 }}>
+          {/* Karşılama Mesajı kartı (Tabs: Gelen / Giden / CallerID) */}
+          <div className="glass-card" style={{ padding: 20 }}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 18, paddingBottom: 14,
+              marginBottom: 14, paddingBottom: 12,
               borderBottom: '1px solid rgba(255,255,255,0.06)',
             }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
-                Karşılama Mesajı
-              </span>
-              {greetingLoading ? <Spinner /> : (
-                <span style={{
-                  fontSize: 11, color: 'var(--foreground-3)',
-                  padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
-                }}>
-                  Sesli AI Açılış
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>
+                  🗣️ Karşılama Mesajları & Hat Ayarı
                 </span>
-              )}
+                <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '2px 0 0' }}>
+                  Gelen ve giden aramalar için ayrı açılış metinleri
+                </p>
+              </div>
+              {greetingLoading && <Spinner />}
+            </div>
+
+            {/* Tab switchers */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 10 }}>
+              <button
+                type="button"
+                onClick={() => setGreetingTab('inbound')}
+                style={{
+                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
+                  background: greetingTab === 'inbound' ? 'rgba(59,130,246,0.25)' : 'transparent',
+                  color: greetingTab === 'inbound' ? '#60a5fa' : 'var(--foreground-3)',
+                }}
+              >
+                📥 Gelen Arama
+              </button>
+              <button
+                type="button"
+                onClick={() => setGreetingTab('outbound')}
+                style={{
+                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
+                  background: greetingTab === 'outbound' ? 'rgba(16,185,129,0.25)' : 'transparent',
+                  color: greetingTab === 'outbound' ? '#34d399' : 'var(--foreground-3)',
+                }}
+              >
+                📤 Giden Arama
+              </button>
+              <button
+                type="button"
+                onClick={() => setGreetingTab('callerid')}
+                style={{
+                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
+                  background: greetingTab === 'callerid' ? 'rgba(236,72,153,0.25)' : 'transparent',
+                  color: greetingTab === 'callerid' ? '#f472b6' : 'var(--foreground-3)',
+                }}
+              >
+                📞 Caller ID
+              </button>
             </div>
 
             {!greetingLoading && (
               <>
-                <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginBottom: 14, lineHeight: 1.6 }}>
-                  Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
-                </p>
+                {/* 📥 Gelen Arama Karşılama */}
+                {greetingTab === 'inbound' && (
+                  <div>
+                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
+                      Müşteri kliniği aradığında AI asistanın söyleyeceği ilk karşılama cümlesi:
+                    </p>
+                    <textarea
+                      value={greetingText}
+                      onChange={(e) => setGreetingText(e.target.value)}
+                      rows={3}
+                      style={{
+                        width: '100%', padding: '10px 12px', fontSize: 12, lineHeight: 1.5,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8, color: 'var(--foreground)', resize: 'vertical', outline: 'none', fontFamily: 'inherit',
+                      }}
+                      placeholder="Merhaba, hoş geldiniz! Ben Pine Klinik asistanınızım. Size nasıl yardımcı olabilirim?"
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveGreeting('inbound')}
+                        disabled={greetingSaving || !greetingText.trim()}
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: '6px 16px' }}
+                      >
+                        {greetingSaving ? 'Kaydediliyor...' : '📥 Gelen Karşılamayı Kaydet'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <textarea
-                  value={greetingText}
-                  onChange={(e) => setGreetingText(e.target.value)}
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 8,
-                    color: 'var(--foreground)',
-                    resize: 'vertical',
-                    outline: 'none',
-                    fontFamily: 'inherit',
-                  }}
-                  placeholder="Merhaba, hoş geldiniz!..."
-                />
+                {/* 📤 Giden Arama Karşılama */}
+                {greetingTab === 'outbound' && (
+                  <div>
+                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
+                      AI asistan hastayı/müşteriyi dış aramada aradığında söyleyeceği ilk karşılama cümlesi:
+                    </p>
+                    <textarea
+                      value={greetingOutboundText}
+                      onChange={(e) => setGreetingOutboundText(e.target.value)}
+                      rows={3}
+                      style={{
+                        width: '100%', padding: '10px 12px', fontSize: 12, lineHeight: 1.5,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8, color: 'var(--foreground)', resize: 'vertical', outline: 'none', fontFamily: 'inherit',
+                      }}
+                      placeholder="Merhaba, ben Pine Klinik asistanıyım. Tedavi sonrası memnuniyet anketimiz için arıyorum..."
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveGreeting('outbound')}
+                        disabled={greetingSaving || !greetingOutboundText.trim()}
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: '6px 16px', background: '#10b981', borderColor: '#10b981' }}
+                      >
+                        {greetingSaving ? 'Kaydediliyor...' : '📤 Giden Karşılamayı Kaydet'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                  <button
-                    type="button"
-                    onClick={handleSaveGreeting}
-                    disabled={greetingSaving || !greetingText.trim()}
-                    style={{
-                      padding: '8px 18px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
-                      border: '1px solid rgba(52,211,153,0.3)',
-                      borderRadius: 8,
-                      color: '#34d399',
-                      cursor: greetingSaving ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
-                  </button>
-                </div>
+                {/* 📞 Dış Arama CallerID */}
+                {greetingTab === 'callerid' && (
+                  <div>
+                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
+                      Robotun dış arama yaparken karşı tarafın ekranında görünecek NetGSM çıkış numarası:
+                    </p>
+                    <input
+                      value={outboundCallerId}
+                      onChange={(e) => setOutboundCallerId(e.target.value)}
+                      placeholder="08503096119"
+                      style={{
+                        width: '100%', padding: '8px 12px', fontSize: 13,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8, color: 'var(--foreground)', outline: 'none',
+                      }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={handleSaveCallerId}
+                        disabled={callerIdSaving || !outboundCallerId.trim()}
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: '6px 16px', background: '#ec4899', borderColor: '#ec4899' }}
+                      >
+                        {callerIdSaving ? 'Kaydediliyor...' : '📞 CallerID Kaydet'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
 
-          {/* Gelişmiş Ayarlar card */}
-          <div className="glass-card" style={{ padding: 24 }}>
+          {/* Gelişmiş Ses Ayarları kartı */}
+          <div className="glass-card" style={{ padding: 20 }}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 18, paddingBottom: 14,
+              marginBottom: 14, paddingBottom: 12,
               borderBottom: '1px solid rgba(255,255,255,0.06)',
             }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
-                Gelişmiş Yapay Zeka Ayarları
-              </span>
-              {voiceLoading ? <Spinner /> : (
-                <span style={{
-                  fontSize: 11, color: 'var(--foreground-3)',
-                  padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
-                }}>
-                  Yapay Zeka & Telephony
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>
+                  ⚙️ Gelişmiş Sesli AI & Telephony
                 </span>
-              )}
+                <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '2px 0 0' }}>
+                  Ses tonu, bekleme süreleri ve arama zaman aşımı
+                </p>
+              </div>
+              {voiceLoading && <Spinner />}
             </div>
 
             {!voiceLoading && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {/* Asistan Sesi Seçimi */}
                 <div>
-                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Asistan Sesi Seçimi</h4>
+                  <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Asistan Sesi Seçimi</label>
                   <select
                     value={voiceSettings.voiceName || 'Aoede'}
                     onChange={e => setVoiceSettings({ ...voiceSettings, voiceName: e.target.value })}
                     style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: 6,
-                      color: 'var(--foreground)',
-                      outline: 'none',
-                      cursor: 'pointer'
+                      width: '100%', padding: '7px 10px', fontSize: 12,
+                      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 6, color: 'var(--foreground)', outline: 'none', cursor: 'pointer'
                     }}
                   >
                     <option value="Aoede" style={{ background: '#111' }}>Kadın (Sıcak ve Dost Canlısı)</option>
@@ -897,59 +1072,29 @@ export default function KnowledgeTab() {
                   </select>
                 </div>
 
-                {/* Checkboxes */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={voiceSettings.googleSearchGrounding} onChange={e => setVoiceSettings({...voiceSettings, googleSearchGrounding: e.target.checked})} />
-                    İnternet Arama
-                  </label>
-                </div>
-
                 {/* Konuşmaya Başlama */}
                 <div>
-                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Konuşmaya Başlama (Start Speaking Plan)</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Bekleme Süresi (s)</label>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Bekleme Süresi</label>
                         <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.startWaitSeconds}s</span>
                       </div>
                       <input type="range" min="0" max="5" step="0.1" value={voiceSettings.startWaitSeconds} onChange={e => setVoiceSettings({...voiceSettings, startWaitSeconds: parseFloat(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Noktalama Beklemesi (s)</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.startOnPunctuationSeconds}s</span>
-                      </div>
-                      <input type="range" min="0" max="5" step="0.1" value={voiceSettings.startOnPunctuationSeconds} onChange={e => setVoiceSettings({...voiceSettings, startOnPunctuationSeconds: parseFloat(e.target.value)})} style={{ width: '100%' }} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Çağrı Zaman Aşımı */}
-                <div>
-                  <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Çağrı Zaman Aşımı (Timeout)</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Sessizlik Aşımı (s)</label>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Sessizlik Aşımı</label>
                         <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceTimeout}s</span>
                       </div>
                       <input type="range" min="5" max="120" step="1" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
                     </div>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Max Çağrı Süresi (s)</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callMaxDuration}s</span>
-                      </div>
-                      <input type="range" min="60" max="3600" step="60" value={voiceSettings.callMaxDuration} onChange={e => setVoiceSettings({...voiceSettings, callMaxDuration: parseInt(e.target.value)})} style={{ width: '100%' }} />
-                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                  <button onClick={handleSaveVoiceSettings} disabled={voiceSaving} style={{ padding: '8px 18px', fontSize: 12, fontWeight: 600, background: voiceSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 8, color: '#34d399', cursor: voiceSaving ? 'wait' : 'pointer' }}>
-                    {voiceSaving ? 'Kaydediliyor...' : 'Ayarları Kaydet'}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <button onClick={handleSaveVoiceSettings} disabled={voiceSaving} style={{ padding: '6px 14px', fontSize: 11, fontWeight: 600, background: voiceSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 8, color: '#34d399', cursor: voiceSaving ? 'wait' : 'pointer' }}>
+                    {voiceSaving ? 'Kaydediliyor...' : 'Ses Ayarlarını Kaydet'}
                   </button>
                 </div>
               </div>
@@ -958,11 +1103,64 @@ export default function KnowledgeTab() {
         </div>
       </div>
 
-      {/* Alt satır: Konuşma Akışı (tek sütun) */}
-      <div style={{ width: '100%' }}>
-        <FlowBuilder />
-      </div>
+      {/* Alt Satır: Konuşma Akışı (Flow Builder - Gelen ve Giden Tabları) */}
+      <div className="glass-card" style={{ width: '100%', padding: '1.25rem', marginTop: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              🔀 Konuşma Akışı Senaryoları (Flow Builder)
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', margin: '4px 0 0' }}>
+              Yapay zekanın görüşme esnasında soracağı soruları, kontrolleri ve randevu adımlarını görsel olarak tasarlayın
+            </p>
+          </div>
 
+          {/* Flow Direction Selector Switcher */}
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)' }}>
+            <button
+              onClick={() => setFlowDirection('inbound')}
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
+                background: flowDirection === 'inbound' ? '#3b82f6' : 'transparent',
+                color: flowDirection === 'inbound' ? '#fff' : 'var(--foreground-3)',
+                boxShadow: flowDirection === 'inbound' ? '0 2px 8px rgba(59,130,246,0.4)' : 'none',
+              }}
+            >
+              📥 Gelen Arama Akışı (Randevu)
+            </button>
+            <button
+              onClick={() => setFlowDirection('outbound')}
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
+                background: flowDirection === 'outbound' ? '#10b981' : 'transparent',
+                color: flowDirection === 'outbound' ? '#fff' : 'var(--foreground-3)',
+                boxShadow: flowDirection === 'outbound' ? '0 2px 8px rgba(16,185,129,0.4)' : 'none',
+              }}
+            >
+              📤 Giden Arama Akışı (Anket & Takip)
+            </button>
+          </div>
+        </div>
+
+        {/* Current Flow Notice */}
+        <div style={{
+          padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: '0.8rem',
+          background: flowDirection === 'inbound' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
+          border: `1px solid ${flowDirection === 'inbound' ? 'rgba(59,130,246,0.2)' : 'rgba(16,185,129,0.2)'}`,
+          color: flowDirection === 'inbound' ? '#93c5fd' : '#6ee7b7',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span>
+            {flowDirection === 'inbound' 
+              ? '📥 Şu an **Gelen Arama Akışı** düzenleniyor. Kliniği arayan hastaların görüşme akışıdır.' 
+              : '📤 Şu an **Giden Arama Akışı** düzenleniyor. Robotun dışarıya yaptığı anket ve takip aramalarının akışıdır.'}
+          </span>
+          <span style={{ fontSize: '0.72rem', opacity: 0.8 }}>Yön: {flowDirection}</span>
+        </div>
+
+        {/* FlowBuilder with dynamic direction key to force re-render/reload */}
+        <FlowBuilder key={flowDirection} direction={flowDirection} />
+      </div>
 
       {/* Modal */}
       {modal.open && (
@@ -985,22 +1183,22 @@ export default function KnowledgeTab() {
         }} onClick={e => { if (e.target === e.currentTarget) setCallModalOpen(false) }}>
           <div style={{
             background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 400,
+            borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420,
             animation: 'fadeIn 0.2s ease',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>📞 Yapay Zeka ile Ara</h2>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>📞 Yapay Zeka ile Ara (Dış Arama)</h2>
               <button onClick={() => setCallModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
             </div>
-            <form onSubmit={handleOutboundCall} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <form onSubmit={handleOutboundCall} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-                  Telefon Numarası
+                  Hedef Telefon Numarası
                 </label>
                 <input
                   value={callPhone}
                   onChange={e => setCallPhone(e.target.value)}
-                  placeholder="Örn: 05xxxxxxxxx veya 0850xxxxxxx"
+                  placeholder="Örn: 05xxxxxxxxx"
                   required
                   style={{
                     width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
@@ -1008,16 +1206,21 @@ export default function KnowledgeTab() {
                     fontSize: '0.875rem', outline: 'none',
                   }}
                 />
-                <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginTop: 8 }}>
-                  Giden arama akışı ve giden karşılama mesajı kullanılacaktır.
-                </div>
               </div>
+
+              <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 8, padding: '10px 12px', fontSize: '0.76rem', color: '#6ee7b7' }}>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>ℹ️ Arama Parametreleri:</div>
+                <div>• Çıkış Numarası: <strong>{outboundCallerId}</strong></div>
+                <div>• Akış: <strong>Giden Arama Akışı (Anket/Takip)</strong></div>
+                <div>• Açılış: <strong>Giden Karşılama Mesajı</strong></div>
+              </div>
+
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button type="button" onClick={() => setCallModalOpen(false)} className="btn btn-ghost" style={{ fontSize: '0.875rem' }} disabled={calling}>
                   İptal
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={calling || !callPhone.trim()} style={{ fontSize: '0.875rem', minWidth: 100, background: 'var(--accent)', borderColor: 'var(--accent)' }}>
-                  {calling ? '⏳ Aranıyor...' : 'Ara'}
+                <button type="submit" className="btn btn-primary" disabled={calling || !callPhone.trim()} style={{ fontSize: '0.875rem', minWidth: 100, background: '#ec4899', borderColor: '#ec4899' }}>
+                  {calling ? '⏳ Aranıyor...' : '📞 Hemen Ara'}
                 </button>
               </div>
             </form>

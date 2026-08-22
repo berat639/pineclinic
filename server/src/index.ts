@@ -1221,17 +1221,25 @@ const app = new Elysia()
 
   .put('/api/admin/settings/greeting', async ({ body, set }) => {
     const { greeting, greetingOutbound } = (body ?? {}) as { greeting?: string; greetingOutbound?: string }
-    if (!greeting || greeting.trim().length < 5) {
-      set.status = 400
-      return { error: 'Gelen Karşılama mesajı en az 5 karakter olmalıdır.' }
+    let updatedInbound = undefined
+    let updatedOutbound = undefined
+    if (greeting !== undefined) {
+      if (greeting.trim().length < 3) {
+        set.status = 400
+        return { error: 'Gelen Karşılama mesajı en az 3 karakter olmalıdır.' }
+      }
+      await setGreeting(greeting.trim(), 'inbound')
+      updatedInbound = greeting.trim()
     }
-    if (!greetingOutbound || greetingOutbound.trim().length < 5) {
-      set.status = 400
-      return { error: 'Giden Karşılama mesajı en az 5 karakter olmalıdır.' }
+    if (greetingOutbound !== undefined) {
+      if (greetingOutbound.trim().length < 3) {
+        set.status = 400
+        return { error: 'Giden Karşılama mesajı en az 3 karakter olmalıdır.' }
+      }
+      await setGreeting(greetingOutbound.trim(), 'outbound')
+      updatedOutbound = greetingOutbound.trim()
     }
-    await setGreeting(greeting.trim(), 'inbound')
-    await setGreeting(greetingOutbound.trim(), 'outbound')
-    return { success: true, greeting: greeting.trim(), greetingOutbound: greetingOutbound.trim() }
+    return { success: true, greeting: updatedInbound, greetingOutbound: updatedOutbound }
   })
 
   // ── Outbound Caller ID Settings ──────────────────────────────────────────────
