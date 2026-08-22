@@ -152,6 +152,8 @@ async function runMigrations() {
     )
   `
 
+  await sql`ALTER TABLE conversation_flows ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'inbound'`
+
   await sql`
     CREATE TABLE IF NOT EXISTS business_settings (
       key        TEXT PRIMARY KEY,
@@ -173,6 +175,7 @@ async function runMigrations() {
       category      TEXT NOT NULL DEFAULT 'genel',
       title         TEXT NOT NULL DEFAULT '',
       content       TEXT NOT NULL DEFAULT '',
+      call_direction TEXT NOT NULL DEFAULT 'both',
       active        BOOLEAN NOT NULL DEFAULT true,
       embedding     vector(768),
       embedded_at   TIMESTAMPTZ,
@@ -185,6 +188,7 @@ async function runMigrations() {
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS category   TEXT NOT NULL DEFAULT 'genel'`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS title      TEXT NOT NULL DEFAULT ''`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS content    TEXT NOT NULL DEFAULT ''`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS call_direction TEXT NOT NULL DEFAULT 'both'`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS active     BOOLEAN NOT NULL DEFAULT true`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedding  vector(768)`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedded_at TIMESTAMPTZ`
