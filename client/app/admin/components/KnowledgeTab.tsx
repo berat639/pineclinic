@@ -818,14 +818,10 @@ export default function KnowledgeTab() {
                 </div>
 
                 {/* Checkboxes */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={voiceSettings.googleSearchGrounding} onChange={e => setVoiceSettings({...voiceSettings, googleSearchGrounding: e.target.checked})} />
-                    Google Arama Grounding
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={voiceSettings.codeExecution} onChange={e => setVoiceSettings({...voiceSettings, codeExecution: e.target.checked})} />
-                    Kod Çalıştırma (Code Execution)
+                    İnternet Arama
                   </label>
                 </div>
 
@@ -834,12 +830,18 @@ export default function KnowledgeTab() {
                   <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Konuşmaya Başlama (Start Speaking Plan)</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
-                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Bekleme Süresi (s)</label>
-                      <input type="number" step="0.1" value={voiceSettings.startWaitSeconds} onChange={e => setVoiceSettings({...voiceSettings, startWaitSeconds: parseFloat(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Bekleme Süresi (s)</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.startWaitSeconds}s</span>
+                      </div>
+                      <input type="range" min="0" max="5" step="0.1" value={voiceSettings.startWaitSeconds} onChange={e => setVoiceSettings({...voiceSettings, startWaitSeconds: parseFloat(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Noktalama Beklemesi (s)</label>
-                      <input type="number" step="0.1" value={voiceSettings.startOnPunctuationSeconds} onChange={e => setVoiceSettings({...voiceSettings, startOnPunctuationSeconds: parseFloat(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Noktalama Beklemesi (s)</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.startOnPunctuationSeconds}s</span>
+                      </div>
+                      <input type="range" min="0" max="5" step="0.1" value={voiceSettings.startOnPunctuationSeconds} onChange={e => setVoiceSettings({...voiceSettings, startOnPunctuationSeconds: parseFloat(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                   </div>
                 </div>
@@ -849,12 +851,18 @@ export default function KnowledgeTab() {
                   <h4 style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>Çağrı Zaman Aşımı (Timeout)</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
-                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Sessizlik Aşımı (s)</label>
-                      <input type="number" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Sessizlik Aşımı (s)</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceTimeout}s</span>
+                      </div>
+                      <input type="range" min="5" max="120" step="1" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Max Çağrı Süresi (s)</label>
-                      <input type="number" value={voiceSettings.callMaxDuration} onChange={e => setVoiceSettings({...voiceSettings, callMaxDuration: parseInt(e.target.value)})} style={{ width: '100%', padding: '6px 10px', fontSize: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', outline: 'none' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Max Çağrı Süresi (s)</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callMaxDuration}s</span>
+                      </div>
+                      <input type="range" min="60" max="3600" step="60" value={voiceSettings.callMaxDuration} onChange={e => setVoiceSettings({...voiceSettings, callMaxDuration: parseInt(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                   </div>
                 </div>
