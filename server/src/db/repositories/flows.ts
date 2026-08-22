@@ -126,7 +126,7 @@ export function flowToToolFields(flow: ConversationFlow): {
 export function flowToPromptText(flow: ConversationFlow): string {
   if (flow.nodes.length === 0) return ''
 
-  const lines: string[] = ['KONUŞMA AKIŞI:']
+  const lines: string[] = ['KONUŞMA AKIŞI VE TALİMATLARI:']
   const nodeMap = new Map(flow.nodes.map(n => [n.id, n]))
   const edgeMap = new Map<string, FlowEdge[]>()
   for (const e of flow.edges) {
@@ -152,7 +152,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
 
     switch (node.type) {
       case 'START':
-        lines.push(`${prefix}${step}. Karşılama mesajını söyle`)
+        lines.push(`${prefix}${step}. Karşılama mesajını söyleyerek söze başla.`)
         step++
         break
       case 'FIELD':
@@ -184,8 +184,8 @@ export function flowToPromptText(flow: ConversationFlow): string {
         const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
         if (act === 'transfer_call') {
           lines.push(`${prefix}${step}. ARAMAYI AKTAR: ${target ? `"${target}" birimine ` : ''}aramaAktar aracını çağır.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
-        } else if (act === 'save_patient_note') {
-          lines.push(`${prefix}${step}. HASTADAN NOT AL: Hastanın mesajını hastaNotKaydet aracını çağırarak bankoya ilet.`)
+        } else if (act === 'save_patient_note' || act === 'notBirak') {
+          lines.push(`${prefix}${step}. HASTADAN NOT AL: Karşı tarafın yanıtını / mesajını hastaNotKaydet aracını çağırarak kaydet.`)
         } else if (act === 'end_call') {
           const msg = (node.data as Record<string, unknown>).message || ''
           lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${msg ? `"${msg}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
@@ -196,6 +196,8 @@ export function flowToPromptText(flow: ConversationFlow): string {
         break
       }
       case 'END':
+        lines.push(`${prefix}${step}. Görüşmeyi nazikçe tamamla ve veda et.`)
+        step++
         return
     }
 
@@ -212,10 +214,20 @@ export function flowToPromptText(flow: ConversationFlow): string {
   // Ayrıca START düğümüne bağlı olmayan (bağımsız) akış parçalarını da işle
   const unvisitedRoots = flow.nodes.filter(n => !visited.has(n.id) && !flow.edges.some(e => e.target === n.id))
   for (const root of unvisitedRoots) {
-    if (root.type !== 'END') { // END düğümleri tek başına anlam ifade etmez
-      lines.push(`\nBAĞIMSIZ AKIŞ KURALI (Şartlar sağlanırsa çalıştır):`)
+    if (root.type !== 'END') {
+      lines.push(`\nBAĞIMSIZ AKIŞ KURALI:`)
       traverse(root.id, 0)
     }
+  }
+
+  // Eğer akışta sadece START düğümü varsa veya akış bittikten sonra:
+  const outgoing = edgeMap.get(startNode.id) || []
+  if (outgoing.length === 0) {
+    lines.push(`\nGENEL VE DOĞAL SOHBET TALİMATI:
+Karşılama mesajını söyledikten sonra karşı tarafın (müşterinin/hastanın) söylediği her cümleye mutlaka doğal, samimi, ilgili ve mantıklı cevaplar ver. Sorularına cevap ver, sohbeti devam ettir ve asla sessiz kalma. Karşı taraf görüşmeyi bitirmek istediğinde vedalaş.`)
+  } else {
+    lines.push(`\nGENEL İLETİŞİM KURALI:
+Akış adımlarını takip ederken karşı taraf farklı bir şey söyler veya soru sorarsa, önce samimi ve net bir şekilde cevabını ver, ardından akışa devam et. Asla cevapsız bırakma.`)
   }
 
   return lines.join('\n')
