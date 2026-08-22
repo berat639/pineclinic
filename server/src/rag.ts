@@ -10,8 +10,8 @@ import { retrieveTopK as retrieveDocsByEmbedding, type RankedDoc } from './db/re
 // ── Embedding client ──────────────────────────────────────────────────────────
 
 function getEmbeddingClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('GEMINI_API_KEY tanımlı değil')
+  const apiKey = process.env.GEMINI_API_KEY || 'DUMMY_KEY'
+  if (apiKey === 'DUMMY_KEY') console.warn('GEMINI_API_KEY tanımlı değil, dummy key kullanılıyor')
   return new GoogleGenAI({ apiKey })
 }
 
