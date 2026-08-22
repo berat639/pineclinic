@@ -8,8 +8,9 @@ export interface AmiConfig {
 }
 
 function getAmiConfig(): AmiConfig {
+  const isProd = process.env.NODE_ENV === 'production'
   return {
-    host: process.env.ASTERISK_AMI_HOST || 'localhost',
+    host: process.env.ASTERISK_AMI_HOST || (isProd ? 'pineclinic-asterisk' : 'localhost'),
     port: parseInt(process.env.ASTERISK_AMI_PORT || '5038', 10),
     username: process.env.ASTERISK_AMI_USER || 'voiceai',
     secret: process.env.ASTERISK_AMI_SECRET || 'pineclinic_ami_secret_123',
