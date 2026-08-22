@@ -267,7 +267,7 @@ export default function KnowledgeTab() {
       const res = await fetch('/api/admin/calls/outbound', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: callPhone }),
+        body: JSON.stringify({ phone: callPhone, to: callPhone }),
       })
       if (res.ok) {
         showToast('📞 Arama başlatıldı!')

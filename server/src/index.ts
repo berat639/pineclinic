@@ -914,7 +914,8 @@ const app = new Elysia()
 
   // ── Outbound Calls ─────────────────────────────────────────────────────────
   .post('/api/admin/calls/outbound', async ({ body, set }) => {
-    const { phone } = (body ?? {}) as { phone?: string }
+    const b = (body ?? {}) as { phone?: string; to?: string; target?: string }
+    const phone = b.phone || b.to || b.target
     if (!phone) { set.status = 400; return { error: 'phone numarası zorunludur' } }
     const { getSetting } = await import('./db/repositories/settings')
     const callerId = await getSetting('outbound_caller_id') || '08503096119'
