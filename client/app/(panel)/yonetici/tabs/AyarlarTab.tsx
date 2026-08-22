@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import PromptEditor from '../../../admin/components/PromptEditor'
 import FlowBuilder from '../../../admin/components/FlowBuilder'
 
-type InnerTab = 'conversation' | 'system' | 'phonebook'
+type InnerTab = 'flow_inbound' | 'flow_outbound' | 'system' | 'phonebook'
 
 type CalendarStatus = {
   connected: boolean
@@ -43,11 +43,15 @@ const buttonStyle: React.CSSProperties = {
 }
 
 export default function AyarlarTab() {
-  const [innerTab, setInnerTab] = useState<InnerTab>('conversation')
+  const [innerTab, setInnerTab] = useState<'flow_inbound' | 'flow_outbound' | 'system' | 'phonebook'>('flow_inbound')
 
   const [greeting, setGreeting] = useState('')
+  const [greetingOutbound, setGreetingOutbound] = useState('')
   const [greetingLoading, setGreetingLoading] = useState(true)
   const [greetingSaving, setGreetingSaving] = useState(false)
+
+  const [outboundCallerId, setOutboundCallerId] = useState('')
+  const [callerIdSaving, setCallerIdSaving] = useState(false)
 
   const [connMode, setConnMode] = useState<'server' | 'direct'>('server')
   const [connModeSaving, setConnModeSaving] = useState(false)
@@ -114,6 +118,7 @@ export default function AyarlarTab() {
       const res = await fetch('/api/admin/settings/greeting')
       const data = await res.json()
       setGreeting(data?.greeting || '')
+      setGreetingOutbound(data?.greetingOutbound || '')
     } catch {
       // ignore
     }
@@ -125,6 +130,16 @@ export default function AyarlarTab() {
       const res = await fetch('/api/admin/settings/connection-mode')
       const data = await res.json()
       if (data?.mode === 'direct' || data?.mode === 'server') setConnMode(data.mode)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const loadCallerId = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings/outbound-caller-id')
+      const data = await res.json()
+      setOutboundCallerId(data?.callerId || '')
     } catch {
       // ignore
     }
@@ -163,22 +178,23 @@ export default function AyarlarTab() {
   useEffect(() => {
     if (innerTab === 'system') {
       loadGreeting()
+      loadCallerId()
       loadConnMode()
       loadAi()
       loadCalendar()
     } else if (innerTab === 'phonebook') {
       loadPhonebook()
     }
-  }, [innerTab, loadGreeting, loadConnMode, loadAi, loadCalendar, loadPhonebook])
+  }, [innerTab, loadGreeting, loadCallerId, loadConnMode, loadAi, loadCalendar, loadPhonebook])
 
   const saveGreeting = async () => {
-    if (!greeting.trim() || greetingSaving) return
+    if (!greeting.trim() || !greetingOutbound.trim() || greetingSaving) return
     setGreetingSaving(true)
     try {
       await fetch('/api/admin/settings/greeting', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ greeting: greeting.trim() }),
+        body: JSON.stringify({ greeting: greeting.trim(), greetingOutbound: greetingOutbound.trim() }),
       })
     } catch {
       // ignore
@@ -200,6 +216,21 @@ export default function AyarlarTab() {
       // ignore
     }
     setConnModeSaving(false)
+  }
+
+  const saveCallerId = async () => {
+    if (!outboundCallerId.trim() || callerIdSaving) return
+    setCallerIdSaving(true)
+    try {
+      await fetch('/api/admin/settings/outbound-caller-id', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerId: outboundCallerId.trim() }),
+      })
+    } catch {
+      // ignore
+    }
+    setCallerIdSaving(false)
   }
 
   const saveAiModel = async (model: string) => {
@@ -259,14 +290,24 @@ export default function AyarlarTab() {
     <div style={{ width: '100%', display: 'grid', gap: 14 }}>
       <div className="glass-card" style={{ ...cardStyle, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
-          onClick={() => setInnerTab('conversation')}
+          onClick={() => setInnerTab('flow_inbound')}
           style={{
             ...buttonStyle,
-            background: innerTab === 'conversation' ? 'var(--accent)' : 'var(--glass-bg)',
-            color: innerTab === 'conversation' ? '#fff' : 'var(--foreground-2)',
+            background: innerTab === 'flow_inbound' ? 'var(--accent)' : 'var(--glass-bg)',
+            color: innerTab === 'flow_inbound' ? '#fff' : 'var(--foreground-2)',
           }}
         >
-          Konuşma Akışı
+          Gelen Arama Akışı
+        </button>
+        <button
+          onClick={() => setInnerTab('flow_outbound')}
+          style={{
+            ...buttonStyle,
+            background: innerTab === 'flow_outbound' ? 'var(--accent)' : 'var(--glass-bg)',
+            color: innerTab === 'flow_outbound' ? '#fff' : 'var(--foreground-2)',
+          }}
+        >
+          Giden Arama Akışı
         </button>
         <button
           onClick={() => setInnerTab('phonebook')}
@@ -290,13 +331,19 @@ export default function AyarlarTab() {
         </button>
       </div>
 
-      {innerTab === 'conversation' && (
+      {innerTab === 'flow_inbound' && (
         <>
           <PromptEditor />
           <div className="glass-card" style={{ padding: 12 }}>
-            <FlowBuilder />
+            <FlowBuilder direction="inbound" />
           </div>
         </>
+      )}
+
+      {innerTab === 'flow_outbound' && (
+        <div className="glass-card" style={{ padding: 12 }}>
+          <FlowBuilder direction="outbound" />
+        </div>
       )}
 
       {innerTab === 'phonebook' && (
@@ -356,7 +403,7 @@ export default function AyarlarTab() {
       {innerTab === 'system' && (
         <div style={{ display: 'grid', gap: 12 }}>
           <div className="glass-card" style={cardStyle}>
-            <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Karşılama Mesajı</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Gelen Arama Karşılama Mesajı</div>
             <textarea
               value={greeting}
               onChange={e => setGreeting(e.target.value)}
@@ -364,9 +411,32 @@ export default function AyarlarTab() {
               style={{ ...inputStyle, resize: 'vertical' }}
               placeholder={greetingLoading ? 'Yükleniyor...' : 'Karşılama mesajını girin'}
             />
+            <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', marginTop: 12, marginBottom: 8 }}>Giden Arama Karşılama Mesajı</div>
+            <textarea
+              value={greetingOutbound}
+              onChange={e => setGreetingOutbound(e.target.value)}
+              rows={3}
+              style={{ ...inputStyle, resize: 'vertical' }}
+              placeholder={greetingLoading ? 'Yükleniyor...' : 'Dış arama için karşılama mesajını girin'}
+            />
             <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={saveGreeting} disabled={greetingSaving || greetingLoading || !greeting.trim()} style={buttonStyle}>
+              <button onClick={saveGreeting} disabled={greetingSaving || greetingLoading || !greeting.trim() || !greetingOutbound.trim()} style={buttonStyle}>
                 {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
+              </button>
+            </div>
+          </div>
+
+          <div className="glass-card" style={cardStyle}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Dış Arama CallerID (Numarası)</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                value={outboundCallerId}
+                onChange={e => setOutboundCallerId(e.target.value)}
+                placeholder="Örn: 08503096119"
+                style={{ ...inputStyle, flex: 1, minWidth: 160 }}
+              />
+              <button onClick={saveCallerId} disabled={callerIdSaving || !outboundCallerId.trim()} style={buttonStyle}>
+                {callerIdSaving ? 'Kaydediliyor...' : 'Kaydet'}
               </button>
             </div>
           </div>

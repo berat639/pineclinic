@@ -153,7 +153,7 @@ const nodeTypes: NodeTypes = {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function FlowBuilder() {
+export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'inbound' | 'outbound' }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any)
   const [saving, setSaving] = useState(false)
@@ -181,7 +181,7 @@ export default function FlowBuilder() {
 
   // Load flow
   useEffect(() => {
-    fetch('/api/admin/flow')
+    fetch(`/api/admin/flow?direction=${direction}`)
       .then(r => r.json())
       .then(data => {
         if (data.nodes?.length > 0) {
@@ -262,6 +262,7 @@ export default function FlowBuilder() {
   };
 
   const saveFlow = async () => {
+    if (saving) return
     setSaving(true)
     try {
       const serverNodes = nodes.map(n => ({
@@ -270,7 +271,7 @@ export default function FlowBuilder() {
         position: n.position,
         data: n.data,
       }))
-      await fetch('/api/admin/flow', {
+      await fetch(`/api/admin/flow?direction=${direction}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: serverNodes, edges }),

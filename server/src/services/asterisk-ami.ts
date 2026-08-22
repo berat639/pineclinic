@@ -127,3 +127,29 @@ export async function transferCall(channel: string, targetNumber: string): Promi
   console.log(`[AMI] Aktarım sonucu:`, res)
   return res
 }
+
+/**
+ * Initiate an outbound call to a customer via Netgsm and bridge it to outbound-ai
+ */
+export async function initiateOutboundCall(customerNumber: string, callerId: string): Promise<{ success: boolean; message: string }> {
+  console.log(`[AMI] Dış arama başlatılıyor: heden=${customerNumber}, callerId=${callerId}`)
+  
+  const cleanNumber = customerNumber.replace(/\D/g, '')
+  if (!cleanNumber) {
+    return { success: false, message: 'Geçersiz müşteri telefon numarası' }
+  }
+
+  const res = await sendAmiAction({
+    Action: 'Originate',
+    Channel: `PJSIP/${cleanNumber}@netgsm-endpoint`,
+    Context: 'outbound-ai',
+    Exten: 's',
+    Priority: '1',
+    CallerID: `Pine Klinik <${callerId}>`,
+    Variable: `CUSTOMER_NUMBER=${cleanNumber}`,
+    Async: 'true',
+  })
+
+  console.log(`[AMI] Dış arama sonucu:`, res)
+  return res
+}

@@ -59,7 +59,7 @@ import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
 import { startReminderCron } from './cron/reminders'
 
-const callerRegistry = new Map<string, { phone: string; channel?: string }>()
+const callerRegistry = new Map<string, { phone: string; channel?: string; direction?: string }>()
 
 const PORT = Number(process.env.PORT) || 3001
 
@@ -100,7 +100,7 @@ const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınız�
  * Build system prompt dynamically from DB sections.
  * No cache — always reads fresh from DB for instant updates.
  */
-async function buildSystemPrompt(greeting: string): Promise<string> {
+async function buildSystemPrompt(greeting: string, direction: string = 'inbound'): Promise<string> {
   let dbSections: Record<string, string> = {}
   try {
     const rows = await getAllPromptSections()
@@ -119,7 +119,7 @@ async function buildSystemPrompt(greeting: string): Promise<string> {
   // Inject conversation flow as prompt text
   try {
     const { getActiveFlow, flowToPromptText } = await import('./db/repositories/flows')
-    const flow = await getActiveFlow()
+    const flow = await getActiveFlow(direction)
     if (flow) {
       const flowText = flowToPromptText(flow)
       if (flowText) parts.push(flowText)
@@ -853,12 +853,12 @@ const app = new Elysia()
   })
 
   .post('/api/admin/knowledge', async ({ body, set }) => {
-    const { category, title, content, active } = body as any
+    const { category, title, content, callDirection, active } = body as any
     if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
     try {
       let embedding: number[] = []
       try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
-      const doc = await createDoc({ category, title, content, active: active !== false }, embedding)
+      const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
     } catch (e) { set.status = 500; return { error: String(e) } }
   })
@@ -870,12 +870,12 @@ const app = new Elysia()
   })
 
   .put('/api/admin/knowledge/:id', async ({ params, body, set }) => {
-    const { category, title, content, active } = body as any
+    const { category, title, content, callDirection, active } = body as any
     let newEmbedding: number[] | undefined
     if (content) {
       try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Admin Re-embed hatası:', e); newEmbedding = [] }
     }
-    const doc = await updateDoc(params.id, { category, title, content, active }, newEmbedding)
+    const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
     if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
     return { success: true, doc }
   })
@@ -904,11 +904,24 @@ const app = new Elysia()
     const uuid = query.uuid as string | undefined
     const caller = query.caller as string | undefined
     const channel = query.channel as string | undefined
+    const direction = (query.direction as string) || 'inbound'
     if (uuid && caller) {
-      callerRegistry.set(uuid, { phone: caller, channel })
+      callerRegistry.set(uuid, { phone: caller, channel, direction })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
     }
     return { ok: true }
+  })
+
+  // ── Outbound Calls ─────────────────────────────────────────────────────────
+  .post('/api/admin/calls/outbound', async ({ body, set }) => {
+    const { phone } = (body ?? {}) as { phone?: string }
+    if (!phone) { set.status = 400; return { error: 'phone numarası zorunludur' } }
+    const { getSetting } = await import('./db/repositories/settings')
+    const callerId = await getSetting('outbound_caller_id') || '08503096119'
+    const { initiateOutboundCall } = await import('./services/asterisk-ami')
+    const res = await initiateOutboundCall(phone, callerId)
+    if (!res.success) { set.status = 500; return { error: res.message } }
+    return { success: true, message: 'Dış arama başlatıldı' }
   })
 
   .get('/api/events', ({ set }) => {
@@ -989,23 +1002,23 @@ const app = new Elysia()
   })
 
   .post('/api/knowledge', async ({ body, set }) => {
-    const { category, title, content, active } = body as any
+    const { category, title, content, callDirection, active } = body as any
     if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
     try {
       let embedding: number[] = []
       try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
-      const doc = await createDoc({ category, title, content, active: active !== false }, embedding)
+      const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
     } catch (e) { set.status = 500; return { error: String(e) } }
   })
 
   .put('/api/knowledge/:id', async ({ params, body, set }) => {
-    const { category, title, content, active } = body as any
+    const { category, title, content, callDirection, active } = body as any
     let newEmbedding: number[] | undefined
     if (content) {
       try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Re-embed hatası:', e); newEmbedding = [] }
     }
-    const doc = await updateDoc(params.id, { category, title, content, active }, newEmbedding)
+    const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
     if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
     return { success: true, doc }
   })
@@ -1197,17 +1210,43 @@ const app = new Elysia()
 
   // ── Greeting Settings ─────────────────────────────────────────────────────
   .get('/api/admin/settings/greeting', async () => {
-    const greeting = await getGreeting()
-    return { greeting: greeting ?? DEFAULT_GREETING }
+    const greeting = await getGreeting('inbound')
+    const greetingOutbound = await getGreeting('outbound')
+    return {
+      greeting: greeting ?? DEFAULT_GREETING,
+      greetingOutbound: greetingOutbound ?? DEFAULT_GREETING
+    }
   })
 
   .put('/api/admin/settings/greeting', async ({ body, set }) => {
-    const { greeting } = (body ?? {}) as { greeting?: string }
+    const { greeting, greetingOutbound } = (body ?? {}) as { greeting?: string; greetingOutbound?: string }
     if (!greeting || greeting.trim().length < 5) {
       set.status = 400
-      return { error: 'Karşılama mesajı en az 5 karakter olmalıdır.' }
+      return { error: 'Gelen Karşılama mesajı en az 5 karakter olmalıdır.' }
     }
-    const saved = await setGreeting(greeting.trim())
+    if (!greetingOutbound || greetingOutbound.trim().length < 5) {
+      set.status = 400
+      return { error: 'Giden Karşılama mesajı en az 5 karakter olmalıdır.' }
+    }
+    await setGreeting(greeting.trim(), 'inbound')
+    await setGreeting(greetingOutbound.trim(), 'outbound')
+    return { success: true, greeting: greeting.trim(), greetingOutbound: greetingOutbound.trim() }
+  })
+
+  // ── Outbound Caller ID Settings ──────────────────────────────────────────────
+  .get('/api/admin/settings/outbound-caller-id', async () => {
+    const { getOutboundCallerId } = await import('./db/repositories/settings')
+    return { callerId: await getOutboundCallerId() }
+  })
+
+  .put('/api/admin/settings/outbound-caller-id', async ({ body, set }) => {
+    const { callerId } = (body ?? {}) as { callerId?: string }
+    if (!callerId) {
+      set.status = 400
+      return { error: 'Caller ID boş olamaz.' }
+    }
+    const { setOutboundCallerId } = await import('./db/repositories/settings')
+    const saved = await setOutboundCallerId(callerId)
     return { success: true, ...saved }
   })
 
@@ -1443,20 +1482,22 @@ const app = new Elysia()
   })
 
   // ── Conversation Flow API ─────────────────────────────────────────────────
-  .get('/api/admin/flow', async () => {
+  .get('/api/admin/flow', async ({ query }) => {
     const { getActiveFlow } = await import('./db/repositories/flows')
-    const flow = await getActiveFlow()
+    const direction = (query.direction as string) || 'inbound'
+    const flow = await getActiveFlow(direction)
     return flow ?? { nodes: [], edges: [] }
   })
 
-  .put('/api/admin/flow', async ({ body, set }) => {
+  .put('/api/admin/flow', async ({ body, query, set }) => {
     const { nodes, edges } = (body ?? {}) as { nodes?: unknown[]; edges?: unknown[] }
+    const direction = (query.direction as string) || 'inbound'
     if (!Array.isArray(nodes) || !Array.isArray(edges)) {
       set.status = 400
       return { error: 'nodes ve edges array olmalı' }
     }
     const { saveFlow } = await import('./db/repositories/flows')
-    const flow = await saveFlow(nodes as any[], edges as any[])
+    const flow = await saveFlow(nodes as any[], edges as any[], direction)
     return { success: true, flow }
   })
 
@@ -1795,9 +1836,9 @@ app.ws('/ws', {
           ai,
           port: Number(process.env.AUDIOSOCKET_PORT) || 12000,
           resolveLiveModel,
-          buildSystemPrompt: async () => {
+          buildSystemPrompt: async (direction?: string) => {
             const g = await getGreeting() ?? DEFAULT_GREETING
-            return buildSystemPrompt(g)
+            return buildSystemPrompt(g, direction)
           },
           sessions,
           notifyAdmins,

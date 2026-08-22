@@ -173,11 +173,11 @@ interface SharedSessionInfo {
 export interface TelephonyDeps {
   ai: GoogleGenAI
   port: number
-  buildSystemPrompt: () => Promise<string>
+  buildSystemPrompt: (direction?: string) => Promise<string>
   resolveLiveModel: () => Promise<string>
   sessions: Map<string, SharedSessionInfo>
   notifyAdmins: (event: string, payload: unknown) => void
-  callerRegistry: Map<string, { phone: string; channel?: string } | string>
+  callerRegistry: Map<string, { phone: string; channel?: string; direction?: string }>
 }
 
 // Müşteri sessizlik timeout'u — AI soru sorup cevap beklerken müşteri
@@ -201,6 +201,7 @@ interface CallState {
   callerId?: string
   callerPhone?: string
   callerChannel?: string
+  callerDirection?: string
   audioQueue: Buffer[]
   noiseGate: NoiseGate
   // Zaman aşımı timer'ları
@@ -346,6 +347,15 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         scheduleFrame()
 
         try {
+          // UUID gelmesini bekle (ilk AudioSocket paketiyle gelir, genelde < 50ms)
+          let waitCount = 0
+          while (!state.callerId && waitCount < 100) {
+            await new Promise(r => setTimeout(r, 10))
+            waitCount++
+          }
+          const direction = state.callerDirection || 'inbound'
+          console.log(`[${shortId}] Arama yönü: ${direction}`)
+
           // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
           const todayStr = getTodayTurkish()
           const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
@@ -354,10 +364,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             (async () => {
               try {
                 const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
-                const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
+                // Yön bazlı bilgi bankası araması için ekstra argüman (direction)
+                const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
                 if (topDocs.length > 0) {
                   console.log(
-                    `[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map((d) => d.title).join(', ')}`,
+                    `[${shortId}] RAG (${direction}): ${topDocs.length} belge → ${topDocs.map((d) => d.title).join(', ')}`,
                   )
                   return await buildRagPrompt(topDocs)
                 }
@@ -366,7 +377,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
               return ''
             })(),
-            buildSystemPrompt(),
+            buildSystemPrompt(direction), // Yön bazlı system prompt
             resolveLiveModel(),
           ])
 
@@ -550,15 +561,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             state.callerId = channelUuid
             const reg = callerRegistry.get(channelUuid)
             if (reg) {
-              if (typeof reg === 'string') {
-                state.callerPhone = reg
-              } else {
-                state.callerPhone = reg.phone
-                state.callerChannel = reg.channel
-              }
+              state.callerPhone = reg.phone
+              state.callerChannel = reg.channel
+              state.callerDirection = reg.direction || 'inbound'
               callerRegistry.delete(channelUuid)
             }
-            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}`)
+            console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
             if (!info.session) continue

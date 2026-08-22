@@ -50,6 +50,13 @@
       "when": 1787154607066,
       "tag": "0006_strong_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787419433719,
+      "tag": "0007_fearless_scrambler",
+      "breakpoints": true
     }
   ]
 }

@@ -59,6 +59,7 @@ export const appointments = pgTable('appointments', {
 export const conversationFlows = pgTable('conversation_flows', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   name: text('name').notNull().default('main'),
+  direction: text('direction').notNull().default('inbound'),
   nodes: jsonb('nodes').notNull().default([]),
   edges: jsonb('edges').notNull().default([]),
   isActive: boolean('is_active').notNull().default(true),
@@ -183,6 +184,7 @@ export const knowledgeDocuments = pgTable('knowledge_documents', {
   title: text('title').notNull(),
   content: text('content').notNull(),
   active: boolean('active').notNull().default(true),
+  callDirection: text('call_direction').notNull().default('both'),
   // embedding vector(768) is managed via raw SQL — pgvector type not in drizzle-orm/pg-core
   embeddedAt: timestamp('embedded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

@@ -12,12 +12,13 @@ done
 UUID="${1:-}"
 CALLER="${2:-}"
 CHANNEL="${3:-}"
+DIRECTION="${4:-inbound}"
 
 if [ -n "$UUID" ] && [ -n "$CALLER" ]; then
   HOST="${AUDIOSOCKET_HOST:-voiceai-server}"
   PORT="${BACKEND_HTTP_PORT:-3001}"
   curl -sf --max-time 2 \
-    "http://${HOST}:${PORT}/api/telephony/register?uuid=${UUID}&caller=${CALLER}&channel=${CHANNEL}" \
+    "http://${HOST}:${PORT}/api/telephony/register?uuid=${UUID}&caller=${CALLER}&channel=${CHANNEL}&direction=${DIRECTION}" \
     >/dev/null 2>&1 || true
 fi
 

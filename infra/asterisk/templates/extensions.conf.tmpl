@@ -18,14 +18,14 @@ writeprotect=no
 exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
 exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
@@ -33,7 +33,7 @@ exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
 exten => 100,1,NoOp(Test AudioSocket bridge)
  same => n,Answer()
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
- same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
@@ -46,5 +46,15 @@ exten => _X.,1,NoOp(Dinamik Yonlendirme: ${EXTEN})
  same => n,Hangup()
 
 exten => s,1,NoOp(Dinamik Yonlendirme default)
+ same => n,Hangup()
+
+; ─────────────────────────────────────────────────────────────────────────────
+; Outbound AI Context
+; ─────────────────────────────────────────────────────────────────────────────
+[outbound-ai]
+exten => s,1,NoOp(Outbound call answered by ${CUSTOMER_NUMBER})
+ same => n,Set(AUDIOSOCKET_UUID=${UUID()})
+ same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CUSTOMER_NUMBER},${CHANNEL},outbound)
+ same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 

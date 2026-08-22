@@ -9,6 +9,7 @@ export interface KnowledgeDoc {
   category: KnowledgeCategory
   title: string
   content: string
+  callDirection: 'inbound' | 'outbound' | 'both'
   active: boolean
   embeddedAt: string
   createdAt: string
@@ -34,6 +35,7 @@ export async function listDocs(): Promise<KnowledgeDoc[]> {
       category: knowledgeDocuments.category,
       title: knowledgeDocuments.title,
       content: knowledgeDocuments.content,
+      callDirection: knowledgeDocuments.callDirection,
       active: knowledgeDocuments.active,
       embeddedAt: knowledgeDocuments.embeddedAt,
       createdAt: knowledgeDocuments.createdAt,
@@ -46,6 +48,7 @@ export async function listDocs(): Promise<KnowledgeDoc[]> {
     category: (r.category ?? 'genel') as KnowledgeCategory,
     title: r.title,
     content: r.content,
+    callDirection: (r.callDirection as 'inbound' | 'outbound' | 'both') || 'both',
     active: r.active ?? true,
     embeddedAt: toIso(r.embeddedAt),
     createdAt: toIso(r.createdAt),
@@ -66,24 +69,25 @@ export async function countEmbedded(): Promise<{ total: number; embedded: number
 }
 
 export async function createDoc(
-  data: Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'active'>,
+  data: Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'callDirection' | 'active'>,
   embedding: number[],
 ): Promise<KnowledgeDoc> {
   const nowIso = new Date().toISOString()
   const hasEmbedding = embedding.length > 0
   const insertResult = await db.execute(drizzleSql`
-    INSERT INTO knowledge_documents (category, title, content, active, embedding, embedded_at, created_at, updated_at)
+    INSERT INTO knowledge_documents (category, title, content, call_direction, active, embedding, embedded_at, created_at, updated_at)
     VALUES (
       ${data.category},
       ${data.title},
       ${data.content},
+      ${data.callDirection || 'both'},
       ${data.active},
       ${hasEmbedding ? drizzleSql`${vectorLiteral(embedding)}::vector` : drizzleSql`NULL`},
       ${hasEmbedding ? nowIso : null},
       ${nowIso},
       ${nowIso}
     )
-    RETURNING id, category, title, content, active, embedded_at, created_at, updated_at
+    RETURNING id, category, title, content, call_direction, active, embedded_at, created_at, updated_at
   `)
   const row = ((insertResult as unknown as { rows?: Array<Record<string, unknown>> }).rows
     ?? (insertResult as unknown as Array<Record<string, unknown>>))[0]
@@ -92,6 +96,7 @@ export async function createDoc(
     category: (row.category as KnowledgeCategory) ?? 'genel',
     title: row.title as string,
     content: row.content as string,
+    callDirection: (row.call_direction as 'inbound' | 'outbound' | 'both') || 'both',
     active: row.active as boolean,
     embeddedAt: row.embedded_at ? new Date(row.embedded_at as string).toISOString() : '',
     createdAt: new Date(row.created_at as string).toISOString(),
@@ -101,7 +106,7 @@ export async function createDoc(
 
 export async function updateDoc(
   id: string,
-  data: Partial<Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'active'>>,
+  data: Partial<Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'callDirection' | 'active'>>,
   newEmbedding?: number[],
 ): Promise<KnowledgeDoc | null> {
   const nowIso = new Date().toISOString()
@@ -111,6 +116,7 @@ export async function updateDoc(
   if (data.category !== undefined) sets.push(drizzleSql`category = ${data.category}`)
   if (data.title !== undefined) sets.push(drizzleSql`title = ${data.title}`)
   if (data.content !== undefined) sets.push(drizzleSql`content = ${data.content}`)
+  if (data.callDirection !== undefined) sets.push(drizzleSql`call_direction = ${data.callDirection}`)
   if (data.active !== undefined) sets.push(drizzleSql`active = ${data.active}`)
   if (newEmbedding !== undefined) {
     if (newEmbedding.length > 0) {
@@ -133,7 +139,7 @@ export async function updateDoc(
     UPDATE knowledge_documents
     SET ${setClause}
     WHERE id = ${id}
-    RETURNING id, category, title, content, active, embedded_at, created_at, updated_at
+    RETURNING id, category, title, content, call_direction, active, embedded_at, created_at, updated_at
   `)
   const row = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
     ?? (result as unknown as Array<Record<string, unknown>>))[0]
@@ -143,6 +149,7 @@ export async function updateDoc(
     category: (row.category as KnowledgeCategory) ?? 'genel',
     title: row.title as string,
     content: row.content as string,
+    callDirection: (row.call_direction as 'inbound' | 'outbound' | 'both') || 'both',
     active: row.active as boolean,
     embeddedAt: row.embedded_at ? new Date(row.embedded_at as string).toISOString() : '',
     createdAt: new Date(row.created_at as string).toISOString(),
@@ -204,13 +211,14 @@ export interface RankedDoc {
   score: number
 }
 
-export async function retrieveTopK(queryEmbedding: number[], k = 5): Promise<RankedDoc[]> {
+export async function retrieveTopK(queryEmbedding: number[], k = 5, direction: string = 'inbound'): Promise<RankedDoc[]> {
   if (queryEmbedding.length === 0) return []
   const result = await db.execute(drizzleSql`
     SELECT id, category, title, content,
            1 - (embedding <=> ${vectorLiteral(queryEmbedding)}::vector) AS score
     FROM knowledge_documents
     WHERE active = true AND embedding IS NOT NULL
+      AND (call_direction = 'both' OR call_direction = ${direction})
     ORDER BY embedding <=> ${vectorLiteral(queryEmbedding)}::vector
     LIMIT ${k}
   `)

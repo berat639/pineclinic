@@ -45,11 +45,11 @@ function toIso(d: Date | null | undefined): string {
   return d ? d.toISOString() : ''
 }
 
-export async function getActiveFlow(): Promise<ConversationFlow | null> {
+export async function getActiveFlow(direction: string = 'inbound'): Promise<ConversationFlow | null> {
   const rows = await db
     .select()
     .from(conversationFlows)
-    .where(eq(conversationFlows.isActive, true))
+    .where(drizzleSql`${conversationFlows.isActive} = true AND ${conversationFlows.direction} = ${direction}`)
     .limit(1)
   if (rows.length === 0) return null
   const r = rows[0]
@@ -64,8 +64,8 @@ export async function getActiveFlow(): Promise<ConversationFlow | null> {
   }
 }
 
-export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[]): Promise<ConversationFlow> {
-  const existing = await getActiveFlow()
+export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: string = 'inbound'): Promise<ConversationFlow> {
+  const existing = await getActiveFlow(direction)
   if (existing) {
     const [updated] = await db
       .update(conversationFlows)
@@ -84,7 +84,7 @@ export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[]): Promise<Co
   }
   const [inserted] = await db
     .insert(conversationFlows)
-    .values({ nodes, edges })
+    .values({ nodes, edges, direction })
     .returning()
   return {
     id: inserted.id,

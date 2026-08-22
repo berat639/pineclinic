@@ -22,6 +22,7 @@ export interface KnowledgeDoc {
   category: string
   title: string
   content: string
+  callDirection: 'inbound' | 'outbound' | 'both'
   active: boolean
   embeddedAt: string
   createdAt: string
@@ -44,7 +45,7 @@ type Category = string
 interface ModalProps {
   doc: Partial<KnowledgeDoc> | null
   onClose: () => void
-  onSave: (data: { category: Category; title: string; content: string; active: boolean }) => Promise<void>
+  onSave: (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean }) => Promise<void>
   saving: boolean
   categories: CategoryDef[]
 }
@@ -54,6 +55,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   const [category, setCategory] = useState<Category>((doc?.category as Category) || 'genel')
   const [title, setTitle] = useState(doc?.title || '')
   const [content, setContent] = useState(doc?.content || '')
+  const [callDirection, setCallDirection] = useState<'inbound' | 'outbound' | 'both'>((doc?.callDirection as 'inbound' | 'outbound' | 'both') || 'both')
   const [active, setActive] = useState(doc?.active !== false)
 
   const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
@@ -63,7 +65,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !content.trim()) return
-    onSave({ category, title: title.trim(), content: content.trim(), active })
+    onSave({ category, title: title.trim(), content: content.trim(), callDirection, active })
   }
 
   return (
@@ -143,6 +145,48 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
             />
           </div>
 
+          {/* Yön (Arama Yönü) Seçimi */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+              Arama Yönü
+            </label>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+                <input
+                  type="radio"
+                  name="callDirection"
+                  value="both"
+                  checked={callDirection === 'both'}
+                  onChange={() => setCallDirection('both')}
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                İkisi de
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+                <input
+                  type="radio"
+                  name="callDirection"
+                  value="inbound"
+                  checked={callDirection === 'inbound'}
+                  onChange={() => setCallDirection('inbound')}
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                Sadece Gelen Arama
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', color: 'var(--foreground)' }}>
+                <input
+                  type="radio"
+                  name="callDirection"
+                  value="outbound"
+                  checked={callDirection === 'outbound'}
+                  onChange={() => setCallDirection('outbound')}
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                Sadece Giden Arama
+              </label>
+            </div>
+          </div>
+
           {/* Aktif toggle */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
@@ -206,10 +250,38 @@ export default function KnowledgeTab() {
   const [reindexing, setReindexing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   
-  // Greeting state
   const [greetingText, setGreetingText] = useState('')
   const [greetingLoading, setGreetingLoading] = useState(true)
   const [greetingSaving, setGreetingSaving] = useState(false)
+
+  // Outbound Call Modal state
+  const [callModalOpen, setCallModalOpen] = useState(false)
+  const [callPhone, setCallPhone] = useState('')
+  const [calling, setCalling] = useState(false)
+
+  const handleOutboundCall = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!callPhone) return
+    setCalling(true)
+    try {
+      const res = await fetch('/api/admin/calls/outbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: callPhone }),
+      })
+      if (res.ok) {
+        showToast('📞 Arama başlatıldı!')
+        setCallModalOpen(false)
+        setCallPhone('')
+      } else {
+        const data = await res.json()
+        showToast(data.error || 'Arama başarısız', 'error')
+      }
+    } catch {
+      showToast('Arama başarısız', 'error')
+    }
+    setCalling(false)
+  }
 
   const fetchGreeting = useCallback(async () => {
     try {
@@ -490,6 +562,14 @@ export default function KnowledgeTab() {
             style={{ fontSize: '0.8rem', padding: '6px 16px' }}
           >
             + Yeni Belge
+          </button>
+          
+          <button
+            onClick={() => setCallModalOpen(true)}
+            className="btn btn-primary"
+            style={{ fontSize: '0.8rem', padding: '6px 16px', background: 'var(--accent)', borderColor: 'var(--accent)' }}
+          >
+            📞 Yapay Zeka ile Ara
           </button>
         </div>
       </div>
@@ -893,6 +973,56 @@ export default function KnowledgeTab() {
           saving={saving}
           categories={categories}
         />
+      )}
+
+      {/* Outbound Call Modal */}
+      {callModalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1rem',
+        }} onClick={e => { if (e.target === e.currentTarget) setCallModalOpen(false) }}>
+          <div style={{
+            background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 400,
+            animation: 'fadeIn 0.2s ease',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>📞 Yapay Zeka ile Ara</h2>
+              <button onClick={() => setCallModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+            </div>
+            <form onSubmit={handleOutboundCall} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Telefon Numarası
+                </label>
+                <input
+                  value={callPhone}
+                  onChange={e => setCallPhone(e.target.value)}
+                  placeholder="Örn: 05xxxxxxxxx veya 0850xxxxxxx"
+                  required
+                  style={{
+                    width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
+                    fontSize: '0.875rem', outline: 'none',
+                  }}
+                />
+                <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginTop: 8 }}>
+                  Giden arama akışı ve giden karşılama mesajı kullanılacaktır.
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                <button type="button" onClick={() => setCallModalOpen(false)} className="btn btn-ghost" style={{ fontSize: '0.875rem' }} disabled={calling}>
+                  İptal
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={calling || !callPhone.trim()} style={{ fontSize: '0.875rem', minWidth: 100, background: 'var(--accent)', borderColor: 'var(--accent)' }}>
+                  {calling ? '⏳ Aranıyor...' : 'Ara'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   )

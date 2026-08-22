@@ -102,14 +102,28 @@ export async function setAiModel(model: string): Promise<{ model: string; update
 
 // ── Greeting settings ───────────────────────────────────────────────────────
 const AI_GREETING = 'ai.greeting'
+const AI_GREETING_OUTBOUND = 'ai.greeting_outbound'
 
-export async function getGreeting(): Promise<string | null> {
-  return getSetting(AI_GREETING)
+export async function getGreeting(direction: string = 'inbound'): Promise<string | null> {
+  return getSetting(direction === 'outbound' ? AI_GREETING_OUTBOUND : AI_GREETING)
 }
 
-export async function setGreeting(text: string): Promise<{ greeting: string; updatedAt: string }> {
-  await setSetting(AI_GREETING, text)
+export async function setGreeting(text: string, direction: string = 'inbound'): Promise<{ greeting: string; updatedAt: string }> {
+  const key = direction === 'outbound' ? AI_GREETING_OUTBOUND : AI_GREETING
+  await setSetting(key, text)
   return { greeting: text, updatedAt: new Date().toISOString() }
+}
+
+// ── Outbound Caller ID settings ─────────────────────────────────────────────
+const OUTBOUND_CALLER_ID = 'outbound_caller_id'
+
+export async function getOutboundCallerId(): Promise<string> {
+  return (await getSetting(OUTBOUND_CALLER_ID)) || '08503096119'
+}
+
+export async function setOutboundCallerId(callerId: string): Promise<{ callerId: string; updatedAt: string }> {
+  await setSetting(OUTBOUND_CALLER_ID, callerId)
+  return { callerId, updatedAt: new Date().toISOString() }
 }
 
 // ── Connection mode settings ────────────────────────────────────────────────
