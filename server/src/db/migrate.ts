@@ -285,6 +285,30 @@ async function runMigrations() {
     )
   `
 
+  // ── RBAC Tables ────────────────────────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         TEXT NOT NULL UNIQUE,
+      phone         TEXT,
+      password_hash TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      avatar        TEXT,
+      role          TEXT NOT NULL DEFAULT 'host',
+      specialty     TEXT,
+      color         TEXT,
+      active        BOOLEAN NOT NULL DEFAULT true,
+      last_login_at TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ DEFAULT now(),
+      updated_at    TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
+  // Drop legacy doctor_id column if exists
+  await sql`ALTER TABLE users DROP COLUMN IF EXISTS doctor_id`
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS specialty TEXT`
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS color TEXT`
+
   await sql`
     CREATE TABLE IF NOT EXISTS dental_appointments (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -338,29 +362,7 @@ async function runMigrations() {
 
   // doctors table removed — seeding hekim users happens via seed-users script
 
-  // ── RBAC Tables ────────────────────────────────────────────────────────────
-  await sql`
-    CREATE TABLE IF NOT EXISTS users (
-      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      email         TEXT NOT NULL UNIQUE,
-      phone         TEXT,
-      password_hash TEXT NOT NULL,
-      name          TEXT NOT NULL,
-      avatar        TEXT,
-      role          TEXT NOT NULL DEFAULT 'host',
-      specialty     TEXT,
-      color         TEXT,
-      active        BOOLEAN NOT NULL DEFAULT true,
-      last_login_at TIMESTAMPTZ,
-      created_at    TIMESTAMPTZ DEFAULT now(),
-      updated_at    TIMESTAMPTZ DEFAULT now()
-    )
-  `
 
-  // Drop legacy doctor_id column if exists
-  await sql`ALTER TABLE users DROP COLUMN IF EXISTS doctor_id`
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS specialty TEXT`
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS color TEXT`
 
   await sql`
     CREATE TABLE IF NOT EXISTS user_sessions (
