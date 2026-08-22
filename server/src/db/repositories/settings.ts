@@ -105,12 +105,23 @@ const AI_GREETING = 'ai.greeting'
 const AI_GREETING_OUTBOUND = 'ai.greeting_outbound'
 
 export async function getGreeting(direction: string = 'inbound'): Promise<string | null> {
-  return getSetting(direction === 'outbound' ? AI_GREETING_OUTBOUND : AI_GREETING)
+  if (direction === 'outbound') {
+    const val = (await getSetting(AI_GREETING_OUTBOUND)) || (await getSetting('greeting_message_outbound'))
+    return val || null
+  }
+  const val = (await getSetting(AI_GREETING)) || (await getSetting('greeting_message'))
+  return val || null
 }
 
 export async function setGreeting(text: string, direction: string = 'inbound'): Promise<{ greeting: string; updatedAt: string }> {
   const key = direction === 'outbound' ? AI_GREETING_OUTBOUND : AI_GREETING
   await setSetting(key, text)
+  // Also sync with legacy key to be safe
+  if (direction === 'outbound') {
+    await setSetting('greeting_message_outbound', text).catch(() => {})
+  } else {
+    await setSetting('greeting_message', text).catch(() => {})
+  }
   return { greeting: text, updatedAt: new Date().toISOString() }
 }
 

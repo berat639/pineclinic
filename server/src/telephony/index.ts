@@ -480,8 +480,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
           // Birden fazla turnComplete: true göndermek modelin her birine ayrı
           // greeting üretmesine neden olur.
+          const { getGreeting: fetchGreetingForSession } = await import('../db/repositories/settings')
+          const activeGreeting = (await fetchGreetingForSession(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
+          
           const initParts: string[] = [
-            'Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)',
+            direction === 'outbound'
+              ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+              : 'Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)',
           ]
 
           // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,

@@ -111,7 +111,16 @@ async function buildSystemPrompt(greeting: string, direction: string = 'inbound'
   for (const key of PROMPT_SECTION_KEYS) {
     let value = dbSections[key] ?? getDefaultPromptValue(key) ?? ''
     if (key === 'prompt.greeting_flow') {
-      value = value.replace(/\{\{greeting\}\}/g, greeting)
+      if (direction === 'outbound') {
+        value = `GIDEN ARAMA (OUTBOUND) KARŞILAMA VE GÖREV TALİMATI:
+Sen dış arama (outbound call) yapıyorsun. Karşı taraf telefonu açtığında İLK CÜMLE olarak KESİNLİKLE şu giden karşılama mesajını söyle:
+"${greeting}"
+Ardından konuşma akışındaki adımları sırasıyla uygula.`
+      } else {
+        value = value.includes('{{greeting}}')
+          ? value.replace(/\{\{greeting\}\}/g, greeting)
+          : `GELEN ARAMA (INBOUND) KARŞILAMA:\nMüşteri aradığında şu karşılama mesajını söyle: "${greeting}"\nSonra müşterinin ne istediğini dinle ve yardımcı ol.`
+      }
     }
     if (value) parts.push(value)
   }
@@ -1846,8 +1855,9 @@ app.ws('/ws', {
           port: Number(process.env.AUDIOSOCKET_PORT) || 12000,
           resolveLiveModel,
           buildSystemPrompt: async (direction?: string) => {
-            const g = await getGreeting() ?? DEFAULT_GREETING
-            return buildSystemPrompt(g, direction)
+            const dir = direction || 'inbound'
+            const g = (await getGreeting(dir)) ?? DEFAULT_GREETING
+            return buildSystemPrompt(g, dir)
           },
           sessions,
           notifyAdmins,
