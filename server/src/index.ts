@@ -85,8 +85,8 @@ async function resolveLiveModel(): Promise<string> {
 
 // ── GoogleGenAI client ────────────────────────────────────────────────────────
 function createAI(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY || 'DUMMY_KEY'
-  if (apiKey === 'DUMMY_KEY') console.warn('GEMINI_API_KEY tanımlı değil, dummy key kullanılıyor')
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY tanımlı değil')
   console.log('[AI] Gemini API key modu')
   return new GoogleGenAI({ apiKey })
 }
