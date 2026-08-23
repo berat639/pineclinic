@@ -67,6 +67,13 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [waShowToken, setWaShowToken] = useState(false)
   const [waCopied, setWaCopied] = useState(false)
 
+  // Role Permissions State
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
+    hekim: ['calendar', 'patients', 'knowledge'],
+    sekreter: ['calendar', 'patients', 'payments'],
+    asistan: ['calendar', 'patients']
+  })
+
   const webhookUrl = typeof window !== 'undefined'
     ? `${window.location.origin.replace(':3000', ':3001')}/api/whatsapp/webhook`
     : '/api/whatsapp/webhook'
@@ -107,6 +114,11 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       })
       .catch(() => showToast('error', 'Veriler alınamadı'))
       .finally(() => setLoading(false))
+
+    fetch('/api/admin/settings/roles')
+      .then(r => r.json())
+      .then(data => { if (data && Object.keys(data).length) setRolePermissions(data) })
+      .catch(() => {})
   }, [])
 
   const handleSave = async () => {
@@ -125,8 +137,15 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           whatsappEnabled: waEnabled,
         })
       })
-      if (!res.ok) throw new Error('Kaydedilemedi')
-      showToast('success', 'Entegrasyon ayarları başarıyla kaydedildi')
+      
+      const rolesRes = await fetch('/api/admin/settings/roles', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rolePermissions)
+      })
+
+      if (!res.ok || !rolesRes.ok) throw new Error('Kaydedilemedi')
+      showToast('success', 'Entegrasyon ve rol ayarları başarıyla kaydedildi')
     } catch (err: any) {
       showToast('error', err.message || 'Hata oluştu')
     } finally {
@@ -356,6 +375,60 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
             <li>"messages" subscription'ını aktif edin</li>
             <li>Buradaki bilgileri kaydedin ve WhatsApp entegrasyonu hazır!</li>
           </ol>
+        </div>
+      </div>
+
+      {/* Role-based Tab Permissions */}
+      <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--foreground)' }}>Rol Bazlı Sekme İzinleri</h3>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--foreground-3)' }}>Alt kullanıcıların görebileceği sekmeleri belirleyin.</p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {['hekim', 'sekreter', 'asistan'].map(role => (
+            <div key={role} style={{ padding: 16, background: 'rgba(0,0,0,0.2)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', textTransform: 'capitalize', marginBottom: 12 }}>
+                {role} Rolü
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {[
+                  { id: 'calendar', label: 'Takvim' },
+                  { id: 'patients', label: 'Hastalar' },
+                  { id: 'payments', label: 'Ödemeler & Finans' },
+                  { id: 'stok', label: 'Stok & Bakım' },
+                  { id: 'knowledge', label: 'Bilgi Tabanı' },
+                  { id: 'klinik', label: 'Klinik Personeli' },
+                ].map(tab => {
+                  const isChecked = rolePermissions[role]?.includes(tab.id) || false
+                  return (
+                    <label key={tab.id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--foreground-2)' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isChecked}
+                        onChange={(e) => {
+                          setRolePermissions(prev => {
+                            const current = prev[role] || []
+                            return {
+                              ...prev,
+                              [role]: e.target.checked ? [...current, tab.id] : current.filter(id => id !== tab.id)
+                            }
+                          })
+                        }}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      {tab.label}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

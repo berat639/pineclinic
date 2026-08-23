@@ -1578,6 +1578,28 @@ const app = new Elysia()
     return { success: true }
   })
 
+  .get('/api/admin/settings/roles', async () => {
+    const { getSetting } = await import('./db/repositories/settings')
+    let permsStr = await getSetting('role_tab_permissions')
+    let perms = {}
+    if (permsStr) {
+      try { perms = JSON.parse(permsStr) } catch (e) {}
+    } else {
+      // Default permissions if none exist
+      perms = {
+        hekim: ['calendar', 'patients', 'knowledge'],
+        sekreter: ['calendar', 'patients', 'payments'],
+        asistan: ['calendar', 'patients']
+      }
+    }
+    return perms
+  })
+  .put('/api/admin/settings/roles', async ({ body }) => {
+    const { setSetting } = await import('./db/repositories/settings')
+    await setSetting('role_tab_permissions', JSON.stringify(body))
+    return { success: true }
+  })
+
   // ── Knowledge Categories ────────────────────────────────────────────────────
   .get('/api/admin/categories', async () => {
     return await listCategories()

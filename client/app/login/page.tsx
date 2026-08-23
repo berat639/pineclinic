@@ -22,10 +22,7 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Giriş başarısız'); return }
-      const role = data.role as string
-      if (role === 'yonetici') router.push('/yonetici')
-      else if (role === 'hekim') router.push('/hekim')
-      else router.push('/host')
+      router.push('/panel')
     } catch { setError('Sunucuya bağlanılamadı') }
     finally { setLoading(false) }
   }
