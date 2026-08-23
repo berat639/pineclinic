@@ -75,7 +75,7 @@ export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
 
   // Ensure doktor_id and musteri_adi are always available as optional params
   if (!fieldProps['doktor_id']) {
-    fieldProps['doktor_id'] = { type: Type.STRING, description: 'Mevcut hasta için atanacak doktorun ID\'si (musteriSorgula sonucundaki doktor_gecmisi\'nden)' }
+    fieldProps['doktor_id'] = { type: Type.STRING, description: 'Mevcut hasta için atanacak doktorun ID\'si (musteriSorgula sonucundaki doktor_gecmisi\'nden). Eğer hasta seçim yapmazsa veya farketmez derse boş (null) bırakın.' }
   }
   if (!fieldProps['musteri_adi']) {
     fieldProps['musteri_adi'] = { type: Type.STRING, description: 'Müşteri adı soyadı (kayıtlı müşteri için musteriSorgula\'dan gelen ad)' }
@@ -93,7 +93,7 @@ export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
           tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD formatında)' },
           saat: { type: Type.STRING, description: 'Randevu saati (HH:MM formatında)' },
           sikayet: { type: Type.STRING, description: 'Hastanın şikayeti veya işlem talebi' },
-          doktor_id: { type: Type.STRING, description: 'Tercih edilen hekim ID\'si' },
+          doktor_id: { type: Type.STRING, description: 'Tercih edilen hekim ID\'si (Hasta hekim belirtmezse veya farketmez derse boş bırakın)' },
           ...fieldProps,
         },
         required: ['musteri_adi', 'telefon', 'tarih', 'saat'],
@@ -254,6 +254,11 @@ export async function createLiveSession(
       void (async () => {
         try {
           const { createDentalAppointmentFromVoice } = await import('./db/repositories/dental')
+          const providedDocId = args.doktor_id as string
+          let finalDoctorId: string | null = null
+          if (providedDocId && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(providedDocId)) {
+            finalDoctorId = providedDocId
+          }
           await createDentalAppointmentFromVoice({
             customerName: appointment.customerName,
             phone: appointment.phone,
@@ -262,7 +267,7 @@ export async function createLiveSession(
             time: appointment.time,
             notes: appointment.notes,
             complaint: (args.sikayet as string) || (args.hastaSikayeti as string) || undefined,
-            doctorId: (args.doktor_id as string) || null,
+            doctorId: finalDoctorId,
           })
           console.log('[Randevu:CalendarSync]', appointment.id)
         } catch (e) { console.error('[Randevu:CalendarSync:ERROR]', e) }
