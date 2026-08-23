@@ -15,14 +15,14 @@ export default function PatientListItem({ patient, isExpanded, onClick }: Patien
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '12px 16px',
-        background: isExpanded ? 'var(--input-bg)' : '#ffffff',
+        background: isExpanded ? 'var(--input-bg)' : 'transparent',
         borderBottom: '1px solid var(--glass-border)',
         cursor: 'pointer',
         transition: 'all 0.2s',
         color: 'var(--foreground)'
       }}
       onMouseOver={e => !isExpanded && (e.currentTarget.style.background = 'var(--input-bg)')}
-      onMouseOut={e => !isExpanded && (e.currentTarget.style.background = '#ffffff')}
+      onMouseOut={e => !isExpanded && (e.currentTarget.style.background = 'transparent')}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>

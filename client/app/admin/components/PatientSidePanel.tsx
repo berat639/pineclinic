@@ -57,7 +57,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
           position: 'fixed',
           top: 0, left: 0, bottom: 0,
           width: 400,
-          background: 'var(--background)',
+          background: 'var(--card-bg)',
           borderRight: '1px solid var(--divider)',
           zIndex: 99999,
           display: 'flex',
@@ -66,6 +66,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
           transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.3s ease-in-out',
         }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid var(--divider)' }}>
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)' }}>👥 Hastalar</h2>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--foreground-3)' }}>✕</button>

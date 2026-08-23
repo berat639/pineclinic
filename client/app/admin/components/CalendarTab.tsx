@@ -553,7 +553,7 @@ export default function CalendarTab() {
 
       {/* Right Panel — Event Detail */}
       {panelOpen && selectedEvent && (
-        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, backgroundColor: 'var(--background)', borderLeft: '1px solid var(--divider)', zIndex: 9999, padding: 24, overflowY: 'auto', boxShadow: '-4px 0 20px rgba(0,0,0,0.19)' }}>
+        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)', zIndex: 9999, padding: 24, overflowY: 'auto', boxShadow: '-4px 0 20px rgba(0,0,0,0.19)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Detayı</h3>
             <button onClick={() => setPanelOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
