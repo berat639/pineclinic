@@ -142,50 +142,24 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
           </div>
 
           {/* Yön (Arama Yönü) Seçimi */}
+          {/* Kullanım Yeri Seçimi (Gelişmiş değil, sadece sadeleştirildi) */}
           <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
             <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-2)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
-              🔀 Arama Yönü (Kullanım Alanı)
+              🔀 Kullanım Yeri
             </label>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
-                <input
-                  type="radio"
-                  name="callDirection"
-                  value="both"
-                  checked={callDirection === 'both'}
-                  onChange={() => setCallDirection('both')}
-                  style={{ accentColor: '#a855f7' }}
-                />
-                🔄 İkisi de (Gelen & Giden)
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
-                <input
-                  type="radio"
-                  name="callDirection"
-                  value="inbound"
-                  checked={callDirection === 'inbound'}
-                  onChange={() => setCallDirection('inbound')}
-                  style={{ accentColor: '#3b82f6' }}
-                />
-                📥 Sadece Gelen Arama
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', color: 'var(--foreground)' }}>
-                <input
-                  type="radio"
-                  name="callDirection"
-                  value="outbound"
-                  checked={callDirection === 'outbound'}
-                  onChange={() => setCallDirection('outbound')}
-                  style={{ accentColor: '#10b981' }}
-                />
-                📤 Sadece Giden Arama
-              </label>
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginTop: 6 }}>
-              {callDirection === 'both' && 'Bu bilgi hem kliniği arayan hastalara hem de robotun aradığı hastalara sunulur.'}
-              {callDirection === 'inbound' && 'Bu bilgi yalnızca kliniği arayan hastalara verilir.'}
-              {callDirection === 'outbound' && 'Bu bilgi yalnızca robot dış arama yaptığında (anket, hatırlatma vb.) kullanılır.'}
-            </div>
+            <select
+              value={callDirection}
+              onChange={e => setCallDirection(e.target.value as any)}
+              style={{
+                width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: 'var(--foreground)',
+                fontSize: '0.85rem', outline: 'none', cursor: 'pointer', appearance: 'none'
+              }}
+            >
+              <option value="both">Tüm Aramalar (Varsayılan)</option>
+              <option value="inbound">Sadece Bizi Aradıklarında (Gelen Arama)</option>
+              <option value="outbound">Sadece Biz Aradığımızda (Giden Arama)</option>
+            </select>
           </div>
 
           {/* Aktif toggle */}
@@ -623,30 +597,6 @@ export default function KnowledgeTab() {
 
         {/* Filter bars */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          {/* Direction filters */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--foreground-3)', marginRight: 4 }}>Yön:</span>
-            {[
-              { id: 'all', label: 'Tüm Yönler' },
-              { id: 'inbound', label: '📥 Gelen Arama' },
-              { id: 'outbound', label: '📤 Giden Arama' },
-              { id: 'both', label: '🔄 Ortak / İkisi' },
-            ].map(d => (
-              <button
-                key={d.id}
-                onClick={() => setDirectionFilter(d.id as any)}
-                style={{
-                  padding: '4px 10px', borderRadius: 8, border: '1px solid', fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
-                  background: directionFilter === d.id ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.03)',
-                  borderColor: directionFilter === d.id ? '#a855f7' : 'rgba(255,255,255,0.08)',
-                  color: directionFilter === d.id ? '#d8b4fe' : 'var(--foreground-3)',
-                }}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
-
           {/* Category filters */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--foreground-3)', marginRight: 4 }}>Kategori:</span>
@@ -782,16 +732,18 @@ export default function KnowledgeTab() {
                             {getCatIcon(doc.category)} {getCatLabel(doc.category)}
                           </span>
 
-                          {/* Direction Badge */}
-                          <span style={{
-                            fontSize: '0.68rem', fontWeight: 600,
-                            padding: '2px 8px', borderRadius: 20,
-                            background: dir === 'inbound' ? 'rgba(59,130,246,0.15)' : dir === 'outbound' ? 'rgba(16,185,129,0.15)' : 'rgba(168,85,247,0.15)',
-                            border: `1px solid ${dir === 'inbound' ? 'rgba(59,130,246,0.3)' : dir === 'outbound' ? 'rgba(16,185,129,0.3)' : 'rgba(168,85,247,0.3)'}`,
-                            color: dir === 'inbound' ? '#60a5fa' : dir === 'outbound' ? '#34d399' : '#c084fc',
-                          }}>
-                            {dir === 'inbound' ? '📥 Gelen Arama' : dir === 'outbound' ? '📤 Giden Arama' : '🔄 Gelen & Giden'}
-                          </span>
+                          {/* Direction Badge (Only show if restricted) */}
+                          {dir !== 'both' && (
+                            <span style={{
+                              fontSize: '0.68rem', fontWeight: 600,
+                              padding: '2px 8px', borderRadius: 20,
+                              background: dir === 'inbound' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
+                              border: `1px solid ${dir === 'inbound' ? 'rgba(59,130,246,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                              color: dir === 'inbound' ? '#60a5fa' : '#34d399',
+                            }} title={dir === 'inbound' ? 'Sadece Gelen Aramalarda Kullanılır' : 'Sadece Giden Aramalarda Kullanılır'}>
+                              {dir === 'inbound' ? '📥 Sadece Gelen' : '📤 Sadece Giden'}
+                            </span>
+                          )}
                         </div>
                         <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.3 }}>
                           {doc.title}
