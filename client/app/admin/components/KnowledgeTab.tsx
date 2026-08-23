@@ -1091,20 +1091,33 @@ export default function KnowledgeTab() {
             >
               📤 Giden Arama Akışı (Anket & Takip)
             </button>
+            <button
+              onClick={() => setFlowDirection('whatsapp')}
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
+                background: flowDirection === 'whatsapp' ? '#22c55e' : 'transparent',
+                color: flowDirection === 'whatsapp' ? '#fff' : 'var(--foreground-3)',
+                boxShadow: flowDirection === 'whatsapp' ? '0 2px 8px rgba(34,197,94,0.4)' : 'none',
+              }}
+            >
+              💬 WhatsApp
+            </button>
           </div>
         </div>
 
         {/* Current Flow Notice */}
         <div style={{
           padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: '0.8rem',
-          background: flowDirection === 'inbound' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-          border: `1px solid ${flowDirection === 'inbound' ? 'rgba(59,130,246,0.2)' : 'rgba(16,185,129,0.2)'}`,
-          color: flowDirection === 'inbound' ? '#93c5fd' : '#6ee7b7',
+          background: flowDirection === 'inbound' ? 'rgba(59,130,246,0.1)' : flowDirection === 'whatsapp' ? 'rgba(34,197,94,0.1)' : 'rgba(16,185,129,0.1)',
+          border: `1px solid ${flowDirection === 'inbound' ? 'rgba(59,130,246,0.2)' : flowDirection === 'whatsapp' ? 'rgba(34,197,94,0.2)' : 'rgba(16,185,129,0.2)'}`,
+          color: flowDirection === 'inbound' ? '#93c5fd' : flowDirection === 'whatsapp' ? '#86efac' : '#6ee7b7',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <span>
             {flowDirection === 'inbound' 
               ? '📥 Şu an **Gelen Arama Akışı** düzenleniyor. Kliniği arayan hastaların görüşme akışıdır.' 
+              : flowDirection === 'whatsapp'
+              ? '💬 Şu an **WhatsApp Akışı** düzenleniyor. Hastalarla WhatsApp üzerinden yapılan konuşmaların akışıdır.'
               : '📤 Şu an **Giden Arama Akışı** düzenleniyor. Robotun dışarıya yaptığı anket ve takip aramalarının akışıdır.'}
           </span>
           <span style={{ fontSize: '0.72rem', opacity: 0.8 }}>Yön: {flowDirection}</span>
