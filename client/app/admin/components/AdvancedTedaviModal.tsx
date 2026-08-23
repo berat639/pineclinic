@@ -4,7 +4,7 @@ import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
 
 export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, onClose, onSaved, editingGroup }: any) {
-  const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[] }[]>>({})
+  const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[], color?: string }[]>>({})
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([])
   
   const [consultations, setConsultations] = useState<any[]>([])
@@ -25,6 +25,14 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
   const [groupName, setGroupName] = useState<string>(editingGroup ? editingGroup.name : `Tedavi Planı - ${new Date().toLocaleDateString('tr-TR')}`);
 
+  const [procTemplates, setProcTemplates] = useState<any[]>([
+    { name: 'Kompozit Dolgu (Tek Yüzey)', price: 1200, color: '#3b82f6' },
+    { name: 'Kanal Tedavisi (Tek Kanal)', price: 3500, color: '#ec4899' },
+    { name: 'Diş Çekimi', price: 800, color: '#ef4444' },
+    { name: 'İmplant (Yerli)', price: 8000, color: '#06b6d4' },
+    { name: 'Zirkonyum Kuron', price: 5000, color: '#f59e0b' },
+  ])
+
   useEffect(() => {
     if (editingGroup && editingGroup.treatments) {
       const drafts: any = {};
@@ -33,13 +41,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const toothStr = String(t.toothNumber || 'general');
         if (t.toothNumber) teethSet.add(Number(t.toothNumber));
         if (!drafts[toothStr]) drafts[toothStr] = [];
+        const matchedProc = procTemplates.find(p => p.name === t.procedureName);
         drafts[toothStr].push({
           id: t.id || Date.now().toString(),
           name: t.procedureName,
           price: t.cost,
           indications: t.indication ? [t.indication] : [],
           doctorId: t.doctorId || null,
-          materials: []
+          materials: [],
+          color: matchedProc ? matchedProc.color : undefined
         });
         if (t.dcmUrl) {
           // Can't restore File object, but we can potentially display it. 
@@ -50,21 +60,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       setSelectedTeeth(Array.from(teethSet));
     }
   }, [editingGroup]);
-  const [procTemplates, setProcTemplates] = useState<any[]>([
-    { name: 'Kompozit Dolgu (Tek Yüzey)', price: 1200 },
-    { name: 'Kanal Tedavisi (Tek Kanal)', price: 3500 },
-    { name: 'Diş Çekimi', price: 800 },
-    { name: 'İmplant (Yerli)', price: 8000 },
-    { name: 'Zirkonyum Kuron', price: 5000 },
-  ])
   const [indTemplates, setIndTemplates] = useState<string[]>([
-    'Derin Çürük', 'Kırık Diş', 'Eksik Diş', 'Estetik Bozukluk', 'Kök Ucu İltihabı'
+    'Çürük', 'Kırık', 'Eksik Diş', 'Enfeksiyon', 'Kanal Yenileme', 'Estetik',
   ])
-  
+  const [editingTemplate, setEditingTemplate] = useState<{type: 'procedure'|'indication', index: number} | null>(null)
   const [newTemplateType, setNewTemplateType] = useState<'procedure'|'indication'>('procedure')
   const [newTemplateInput, setNewTemplateInput] = useState('')
   const [newTemplatePrice, setNewTemplatePrice] = useState<number>(0)
-  const [editingTemplate, setEditingTemplate] = useState<{type: 'procedure'|'indication', index: number} | null>(null)
+  const [newTemplateMaterials, setNewTemplateMaterials] = useState<any[]>([])
+  const [newTemplateColor, setNewTemplateColor] = useState('#3b82f6')
   
   const [treatmentDcmFile, setTreatmentDcmFile] = useState<File | null>(null)
   
@@ -605,6 +609,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       selected={selectedTeeth.length === 1 && selectedTeeth[0] === n} 
                       multiSelected={selectedTeeth.includes(n)}
                       hasDraft={!!toothDrafts[String(n)]}
+                      colors={Array.from(new Set((toothDrafts[String(n)] || []).map((d: any) => d.color).filter(Boolean)))}
                       onClick={(e: React.MouseEvent) => handleToothClick(n, e)}
                       onContextMenu={(e: React.MouseEvent) => {
                         e.preventDefault();
@@ -635,7 +640,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       price: p.price,
                                       indications: [...indications],
                                       doctorId: defaultDoctorId,
-                                      materials: [...(activeMaterials || p.materials || []).map((m: any) => ({...m}))]
+                                      materials: [...(activeMaterials || p.materials || []).map((m: any) => ({...m}))],
+                                      color: p.color
                                     });
                                   }
                                 });
@@ -666,6 +672,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       selected={selectedTeeth.length === 1 && selectedTeeth[0] === n} 
                       multiSelected={selectedTeeth.includes(n)}
                       hasDraft={!!toothDrafts[String(n)]}
+                      colors={Array.from(new Set((toothDrafts[String(n)] || []).map((d: any) => d.color).filter(Boolean)))}
                       onClick={(e: React.MouseEvent) => handleToothClick(n, e)}
                       onContextMenu={(e: React.MouseEvent) => {
                         e.preventDefault();
@@ -696,7 +703,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       price: p.price,
                                       indications: [...indications],
                                       doctorId: defaultDoctorId,
-                                      materials: [...(activeMaterials || p.materials || []).map((m: any) => ({...m}))]
+                                      materials: [...(activeMaterials || p.materials || []).map((m: any) => ({...m}))],
+                                      color: p.color
                                     });
                                   }
                                 });
@@ -800,7 +808,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       style={{ padding: '6px 12px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', boxShadow: isSelected ? '0 0 0 2px var(--accent)' : 'none', borderRadius: 20, fontSize: '0.8rem', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}
                     >
                       <span style={{flex: 1, pointerEvents: 'none'}}>{proc.name}</span> <span style={{ opacity: 0.5, fontSize: '0.7rem', pointerEvents: 'none' }}>{proc.price} ₺</span>
-                      <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({type: 'procedure', index: i}); setNewTemplateType('procedure'); setNewTemplateInput(proc.name); setNewTemplatePrice(proc.price); setNewTemplateMaterials(proc.materials || []); }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: proc.color || '#3b82f6', marginLeft: 4 }} />
+                      <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({type: 'procedure', index: i}); setNewTemplateType('procedure'); setNewTemplateInput(proc.name); setNewTemplatePrice(proc.price); setNewTemplateColor(proc.color || '#3b82f6'); setNewTemplateMaterials(proc.materials || []); }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
                       <button onClick={(e) => { e.stopPropagation(); setProcTemplates(prev => prev.filter((_, idx) => idx !== i)); }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
                     </div>
                   )})}
@@ -894,6 +903,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   {newTemplateType === 'procedure' && (
                     <>
                       <input type="number" value={newTemplatePrice || ''} onChange={e => setNewTemplatePrice(Number(e.target.value))} placeholder="Fiyat (₺)" style={{ ...inputStyle, width: 80, padding: '6px', fontSize: '0.8rem' }} />
+                      <input type="color" value={newTemplateColor} onChange={e => setNewTemplateColor(e.target.value)} style={{ width: 32, height: 32, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} title="İşlem Rengi" />
                       <select onChange={e => {
                         const itemId = e.target.value;
                         if (!itemId) return;
@@ -914,7 +924,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     if (editingTemplate) {
                       if (editingTemplate.type === 'procedure') {
                         const arr = [...procTemplates];
-                        arr[editingTemplate.index] = { name: newTemplateInput.trim(), price: newTemplatePrice, materials: [...newTemplateMaterials] };
+                        arr[editingTemplate.index] = { name: newTemplateInput.trim(), price: newTemplatePrice, color: newTemplateColor, materials: [...newTemplateMaterials] };
                         setProcTemplates(arr);
                       } else {
                         const arr = [...indTemplates];
@@ -924,7 +934,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       setEditingTemplate(null);
                     } else {
                       if (newTemplateType === 'procedure') {
-                        setProcTemplates(prev => [...prev, { name: newTemplateInput.trim(), price: newTemplatePrice, materials: [...newTemplateMaterials] }]);
+                        setProcTemplates(prev => [...prev, { name: newTemplateInput.trim(), price: newTemplatePrice, color: newTemplateColor, materials: [...newTemplateMaterials] }]);
                       } else {
                         setIndTemplates(prev => Array.from(new Set([...prev, newTemplateInput.trim()])));
                       }
@@ -1410,7 +1420,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         if (!next[tk].find((x:any) => x.name === p.name)) {
                           next[tk].push({
                             id: Math.random().toString(36).substring(7),
-                            name: p.name, price: p.price, indications: [], doctorId: defaultDoctorId, materials: [...(p.materials || []).map((m: any) => ({...m}))]
+                            name: p.name, price: p.price, indications: [], doctorId: defaultDoctorId, materials: [...(p.materials || []).map((m: any) => ({...m}))],
+                            color: p.color
                           });
                         }
                       });
