@@ -176,7 +176,10 @@ export default function Home() {
 
       setStatus('listening')
 
-      session.sendText(`Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)`)
+      const greetingPrompt = sessionConfig?.greeting
+        ? `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Müşteriye tam olarak şu karşılama mesajını okuyarak konuşmayı başlat: "${sessionConfig.greeting}" (Bu bir sistem bildirimidir, müşteri adı sanma.)`
+        : `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Kısaca "Merhaba, size nasıl yardımcı olabilirim?" diyerek görüşmeyi başlat.`
+      session.sendText(greetingPrompt)
 
       if (mode === 'audio') {
         const mic = new MicrophoneCapture()
