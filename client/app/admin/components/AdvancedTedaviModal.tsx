@@ -106,14 +106,27 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const minIdx = Math.min(startIdx, endIdx)
         const maxIdx = Math.max(startIdx, endIdx)
         const range = allTeeth.slice(minIdx, maxIdx + 1)
-        setSelectedTeeth(prev => Array.from(new Set([...prev, ...range])))
+        
+        setSelectedTeeth(prev => {
+          // If anchor is selected, ADD the range. If anchor is unselected, REMOVE the range.
+          const isAdding = prev.includes(lastSelectedTooth);
+          if (isAdding) {
+            return Array.from(new Set([...prev, ...range]));
+          } else {
+            return prev.filter(t => !range.includes(t));
+          }
+        })
       }
     } else if (e.ctrlKey || e.metaKey) {
       setSelectedTeeth(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
     } else {
       setSelectedTeeth(prev => prev.includes(n) && prev.length === 1 ? [] : [n]);
     }
-    setLastSelectedTooth(n)
+    
+    // Do not move the anchor when shift-clicking, allowing consecutive shift-clicks from the same anchor.
+    if (!e.shiftKey) {
+      setLastSelectedTooth(n)
+    }
   }
 
   const handlePrint = () => {
