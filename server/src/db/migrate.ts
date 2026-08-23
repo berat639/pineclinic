@@ -768,6 +768,9 @@ async function runMigrations() {
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_enabled BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
 
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS whatsapp_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS sms_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS email_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+
 
   await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_name TEXT`.catch(() => {})
   await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status TEXT DEFAULT 'pending'`.catch(() => {})
