@@ -1726,6 +1726,8 @@ const app = new Elysia()
       .filter(t => t.name !== 'cagriySonlandir')
     const model = await resolveLiveModel()
     const branding = await getBranding()
+    const { getSetting } = await import('./db/repositories/settings')
+    const voiceName = await getSetting('ai.voice_name') || 'Aoede'
 
     return {
       systemPrompt: systemPrompt + ragContext,
@@ -1733,6 +1735,7 @@ const app = new Elysia()
       model,
       greeting,
       branding,
+      voiceName,
     }
   })
 

@@ -25,6 +25,7 @@ export type SessionConfig = {
     subtitle: string
     logoUrl: string
   }
+  voiceName?: string
 }
 
 // ── Tool call → server HTTP ────────────────────────────────────────────────
@@ -119,7 +120,7 @@ export class AiLiveSession {
             speechConfig: mode === 'audio' ? {
               voiceConfig: {
                 prebuiltVoiceConfig: {
-                  voiceName: 'Orus',
+                  voiceName: config.voiceName || 'Aoede',
                 },
               },
             } : undefined,
