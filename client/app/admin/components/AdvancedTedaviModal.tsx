@@ -231,10 +231,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     printWindow.document.close();
   };
 
-  
+  const listenTimeoutRef = useRef<any>(null);
+
   const toggleListening = () => {
     if (isListening) {
       if (recognitionRef.current) recognitionRef.current.stop();
+      if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
       setIsListening(false);
       return;
     }
@@ -254,15 +256,27 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       recognition.onstart = () => {
         setIsListening(true);
         setTranscript("Dinliyorum...");
+        listenTimeoutRef.current = setTimeout(() => {
+          if (recognitionRef.current) recognitionRef.current.stop();
+          setIsListening(false);
+          setTranscript("Zaman aşımı (20sn). Lütfen tekrar deneyin.");
+          setTimeout(() => setTranscript(""), 2000);
+        }, 20000);
       };
 
       recognition.onresult = (event: any) => {
         const currentTranscript = event.results[event.results.length - 1][0].transcript;
         setTranscript(currentTranscript);
+        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
+        listenTimeoutRef.current = setTimeout(() => {
+          if (recognitionRef.current) recognitionRef.current.stop();
+          setIsListening(false);
+        }, 20000);
       };
 
       recognition.onerror = (event: any) => {
         console.error("Speech recognition error", event.error);
+        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
         setIsListening(false);
         setTranscript("Hata: " + event.error);
         setTimeout(() => setTranscript(""), 2000);
@@ -270,9 +284,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
       recognition.onend = () => {
         setIsListening(false);
+        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
         // Process final transcript if it's not just "Dinliyorum..."
         setTranscript((prev) => {
-          if (prev && prev !== "Dinliyorum..." && !prev.startsWith("Hata:")) {
+          if (prev && prev !== "Dinliyorum..." && !prev.startsWith("Hata:") && !prev.startsWith("Zaman")) {
              processAICommand(prev);
           }
           return "";
@@ -508,11 +523,24 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>Tedavi Planı Oluştur</h3>
+            <style>{`
+              @keyframes siriWave {
+                0% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #ec4899, 0 0 20px #8b5cf6, 0 0 30px #3b82f6; }
+                50% { transform: scale(1.03); opacity: 1; box-shadow: 0 0 20px #ec4899, 0 0 40px #8b5cf6, 0 0 60px #3b82f6; }
+                100% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #ec4899, 0 0 20px #8b5cf6, 0 0 30px #3b82f6; }
+              }
+              @keyframes siriRotate {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+              }
+            `}</style>
             
             <button 
               onClick={toggleListening}
               style={{ 
-                background: isListening ? 'linear-gradient(90deg, #ec4899, #8b5cf6)' : 'var(--glass-bg)', 
+                background: isListening ? 'linear-gradient(270deg, #ec4899, #8b5cf6, #3b82f6, #ec4899)' : 'var(--glass-bg)', 
+                backgroundSize: isListening ? '300% 300%' : 'auto',
                 border: `1px solid ${isListening ? 'transparent' : 'var(--glass-border)'}`, 
                 color: isListening ? '#fff' : 'var(--foreground)', 
                 padding: '6px 16px', 
@@ -523,7 +551,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: isListening ? '0 0 15px rgba(236,72,153,0.5)' : 'none',
+                animation: isListening ? 'siriWave 1.5s infinite ease-in-out, siriRotate 3s infinite linear' : 'none',
                 transition: 'all 0.3s ease'
               }}>
               <span style={{ fontSize: '1.1rem' }}>🎙️</span> {isListening ? 'Asistan Dinliyor...' : 'Asistanı Başlat'}
