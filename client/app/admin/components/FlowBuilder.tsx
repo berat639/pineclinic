@@ -397,6 +397,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
             onNodeClick={(_e, node) => setSelectedNodeId(node.id)}
             onPaneClick={() => setSelectedNodeId(null)}
             onNodeDoubleClick={(_e, node) => deleteNode(node.id)}
+            onEdgeDoubleClick={(_e, edge) => setEdges(eds => eds.filter(e => e.id !== edge.id))}
             fitView
             style={{ background: 'var(--flow-bg, #0a0f1a)' }}
             colorMode="system"
