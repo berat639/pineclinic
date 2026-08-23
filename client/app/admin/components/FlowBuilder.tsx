@@ -162,6 +162,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   
   // Sidebar state
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
   // Load phonebook
   useEffect(() => {
@@ -394,8 +395,9 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
-            onNodeClick={(_e, node) => setSelectedNodeId(node.id)}
-            onPaneClick={() => setSelectedNodeId(null)}
+            onNodeClick={(_e, node) => { setSelectedNodeId(node.id); setSelectedEdgeId(null); }}
+            onEdgeClick={(_e, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null); }}
+            onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
             onNodeDoubleClick={(_e, node) => deleteNode(node.id)}
             onEdgeDoubleClick={(_e, edge) => setEdges(eds => eds.filter(e => e.id !== edge.id))}
             fitView
@@ -414,12 +416,38 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
             Özellikler Paneli
           </h3>
 
-          {!selectedNode && (
+          {!selectedNode && !selectedEdgeId && (
             <div style={{ color: 'var(--foreground-3)', fontSize: 12, textAlign: 'center', marginTop: 40, lineHeight: 1.6 }}>
               <div style={{ fontSize: 24, marginBottom: 8 }}>🖱️</div>
-              Tuvalden düzenlemek istediğiniz bir düğümü seçin veya üst menüden yeni bir düğüm ekleyin.
+              Tuvalden düzenlemek istediğiniz bir düğümü veya bağlantı çizgisini seçin.
             </div>
           )}
+
+          {selectedEdgeId && (() => {
+            const edge = edges.find(e => e.id === selectedEdgeId);
+            if (!edge) return null;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ padding: '12px', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8 }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 600, color: '#ef4444', marginBottom: 8 }}>Bağlantı Çizgisi Seçili</h4>
+                  <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 12, lineHeight: 1.5 }}>
+                    Seçili olan bağlantıyı silmek için aşağıdaki butonu kullanabilirsiniz.
+                  </p>
+                  <button 
+                    onClick={() => {
+                      setEdges(eds => eds.filter(e => e.id !== edge.id));
+                      setSelectedEdgeId(null);
+                    }}
+                    style={{
+                      width: '100%', padding: '8px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
+                    }}
+                  >
+                    🗑️ Bağlantıyı Sil
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
 
           {selectedNode?.type === 'fieldNode' && (() => {
             const d = selectedNode.data as FieldData;
