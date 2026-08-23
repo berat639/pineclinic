@@ -12,7 +12,7 @@ let globalSileroModel: any = null
 
 export async function initNeuralVAD() {
   if (globalSileroModel) return
-  const modelPath = path.resolve(__dirname, '../../../node_modules/@ricky0123/vad-node/dist/silero_vad.onnx')
+  const modelPath = require.resolve('@ricky0123/vad-node/dist/silero_vad.onnx')
   const modelFetcher = async () => {
     const contents = await fs.readFile(modelPath)
     return contents.buffer
