@@ -23,6 +23,9 @@ export default function PatientsTab() {
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
   const [profileData, setProfileData] = useState<any>(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newPatient, setNewPatient] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '' })
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -97,6 +100,33 @@ export default function PatientsTab() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  const handleAddPatient = async () => {
+    if (!newPatient.name.trim()) {
+      alert('Hasta adı zorunludur.')
+      return
+    }
+    
+    try {
+      const res = await fetch('/api/dental/patients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPatient)
+      })
+      if (res.ok) {
+        alert('Hasta başarıyla eklendi!')
+        setShowAddModal(false)
+        setNewPatient({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '' })
+        loadPatients()
+      } else {
+        const err = await res.json()
+        alert('Hata: ' + (err.error || 'Bilinmeyen hata'))
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Hasta eklenirken bir hata oluştu.')
+    }
+  }
+
   useEffect(() => {
     if (selectedPatientId) {
       setProfileLoading(true)
@@ -155,6 +185,18 @@ export default function PatientsTab() {
             }}
           >
             📊 Excel İçe Aktar
+          </button>
+          
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              padding: '8px 16px', background: 'var(--brand-color, #2563eb)',
+              border: 'none', borderRadius: 8,
+              color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}
+          >
+            ➕ Yeni Hasta Ekle
           </button>
 
           <input
@@ -260,6 +302,33 @@ export default function PatientsTab() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {showAddModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', padding: '1.5rem', borderRadius: 12, border: '1px solid var(--glass-border)', width: 400, maxWidth: '90%' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--foreground)' }}>Yeni Hasta Ekle</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <input type="text" placeholder="Ad Soyad (Zorunlu)" value={newPatient.name} onChange={e => setNewPatient({...newPatient, name: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={newPatient.phone} onChange={e => setNewPatient({...newPatient, phone: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              <input type="text" placeholder="TC Kimlik No (İsteğe Bağlı)" value={newPatient.tcIdentity} onChange={e => setNewPatient({...newPatient, tcIdentity: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              <input type="email" placeholder="E-posta (İsteğe Bağlı)" value={newPatient.email} onChange={e => setNewPatient({...newPatient, email: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              <select value={newPatient.gender} onChange={e => setNewPatient({...newPatient, gender: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }}>
+                <option value="">Cinsiyet (İsteğe Bağlı)</option>
+                <option value="Erkek">Erkek</option>
+                <option value="Kadın">Kadın</option>
+              </select>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', paddingLeft: 4 }}>Doğum Tarihi (İsteğe Bağlı)</label>
+                <input type="date" value={newPatient.birthDate} onChange={e => setNewPatient({...newPatient, birthDate: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.5rem' }}>
+              <button onClick={() => setShowAddModal(false)} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--foreground)', cursor: 'pointer' }}>İptal</button>
+              <button onClick={handleAddPatient} style={{ padding: '8px 16px', background: 'var(--brand-color, #2563eb)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

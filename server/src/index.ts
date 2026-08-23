@@ -364,7 +364,15 @@ const app = new Elysia()
     const { createPatient } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.name) { set.status = 400; return { error: 'Name required' } }
-    return await createPatient({ name: b.name, phone: b.phone, balance: b.balance })
+    return await createPatient({ 
+      name: b.name, 
+      phone: b.phone, 
+      email: b.email,
+      tcIdentity: b.tcIdentity,
+      gender: b.gender,
+      birthDate: b.birthDate,
+      balance: b.balance 
+    })
   })
   .post("/api/dental/patients/bulk", async ({ body, set }) => {
     const { createPatientsBulk } = await import("./db/repositories/dental")

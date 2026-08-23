@@ -244,10 +244,14 @@ export async function listPatients() {
   return db.select().from(patients).orderBy(desc(patients.createdAt))
 }
 
-export async function createPatient(data: { name: string; phone?: string; balance?: number }) {
+export async function createPatient(data: { name: string; phone?: string; balance?: number; email?: string; tcIdentity?: string; gender?: string; birthDate?: string }) {
   const [row] = await db.insert(patients).values({
     name: data.name,
     phone: data.phone ?? null,
+    email: data.email ?? null,
+    tcIdentity: data.tcIdentity ?? null,
+    gender: data.gender ?? null,
+    birthDate: data.birthDate ? new Date(data.birthDate) : null,
     balance: data.balance ?? 0,
   }).returning()
   return row
