@@ -262,6 +262,55 @@ const app = new Elysia()
   .use(notificationsPlugin)
   .use(yoneticiPlugin)
 
+  // ── Public Opt-out API ─────────────────────────────────────────────────────
+  .get('/api/public/optout/:id', async ({ params, set }: any) => {
+    try {
+      const { db } = await import('./db/client')
+      const { patients } = await import('./db/schema')
+      const { eq } = await import('drizzle-orm')
+      
+      const patientId = params.id
+      const patient = await db.query.patients.findFirst({
+        where: eq(patients.id, patientId)
+      })
+      if (!patient) {
+        set.status = 404
+        return { error: 'Hasta bulunamadı' }
+      }
+      return { 
+        id: patient.id,
+        name: patient.name,
+        smsOptOut: patient.smsOptOut,
+        emailOptOut: patient.emailOptOut,
+        whatsappOptOut: patient.whatsappOptOut 
+      }
+    } catch (e: any) {
+      set.status = 500
+      return { error: 'Sunucu hatası' }
+    }
+  })
+  .post('/api/public/optout/:id', async ({ params, body, set }: any) => {
+    try {
+      const { db } = await import('./db/client')
+      const { patients } = await import('./db/schema')
+      const { eq } = await import('drizzle-orm')
+      
+      const patientId = params.id
+      const b = body as any
+      
+      await db.update(patients).set({
+        smsOptOut: !!b.smsOptOut,
+        emailOptOut: !!b.emailOptOut,
+        whatsappOptOut: !!b.whatsappOptOut
+      }).where(eq(patients.id, patientId))
+      
+      return { success: true }
+    } catch (e: any) {
+      set.status = 500
+      return { error: 'Sunucu hatası' }
+    }
+  })
+
   // ── WhatsApp Webhook ───────────────────────────────────────────────────────
   // GET: Meta webhook verification (hub.challenge)
   .get('/api/whatsapp/webhook', ({ query, set }: any) => {

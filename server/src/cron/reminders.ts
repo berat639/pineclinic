@@ -68,8 +68,9 @@ async function processReminders() {
           ))
           .limit(1)
 
-        const message = tplRows[0]?.content
-          ?? `Sayin ${patient.name}, ${treatment.procedureName} isleminiz icin kontrol vaktiniz gelmistir. Randevu almak icin lutfen klinigimizle iletisime geciniz. Iyi gunler dileriz.`
+        const optOutLink = `\n\nİletişim tercihleri: https://pinecllinic.thinpine.com/optout?p=${patient.id}`
+        const message = (tplRows[0]?.content
+          ?? `Sayin ${patient.name}, ${treatment.procedureName} isleminiz icin kontrol vaktiniz gelmistir. Randevu almak icin lutfen klinigimizle iletisime geciniz. Iyi gunler dileriz.`) + optOutLink
 
         console.log(`[SMS] Sending to ${patient.name} (${patient.phone}) via NetGSM...`)
         const res = await sendSMS({
@@ -127,8 +128,9 @@ async function processReminders() {
           waResult = await sendWhatsAppTemplate(patient.phone, creds, waTpl.whatsappTemplateName, 'tr', components)
         } else {
           // Fallback: free text (only works within 24h window — may fail, that's ok)
-          const fallbackText = waTpl?.content
-            ?? `Sayın ${patient.name}, ${treatment.procedureName} işleminiz için kontrol vaktiniz gelmiştir. Randevu almak için lütfen bize yazın.`
+          const optOutLink = `\n\nİletişim tercihleri: https://pinecllinic.thinpine.com/optout?p=${patient.id}`
+          const fallbackText = (waTpl?.content
+            ?? `Sayın ${patient.name}, ${treatment.procedureName} işleminiz için kontrol vaktiniz gelmiştir. Randevu almak için lütfen bize yazın.`) + optOutLink
           waResult = await sendWhatsAppText(patient.phone, creds, fallbackText)
         }
 
