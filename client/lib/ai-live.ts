@@ -63,7 +63,7 @@ export class AiLiveSession {
     this.callbacks = callbacks
   }
 
-  async connect(apiKey: string, config: SessionConfig): Promise<void> {
+  async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
     const modelName = config.model || 'gemini-3.1-flash-live-preview'
 
     return new Promise<void>((resolve, reject) => {
@@ -105,7 +105,7 @@ export class AiLiveSession {
             },
           },
           config: {
-            responseModalities: [Modality.AUDIO],
+            responseModalities: mode === 'text' ? [Modality.TEXT] : [Modality.AUDIO],
             systemInstruction: config.systemPrompt,
             tools: config.toolDeclarations.length > 0
               ? [{ functionDeclarations: config.toolDeclarations }]
@@ -116,18 +116,18 @@ export class AiLiveSession {
                 targetTokens: '16000',
               },
             },
-            speechConfig: {
+            speechConfig: mode === 'audio' ? {
               voiceConfig: {
                 prebuiltVoiceConfig: {
                   voiceName: 'Orus',
                 },
               },
-            },
-            realtimeInputConfig: {
+            } : undefined,
+            realtimeInputConfig: mode === 'audio' ? {
               automaticActivityDetection: {
                 disabled: false,
               },
-            },
+            } : undefined,
           },
         })
         .then((session) => {

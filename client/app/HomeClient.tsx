@@ -39,6 +39,8 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
+  const [mode, setMode] = useState<'audio' | 'text'>('audio')
+  const [textInput, setTextInput] = useState('')
 
   const sessionRef = useRef<AiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
@@ -139,7 +141,7 @@ export default function Home() {
     sessionRef.current = session
 
     try {
-      await session.connect(apiKey, sessionConfig)
+      await session.connect(apiKey, sessionConfig, mode)
 
       // Wait briefly to confirm session is stable (AI may close immediately on errors)
       await new Promise<void>((resolve, reject) => {
@@ -161,13 +163,15 @@ export default function Home() {
 
       setStatus('listening')
 
-      session.sendText('Sistem bildirimi: Müşteri sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)')
+      session.sendText(`Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)`)
 
-      const mic = new MicrophoneCapture()
-      micRef.current = mic
-      await mic.start((pcm) => {
-        session.sendAudio(pcm)
-      })
+      if (mode === 'audio') {
+        const mic = new MicrophoneCapture()
+        micRef.current = mic
+        await mic.start((pcm) => {
+          session.sendAudio(pcm)
+        })
+      }
     } catch (err) {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
@@ -266,6 +270,40 @@ export default function Home() {
           <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 400 }}>
             {sessionConfig?.branding?.subtitle || 'Randevu · Bilgi'}
           </p>
+        </div>
+
+        {/* Mode Toggle */}
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '-1rem', zIndex: 10 }}>
+          <button
+            onClick={() => status === 'idle' && setMode('audio')}
+            style={{
+              padding: '0.5rem 1.5rem',
+              borderRadius: '20px',
+              border: `1px solid ${mode === 'audio' ? '#3b82f6' : '#475569'}`,
+              background: mode === 'audio' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+              color: mode === 'audio' ? '#60a5fa' : '#94a3b8',
+              cursor: status === 'idle' ? 'pointer' : 'not-allowed',
+              opacity: status === 'idle' ? 1 : 0.5,
+              transition: 'all 0.2s',
+            }}
+          >
+            🎙️ Sesli
+          </button>
+          <button
+            onClick={() => status === 'idle' && setMode('text')}
+            style={{
+              padding: '0.5rem 1.5rem',
+              borderRadius: '20px',
+              border: `1px solid ${mode === 'text' ? '#3b82f6' : '#475569'}`,
+              background: mode === 'text' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+              color: mode === 'text' ? '#60a5fa' : '#94a3b8',
+              cursor: status === 'idle' ? 'pointer' : 'not-allowed',
+              opacity: status === 'idle' ? 1 : 0.5,
+              transition: 'all 0.2s',
+            }}
+          >
+            💬 Yazılı
+          </button>
         </div>
 
         {/* Voice Button */}
@@ -370,6 +408,51 @@ export default function Home() {
           }}>
             {errorMsg}
           </div>
+        )}
+
+        {/* Text Input */}
+        {mode === 'text' && isActive && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!textInput.trim() || !sessionRef.current) return
+              sessionRef.current.sendText(textInput.trim())
+              addTranscript('user', textInput.trim())
+              setTextInput('')
+            }}
+            style={{ display: 'flex', gap: '0.5rem', width: '100%', marginTop: '0.5rem' }}
+          >
+            <input
+              type="text"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              placeholder="Mesajınızı yazın..."
+              style={{
+                flex: 1,
+                padding: '0.75rem 1rem',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#fff',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!textInput.trim()}
+              style={{
+                padding: '0 1.25rem',
+                borderRadius: '12px',
+                background: textInput.trim() ? '#3b82f6' : '#334155',
+                color: '#fff',
+                border: 'none',
+                cursor: textInput.trim() ? 'pointer' : 'not-allowed',
+                fontWeight: 600,
+              }}
+            >
+              Gönder
+            </button>
+          </form>
         )}
 
         {/* Transcript */}
