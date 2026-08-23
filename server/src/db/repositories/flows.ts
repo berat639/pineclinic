@@ -211,6 +211,24 @@ export function flowToPromptText(flow: ConversationFlow): string {
 
   traverse(startNode.id, 0)
   
+  // ── Global Tetikleyiciler (Bağımsız veya Bağlı Kalan Tüm Aksiyonlar) ──
+  const globalActions = flow.nodes.filter(n => n.type === 'ACTION' && (n.data as any).triggerKeywords)
+  if (globalActions.length > 0) {
+    lines.push('\n⚡ GLOBAL TETİKLEYİCİLER (Görüşmenin HERHANGİ bir anında geçerlidir):')
+    for (const node of globalActions) {
+      const act = (node.data as Record<string, unknown>).action
+      const target = (node.data as Record<string, unknown>).transferNumber || ''
+      const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
+      
+      if (act === 'transfer_call') {
+        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya ima ederse, akışı derhal kesip aramaAktar(${target ? `hedef: ${target}` : ''}) aracını çağır.`)
+      } else if (act === 'end_call') {
+        const msg = (node.data as Record<string, unknown>).message || ''
+        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanırsa, akışı derhal kesip cagriySonlandir() aracını çağır. ${msg ? `Öncesinde "${msg}" de.` : ''}`)
+      }
+    }
+  }
+
   // Ayrıca START düğümüne bağlı olmayan (bağımsız) akış parçalarını da işle
   const unvisitedRoots = flow.nodes.filter(n => !visited.has(n.id) && !flow.edges.some(e => e.target === n.id))
   for (const root of unvisitedRoots) {

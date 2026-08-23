@@ -99,6 +99,7 @@ function ConditionNode({ data }: { data: ConditionData }) {
   const labels: Record<string, string> = {
     'is_registered': 'Hasta kayıtlı mı?',
     'kayitli': 'Hasta kayıtlı mı?',
+    'user_intent': 'Kullanıcı Niyeti',
   }
   const humanLabel = labels[data.conditionField] || (data.conditionField ? `${data.conditionField} kontrol` : 'Koşul')
   return (
@@ -553,43 +554,65 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Hangi bilgi kontrol edilecek?</label>
-                  <select value={d.conditionField} onChange={e => updateSelectedNode({ conditionField: e.target.value })} style={inputStyle}>
+                  <select value={d.conditionField} onChange={e => updateSelectedNode({ conditionField: e.target.value, operator: e.target.value === 'user_intent' ? 'intent' : 'equals' })} style={inputStyle}>
                     <option value="">Bir alan seçin...</option>
+                    <option value="user_intent">🎯 Özel Niyet / İstek Algılama (user_intent)</option>
                     <option value="is_registered">Hasta Kayıtlı Mı? (is_registered)</option>
                     {PATIENT_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label} ({f.value})</option>)}
                   </select>
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Kural (Şart)</label>
-                  <select value={d.operator} onChange={e => updateSelectedNode({ operator: e.target.value as any })} style={inputStyle}>
-                    <option value="equals">Cevap tam olarak şuna eşitse:</option>
-                    <option value="contains">Cevap şu kelimeyi içeriyorsa:</option>
-                    <option value="notEmpty">Herhangi bir cevap verildiyse (Boş bırakılmadıysa)</option>
-                  </select>
-                </div>
-                {d.operator !== 'notEmpty' && (
-                  <div style={{ padding: 12, borderRadius: 8, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
-                    <label style={{ fontSize: 11, color: '#22c55e', display: 'block', marginBottom: 6, fontWeight: 600 }}>
-                      ✅ Hangi durumda "Evet" (Yeşil ok) yönüne gidilsin?
+                
+                {d.conditionField === 'user_intent' ? (
+                  <div style={{ padding: 12, borderRadius: 8, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                    <label style={{ fontSize: 11, color: '#60a5fa', display: 'block', marginBottom: 6, fontWeight: 600 }}>
+                      🧠 Yapay Zeka Neyi Algılasın?
                     </label>
-                    <select 
-                      value={d.conditionValue === 'true' || d.conditionValue === 'false' ? d.conditionValue : 'custom'}
-                      onChange={e => updateSelectedNode({ conditionValue: e.target.value === 'custom' ? '' : e.target.value })}
-                      style={{ ...inputStyle, marginBottom: (d.conditionValue === 'true' || d.conditionValue === 'false') ? 0 : 8, borderColor: 'rgba(34,197,94,0.3)' }}
-                    >
-                      <option value="true">Cevap Olumluysa (Evet vb.)</option>
-                      <option value="false">Cevap Olumsuzsa (Hayır vb.)</option>
-                      <option value="custom">Özel Bir Kelime Söylerse...</option>
-                    </select>
-
-                    {d.conditionValue !== 'true' && d.conditionValue !== 'false' && (
-                      <input value={d.conditionValue} onChange={e => updateSelectedNode({ conditionValue: e.target.value })} placeholder="Örn: kanal tedavisi, onaylıyorum..." style={inputStyle} />
-                    )}
-
-                    <div style={{ fontSize: 10, color: '#ef4444', marginTop: 12, borderTop: '1px dashed rgba(239,68,68,0.2)', paddingTop: 8 }}>
-                      ❌ <strong>Diğer tüm cevaplarda</strong> otomatik olarak "Hayır" (Kırmızı ok) yönüne gidilir.
+                    <textarea 
+                      value={d.conditionValue} 
+                      onChange={e => updateSelectedNode({ conditionValue: e.target.value })} 
+                      placeholder="Örn: Kullanıcı Sağlık Bakanlığından aradığını ve yetkiliyle görüşmek istediğini söylüyor." 
+                      rows={4} 
+                      style={{ ...inputStyle, resize: 'vertical' }} 
+                    />
+                    <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 8, lineHeight: 1.4 }}>
+                      Eğer yapay zeka hastanın konuşmasından bu niyeti çıkarırsa çağrıyı <strong>Evet (Yeşil)</strong> yönüne, çıkaramazsa <strong>Hayır (Kırmızı)</strong> yönüne yönlendirir.
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Kural (Şart)</label>
+                      <select value={d.operator} onChange={e => updateSelectedNode({ operator: e.target.value as any })} style={inputStyle}>
+                        <option value="equals">Cevap tam olarak şuna eşitse:</option>
+                        <option value="contains">Cevap şu kelimeyi içeriyorsa:</option>
+                        <option value="notEmpty">Herhangi bir cevap verildiyse (Boş bırakılmadıysa)</option>
+                      </select>
+                    </div>
+                    {d.operator !== 'notEmpty' && (
+                      <div style={{ padding: 12, borderRadius: 8, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                        <label style={{ fontSize: 11, color: '#22c55e', display: 'block', marginBottom: 6, fontWeight: 600 }}>
+                          ✅ Hangi durumda "Evet" (Yeşil ok) yönüne gidilsin?
+                        </label>
+                        <select 
+                          value={d.conditionValue === 'true' || d.conditionValue === 'false' ? d.conditionValue : 'custom'}
+                          onChange={e => updateSelectedNode({ conditionValue: e.target.value === 'custom' ? '' : e.target.value })}
+                          style={{ ...inputStyle, marginBottom: (d.conditionValue === 'true' || d.conditionValue === 'false') ? 0 : 8, borderColor: 'rgba(34,197,94,0.3)' }}
+                        >
+                          <option value="true">Cevap Olumluysa (Evet vb.)</option>
+                          <option value="false">Cevap Olumsuzsa (Hayır vb.)</option>
+                          <option value="custom">Özel Bir Kelime Söylerse...</option>
+                        </select>
+
+                        {d.conditionValue !== 'true' && d.conditionValue !== 'false' && (
+                          <input value={d.conditionValue} onChange={e => updateSelectedNode({ conditionValue: e.target.value })} placeholder="Örn: kanal tedavisi, onaylıyorum..." style={inputStyle} />
+                        )}
+
+                        <div style={{ fontSize: 10, color: '#ef4444', marginTop: 12, borderTop: '1px dashed rgba(239,68,68,0.2)', paddingTop: 8 }}>
+                          ❌ <strong>Diğer tüm cevaplarda</strong> otomatik olarak "Hayır" (Kırmızı ok) yönüne gidilir.
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )
