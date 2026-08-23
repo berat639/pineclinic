@@ -149,14 +149,16 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           @media print {
             @page { margin: 1.5cm; size: A4 portrait; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0; }
+            tr, .summary-container { page-break-inside: avoid; break-inside: avoid; }
           }
           body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #111; max-width: 800px; margin: 0 auto; line-height: 1.5; }
           .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px; }
           h1 { color: #1e3a8a; margin: 0; font-size: 26px; text-transform: uppercase; letter-spacing: 1px; }
           .date { color: #64748b; font-size: 14px; margin-top: 10px; }
           table { width: 100%; border-collapse: collapse; margin-bottom: 40px; font-size: 14px; }
+          tr { page-break-inside: avoid; break-inside: avoid; }
           th { background-color: #f1f5f9; padding: 12px 10px; text-align: left; border-bottom: 2px solid #cbd5e1; color: #334155; font-weight: 700; }
-          .summary-container { display: flex; justify-content: flex-end; }
+          .summary-container { display: flex; justify-content: flex-end; page-break-inside: avoid; break-inside: avoid; }
           .summary-table { width: 350px; border-collapse: collapse; background-color: #f8fafc; border-radius: 8px; overflow: hidden; }
           .summary-table td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
           .summary-table .label { color: #475569; font-weight: 500; }
