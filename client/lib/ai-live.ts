@@ -75,7 +75,7 @@ export class AiLiveSession {
           model: `models/${modelName}`,
           callbacks: {
             onopen: () => {
-              console.log('[Live] Connected')
+              // console.log('[Live] Connected')
               this._isConnected = true
               this.callbacks.onConnectionChange(true)
               if (!resolved) { resolved = true; resolve() }
@@ -132,7 +132,7 @@ export class AiLiveSession {
         })
         .then((session) => {
           this.session = session
-          console.log(`[Live] Session: ${modelName}`)
+          // console.log(`[Live] Session: ${modelName}`)
         })
         .catch((err) => {
           console.error('[Live] Connect failed:', err)
@@ -212,7 +212,7 @@ export class AiLiveSession {
     // Output transcription (text of what AI said in audio mode)
     const transcript = (message as any).serverContent?.outputTranscription?.text
     if (transcript) {
-      console.log('[AI]', transcript)
+      // console.log('[AI]', transcript)
       this.callbacks.onText(transcript)
     }
 

@@ -115,11 +115,11 @@ export default function Home() {
       },
       onText: (text) => {
         textBufferRef.current += text
-        console.log('[AI Text]', text)
+        // console.log('[AI Text]', text)
       },
       onTurnComplete: () => {
-        if (textBufferRef.current.trim()) {
-          console.log('[AI Turn]', textBufferRef.current.trim())
+        if (textBufferRef.current.trim().length > 0) {
+          // console.log('[AI Turn]', textBufferRef.current.trim())
           addTranscript('model', textBufferRef.current.trim())
           textBufferRef.current = ''
         }

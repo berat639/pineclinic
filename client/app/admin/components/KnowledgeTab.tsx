@@ -237,7 +237,7 @@ export default function KnowledgeTab() {
   const [callerIdSaving, setCallerIdSaving] = useState(false)
 
   // Flow Builder Direction State
-  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound'>('inbound')
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
 
   // Outbound Call Modal state
   const [callModalOpen, setCallModalOpen] = useState(false)

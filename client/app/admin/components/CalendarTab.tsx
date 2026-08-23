@@ -400,19 +400,14 @@ export default function CalendarTab() {
           />
           <button onClick={() => goDate(1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>▶</button>
           <button
-            onClick={() => setPatientPanelOpen(true)}
-            style={{
-              padding: '7px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--glass-border)',
-              background: 'var(--glass-bg)',
-              color: 'var(--foreground)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
+            className="btn btn-primary" 
+            style={{ padding: '8px 16px', borderRadius: 8, fontSize: '0.82rem' }}
+            onClick={() => {
+              setPatientPanelOpen(true)
+              setPanelOpen(false) // Add mutual exclusivity
             }}
           >
-            👥 Hastalar
+            <Users size={16} /> Hastalar
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
@@ -558,7 +553,7 @@ export default function CalendarTab() {
 
       {/* Right Panel — Event Detail */}
       {panelOpen && selectedEvent && (
-        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, backgroundColor: 'var(--background)', borderLeft: '1px solid var(--divider)', zIndex: 9999, padding: 24, overflowY: 'auto', boxShadow: '-4px 0 20px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, backgroundColor: 'var(--background)', borderLeft: '1px solid var(--divider)', zIndex: 9999, padding: 24, overflowY: 'auto', boxShadow: '-4px 0 20px rgba(0,0,0,0.19)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Detayı</h3>
             <button onClick={() => setPanelOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
