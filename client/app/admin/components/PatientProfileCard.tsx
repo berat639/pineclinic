@@ -53,6 +53,25 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
         </div>
       </div>
 
+      {/* İletişim İzinleri (KVKK) */}
+      <div style={cardStyle}>
+        <div style={headerStyle}>🛡️ İletişim İzinleri (KVKK)</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>💬 SMS:</span>
+            {patient.smsOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>📧 E-posta:</span>
+            {patient.emailOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>🟢 WhatsApp:</span>
+            {patient.whatsappOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
+          </div>
+        </div>
+      </div>
+
       {/* Hastalıklar & Alerjiler */}
       {diseases && diseases.length > 0 && (
         <div style={cardStyle}>

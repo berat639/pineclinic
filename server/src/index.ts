@@ -503,6 +503,9 @@ const app = new Elysia()
     const updateData: any = {}
     if (b.phone !== undefined) updateData.phone = b.phone
     if (b.email !== undefined) updateData.email = b.email
+    if (b.whatsappOptOut !== undefined) updateData.whatsappOptOut = b.whatsappOptOut
+    if (b.smsOptOut !== undefined) updateData.smsOptOut = b.smsOptOut
+    if (b.emailOptOut !== undefined) updateData.emailOptOut = b.emailOptOut
     if (Object.keys(updateData).length === 0) return { success: true }
     
     await db.update(patients).set(updateData).where(eq(patients.id, params.id))

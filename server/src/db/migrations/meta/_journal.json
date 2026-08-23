@@ -57,6 +57,13 @@
       "when": 1787419433719,
       "tag": "0007_fearless_scrambler",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787489868022,
+      "tag": "0008_loud_virginia_dare",
+      "breakpoints": true
     }
   ]
 }

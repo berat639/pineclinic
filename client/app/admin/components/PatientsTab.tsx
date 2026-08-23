@@ -25,7 +25,7 @@ export default function PatientsTab() {
   const [profileLoading, setProfileLoading] = useState(false)
   
   const [showAddModal, setShowAddModal] = useState(false)
-  const [newPatient, setNewPatient] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '' })
+  const [newPatient, setNewPatient] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -115,7 +115,7 @@ export default function PatientsTab() {
       if (res.ok) {
         alert('Hasta başarıyla eklendi!')
         setShowAddModal(false)
-        setNewPatient({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '' })
+        setNewPatient({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
         loadPatients()
       } else {
         const err = await res.json()
@@ -322,6 +322,22 @@ export default function PatientsTab() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', paddingLeft: 4 }}>Doğum Tarihi (İsteğe Bağlı)</label>
                 <input type="date" value={newPatient.birthDate} onChange={e => setNewPatient({...newPatient, birthDate: e.target.value})} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)' }} />
+              </div>
+              
+              <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>İletişim İzinleri (KVKK)</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!newPatient.smsOptOut} onChange={e => setNewPatient({...newPatient, smsOptOut: !e.target.checked})} />
+                  SMS ile bilgilendirilmek istiyorum
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!newPatient.emailOptOut} onChange={e => setNewPatient({...newPatient, emailOptOut: !e.target.checked})} />
+                  E-posta ile bilgilendirilmek istiyorum
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!newPatient.whatsappOptOut} onChange={e => setNewPatient({...newPatient, whatsappOptOut: !e.target.checked})} />
+                  WhatsApp ile bilgilendirilmek istiyorum
+                </label>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.5rem' }}>

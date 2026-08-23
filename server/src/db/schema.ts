@@ -128,6 +128,8 @@ export const patients = pgTable('patients', {
   birthDate: timestamp('birth_date', { withTimezone: true }),
   balance: integer('balance').notNull().default(0),
   whatsappOptOut: boolean('whatsapp_opt_out').notNull().default(false), // Hasta WA bildirimlerini kapattı mı?
+  smsOptOut: boolean('sms_opt_out').notNull().default(false), // Hasta SMS bildirimlerini kapattı mı?
+  emailOptOut: boolean('email_opt_out').notNull().default(false), // Hasta Email bildirimlerini kapattı mı?
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
