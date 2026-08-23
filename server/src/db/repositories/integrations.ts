@@ -9,18 +9,24 @@ export interface IntegrationsSettings {
   voipLabel?: string | null
   voipBaseUrl?: string | null
   voipTrunkHost?: string | null
-  
+
   // SMTP
   smtpHost?: string | null
   smtpPort?: string | null
   smtpUser?: string | null
   smtpPass?: string | null
   smtpSecure?: string | null
-  
+
   // SMS (NetGSM)
   smsUsercode?: string | null
   smsPassword?: string | null
   smsSenderId?: string | null
+
+  // WhatsApp Business API
+  whatsappPhoneNumberId?: string | null
+  whatsappAccessToken?: string | null
+  whatsappVerifyToken?: string | null
+  whatsappEnabled?: boolean | null
 }
 
 const KEYS = {
@@ -36,7 +42,6 @@ const KEYS = {
 }
 
 export async function getIntegrations(): Promise<IntegrationsSettings> {
-  // Get business settings
   const [
     voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
     smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure
@@ -69,6 +74,11 @@ export async function getIntegrations(): Promise<IntegrationsSettings> {
     smsUsercode: clinic?.netgsmUsercode || null,
     smsPassword: clinic?.netgsmPassword || null,
     smsSenderId: clinic?.smsSenderId || null,
+    // WhatsApp
+    whatsappPhoneNumberId: clinic?.whatsappPhoneNumberId || null,
+    whatsappAccessToken: clinic?.whatsappAccessToken || null,
+    whatsappVerifyToken: clinic?.whatsappVerifyToken || null,
+    whatsappEnabled: clinic?.whatsappEnabled ?? false,
   }
 }
 
@@ -90,18 +100,29 @@ export async function updateIntegrations(patch: IntegrationsSettings): Promise<v
 
   await Promise.all(updates)
 
-  // SMS updates (update the first clinic if exists)
-  if (patch.smsUsercode !== undefined || patch.smsPassword !== undefined || patch.smsSenderId !== undefined) {
+  // SMS + WhatsApp updates (update the first clinic if exists)
+  const hasClinicUpdate = [
+    patch.smsUsercode, patch.smsPassword, patch.smsSenderId,
+    patch.whatsappPhoneNumberId, patch.whatsappAccessToken,
+    patch.whatsappVerifyToken, patch.whatsappEnabled,
+  ].some(v => v !== undefined)
+
+  if (hasClinicUpdate) {
     const clinicList = await db.select().from(clinics).limit(1)
     if (clinicList.length > 0) {
       const clinic = clinicList[0]
       const toUpdate: any = {}
-      
+
       if (patch.smsUsercode !== undefined) toUpdate.netgsmUsercode = patch.smsUsercode
       if (patch.smsPassword !== undefined) toUpdate.netgsmPassword = patch.smsPassword
       if (patch.smsSenderId !== undefined) toUpdate.smsSenderId = patch.smsSenderId
+      // WhatsApp
+      if (patch.whatsappPhoneNumberId !== undefined) toUpdate.whatsappPhoneNumberId = patch.whatsappPhoneNumberId
+      if (patch.whatsappAccessToken !== undefined) toUpdate.whatsappAccessToken = patch.whatsappAccessToken
+      if (patch.whatsappVerifyToken !== undefined) toUpdate.whatsappVerifyToken = patch.whatsappVerifyToken
+      if (patch.whatsappEnabled !== undefined) toUpdate.whatsappEnabled = patch.whatsappEnabled
 
-      await db.update(clinics).set(toUpdate).where(eq(clinics.id, clinic.id))
+      await db.update(clinics).set(toUpdate).where(eq(clinics.id, clinic!.id))
     }
   }
 }

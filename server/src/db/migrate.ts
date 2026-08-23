@@ -761,6 +761,33 @@ async function runMigrations() {
   // ── Drop Deprecated ───────────────────────────────────────────────────────
   await sql`DROP TABLE IF EXISTS doctors CASCADE`.catch(() => {})
 
+  // ── WhatsApp Business API ─────────────────────────────────────────────────
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT`.catch(() => {})
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT`.catch(() => {})
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_verify_token TEXT`.catch(() => {})
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_enabled BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS whatsapp_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+
+  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_name TEXT`.catch(() => {})
+  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status TEXT DEFAULT 'pending'`.catch(() => {})
+  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_id TEXT`.catch(() => {})
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS whatsapp_conversations (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id         UUID NOT NULL REFERENCES clinics(id),
+      patient_phone     TEXT NOT NULL,
+      patient_id        UUID REFERENCES patients(id),
+      history           JSONB NOT NULL DEFAULT '[]',
+      last_message_at   TIMESTAMPTZ DEFAULT now(),
+      window_expires_at TIMESTAMPTZ,
+      created_at        TIMESTAMPTZ DEFAULT now(),
+      updated_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_wa_conv_clinic_phone ON whatsapp_conversations(clinic_id, patient_phone)`.catch(() => {})
+
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }

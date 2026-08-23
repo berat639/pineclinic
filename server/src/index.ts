@@ -262,6 +262,109 @@ const app = new Elysia()
   .use(notificationsPlugin)
   .use(yoneticiPlugin)
 
+  // ── WhatsApp Webhook ───────────────────────────────────────────────────────
+  // GET: Meta webhook verification (hub.challenge)
+  .get('/api/whatsapp/webhook', ({ query, set }: any) => {
+    const mode = query['hub.mode']
+    const token = query['hub.verify_token']
+    const challenge = query['hub.challenge']
+    // We allow per-clinic verify tokens — check all enabled clinics
+    // For simplicity we also accept a global env fallback
+    const globalToken = process.env.WA_VERIFY_TOKEN
+    if (mode === 'subscribe' && (token === globalToken)) {
+      console.log('[WA Webhook] Verification success')
+      set.headers['content-type'] = 'text/plain'
+      return challenge
+    }
+    set.status = 403
+    return 'Forbidden'
+  })
+
+  // POST: Incoming messages from Meta
+  .post('/api/whatsapp/webhook', async ({ body, set }: any) => {
+    try {
+      const payload = body as any
+      if (payload?.object !== 'whatsapp_business_account') {
+        set.status = 400
+        return { error: 'Not a WhatsApp event' }
+      }
+
+      // Acknowledge immediately (Meta requires < 5s response)
+      // Process async
+      ;(async () => {
+        try {
+          const { handleIncomingWhatsAppMessage } = await import('./services/whatsapp-conversation')
+          const { db } = await import('./db/client')
+          const { clinics } = await import('./db/schema')
+          const { eq } = await import('drizzle-orm')
+
+          for (const entry of payload.entry ?? []) {
+            for (const change of entry.changes ?? []) {
+              const val = change.value
+              const phoneNumberId = val?.metadata?.phone_number_id
+
+              if (!phoneNumberId) continue
+
+              // Find which clinic this phone number belongs to
+              const clinicRows = await db.select()
+                .from(clinics)
+                .where(eq(clinics.whatsappPhoneNumberId, phoneNumberId))
+                .limit(1)
+              const clinic = clinicRows[0]
+              if (!clinic?.whatsappEnabled) continue
+
+              // Handle status updates (delivery receipts, errors)
+              for (const status of val.statuses ?? []) {
+                if (status.status === 'failed' && status.errors?.[0]?.code === 131026) {
+                  // Patient blocked/opted out
+                  const { patients } = await import('./db/schema')
+                  const { and } = await import('drizzle-orm')
+                  await db.update(patients)
+                    .set({ whatsappOptOut: true })
+                    .where(and(
+                      eq(patients.clinicId, clinic.id),
+                      eq(patients.phone, status.recipient_id)
+                    ))
+                  console.log(`[WA Webhook] Opt-out via failed delivery: ${status.recipient_id}`)
+                }
+              }
+
+              // Handle incoming messages
+              for (const msg of val.messages ?? []) {
+                const from = msg.from  // Sender phone (E.164 without +)
+                let text = ''
+
+                if (msg.type === 'text') {
+                  text = msg.text?.body ?? ''
+                } else if (msg.type === 'interactive') {
+                  text = msg.interactive?.button_reply?.title
+                    ?? msg.interactive?.list_reply?.title
+                    ?? ''
+                } else {
+                  // Unsupported type (image, document etc.) — acknowledge politely
+                  text = '[medya mesajı]'
+                }
+
+                if (text) {
+                  console.log(`[WA Webhook] Message from +${from}: "${text.slice(0, 80)}"`)
+                  await handleIncomingWhatsAppMessage(clinic.id, `+${from}`, text)
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error('[WA Webhook] Async processing error:', err.message)
+        }
+      })()
+
+      return { status: 'ok' }
+    } catch (err: any) {
+      console.error('[WA Webhook] Parse error:', err.message)
+      set.status = 200  // Always return 200 to Meta
+      return { status: 'ok' }
+    }
+  })
+
   // ── Users API (admin) ──────────────────────────────────────────────────────
   .get('/api/admin/users', async () => {
     const { listUsers } = await import('./db/repositories/users')
