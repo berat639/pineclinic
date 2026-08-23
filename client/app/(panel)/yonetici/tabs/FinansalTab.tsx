@@ -55,7 +55,7 @@ export default function FinansalTab() {
             ))}
           </div>
         </div>
-        <div style={{ height: 280, background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+        <div style={{ height: 280, background: 'var(--glass-bg)', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
           {chartData.length === 0 ? (
             <div style={{ color: 'var(--foreground-3)', fontSize: '0.75rem' }}>Henüz gelir/gider verisi yok</div>
           ) : (

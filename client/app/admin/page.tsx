@@ -367,7 +367,7 @@ export default function AdminPage() {
   // Appointments
   const [appointments, setAppointments] = useState<Appointment[]>([])
 
-  // Calendar (Ayarlar tab)
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
   const [calStatus, setCalStatus] = useState<CalendarStatus | null>(null)
   const [calendars, setCalendars] = useState<CalendarItem[]>([])
   const [selectedCalId, setSelectedCalId] = useState('')
@@ -792,7 +792,53 @@ export default function AdminPage() {
               </div>
 
               {/* Konuşma Akışı */}
-              <FlowBuilder />
+              <div className="glass-card" style={{ padding: 24, gridColumn: '1 / -1' }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 18, paddingBottom: 14,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)' }}>
+                    Akış Tasarımcısı (Flow Builder)
+                  </span>
+                  <div style={{ display: 'flex', gap: 4, background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 8 }}>
+                    <button
+                      onClick={() => setFlowDirection('inbound')}
+                      style={{
+                        padding: '6px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer', border: 'none',
+                        background: flowDirection === 'inbound' ? 'rgba(96,165,250,0.2)' : 'transparent',
+                        color: flowDirection === 'inbound' ? '#60a5fa' : 'var(--foreground-3)'
+                      }}
+                    >
+                      Gelen Arama
+                    </button>
+                    <button
+                      onClick={() => setFlowDirection('outbound')}
+                      style={{
+                        padding: '6px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer', border: 'none',
+                        background: flowDirection === 'outbound' ? 'rgba(236,72,153,0.2)' : 'transparent',
+                        color: flowDirection === 'outbound' ? '#ec4899' : 'var(--foreground-3)'
+                      }}
+                    >
+                      Giden Arama
+                    </button>
+                    <button
+                      onClick={() => setFlowDirection('whatsapp')}
+                      style={{
+                        padding: '6px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer', border: 'none',
+                        background: flowDirection === 'whatsapp' ? 'rgba(34,197,94,0.2)' : 'transparent',
+                        color: flowDirection === 'whatsapp' ? '#22c55e' : 'var(--foreground-3)'
+                      }}
+                    >
+                      WhatsApp
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: 2 }}>
+                  <FlowBuilder key={flowDirection} direction={flowDirection} />
+                </div>
+              </div>
 
               </div>{/* alt grid sonu */}
 

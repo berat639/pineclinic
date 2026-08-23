@@ -400,7 +400,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       if (!confirm('Bazı dişlere sadece endikasyon atanmış (işlem adı yok). Yine de devam etmek istiyor musunuz?')) return;
     }
 
-    const isPhoneMissing = notifyPatient && (notificationType === 'sms' || notificationType === 'both') && !patientInfo?.phone
+    const isPhoneMissing = notifyPatient && (notificationType === 'sms' || notificationType === 'whatsapp' || notificationType === 'both') && !patientInfo?.phone
     const isEmailMissing = notifyPatient && (notificationType === 'email' || notificationType === 'both') && !patientInfo?.email
 
     if (isPhoneMissing && !missingPhone.trim()) {
@@ -1249,9 +1249,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <select value={notificationType} onChange={e => setNotificationType(e.target.value)} style={{ ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '6px' }}>
                         <option value="sms">Sadece SMS</option>
                         <option value="email">Sadece E-posta</option>
-                        <option value="both">İkisi de</option>
+                        <option value="whatsapp">Sadece WhatsApp</option>
+                        <option value="both">Tümü (SMS, E-posta, WhatsApp)</option>
                       </select>
-                      {(!patientInfo?.phone && (notificationType === 'sms' || notificationType === 'both')) && (
+                      {(!patientInfo?.phone && (notificationType === 'sms' || notificationType === 'whatsapp' || notificationType === 'both')) && (
                         <div style={{ marginTop: 8 }}>
                           <label style={{ display: 'block', fontSize: '0.75rem', color: '#ef4444', marginBottom: 4 }}>⚠️ Hastanın telefonu eksik, lütfen girin:</label>
                           <input type="tel" value={missingPhone} onChange={e => setMissingPhone(e.target.value)} placeholder="0555..." style={{ ...inputStyle, width: '100%', borderColor: '#ef4444' }} />

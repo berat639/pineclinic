@@ -56,9 +56,9 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
     <div
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top: y, left: x, zIndex: 9999,
-        background: 'var(--background-2)', border: '1px solid var(--glass-border)',
-        borderRadius: 8, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+        position: 'fixed', top: y, left: x, zIndex: 99999,
+        background: 'var(--card-bg)', border: '1px solid var(--glass-border)',
+        borderRadius: 8, padding: 12, boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
         width: 220,
       }}
       
@@ -88,11 +88,12 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
             style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '8px 12px', borderRadius: 6, border: '1px solid var(--glass-border)',
-              background: 'rgba(255,255,255,0.03)', color: 'var(--foreground)',
-              fontSize: 11, cursor: 'pointer', textAlign: 'left'
+              background: 'var(--input-bg)', color: 'var(--foreground)',
+              fontSize: 11, cursor: 'pointer', textAlign: 'left',
+              transition: 'all 0.15s ease'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-bg)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--glass-bg-hover)'; e.currentTarget.style.borderColor = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--input-bg)'; e.currentTarget.style.borderColor = 'var(--glass-border)' }}
           >
             <span style={{ fontWeight: 600 }}>{t.name}</span>
             <span style={{ color: 'var(--foreground-3)' }}>{formatTime(t.start)}-{formatTime(t.end)}</span>

@@ -1107,9 +1107,9 @@ export default function CalendarTab() {
         <div
           className="context-menu-container"
           style={{
-            position: 'fixed', top: eventContextMenu.y, left: eventContextMenu.x, zIndex: 9999,
-            background: 'var(--background-2)', border: '1px solid var(--glass-border)',
-            borderRadius: 8, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', width: 220
+            position: 'fixed', top: eventContextMenu.y, left: eventContextMenu.x, zIndex: 99999,
+            background: 'var(--card-bg)', border: '1px solid var(--glass-border)',
+            borderRadius: 8, padding: 12, boxShadow: '0 10px 40px rgba(0,0,0,0.5)', width: 220
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12 }}>Randevu Ata</div>

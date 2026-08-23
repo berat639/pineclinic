@@ -153,7 +153,7 @@ const nodeTypes: NodeTypes = {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'inbound' | 'outbound' }) {
+export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'inbound' | 'outbound' | 'whatsapp' }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any)
   const [saving, setSaving] = useState(false)
@@ -245,6 +245,37 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
       setNodes(surveyNodes);
       setEdges(surveyEdges);
+      return;
+    }
+
+    if (direction === 'whatsapp') {
+      if(!window.confirm("Örnek WhatsApp asistan akışını yüklemek mevcut akışınızı silecektir. Onaylıyor musunuz?")) return;
+      
+      const waNodes: Node[] = [
+        { id: 'start', type: 'startNode', position: { x: 250, y: 0 }, data: { label: 'Mesaj Geldi' } },
+        { id: 'cond_kayitli', type: 'conditionNode', position: { x: 250, y: 120 }, data: { conditionField: 'is_registered', operator: 'equals', conditionValue: 'true', label: 'Kayıtlı mı?' } },
+        
+        // Hayır
+        { id: 'field_adsoyad', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'hastaAdiSoyadi', fieldType: 'text', description: 'Merhabalar, size nasıl hitap edebilirim?', required: true } },
+        
+        // Evet
+        { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'hastaSikayeti', fieldType: 'text', description: 'Size nasıl yardımcı olabilirim?', required: false } },
+        
+        { id: 'action_randevu', type: 'actionNode', position: { x: 250, y: 400 }, data: { action: 'save_appointment_pending', label: 'Randevu Talebi Oluştur' } },
+        { id: 'end', type: 'endNode', position: { x: 250, y: 550 }, data: { label: 'Bitti' } }
+      ];
+
+      const waEdges: Edge[] = [
+        { id: 'e_s_c', source: 'start', target: 'cond_kayitli', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_adsoyad', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_ad_act', source: 'field_adsoyad', target: 'action_randevu', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_sik_act', source: 'field_sikayet', target: 'action_randevu', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_act_end', source: 'action_randevu', target: 'end', markerEnd: { type: MarkerType.ArrowClosed } }
+      ];
+
+      setNodes(waNodes);
+      setEdges(waEdges);
       return;
     }
 
@@ -566,7 +597,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
           {selectedNode?.type === 'actionNode' && (() => {
             const d = selectedNode.data as ActionData;
-            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'save_record', 'transfer', 'randevuOlustur'];
+            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'send_wa_template', 'save_record', 'transfer', 'randevuOlustur'];
             const isCustomAction = d.action && !validActions.includes(d.action);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -578,8 +609,15 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                     <option value="save_appointment_pending">📝 Randevu Talebi Oluştur (Onay Bekler)</option>
                     <option value="save_patient_note">🗒️ Hastadan Not Al (Bankoya İlet)</option>
                     <option value="webhook">🔗 Dış Sisteme Gönder (Webhook API)</option>
-                    <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
-                    <option value="transfer_call">📞 Aramayı Aktar (Akıllı Beklemeli)</option>
+                    
+                    {direction === 'whatsapp' ? (
+                      <option value="send_wa_template">📱 WhatsApp Şablon Mesajı Gönder (24h kuralı)</option>
+                    ) : (
+                      <>
+                        <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
+                        <option value="transfer_call">📞 Aramayı Aktar (Akıllı Beklemeli)</option>
+                      </>
+                    )}
                     
                     {/* Old deprecated actions shown only if they are currently selected */}
                     {d.action === 'save_record' && <option value="save_record">⚠️ Eski: Veritabanına Kaydet</option>}
@@ -598,6 +636,16 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   <div>
                     <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Webhook URL (POST)</label>
                     <input value={d.webhookUrl || ''} onChange={e => updateSelectedNode({ webhookUrl: e.target.value })} placeholder="https://api.make.com/... veya Zapier" style={inputStyle} />
+                  </div>
+                )}
+
+                {d.action === 'send_wa_template' && (
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Gönderilecek WhatsApp Şablon Adı</label>
+                    <input value={(d.waTemplateName as string) || ''} onChange={e => updateSelectedNode({ waTemplateName: e.target.value })} placeholder="örn: randevu_onay_01" style={inputStyle} />
+                    <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
+                      24 saat kuralı gereği kullanıcı ile yeni bir konuşma başlatmak için Meta onaylı bir şablon kullanmalısınız.
+                    </div>
                   </div>
                 )}
 

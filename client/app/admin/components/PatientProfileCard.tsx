@@ -14,7 +14,7 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
   const { patient, appointments, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
 
   const cardStyle = {
-    background: '#ffffff',
+    background: 'var(--glass-bg)',
     border: '1px solid var(--glass-border)',
     borderRadius: 8,
     padding: 12,
