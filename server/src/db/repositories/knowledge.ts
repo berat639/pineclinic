@@ -167,25 +167,27 @@ export async function deleteDoc(id: string): Promise<boolean> {
 }
 
 export async function toggleDoc(id: string): Promise<KnowledgeDoc | null> {
-  const result = await db.execute(drizzleSql`
-    UPDATE knowledge_documents
-    SET active = NOT active, updated_at = now()
-    WHERE id = ${id}
-    RETURNING id, category, title, content, active, embedded_at, created_at, updated_at
-  `)
-  const row = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
-    ?? (result as unknown as Array<Record<string, unknown>>))[0]
-  if (!row) return null
+  const [existing] = await db.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(eq(knowledgeDocuments.id, id));
+  if (!existing) return null;
+
+  const [doc] = await db
+    .update(knowledgeDocuments)
+    .set({ active: !existing.active, updatedAt: new Date() })
+    .where(eq(knowledgeDocuments.id, id))
+    .returning();
+
+  if (!doc) return null;
   return {
-    id: row.id as string,
-    category: (row.category as KnowledgeCategory) ?? 'genel',
-    title: row.title as string,
-    content: row.content as string,
-    active: row.active as boolean,
-    embeddedAt: row.embedded_at ? new Date(row.embedded_at as string).toISOString() : '',
-    createdAt: new Date(row.created_at as string).toISOString(),
-    updatedAt: new Date(row.updated_at as string).toISOString(),
-  }
+    id: doc.id,
+    category: doc.category as KnowledgeCategory,
+    title: doc.title,
+    content: doc.content,
+    callDirection: doc.callDirection as any,
+    active: doc.active,
+    embeddedAt: toIso(doc.embeddedAt),
+    createdAt: toIso(doc.createdAt),
+    updatedAt: toIso(doc.updatedAt),
+  };
 }
 
 export async function updateDocEmbedding(id: string, embedding: number[]): Promise<boolean> {
