@@ -1013,7 +1013,7 @@ const app = new Elysia()
       }
 
       const doc = await createDoc(
-        { category, title, content, active: true },
+        { category, title, content, callDirection: 'both', active: true },
         embedding,
       )
       return { success: true, id: doc.id, name: doc.title, category: doc.category, message: 'Belge indekslendi' }
