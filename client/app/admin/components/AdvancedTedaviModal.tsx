@@ -107,7 +107,6 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const range = allTeeth.slice(minIdx, maxIdx + 1)
 
         setSelectedTeeth(prev => {
-          // If anchor is selected, ADD the range. If anchor is unselected, REMOVE the range.
           const isAdding = prev.includes(lastSelectedTooth);
           if (isAdding) {
             return Array.from(new Set([...prev, ...range]));
@@ -116,13 +115,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           }
         })
       }
-    } else if (e.ctrlKey || e.metaKey) {
-      setSelectedTeeth(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
     } else {
-      setSelectedTeeth(prev => prev.includes(n) && prev.length === 1 ? [] : [n]);
+      // Normal click: Toggle the tooth without clearing others (user friendly for touch/mouse)
+      setSelectedTeeth(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n]);
     }
 
-    // Do not move the anchor when shift-clicking, allowing consecutive shift-clicks from the same anchor.
     if (!e.shiftKey) {
       setLastSelectedTooth(n)
     }
@@ -138,9 +135,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       procedures.forEach(p => {
         rowsHtml += `
           <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: 600;">Diş ${tooth}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${p.name} ${p.indications.length > 0 ? `<br><small style="color: #666;">(${p.indications.join(', ')})</small>` : ''}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right;">${p.price} ₺</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; font-weight: 600; font-size: 12px;">Diş ${tooth}</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; font-size: 12px;">${p.name} ${p.indications.length > 0 ? `<br><small style="color: #666;">(${p.indications.join(', ')})</small>` : ''}</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; text-align: right; font-size: 12px;">${p.price} ₺</td>
           </tr>
         `;
       });
@@ -159,29 +156,29 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         <title>Tedavi Planı Özeti</title>
         <style>
           @media print {
-            @page { margin: 1.5cm; size: A4 portrait; }
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0; }
+            @page { margin: 1cm; size: A4 portrait; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0; font-size: 12px; }
             tr, .summary-container { page-break-inside: avoid; break-inside: avoid; }
           }
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #111; max-width: 800px; margin: 0 auto; line-height: 1.5; }
-          .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px; }
-          h1 { color: #1e3a8a; margin: 0; font-size: 26px; text-transform: uppercase; letter-spacing: 1px; }
-          .date { color: #64748b; font-size: 14px; margin-top: 10px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 40px; font-size: 14px; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; color: #111; max-width: 800px; margin: 0 auto; line-height: 1.3; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+          h1 { color: #1e3a8a; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 1px; }
+          .date { color: #64748b; font-size: 12px; margin-top: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
           tr { page-break-inside: avoid; break-inside: avoid; }
-          th { background-color: #f1f5f9; padding: 12px 10px; text-align: left; border-bottom: 2px solid #cbd5e1; color: #334155; font-weight: 700; }
+          th { background-color: #f1f5f9; padding: 6px 8px; text-align: left; border-bottom: 2px solid #cbd5e1; color: #334155; font-weight: 700; font-size: 12px; }
           .summary-container { display: flex; justify-content: flex-end; page-break-inside: avoid; break-inside: avoid; }
-          .summary-table { width: 350px; border-collapse: collapse; background-color: #f8fafc; border-radius: 8px; overflow: hidden; }
-          .summary-table td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
+          .summary-table { width: 300px; border-collapse: collapse; background-color: #f8fafc; border-radius: 8px; overflow: hidden; }
+          .summary-table td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
           .summary-table .label { color: #475569; font-weight: 500; }
           .summary-table .value { text-align: right; font-weight: 600; color: #0f172a; }
           .summary-table .discount-row td { color: #ef4444; }
           .summary-table .discount-row .value { color: #ef4444; }
           .summary-table .total-row { background-color: #3b82f6; color: white; }
           .summary-table .total-row td { border-bottom: none; }
-          .summary-table .total-row .label { color: white; font-weight: 600; font-size: 16px; }
-          .summary-table .total-row .value { color: white; font-weight: 700; font-size: 18px; }
-          .footer { margin-top: 60px; font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+          .summary-table .total-row .label { color: white; font-weight: 600; font-size: 14px; }
+          .summary-table .total-row .value { color: white; font-weight: 700; font-size: 15px; }
+          .footer { margin-top: 30px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; }
         </style>
       </head>
       <body>
@@ -263,7 +260,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       recognition.lang = 'tr-TR';
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
-      recognition.continuous = false; // Only one command at a time
+      recognition.continuous = true; // Keep listening until stopped manually
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -580,8 +577,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 border: '1px solid #3b82f6',
                 boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
                 position: 'absolute',
-                top: 40,
-                left: '200px',
+                top: 'calc(100% + 8px)',
+                left: 0,
                 zIndex: 4000,
                 display: 'flex',
                 flexDirection: 'column',

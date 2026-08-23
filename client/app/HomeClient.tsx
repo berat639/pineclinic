@@ -48,13 +48,8 @@ export default function Home() {
   const textBufferRef = useRef('')
   const isActive = status !== 'idle' && status !== 'error'
 
-  // Fetch API key and dynamic session config on mount
+  // Fetch config on mount (safe, just static DB info)
   useEffect(() => {
-    fetch('/api/direct-session')
-      .then(r => r.json())
-      .then((d: { apiKey?: string }) => { if (d.apiKey) setApiKey(d.apiKey) })
-      .catch(() => {})
-
     fetch('/api/direct-session-config')
       .then(r => r.json())
       .then((config: SessionConfig) => {
@@ -71,15 +66,33 @@ export default function Home() {
   }, [])
 
   const start = useCallback(async () => {
-    if (!apiKey || !sessionConfig) {
+    setStatus('connecting')
+    setErrorMsg('')
+    setTranscript([])
+
+    let currentApiKey = apiKey
+    if (!currentApiKey) {
+      try {
+        const r = await fetch('/api/direct-session')
+        const d = await r.json()
+        if (d.apiKey) {
+          currentApiKey = d.apiKey
+          setApiKey(d.apiKey)
+        } else {
+          throw new Error('API Key alınamadı')
+        }
+      } catch (err) {
+        setStatus('error')
+        setErrorMsg('Bağlantı kurulamadı (API Key hatası).')
+        return
+      }
+    }
+
+    if (!currentApiKey || !sessionConfig) {
       setStatus('error')
       setErrorMsg('API key veya oturum ayarları bulunamadı. Server ayarlarını kontrol edin.')
       return
     }
-
-    setStatus('connecting')
-    setErrorMsg('')
-    setTranscript([])
 
     try {
       // iOS AudioContext unlock
@@ -480,9 +493,9 @@ export default function Home() {
                 <span style={{
                   display: 'inline-block',
                   background: entry.role === 'model'
-                    ? 'rgba(30,41,59,0.8)'
-                    : 'rgba(0,44,95,0.5)',
-                  color: entry.role === 'model' ? '#a78bfa' : '#60a5fa',
+                    ? 'rgba(30,41,59,0.95)'
+                    : 'rgba(59,130,246,0.9)',
+                  color: '#f8fafc',
                   padding: '0.45rem 0.85rem',
                   borderRadius: entry.role === 'model' ? '4px 14px 14px 14px' : '14px 4px 14px 14px',
                   maxWidth: '88%',
