@@ -154,7 +154,7 @@ export default function Home() {
     sessionRef.current = session
 
     try {
-      await session.connect(apiKey, sessionConfig, mode)
+      await session.connect(currentApiKey, sessionConfig, mode)
 
       // Wait briefly to confirm session is stable (AI may close immediately on errors)
       await new Promise<void>((resolve, reject) => {
