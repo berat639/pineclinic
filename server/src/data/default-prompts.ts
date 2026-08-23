@@ -118,8 +118,8 @@ Hasta fiyat sorarsa: "Tedavi ücretleri hekimimizin detaylı muayenesi ve röntg
   },
   {
     key: 'prompt.sales_flow',
-    label: 'Satış & Galeri Akışı',
-    description: 'Test sürüşü ve galeri ziyareti randevu akışı.',
+    label: 'Bilgi Sorgulama Akışı',
+    description: 'Bilgi tabanından bilgi sorgulama kuralları.',
     sortOrder: 9,
     defaultValue: `BİLGİ SORGULAMA:
 Müşteri bir konuda soru sorduğunda searchKnowledgeBase aracını kullanarak bilgi tabanından yanıt bul.
@@ -128,7 +128,7 @@ Bilgi tabanında bulunan bilgiyi müşteriye aktar; bulunamayan konularda tahmin
   {
     key: 'prompt.availability_rules',
     label: 'Müsaitlik Kontrolü',
-    description: 'Test sürüşü/galeri tarih kontrolü ve servis müsaitlik kuralları.',
+    description: 'Randevu tarih kontrolü ve müsaitlik kuralları.',
     sortOrder: 10,
     defaultValue: `MÜSAİTLİK KONTROLÜ:
 Randevu oluşturmadan önce randevuMusaitlikKontrol aracı ile tarihin uygunluğunu kontrol et.`,

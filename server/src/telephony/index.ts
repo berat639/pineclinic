@@ -14,7 +14,7 @@ import { StartSensitivity, EndSensitivity, ActivityHandling } from '@google/gena
 import type { GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
-import { buildRagPrompt, embedText, PRE_WARM_QUERY } from '../rag'
+import { buildRagPrompt, getPreWarmEmbedding, embedText, PRE_WARM_QUERY } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
@@ -203,11 +203,12 @@ interface CallState {
   callerChannel?: string
   callerDirection?: string
   audioQueue: Buffer[]
-  noiseGate: NoiseGate
+  noiseGate: NeuralVAD
   // Zaman aşımı timer'ları
   silenceTimer?: ReturnType<typeof setTimeout>
   closeTimer?: ReturnType<typeof setTimeout>
   maxCallTimer?: ReturnType<typeof setTimeout>
+  aiHasSpoken?: boolean
 }
 
 /** Timer'ları temizle. */
@@ -260,7 +261,10 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
   }, SILENCE_WARN_MS)
 }
 
+import { NeuralVAD, initNeuralVAD } from './neural-vad'
+
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
+  await initNeuralVAD()
   const { ai, port, buildSystemPrompt, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
 
   const gateCfg = readGateConfig()
@@ -297,12 +301,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           closed: false,
           hangupPending: false,
           audioQueue: [],
-          noiseGate: new NoiseGate(
-            gateCfg.threshold,
-            gateCfg.trailingFrames,
-            gateCfg.preRollFrames,
-            shortId,
-          ),
+          noiseGate: new NeuralVAD(gateCfg.threshold, shortId),
         }
         socket.data = state
 
@@ -363,7 +362,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           const [ragContext, systemPromptBase, model] = await Promise.all([
             (async () => {
               try {
-                const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+                const preWarmEmbedding = await getPreWarmEmbedding()
                 // Yön bazlı bilgi bankası araması için ekstra argüman (direction)
                 const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
                 if (topDocs.length > 0) {
@@ -396,6 +395,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
               onAudio: (pcm) => {
                 if (state.closed) return
+                state.aiHasSpoken = true // <--- AI konuştuğunda mikrofonu aç
                 // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
                 const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
                 state.downsampleState = nextState
@@ -410,6 +410,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const trimmed = text.trim()
                 if (!trimmed) return
                 const label = role === 'user' ? 'USER' : 'AI'
+                if (role === 'model') state.aiHasSpoken = true
                 console.log(`[${shortId}] ${label}: ${trimmed}`)
               },
               onInterrupted: () => {
@@ -486,7 +487,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           const initParts: string[] = [
             direction === 'outbound'
               ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-              : 'Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)',
+              : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`,
           ]
 
           // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
@@ -496,8 +497,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               const customerCtx = await getCustomerByPhone(state.callerPhone)
               if (customerCtx) {
                 const TYPE_LABELS: Record<string, string> = {
-                  service: 'Servis', test_drive: 'Test Sürüşü',
-                  gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+                  service: 'Tedavi', test_drive: 'Muayene',
+                  gallery_visit: 'Kontrol', other: 'Randevu',
                 }
                 const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
                 const past = customerCtx.appointmentHistory.filter(a => a.isPast)
@@ -574,26 +575,40 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
-            if (!info.session) continue
-            const gatedFrames = state.noiseGate.process(ev.pcm)
+            // AI henüz ilk cümlesini bitirip/başlayıp mikrofonu açana kadar
+            // gelen arkaplan gürültülerini Gemini'ye gönderme, yoksa Gemini 
+            // hastanın konuştuğunu sanıp sessizce bekler.
+            if (!info.session || !state.aiHasSpoken) continue
+            
             // Sessizlik timer'ını sıfırla: gate aktifse isOpen kullan,
             // gate devre dışıysa (threshold=0) frame RMS eşiğine bak.
             const rmsForSilence = computeRmsInt16(ev.pcm)
-            const isSpeech = state.noiseGate.threshold > 0
-              ? state.noiseGate.isOpen
-              : rmsForSilence >= SPEECH_RMS_THRESHOLD
-            if (isSpeech) {
-              clearSilenceTimers(state)
+            
+            // Process returns Buffer[], but we need to await it. Wait! data() is synchronous!
+            // Let's run it async inside an IIFE, but we must ensure order.
+            // Since Asterisk sends packets over TCP, processing them asynchronously might scramble order if we don't queue.
+            // Actually, Node's event loop will process them mostly in order, but to be safe, we can just await in the data handler?
+            // "data" hook in Bun TCP socket can be async!
+            const processAudio = async () => {
+              const gatedFrames = await state.noiseGate.process(ev.pcm)
+              const isSpeech = state.noiseGate.threshold > 0
+                ? state.noiseGate.isOpen
+                : rmsForSilence >= SPEECH_RMS_THRESHOLD
+              
+              if (isSpeech) {
+                clearSilenceTimers(state)
+              }
+              for (const f8k of gatedFrames) {
+                const pcm16 = upsample8to16(f8k)
+                info.session.sendRealtimeInput({
+                  audio: {
+                    data: pcm16.toString('base64'),
+                    mimeType: 'audio/pcm;rate=16000',
+                  },
+                })
+              }
             }
-            for (const f8k of gatedFrames) {
-              const pcm16 = upsample8to16(f8k)
-              info.session.sendRealtimeInput({
-                audio: {
-                  data: pcm16.toString('base64'),
-                  mimeType: 'audio/pcm;rate=16000',
-                },
-              })
-            }
+            processAudio().catch(e => console.error("NeuralVAD error:", e))
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch {}

@@ -46,6 +46,15 @@ export async function embedText(text: string): Promise<number[]> {
   return values
 }
 
+let cachedPreWarmEmbedding: number[] | null = null
+
+export async function getPreWarmEmbedding(): Promise<number[]> {
+  if (cachedPreWarmEmbedding) return cachedPreWarmEmbedding
+  console.log('Caching PRE_WARM_QUERY embedding...')
+  cachedPreWarmEmbedding = await embedText(PRE_WARM_QUERY)
+  return cachedPreWarmEmbedding
+}
+
 // ── Retrieval ─────────────────────────────────────────────────────────────────
 
 export type { RankedDoc } from './db/repositories/knowledge'
@@ -106,4 +115,4 @@ ${sections.join('\n\n')}
 // ── Pre-warm query ────────────────────────────────────────────────────────────
 
 export const PRE_WARM_QUERY =
-  'Skoda otomotiv servis bakım araç satış test sürüşü randevu galeri kampanya'
+  'Diş kliniği randevu muayene tedavi dolgu implant kanal tedavisi kampanya'

@@ -486,7 +486,7 @@ export async function createLiveSession(
           return { sonuc: 'Bu numara için geçmiş randevu bulunamadı.' }
         }
         const TYPE_LABELS: Record<string, string> = {
-          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+          service: 'Tedavi', test_drive: 'Muayene', gallery_visit: 'Kontrol', other: 'Randevu',
         }
         const formatted = pastAppointments
           .map((r, i) => {
@@ -529,7 +529,7 @@ export async function createLiveSession(
           return { sonuc: `${tarih || `${from} - ${to}`} tarihinde henüz randevu yok — müsait.` }
         }
         const TYPE_LABELS: Record<string, string> = {
-          service: 'Servis', test_drive: 'Test Sürüşü', gallery_visit: 'Galeri Ziyareti', other: 'Randevu',
+          service: 'Tedavi', test_drive: 'Muayene', gallery_visit: 'Kontrol', other: 'Randevu',
         }
         const summary = result
           .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.issueOrRequest || TYPE_LABELS[a.type] || 'Randevu'}`)

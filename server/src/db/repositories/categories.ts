@@ -15,12 +15,12 @@ export interface CategoryRow {
 /** Default categories seeded on first run */
 export const DEFAULT_CATEGORIES: Omit<CategoryRow, 'id' | 'createdAt'>[] = [
   { slug: 'genel', label: 'Genel', icon: '🌐', color: '#60a5fa', sortOrder: 0 },
-  { slug: 'servis', label: 'Servis', icon: '🔧', color: '#34d399', sortOrder: 1 },
-  { slug: 'galeri', label: 'Galeri', icon: '🏪', color: '#a78bfa', sortOrder: 2 },
+  { slug: 'tedavi', label: 'Tedavi', icon: '🦷', color: '#34d399', sortOrder: 1 },
+  { slug: 'estetik', label: 'Estetik', icon: '✨', color: '#a78bfa', sortOrder: 2 },
   { slug: 'kampanya', label: 'Kampanya', icon: '🎯', color: '#fb923c', sortOrder: 3 },
   { slug: 'sss', label: 'SSS', icon: '❓', color: '#f59e0b', sortOrder: 4 },
-  { slug: 'arac', label: 'Araç', icon: '🚗', color: '#38bdf8', sortOrder: 5 },
-  { slug: 'musteri', label: 'Müşteri', icon: '👤', color: '#f472b6', sortOrder: 6 },
+  { slug: 'hizmet', label: 'Hizmet', icon: '⚕️', color: '#38bdf8', sortOrder: 5 },
+  { slug: 'musteri', label: 'Hasta', icon: '👤', color: '#f472b6', sortOrder: 6 },
 ]
 
 function toRow(r: typeof knowledgeCategories.$inferSelect): CategoryRow {

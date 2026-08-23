@@ -962,7 +962,7 @@ const app = new Elysia()
 
   /** FormData: name?, category?, file? | text? — admin panel quick upload */
   .post('/api/admin/knowledge/upload', async ({ request, set }) => {
-    const ALLOWED_CATEGORIES = ['genel', 'servis', 'galeri', 'kampanya', 'sss', 'arac'] as const
+    const ALLOWED_CATEGORIES = ['genel', 'tedavi', 'estetik', 'kampanya', 'sss', 'hizmet'] as const
     type Category = typeof ALLOWED_CATEGORIES[number]
 
     let content: string
