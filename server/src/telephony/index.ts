@@ -69,8 +69,8 @@ class NoiseGate {
   /** Son process() çağrısında gate açık mıydı (konuşma algılandı mı). */
   get isOpen(): boolean { return this.wasOpen }
 
-  /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; Gemini'ye gidecek frame'leri döndür. */
-  process(frame: Buffer): Buffer[] {
+  /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; konuşma varsa frame'leri ve kapanış bilgisini döndür. */
+  process(frame: Buffer): { frames: Buffer[]; justClosed: boolean } {
     this.totalFrames++
     const rms = computeRmsInt16(frame)
     this.rmsSum += rms
@@ -82,9 +82,8 @@ class NoiseGate {
     this.maybeLog()
 
     if (this.threshold === 0) {
-      // Gate devre dışı — her frame konuşma sayılır.
       this.wasOpen = true
-      return [frame]
+      return { frames: [frame], justClosed: false }
     }
 
     if (isHigh) {
@@ -93,10 +92,10 @@ class NoiseGate {
         const flushed = this.preRoll
         this.preRoll = []
         this.wasOpen = true
-        return [...flushed, frame]
+        return { frames: [...flushed, frame], justClosed: false }
       }
       this.wasOpen = true
-      return [frame]
+      return { frames: [frame], justClosed: false }
     }
 
     if (this.trailingFrames > 0) {
@@ -104,15 +103,15 @@ class NoiseGate {
       if (this.trailingFrames === 0) {
         this.pushPreRoll(frame)
         this.wasOpen = false
-      } else {
-        this.wasOpen = true
+        return { frames: [frame], justClosed: true } // Konuşma bitti (trailing sonu)
       }
-      return [frame]
+      this.wasOpen = true
+      return { frames: [frame], justClosed: false }
     }
 
     this.pushPreRoll(frame)
     this.wasOpen = false
-    return [Buffer.alloc(frame.length, 0)]
+    return { frames: [], justClosed: false }
   }
 
   private pushPreRoll(frame: Buffer): void {
@@ -575,27 +574,32 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             // Mikrofon henüz açılmadıysa (greeting öncesi hat gürültüsü) sesi gönderme
             if (!info.session || !state.micEnabled) continue
 
-            // NoiseGate: Hat dip gürültüsünü filtreler.
-            // Konuşma algılandığında pre-roll ile canlı sesi açar, sessizlikte kapatır.
-            const gatedFrames = state.noiseGate.process(ev.pcm)
-            if (state.noiseGate.isOpen) {
+            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
+
+            if (frames.length > 0) {
               clearSilenceTimers(state)
+              for (const f8k of frames) {
+                state.micBuffer.push(upsample8to16(f8k))
+              }
             }
 
-            for (const f8k of gatedFrames) {
-              state.micBuffer.push(upsample8to16(f8k))
-            }
-
-            // 5 frame (100ms) biriktirip tek seferde gönder — düşük gecikme + kararlı akış
-            if (state.micBuffer.length >= 5) {
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
-                media: {
+                audio: {
                   mimeType: 'audio/pcm;rate=16000',
                   data: combined.toString('base64'),
                 },
-              } as any)
+              })
+            }
+
+            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
+            if (justClosed) {
+              info.session.sendRealtimeInput({
+                audioStreamEnd: true,
+              })
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
