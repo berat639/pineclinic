@@ -138,7 +138,7 @@ class NoiseGate {
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
   // Default threshold: 180 (telefon hattı dip gürültüsünü filtreler, konuşmada hemen açılır)
   const threshold = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_RMS || '180', 10) || 180)
-  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '400', 10) || 400)
+  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '250', 10) || 250)
   const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
   return {
     threshold,
@@ -583,8 +583,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
-            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
+            // 2 frame (40ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (gecikmeyi azaltmak için)
+            if (state.micBuffer.length >= 2 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
