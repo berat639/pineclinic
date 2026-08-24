@@ -209,6 +209,8 @@ interface CallState {
   closeTimer?: ReturnType<typeof setTimeout>
   maxCallTimer?: ReturnType<typeof setTimeout>
   aiHasSpoken?: boolean
+  userSpeechStartTime?: number
+  userSpeechEndTime?: number
 }
 
 /** Timer'ları temizle. */
@@ -395,7 +397,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
               onAudio: (pcm) => {
                 if (state.closed) return
-                state.aiHasSpoken = true // <--- AI konuştuğunda mikrofonu aç
+                if (!state.aiHasSpoken) {
+                  state.aiHasSpoken = true
+                  if (state.userSpeechEndTime) {
+                    const responseTime = Date.now() - state.userSpeechEndTime
+                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
+                    state.userSpeechEndTime = undefined
+                  }
+                }
                 // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
                 const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
                 state.downsampleState = nextState
@@ -410,7 +419,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const trimmed = text.trim()
                 if (!trimmed) return
                 const label = role === 'user' ? 'USER' : 'AI'
-                if (role === 'model') state.aiHasSpoken = true
+                if (role === 'model') {
+                  state.aiHasSpoken = true
+                  if (state.userSpeechEndTime) {
+                    const responseTime = Date.now() - state.userSpeechEndTime
+                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
+                    state.userSpeechEndTime = undefined
+                  }
+                }
                 console.log(`[${shortId}] ${label}: ${trimmed}`)
               },
               onInterrupted: () => {
@@ -598,13 +614,27 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               
               if (isSpeech) {
                 clearSilenceTimers(state)
+                if (!state.userSpeechStartTime) {
+                  state.userSpeechStartTime = Date.now()
+                  console.log(`[${state.shortId}] (VAD) Müşteri konuşmaya başladı...`)
+                }
+                state.userSpeechEndTime = undefined
+              } else {
+                if (state.userSpeechStartTime) {
+                  const duration = Date.now() - state.userSpeechStartTime
+                  console.log(`[${state.shortId}] (VAD) Müşteri konuşmayı bitirdi (${duration}ms)`)
+                  state.userSpeechStartTime = undefined
+                  state.userSpeechEndTime = Date.now()
+                }
               }
               for (const f8k of gatedFrames) {
                 const pcm16 = upsample8to16(f8k)
-                info.session.sendRealtimeInput([{
-                  mimeType: 'audio/pcm;rate=16000',
-                  data: pcm16.toString('base64'),
-                }])
+                info.session.sendRealtimeInput({
+                  media: {
+                    mimeType: 'audio/pcm;rate=16000',
+                    data: pcm16.toString('base64'),
+                  }
+                } as any)
               }
             }
             processAudio().catch(e => console.error("NeuralVAD error:", e))
