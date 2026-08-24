@@ -138,9 +138,10 @@ class NoiseGate {
 }
 
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
-  const threshold = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_RMS || '0', 10) || 0)
-  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '300', 10) || 300)
-  const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '60', 10) || 60)
+  // Default threshold: 180 (telefon hattı dip gürültüsünü filtreler, konuşmada hemen açılır)
+  const threshold = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_RMS || '180', 10) || 180)
+  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '400', 10) || 400)
+  const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
   return {
     threshold,
     trailingFrames: Math.round(trailingMs / PHONE_FRAME_MS),
@@ -184,8 +185,6 @@ export interface TelephonyDeps {
 // bu kadar süre ses vermezse AI uyarır, sonra kapatır.
 const SILENCE_WARN_MS  = 30_000   // 30s: "Ses almıyorum..." uyarısı
 const SILENCE_CLOSE_MS = 20_000   // +20s daha bekler, yoksa kapar
-/** Gate devre dışıyken (threshold=0) sessizlik timer'ını sıfırlamak için min. RMS eşiği */
-const SPEECH_RMS_THRESHOLD = 150
 // Çağrı max süresi — uzayan/takılı kalan aramaları kapat.
 const MAX_CALL_MS      = 20 * 60_000   // 20 dakika
 
@@ -203,13 +202,12 @@ interface CallState {
   callerChannel?: string
   callerDirection?: string
   audioQueue: Buffer[]
-  noiseGate: NeuralVAD
+  noiseGate: NoiseGate
   // Zaman aşımı timer'ları
   silenceTimer?: ReturnType<typeof setTimeout>
   closeTimer?: ReturnType<typeof setTimeout>
   maxCallTimer?: ReturnType<typeof setTimeout>
-  sessionReady?: boolean         // onReady() çağrıldı — ses akışı başlayabilir
-  userSpeechStartTime?: number
+  micEnabled: boolean
   userSpeechEndTime?: number
   micBuffer: Buffer[]
 }
@@ -264,10 +262,7 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
   }, SILENCE_WARN_MS)
 }
 
-import { NeuralVAD, initNeuralVAD } from './neural-vad'
-
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
-  await initNeuralVAD()
   const { ai, port, buildSystemPrompt, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
 
   const gateCfg = readGateConfig()
@@ -305,7 +300,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           hangupPending: false,
           audioQueue: [],
           micBuffer: [],
-          noiseGate: new NeuralVAD(gateCfg.threshold, shortId),
+          micEnabled: false,
+          noiseGate: new NoiseGate(gateCfg.threshold, gateCfg.trailingFrames, gateCfg.preRollFrames, shortId),
         }
         socket.data = state
 
@@ -402,12 +398,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             {
               onReady: () => {
                 console.log(`[${shortId}] Gemini Live ready (phone)`)
-                // Ses akışı kilidi açılıyor — artık kullanıcı sesi Gemini'ye gidebilir
-                state.sessionReady = true
               },
 
               onAudio: (pcm) => {
                 if (state.closed) return
+                // AI konuşmaya başladığında mikrofonu aç (eğer henüz açılmadıysa)
+                state.micEnabled = true
                 if (state.userSpeechEndTime) {
                   const responseTime = Date.now() - state.userSpeechEndTime
                   console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
@@ -420,10 +416,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 for (const f of frames) state.audioQueue.push(f)
               },
               onTranscript: (role, text) => {
-                // Tanı için: müşterinin ne söylediğini (input transcription)
-                // ve AI'nın ne söylediğini (output transcription) log'a düş.
-                // Chunks halinde gelir, fragment fragment yazılır — gerçek
-                // zamanlı konuşma takibi için yeterli.
                 const trimmed = text.trim()
                 if (!trimmed) return
                 const label = role === 'user' ? 'USER' : 'AI'
@@ -563,6 +555,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             ],
             turnComplete: true,
           })
+
+          // Güvenlik zamanlayıcısı: AI greeting ses üretmese bile max 1.5s sonra mikrofonu aç
+          setTimeout(() => {
+            if (!state.closed) state.micEnabled = true
+          }, 1500)
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -588,43 +585,24 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
-            // Session hazır değilse (onReady henüz gelmedi) sesi gönderme.
-            // Bu, Gemini'nin greeting üretmeden önce kullanıcı sesini alıp
-            // yanlış tetiklenme yapmasını önler.
-            if (!info.session || !state.sessionReady) continue
+            // Mikrofon henüz açılmadıysa (greeting öncesi hat gürültüsü) sesi gönderme
+            if (!info.session || !state.micEnabled) continue
 
-            // Sessizlik/konuşma tespiti (threshold=0 → tüm ses geçer, sadece RMS loglama için)
-            const rmsForSilence = computeRmsInt16(ev.pcm)
-            const isSpeech = state.noiseGate.threshold > 0
-              ? state.noiseGate.isOpen
-              : rmsForSilence >= SPEECH_RMS_THRESHOLD
-
-            if (isSpeech) {
+            // NoiseGate: Hat dip gürültüsünü filtreler.
+            // Konuşma algılandığında pre-roll ile canlı sesi açar, sessizlikte kapatır.
+            const gatedFrames = state.noiseGate.process(ev.pcm)
+            if (state.noiseGate.isOpen) {
               clearSilenceTimers(state)
-              if (!state.userSpeechStartTime) {
-                state.userSpeechStartTime = Date.now()
-                console.log(`[${state.shortId}] USER konuşuyor...`)
-              }
-              state.userSpeechEndTime = undefined
-            } else if (state.userSpeechStartTime) {
-              const duration = Date.now() - state.userSpeechStartTime
-              console.log(`[${state.shortId}] USER konuşmayı bitirdi (${duration}ms)`)
-              state.userSpeechStartTime = undefined
-              state.userSpeechEndTime = Date.now()
             }
 
-            // NoiseGate devre dışıysa (threshold=0) tüm sesi ilet,
-            // aktifse sadece gated frame'leri ilet (sync — NeuralVAD olmadan)
-            const frame16 = upsample8to16(ev.pcm)
-            state.micBuffer.push(frame16)
+            for (const f8k of gatedFrames) {
+              state.micBuffer.push(upsample8to16(f8k))
+            }
 
-            // 5 frame (100ms) biriktirip tek seferde gönder — WebSocket trafiğini
-            // azaltırken gecikmeyi düşük tutar (200ms yerine 100ms)
+            // 5 frame (100ms) biriktirip tek seferde gönder — düşük gecikme + kararlı akış
             if (state.micBuffer.length >= 5) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
-              // SDK'nın `audio` alanı: { mimeType, data } (Blob_2 tipi)
-              // `media` alanı değil — media → mediaChunks dönüşümü protokol hatası (1007) üretiyor
               info.session.sendRealtimeInput({
                 audio: {
                   mimeType: 'audio/pcm;rate=16000',
