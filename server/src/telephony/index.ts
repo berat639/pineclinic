@@ -208,10 +208,10 @@ interface CallState {
   silenceTimer?: ReturnType<typeof setTimeout>
   closeTimer?: ReturnType<typeof setTimeout>
   maxCallTimer?: ReturnType<typeof setTimeout>
-  aiHasSpoken?: boolean
+  sessionReady?: boolean         // onReady() çağrıldı — ses akışı başlayabilir
   userSpeechStartTime?: number
   userSpeechEndTime?: number
-  micBuffer?: Buffer[]
+  micBuffer: Buffer[]
 }
 
 /** Timer'ları temizle. */
@@ -304,6 +304,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           closed: false,
           hangupPending: false,
           audioQueue: [],
+          micBuffer: [],
           noiseGate: new NeuralVAD(gateCfg.threshold, shortId),
         }
         socket.data = state
@@ -362,11 +363,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           const todayStr = getTodayTurkish()
           const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
 
-          const [ragContext, systemPromptBase, model] = await Promise.all([
+          const [ragContext, systemPromptBase, model, voiceName, activeGreeting] = await Promise.all([
             (async () => {
               try {
                 const preWarmEmbedding = await getPreWarmEmbedding()
-                // Yön bazlı bilgi bankası araması için ekstra argüman (direction)
                 const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
                 if (topDocs.length > 0) {
                   console.log(
@@ -379,12 +379,18 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
               return ''
             })(),
-            buildSystemPrompt(direction), // Yön bazlı system prompt
+            buildSystemPrompt(direction),
             resolveLiveModel(),
+            (async () => {
+              const { getSetting } = await import('../db/repositories/settings')
+              return (await getSetting('ai.voice_name')) || 'Aoede'
+            })(),
+            (async () => {
+              const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
+              return (await fetchGreeting(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
+            })(),
           ])
 
-          const { getSetting } = await import('../db/repositories/settings')
-          const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
           console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
 
@@ -394,17 +400,18 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             createLiveSession(
             ai,
             {
-              onReady: () => console.log(`[${shortId}] Gemini Live ready (phone)`),
+              onReady: () => {
+                console.log(`[${shortId}] Gemini Live ready (phone)`)
+                // Ses akışı kilidi açılıyor — artık kullanıcı sesi Gemini'ye gidebilir
+                state.sessionReady = true
+              },
 
               onAudio: (pcm) => {
                 if (state.closed) return
-                if (!state.aiHasSpoken) {
-                  state.aiHasSpoken = true
-                  if (state.userSpeechEndTime) {
-                    const responseTime = Date.now() - state.userSpeechEndTime
-                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
-                    state.userSpeechEndTime = undefined
-                  }
+                if (state.userSpeechEndTime) {
+                  const responseTime = Date.now() - state.userSpeechEndTime
+                  console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
+                  state.userSpeechEndTime = undefined
                 }
                 // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
                 const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
@@ -420,13 +427,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const trimmed = text.trim()
                 if (!trimmed) return
                 const label = role === 'user' ? 'USER' : 'AI'
-                if (role === 'model') {
-                  state.aiHasSpoken = true
-                  if (state.userSpeechEndTime) {
-                    const responseTime = Date.now() - state.userSpeechEndTime
-                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
-                    state.userSpeechEndTime = undefined
-                  }
+                if (role === 'model' && state.userSpeechEndTime) {
+                  const responseTime = Date.now() - state.userSpeechEndTime
+                  console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
+                  state.userSpeechEndTime = undefined
                 }
                 console.log(`[${shortId}] ${label}: ${trimmed}`)
               },
@@ -464,21 +468,15 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               telephonyChannel: state.callerChannel,
               direction: direction,
               realtimeInputConfig: {
-                // NO_INTERRUPTION: müşteri konuşmaya başlasa bile AI kendi
-                // cümlesini/sorusunu sonuna kadar söyler, yarıda kesilmez.
-                // (Varsayılan START_OF_ACTIVITY_INTERRUPTS = barge-in açık.)
                 activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
                 automaticActivityDetection: {
-                  // Telefon hattı (8kHz µ-law/A-law) ses amplitüdünü düşürür.
-                  // START_SENSITIVITY_HIGH ile kısa/kısık konuşmaları (rakamlar,
-                  // "evet", "üç" gibi) yakalarız.
+                  // Telefon hattı (8kHz) — yüksek hassasiyet ile kısa cevapları yakala
                   startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-                  // END HIGH: kısa cevaplarda ("evet", "hayır", rakamlar)
-                  // modelin konuşma bitişini hızlı algılaması için yüksek duyarlılık.
                   endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-                  prefixPaddingMs: 200,
-                  // Kısa onay cümlelerinde ("evet") hızlı tepki.
-                  silenceDurationMs: 700,
+                  // 100ms: kelimenin ilk hecesini kaybetmemek için (200'den düşürüldü)
+                  prefixPaddingMs: 100,
+                  // 500ms: cümle bitişini daha hızlı algıla (700'den düşürüldü)
+                  silenceDurationMs: 500,
                 },
               },
             },
@@ -499,9 +497,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
           // Birden fazla turnComplete: true göndermek modelin her birine ayrı
           // greeting üretmesine neden olur.
-          const { getGreeting: fetchGreetingForSession } = await import('../db/repositories/settings')
-          const activeGreeting = (await fetchGreetingForSession(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
-          
           const initParts: string[] = [
             direction === 'outbound'
               ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
@@ -593,62 +588,50 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
-            // AI henüz ilk cümlesini bitirip/başlayıp mikrofonu açana kadar
-            // gelen arkaplan gürültülerini Gemini'ye gönderme, yoksa Gemini 
-            // hastanın konuştuğunu sanıp sessizce bekler.
-            if (!info.session || !state.aiHasSpoken) continue
-            
-            // Sessizlik timer'ını sıfırla: gate aktifse isOpen kullan,
-            // gate devre dışıysa (threshold=0) frame RMS eşiğine bak.
+            // Session hazır değilse (onReady henüz gelmedi) sesi gönderme.
+            // Bu, Gemini'nin greeting üretmeden önce kullanıcı sesini alıp
+            // yanlış tetiklenme yapmasını önler.
+            if (!info.session || !state.sessionReady) continue
+
+            // Sessizlik/konuşma tespiti (threshold=0 → tüm ses geçer, sadece RMS loglama için)
             const rmsForSilence = computeRmsInt16(ev.pcm)
-            
-            // Process returns Buffer[], but we need to await it. Wait! data() is synchronous!
-            // Let's run it async inside an IIFE, but we must ensure order.
-            // Since Asterisk sends packets over TCP, processing them asynchronously might scramble order if we don't queue.
-            // Actually, Node's event loop will process them mostly in order, but to be safe, we can just await in the data handler?
-            // "data" hook in Bun TCP socket can be async!
-            const processAudio = async () => {
-              if (!state.micBuffer) state.micBuffer = []
+            const isSpeech = state.noiseGate.threshold > 0
+              ? state.noiseGate.isOpen
+              : rmsForSilence >= SPEECH_RMS_THRESHOLD
 
-              const isSpeech = state.noiseGate.threshold > 0
-                ? state.noiseGate.isOpen
-                : rmsForSilence >= SPEECH_RMS_THRESHOLD
-
-              if (isSpeech) {
-                clearSilenceTimers(state)
-                if (!state.userSpeechStartTime) {
-                  state.userSpeechStartTime = Date.now()
-                  console.log(`[${state.shortId}] (VAD) Müşteri konuşmaya başladı...`)
-                }
-                state.userSpeechEndTime = undefined
-              } else {
-                if (state.userSpeechStartTime) {
-                  const duration = Date.now() - state.userSpeechStartTime
-                  console.log(`[${state.shortId}] (VAD) Müşteri konuşmayı bitirdi (${duration}ms)`)
-                  state.userSpeechStartTime = undefined
-                  state.userSpeechEndTime = Date.now()
-                }
+            if (isSpeech) {
+              clearSilenceTimers(state)
+              if (!state.userSpeechStartTime) {
+                state.userSpeechStartTime = Date.now()
+                console.log(`[${state.shortId}] USER konuşuyor...`)
               }
-
-              const gatedFrames = state.noiseGate.threshold > 0 ? await state.noiseGate.process(ev.pcm) : [ev.pcm]
-              
-              for (const f8k of gatedFrames) {
-                state.micBuffer.push(upsample8to16(f8k))
-              }
-
-              // 10 frame (200ms) biriktirip tek seferde gönder (WebSocket spam'ini önlemek için)
-              if (state.micBuffer.length >= 10) {
-                const combined = Buffer.concat(state.micBuffer)
-                state.micBuffer = []
-                info.session.sendRealtimeInput({
-                  media: {
-                    mimeType: 'audio/pcm;rate=16000',
-                    data: combined.toString('base64'),
-                  }
-                } as any)
-              }
+              state.userSpeechEndTime = undefined
+            } else if (state.userSpeechStartTime) {
+              const duration = Date.now() - state.userSpeechStartTime
+              console.log(`[${state.shortId}] USER konuşmayı bitirdi (${duration}ms)`)
+              state.userSpeechStartTime = undefined
+              state.userSpeechEndTime = Date.now()
             }
-            processAudio().catch(e => console.error("Audio process error:", e))
+
+            // NoiseGate devre dışıysa (threshold=0) tüm sesi ilet,
+            // aktifse sadece gated frame'leri ilet (sync — NeuralVAD olmadan)
+            const frame16 = upsample8to16(ev.pcm)
+            state.micBuffer.push(frame16)
+
+            // 5 frame (100ms) biriktirip tek seferde gönder — WebSocket trafiğini
+            // azaltırken gecikmeyi düşük tutar (200ms yerine 100ms)
+            if (state.micBuffer.length >= 5) {
+              const combined = Buffer.concat(state.micBuffer)
+              state.micBuffer = []
+              // SDK'nın `audio` alanı: { mimeType, data } (Blob_2 tipi)
+              // `media` alanı değil — media → mediaChunks dönüşümü protokol hatası (1007) üretiyor
+              info.session.sendRealtimeInput({
+                audio: {
+                  mimeType: 'audio/pcm;rate=16000',
+                  data: combined.toString('base64'),
+                },
+              })
+            }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch {}
