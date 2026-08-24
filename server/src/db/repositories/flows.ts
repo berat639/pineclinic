@@ -108,17 +108,19 @@ export function flowToToolFields(flow: ConversationFlow): {
   const properties: Record<string, { type: string; description: string; enum?: string[] }> = {}
   const requiredSet = new Set<string>()
   for (const node of getFieldNodes(flow)) {
-    const name = node.data.fieldName!
-    if (properties[name]) continue
+    const originalName = node.data.fieldName!
+    const safeName = originalName.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
+    
+    if (properties[safeName]) continue
     const prop: { type: string; description: string; enum?: string[] } = {
       type: 'STRING',
-      description: node.data.description || name,
+      description: node.data.description ? `${originalName}: ${node.data.description}` : originalName,
     }
     if (node.data.fieldType === 'enum' && node.data.enumValues?.length) {
       prop.enum = node.data.enumValues
     }
-    properties[name] = prop
-    if (node.data.required) requiredSet.add(name)
+    properties[safeName] = prop
+    if (node.data.required) requiredSet.add(safeName)
   }
   return { properties, required: [...requiredSet] }
 }
