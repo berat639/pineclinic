@@ -1970,7 +1970,10 @@ app.ws('/ws', {
       }
       if (message instanceof Buffer || message instanceof Uint8Array) {
         const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
-        info.session.sendRealtimeInput({ media: { data: buf.toString('base64'), mimeType: 'audio/pcm;rate=16000' } })
+        info.session.sendRealtimeInput([{
+          mimeType: 'audio/pcm;rate=16000',
+          data: buf.toString('base64'),
+        }])
         info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
         // Ses geldi — idle timer'ı sıfırla
         ;(ws.data as any).touchActivity?.()

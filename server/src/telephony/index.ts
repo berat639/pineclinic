@@ -601,12 +601,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
               for (const f8k of gatedFrames) {
                 const pcm16 = upsample8to16(f8k)
-                info.session.sendRealtimeInput({
-                  audio: {
-                    data: pcm16.toString('base64'),
-                    mimeType: 'audio/pcm;rate=16000',
-                  },
-                })
+                info.session.sendRealtimeInput([{
+                  mimeType: 'audio/pcm;rate=16000',
+                  data: pcm16.toString('base64'),
+                }])
               }
             }
             processAudio().catch(e => console.error("NeuralVAD error:", e))
