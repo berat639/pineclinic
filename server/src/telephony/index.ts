@@ -10,7 +10,6 @@
  */
 
 import { randomUUID } from 'crypto'
-import { StartSensitivity, EndSensitivity, ActivityHandling } from '@google/genai'
 import type { GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
@@ -459,18 +458,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               voiceName,
               telephonyChannel: state.callerChannel,
               direction: direction,
-              realtimeInputConfig: {
-                activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
-                automaticActivityDetection: {
-                  // Telefon hattı (8kHz) — yüksek hassasiyet ile kısa cevapları yakala
-                  startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-                  endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-                  // 100ms: kelimenin ilk hecesini kaybetmemek için (200'den düşürüldü)
-                  prefixPaddingMs: 100,
-                  // 500ms: cümle bitişini daha hızlı algıla (700'den düşürüldü)
-                  silenceDurationMs: 500,
-                },
-              },
             },
           ),
             new Promise<never>((_, reject) =>
