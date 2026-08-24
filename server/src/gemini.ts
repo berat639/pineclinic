@@ -36,14 +36,14 @@ export function validateLiveCustomerIdentity(customerName: string | undefined, p
  * Build tool declarations dynamically from DB (with fallback to defaults).
  * Called once per session creation.
  */
-export async function buildToolDeclarations(): Promise<FunctionDeclaration[]> {
+export async function buildToolDeclarations(direction: string = 'inbound'): Promise<FunctionDeclaration[]> {
   const { getActiveFlow, flowToToolFields } = await import('./db/repositories/flows')
   let dbDescs: Record<string, string> = {}
   try { dbDescs = await getToolDescriptions() } catch { /* use defaults */ }
   const desc = (key: string) => dbDescs[key] ?? getDefaultToolDescription(key) ?? ''
 
   // Build randevuOlustur fields from flow (zero hardcoded fields)
-  const flow = await getActiveFlow()
+  const flow = await getActiveFlow(direction)
   let fieldProps: Record<string, unknown> = {}
   let fieldRequired: string[] = []
 
@@ -221,6 +221,7 @@ export async function createLiveSession(
     voiceName?: string
     realtimeInputConfig?: RealtimeInputConfig
     telephonyChannel?: string
+    direction?: string
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -585,7 +586,7 @@ export async function createLiveSession(
     }
   }
 
-  const toolDeclarations = await buildToolDeclarations()
+  const toolDeclarations = await buildToolDeclarations(options.direction)
 
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],

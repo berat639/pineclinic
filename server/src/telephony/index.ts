@@ -445,6 +445,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               model,
               voiceName,
               telephonyChannel: state.callerChannel,
+              direction: direction,
               realtimeInputConfig: {
                 // NO_INTERRUPTION: müşteri konuşmaya başlasa bile AI kendi
                 // cümlesini/sorusunu sonuna kadar söyler, yarıda kesilmez.
