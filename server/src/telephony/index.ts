@@ -583,8 +583,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 2 frame (40ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (gecikmeyi azaltmak için)
-            if (state.micBuffer.length >= 2 || (justClosed && state.micBuffer.length > 0)) {
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (1011 hatasını önlemek için)
+            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
