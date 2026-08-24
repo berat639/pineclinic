@@ -64,7 +64,7 @@ class NoiseGate {
     private readonly preRollMax: number,
     private readonly shortId: string,
     private readonly logIntervalFrames = 500,
-  ) {}
+  ) { }
 
   /** Son process() çağrısında gate açık mıydı (konuşma algılandı mı). */
   get isOpen(): boolean { return this.wasOpen }
@@ -181,10 +181,10 @@ export interface TelephonyDeps {
 
 // Müşteri sessizlik timeout'u — AI soru sorup cevap beklerken müşteri
 // bu kadar süre ses vermezse AI uyarır, sonra kapatır.
-const SILENCE_WARN_MS  = 30_000   // 30s: "Ses almıyorum..." uyarısı
+const SILENCE_WARN_MS = 30_000   // 30s: "Ses almıyorum..." uyarısı
 const SILENCE_CLOSE_MS = 20_000   // +20s daha bekler, yoksa kapar
 // Çağrı max süresi — uzayan/takılı kalan aramaları kapat.
-const MAX_CALL_MS      = 20 * 60_000   // 20 dakika
+const MAX_CALL_MS = 20 * 60_000   // 20 dakika
 
 /** Tek bir AudioSocket bağlantısı için durum. */
 interface CallState {
@@ -213,7 +213,7 @@ interface CallState {
 /** Timer'ları temizle. */
 function clearSilenceTimers(state: CallState) {
   if (state.silenceTimer) { clearTimeout(state.silenceTimer); state.silenceTimer = undefined }
-  if (state.closeTimer)   { clearTimeout(state.closeTimer);   state.closeTimer   = undefined }
+  if (state.closeTimer) { clearTimeout(state.closeTimer); state.closeTimer = undefined }
 }
 
 /**
@@ -237,7 +237,7 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
         }],
         turnComplete: true,
       })
-    } catch {}
+    } catch { }
 
     // Uyarıdan sonra SILENCE_CLOSE_MS daha bekle, hâlâ sessizse kapat.
     state.closeTimer = setTimeout(() => {
@@ -251,10 +251,10 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
           }],
           turnComplete: true,
         })
-      } catch {}
+      } catch { }
       // Fallback: 3s sonra gene kapalı değilse direkt kapat.
       setTimeout(() => {
-        if (!state.closed) { state.closed = true; try { socket.end() } catch {} }
+        if (!state.closed) { state.closed = true; try { socket.end() } catch { } }
       }, 3_000)
     }, SILENCE_CLOSE_MS)
   }, SILENCE_WARN_MS)
@@ -315,8 +315,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }],
               turnComplete: true,
             })
-          } catch {}
-          setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch {} } }, 4_000)
+          } catch { }
+          setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 4_000)
         }, MAX_CALL_MS)
 
         // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
@@ -329,15 +329,15 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             nextFrameAt += 20
             const frame = state.audioQueue.shift()
             if (frame) {
-              try { socket.write(frame); scheduleFrame() } catch {}
+              try { socket.write(frame); scheduleFrame() } catch { }
             } else if (state.hangupPending) {
               // Ses kuyruğu boşaldı ve hangup bekleniyor — şimdi kapat
               console.log(`[${shortId}] Ses kuyruğu boşaldı, bağlantı kapatılıyor`)
-              try { socket.write(encodeHangupFrame()) } catch {}
+              try { socket.write(encodeHangupFrame()) } catch { }
               state.closed = true
-              try { socket.end() } catch {}
+              try { socket.end() } catch { }
             } else {
-              try { socket.write(silenceFrame); scheduleFrame() } catch {}
+              try { socket.write(silenceFrame); scheduleFrame() } catch { }
             }
           }, delay)
         }
@@ -355,7 +355,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
           // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
           const todayStr = getTodayTurkish()
-          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.`
+          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.`
 
           const [ragContext, systemPromptBase, model, voiceName, activeGreeting] = await Promise.all([
             (async () => {
@@ -392,73 +392,73 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
           const session = await Promise.race([
             createLiveSession(
-            ai,
-            {
-              onReady: () => {
-                console.log(`[${shortId}] Gemini Live ready (phone)`)
-              },
+              ai,
+              {
+                onReady: () => {
+                  console.log(`[${shortId}] Gemini Live ready (phone)`)
+                },
 
-              onAudio: (pcm) => {
-                if (state.closed) return
-                // AI konuşmaya başladığında mikrofonu aç (eğer henüz açılmadıysa)
-                state.micEnabled = true
-                if (state.userSpeechEndTime) {
-                  const responseTime = Date.now() - state.userSpeechEndTime
-                  console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
-                  state.userSpeechEndTime = undefined
-                }
-                // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
-                const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
-                state.downsampleState = nextState
-                const frames = state.outChunker.chunk(pcm8)
-                for (const f of frames) state.audioQueue.push(f)
+                onAudio: (pcm) => {
+                  if (state.closed) return
+                  // AI konuşmaya başladığında mikrofonu aç (eğer henüz açılmadıysa)
+                  state.micEnabled = true
+                  if (state.userSpeechEndTime) {
+                    const responseTime = Date.now() - state.userSpeechEndTime
+                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
+                    state.userSpeechEndTime = undefined
+                  }
+                  // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
+                  const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
+                  state.downsampleState = nextState
+                  const frames = state.outChunker.chunk(pcm8)
+                  for (const f of frames) state.audioQueue.push(f)
+                },
+                onTranscript: (role, text) => {
+                  const trimmed = text.trim()
+                  if (!trimmed) return
+                  const label = role === 'user' ? 'USER' : 'AI'
+                  if (role === 'model' && state.userSpeechEndTime) {
+                    const responseTime = Date.now() - state.userSpeechEndTime
+                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
+                    state.userSpeechEndTime = undefined
+                  }
+                  console.log(`[${shortId}] ${label}: ${trimmed}`)
+                },
+                onInterrupted: () => {
+                  // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
+                  state.audioQueue.length = 0
+                  state.outChunker = new FrameChunker()
+                },
+                onHangup: () => {
+                  console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
+                  if (state.closed || state.hangupPending) return
+                  state.hangupPending = true
+                },
+                onTurnComplete: () => {
+                  // AI konuşmasını bitirdi, müşteri cevabını bekliyor.
+                  // Sessizlik timer'ını başlat; müşteri konuşursa data() sıfırlar.
+                  startSilenceWatch(state, socket)
+                },
+                onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
+                onClose: () => {
+                  console.log(`[${shortId}] Gemini session closed (phone)`)
+                  sessions.delete(shortId)
+                  notifyAdmins('session_end', {
+                    id: shortId,
+                    channel: 'phone',
+                    activeSessions: sessions.size,
+                  })
+                },
               },
-              onTranscript: (role, text) => {
-                const trimmed = text.trim()
-                if (!trimmed) return
-                const label = role === 'user' ? 'USER' : 'AI'
-                if (role === 'model' && state.userSpeechEndTime) {
-                  const responseTime = Date.now() - state.userSpeechEndTime
-                  console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
-                  state.userSpeechEndTime = undefined
-                }
-                console.log(`[${shortId}] ${label}: ${trimmed}`)
+              {
+                dbSessionId: shortId,
+                systemPrompt,
+                model,
+                voiceName,
+                telephonyChannel: state.callerChannel,
+                direction: direction,
               },
-              onInterrupted: () => {
-                // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
-                state.audioQueue.length = 0
-                state.outChunker = new FrameChunker()
-              },
-              onHangup: () => {
-                console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
-                if (state.closed || state.hangupPending) return
-                state.hangupPending = true
-              },
-              onTurnComplete: () => {
-                // AI konuşmasını bitirdi, müşteri cevabını bekliyor.
-                // Sessizlik timer'ını başlat; müşteri konuşursa data() sıfırlar.
-                startSilenceWatch(state, socket)
-              },
-              onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
-              onClose: () => {
-                console.log(`[${shortId}] Gemini session closed (phone)`)
-                sessions.delete(shortId)
-                notifyAdmins('session_end', {
-                  id: shortId,
-                  channel: 'phone',
-                  activeSessions: sessions.size,
-                })
-              },
-            },
-            {
-              dbSessionId: shortId,
-              systemPrompt,
-              model,
-              voiceName,
-              telephonyChannel: state.callerChannel,
-              direction: direction,
-            },
-          ),
+            ),
             new Promise<never>((_, reject) =>
               setTimeout(() => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)), SESSION_CONNECT_TIMEOUT_MS)
             ),
@@ -549,7 +549,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
-          try { socket.end() } catch {}
+          try { socket.end() } catch { }
         }
       },
 
@@ -603,10 +603,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
-            try { socket.end() } catch {}
+            try { socket.end() } catch { }
           } else if (ev.type === 'error') {
             console.error(`[${state.shortId}] AudioSocket error code=${ev.code}`)
-            try { socket.end() } catch {}
+            try { socket.end() } catch { }
           }
         }
       },
@@ -625,7 +625,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
   console.log(`   AudioSocket: tcp://0.0.0.0:${port}`)
   return {
     stop() {
-      try { server.stop() } catch {}
+      try { server.stop() } catch { }
     },
   }
 }
@@ -640,7 +640,7 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
   clearSilenceTimers(state)
   if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
 
-  try { info.session?.close() } catch {}
+  try { info.session?.close() } catch { }
   sessions.delete(shortId)
   console.log(`[${shortId}] AudioSocket disconnected`)
 }
