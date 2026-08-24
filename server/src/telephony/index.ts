@@ -211,6 +211,7 @@ interface CallState {
   aiHasSpoken?: boolean
   userSpeechStartTime?: number
   userSpeechEndTime?: number
+  micBuffer?: Buffer[]
 }
 
 /** Timer'ları temizle. */
@@ -607,11 +608,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             // Actually, Node's event loop will process them mostly in order, but to be safe, we can just await in the data handler?
             // "data" hook in Bun TCP socket can be async!
             const processAudio = async () => {
-              const gatedFrames = await state.noiseGate.process(ev.pcm)
+              if (!state.micBuffer) state.micBuffer = []
+
               const isSpeech = state.noiseGate.threshold > 0
                 ? state.noiseGate.isOpen
                 : rmsForSilence >= SPEECH_RMS_THRESHOLD
-              
+
               if (isSpeech) {
                 clearSilenceTimers(state)
                 if (!state.userSpeechStartTime) {
@@ -627,17 +629,26 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   state.userSpeechEndTime = Date.now()
                 }
               }
+
+              const gatedFrames = state.noiseGate.threshold > 0 ? await state.noiseGate.process(ev.pcm) : [ev.pcm]
+              
               for (const f8k of gatedFrames) {
-                const pcm16 = upsample8to16(f8k)
+                state.micBuffer.push(upsample8to16(f8k))
+              }
+
+              // 10 frame (200ms) biriktirip tek seferde gönder (WebSocket spam'ini önlemek için)
+              if (state.micBuffer.length >= 10) {
+                const combined = Buffer.concat(state.micBuffer)
+                state.micBuffer = []
                 info.session.sendRealtimeInput({
                   media: {
                     mimeType: 'audio/pcm;rate=16000',
-                    data: pcm16.toString('base64'),
+                    data: combined.toString('base64'),
                   }
                 } as any)
               }
             }
-            processAudio().catch(e => console.error("NeuralVAD error:", e))
+            processAudio().catch(e => console.error("Audio process error:", e))
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch {}
