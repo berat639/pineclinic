@@ -59,6 +59,7 @@ exten => s,1,NoOp(Dinamik Yonlendirme default)
 ; ─────────────────────────────────────────────────────────────────────────────
 [outbound-ai]
 exten => s,1,NoOp(Outbound call answered by ${CUSTOMER_NUMBER})
+ same => n,Answer()
  same => n,Set(DENOISE(rx)=on)
  same => n,Set(AGC(rx)=on)
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
