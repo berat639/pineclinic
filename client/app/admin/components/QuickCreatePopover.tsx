@@ -107,7 +107,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 8, padding: '12px 20px', borderBottom: '1px solid var(--border, #eee)' }}>
+        <div style={{ display: 'flex', gap: 8, padding: '12px 20px', borderBottom: '1px solid var(--border, #eee)', background: '#ffffff' }} className="dark:bg-slate-900">
           <button 
             onClick={() => setTab('patient')}
             style={{
@@ -135,15 +135,15 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         </div>
 
         {/* Form Body */}
-        <div style={{ padding: 20, flex: 1, overflowY: 'auto' }}>
+        <div style={{ padding: 20, flex: 1, overflowY: 'auto', background: '#ffffff' }} className="dark:bg-slate-900">
           {tab === 'patient' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input type="text" placeholder="Ad Soyad (Zorunlu)" value={name} onChange={e => setName(e.target.value)} className="tooth-input" />
-              <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={phone} onChange={e => setPhone(e.target.value)} className="tooth-input" />
-              <input type="text" placeholder="TC Kimlik No (İsteğe Bağlı)" value={tc} onChange={e => setTc(e.target.value)} className="tooth-input" />
-              <input type="email" placeholder="E-posta (İsteğe Bağlı)" value={email} onChange={e => setEmail(e.target.value)} className="tooth-input" />
+              <input type="text" placeholder="Ad Soyad (Zorunlu)" value={name} onChange={e => setName(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
+              <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={phone} onChange={e => setPhone(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
+              <input type="text" placeholder="TC Kimlik No (İsteğe Bağlı)" value={tc} onChange={e => setTc(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
+              <input type="email" placeholder="E-posta (İsteğe Bağlı)" value={email} onChange={e => setEmail(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
               
-              <select value={gender} onChange={e => setGender(e.target.value)} className="tooth-input">
+              <select value={gender} onChange={e => setGender(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }}>
                 <option value="">Cinsiyet (İsteğe Bağlı)</option>
                 <option value="male">Erkek</option>
                 <option value="female">Kadın</option>
@@ -152,7 +152,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
               
               <div>
                 <label style={{ fontSize: '0.8rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Doğum Tarihi (İsteğe Bağlı)</label>
-                <input type="date" value={birthDate} onChange={e => setBirthDate(e.target.value)} className="tooth-input" />
+                <input type="date" value={birthDate} onChange={e => setBirthDate(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
               </div>
               
               <div style={{ background: 'var(--input-bg, #f9fafb)', padding: 12, borderRadius: 8, marginTop: 8 }}>
@@ -176,20 +176,20 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Hasta *</label>
-                  <select value={patientId} onChange={e => setPatientId(e.target.value)} className="tooth-input">
+                  <select value={patientId} onChange={e => setPatientId(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }}>
                     <option value="">Hasta Seç...</option>
                     <option value="dummy">Ahmet Yılmaz</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Tutar (₺) *</label>
-                  <input type="number" placeholder="Örn: 1500" value={amount} onChange={e => setAmount(e.target.value)} className="tooth-input" />
+                  <input type="number" placeholder="Örn: 1500" value={amount} onChange={e => setAmount(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Ödeme Yöntemi</label>
-                  <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="tooth-input">
+                  <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }}>
                     <option value="Nakit">Nakit</option>
                     <option value="Kredi Kartı">Kredi Kartı</option>
                     <option value="Havale/EFT">Havale/EFT</option>
@@ -197,32 +197,32 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Ödeme Tarihi *</label>
-                  <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="tooth-input" />
+                  <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Durum</label>
-                  <select value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} className="tooth-input">
+                  <select value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }}>
                     <option value="completed">✅ Yapıldı</option>
                     <option value="pending">⏳ Bekliyor</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Planlanan Tarih</label>
-                  <input type="date" value={plannedDate} onChange={e => setPlannedDate(e.target.value)} className="tooth-input" />
+                  <input type="date" value={plannedDate} onChange={e => setPlannedDate(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
                 </div>
               </div>
               <div>
                 <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Not (opsiyonel)</label>
-                <input type="text" placeholder="Kısa not ekleyin" value={paymentNote} onChange={e => setPaymentNote(e.target.value)} className="tooth-input" />
+                <input type="text" placeholder="Kısa not ekleyin" value={paymentNote} onChange={e => setPaymentNote(e.target.value)} className="tooth-input" style={{ background: '#ffffff' }} />
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border, #eee)', display: 'flex', justifyContent: 'flex-end', gap: 12, background: 'var(--bg, #f9fafb)' }}>
+        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border, #eee)', display: 'flex', justifyContent: 'flex-end', gap: 12, background: 'var(--bg, #f9fafb)' }} className="dark:bg-slate-800">
           <button onClick={onClose} className="btn btn-secondary" style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent' }}>İptal</button>
           <button onClick={handleSave} className="btn btn-primary" style={{ padding: '8px 24px', borderRadius: 8, background: 'var(--brand, #3b82f6)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
         </div>
