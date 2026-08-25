@@ -6,6 +6,7 @@ import { ToothChip, inputStyle } from './ToothChip'
 import PatientSidePanel from './PatientSidePanel'
 import AdvancedTedaviModal from './AdvancedTedaviModal';
 import QuickCreatePopover from './QuickCreatePopover';
+import MiniCalendar from './MiniCalendar';
 
 import DicomViewer from './DicomViewer'
 
@@ -117,6 +118,9 @@ interface Patient {
 
 export default function CalendarTab() {
   const [doctors, setDoctors] = useState<Doctor[]>([])
+  const [selectedDoctorIds, setSelectedDoctorIds] = useState<string[]>([])
+  const initializedDocsRef = React.useRef(false)
+  
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [shifts, setShifts] = useState<any[]>([])
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
@@ -131,6 +135,7 @@ export default function CalendarTab() {
   const [showForm, setShowForm] = useState(false)
   const [showDocForm, setShowDocForm] = useState(false)
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [patientSearchQuery, setPatientSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'appointment' | 'info' | 'treatment'>('appointment')
 
   const [selectedDcmUrl, setSelectedDcmUrl] = useState<string | null>(null)
@@ -208,7 +213,13 @@ export default function CalendarTab() {
       fetchSafe('/api/dental/patients')
     ])
 
-    if (docs) setDoctors(docs)
+    if (docs) {
+      setDoctors(docs)
+      if (!initializedDocsRef.current && docs.length > 0) {
+        setSelectedDoctorIds(docs.map((d: any) => d.id))
+        initializedDocsRef.current = true
+      }
+    }
     if (evts) setEvents(evts)
     if (shiftsData) setShifts(shiftsData)
     if (invs) setInventoryItems(invs)
@@ -366,72 +377,173 @@ export default function CalendarTab() {
     setCurrentDate(d.toISOString().slice(0, 10))
   }
 
+  const filteredEvents = patientSearchQuery 
+    ? events.filter(e => e.title?.toLowerCase().includes(patientSearchQuery.toLowerCase()))
+    : events;
+
   return (
-    <div style={{ maxWidth: 1200, width: '100%' }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
-        flexWrap: 'wrap',
-        gap: 10,
-      }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
-          Günlük Randevu Takvimi
-        </h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* View tabs */}
-          <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--input-border)' }}>
-            {(['day', 'week', 'month'] as const).map(v => (
-              <button key={v} onClick={() => setView(v)} style={{ padding: '5px 14px', fontSize: '0.75rem', fontWeight: 600, border: 'none', background: view === v ? 'var(--accent)' : 'var(--input-bg)', color: view === v ? 'white' : 'var(--foreground-2)', cursor: 'pointer', borderRight: v !== 'month' ? '1px solid var(--input-border)' : 'none' }}>
-                {v === 'day' ? 'Günlük' : v === 'week' ? 'Haftalık' : 'Aylık'}
-              </button>
-            ))}
-          </div>
-          {/* Navigation */}
-          <button onClick={() => goDate(-1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>◀</button>
-          <input
-            type="date"
-            value={currentDate}
-            onChange={(e) => setCurrentDate(e.target.value)}
-            style={{
-              padding: '5px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--input-border)',
-              background: 'var(--input-bg)',
-              color: 'var(--foreground)',
-              fontSize: '0.8rem',
+    <div style={{ maxWidth: 1200, width: '100%', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+      {/* Left Sidebar */}
+      <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
+        
+        <div style={{ 
+          background: 'var(--input-bg, #f3f4f6)', 
+          padding: '10px 14px', 
+          borderRadius: 8, 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 10 
+        }}>
+          <Users size={20} color="var(--foreground-2, #6b7280)" />
+          <input 
+            type="text" 
+            placeholder="Kişi arayın" 
+            value={patientSearchQuery}
+            onChange={(e) => setPatientSearchQuery(e.target.value)}
+            style={{ 
+              border: 'none', 
+              background: 'transparent', 
+              outline: 'none', 
+              width: '100%', 
+              fontSize: '1rem', 
+              color: 'var(--foreground, #111827)' 
             }}
           />
-          <button onClick={() => goDate(1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>▶</button>
-          <button
-            className="btn btn-primary" 
-            style={{ padding: '8px 16px', borderRadius: 8, fontSize: '0.82rem' }}
-            onClick={() => {
-              setPatientPanelOpen(true)
-              setPanelOpen(false) // Add mutual exclusivity
-            }}
-          >
-            <Users size={16} /> Hastalar
-          </button>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            style={{
-              padding: '7px 14px',
-              borderRadius: 8,
-              border: 'none',
-              background: 'var(--accent)',
-              color: '#fff',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            + Randevu Ekle
-          </button>
+        </div>
+
+        {/* Takvimlerim (Doctor Filter) */}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--foreground)' }}>Takvimlerim</h4>
+            <button 
+              onClick={() => {
+                if (selectedDoctorIds.length === doctors.length) {
+                  setSelectedDoctorIds([]) // clear all
+                } else {
+                  setSelectedDoctorIds(doctors.map(d => d.id)) // select all
+                }
+              }}
+              style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', color: 'var(--brand)', cursor: 'pointer', fontWeight: 500 }}
+            >
+              {selectedDoctorIds.length === doctors.length ? 'Temizle' : 'Tümünü Seç'}
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {doctors.map(doc => {
+              const isSelected = selectedDoctorIds.includes(doc.id);
+              return (
+                <label 
+                  key={doc.id}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setSelectedDoctorIds(prev => 
+                      prev.includes(doc.id) 
+                        ? prev.filter(id => id !== doc.id) 
+                        : [...prev, doc.id]
+                    );
+                  }}
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 10, 
+                    cursor: 'pointer', 
+                    fontSize: '0.9rem',
+                    color: 'var(--foreground)',
+                    userSelect: 'none'
+                  }}
+                >
+                  <div style={{
+                    width: 18, 
+                    height: 18, 
+                    borderRadius: 4, 
+                    border: `2px solid ${doc.color}`,
+                    background: isSelected ? doc.color : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s'
+                  }}>
+                    {isSelected && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    )}
+                  </div>
+                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.name}</span>
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {/* Right Content */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 16,
+          flexWrap: 'wrap',
+          gap: 10,
+        }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+            Günlük Randevu Takvimi
+          </h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* View tabs */}
+            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--input-border)' }}>
+              {(['day', 'week', 'month'] as const).map(v => (
+                <button key={v} onClick={() => setView(v)} style={{ padding: '5px 14px', fontSize: '0.75rem', fontWeight: 600, border: 'none', background: view === v ? 'var(--accent)' : 'var(--input-bg)', color: view === v ? 'white' : 'var(--foreground-2)', cursor: 'pointer', borderRight: v !== 'month' ? '1px solid var(--input-border)' : 'none' }}>
+                  {v === 'day' ? 'Günlük' : v === 'week' ? 'Haftalık' : 'Aylık'}
+                </button>
+              ))}
+            </div>
+            {/* Navigation */}
+            <button onClick={() => goDate(-1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>◀</button>
+            <input
+              type="date"
+              value={currentDate}
+              onChange={(e) => setCurrentDate(e.target.value)}
+              style={{
+                padding: '5px 10px',
+                borderRadius: 8,
+                border: '1px solid var(--input-border)',
+                background: 'var(--input-bg)',
+                color: 'var(--foreground)',
+                fontSize: '0.8rem',
+              }}
+            />
+            <button onClick={() => goDate(1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>▶</button>
+            <button
+              className="btn btn-primary" 
+              style={{ padding: '8px 16px', borderRadius: 8, fontSize: '0.82rem' }}
+              onClick={() => {
+                setPatientPanelOpen(true)
+                setPanelOpen(false)
+              }}
+            >
+              <Users size={16} /> Hastalar
+            </button>
+            <button
+              onClick={() => setShowForm(!showForm)}
+              style={{
+                padding: '7px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: 'var(--accent)',
+                color: '#fff',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              + Randevu Ekle
+            </button>
+          </div>
+        </div>
 
       {/* Appointment Form */}
       {showForm && (
@@ -516,8 +628,10 @@ export default function CalendarTab() {
       )}
 
       <DentalCalendar
-        doctors={doctors}
-        events={events}
+        doctors={doctors.filter(d => selectedDoctorIds.includes(d.id))}
+        events={filteredEvents.filter(ev => !ev.doctorId || selectedDoctorIds.includes(ev.doctorId))}
+        shifts={shifts}
+        currentDate={currentDate}
         onHeaderContextMenu={(e, doctorId) => {
           e.preventDefault()
           setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId, date: currentDate })
@@ -554,8 +668,6 @@ export default function CalendarTab() {
             console.error("Failed to update event", e);
           }
         }}
-        shifts={shifts}
-        currentDate={currentDate}
         onEventClick={handleEventClick}
         view={view}
       />
@@ -1293,6 +1405,8 @@ export default function CalendarTab() {
           />
         </div>
       )}
+
+      </div>
 
       <PatientSidePanel 
         isOpen={patientPanelOpen} 
