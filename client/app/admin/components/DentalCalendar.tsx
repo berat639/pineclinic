@@ -158,9 +158,19 @@ function calculateEventLayout(events: CalendarEvent[]) {
   return result;
 }
 
-export default function DentalCalendar({ doctors, events, shifts, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void }) {
+export default function DentalCalendar({ doctors, events, shifts, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
+
+  // Draft selection state for empty slot
+  const [draftSelection, setDraftSelection] = useState<{
+    startY: number;
+    startX: number;
+    top: number;
+    height: number;
+    colIdx: number;
+    active: boolean;
+  } | null>(null);
   
   // Calculate displayDoctors at the top so handleMouseUp can use it
   const dayShifts = shifts?.filter(s => s.date === currentDate) || [];
@@ -215,26 +225,76 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      // Existing event drag logic
       const state = dragRef.current;
-      if (!state.element) return;
+      if (state.element) {
+        const deltaY = e.clientY - state.startY;
+        const deltaX = e.clientX - state.startX;
 
-      const deltaY = e.clientY - state.startY;
-      const deltaX = e.clientX - state.startX;
-
-      if (state.type === 'move') {
-        state.element.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-      } else if (state.type === 'resize-bottom') {
-        state.element.style.height = `calc(${state.originalHeight} + ${deltaY}px)`;
-      } else if (state.type === 'resize-top') {
-        state.element.style.top = `calc(${state.originalTop} + ${deltaY}px)`;
-        state.element.style.height = `calc(${state.originalHeight} - ${deltaY}px)`;
+        if (state.type === 'move') {
+          state.element.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        } else if (state.type === 'resize-bottom') {
+          state.element.style.height = `calc(${state.originalHeight} + ${deltaY}px)`;
+        } else if (state.type === 'resize-top') {
+          state.element.style.top = `calc(${state.originalTop} + ${deltaY}px)`;
+          state.element.style.height = `calc(${state.originalHeight} - ${deltaY}px)`;
+        }
+        return;
       }
+
+      // Draft selection logic for empty slot
+      setDraftSelection(prev => {
+        if (!prev || !prev.active) return prev;
+        const deltaY = e.clientY - prev.startY;
+        let top = prev.top;
+        let height = prev.height;
+        if (deltaY > 0) {
+          height = deltaY;
+        } else {
+          top = prev.top + deltaY;
+          height = Math.abs(deltaY);
+        }
+        return { ...prev, top, height: Math.max(22, height) };
+      });
     };
 
     const handleMouseUp = (e: MouseEvent) => {
+      // Draft selection logic
+      setDraftSelection(prev => {
+        if (prev && prev.active && gridRef.current) {
+          const gridRect = gridRef.current.getBoundingClientRect();
+          // convert top & height to time
+          const startMins = 9 * 60 + Math.round(prev.top / 48 * 30);
+          const endMins = startMins + Math.round(prev.height / 48 * 30);
+          
+          let doctorId: string | null = null;
+          let dateStr = currentDate;
+          
+          if (view === 'day') {
+            doctorId = displayDoctors[prev.colIdx]?.id || null;
+          } else if (view === 'week') {
+            const weekDays = getWeekDays(currentDate);
+            dateStr = weekDays[prev.colIdx]?.date || dateStr;
+          }
+
+          const formatTime = (mins: number) => {
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
+          };
+
+          if (onEmptySlotSelect) {
+            onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.clientX, e.clientY);
+          }
+          return { ...prev, active: false }; // keep it rendered but not active
+        }
+        return prev;
+      });
+
+      // Existing event drag logic
       const state = dragRef.current;
       if (!state.element) return;
-
+      // ... rest of handleMouseUp
       const deltaY = e.clientY - state.startY;
       const rawMins = deltaY / 1.6;
 
@@ -334,7 +394,14 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [events, onEventUpdate, view, doctors, currentDate]);
+  }, [events, onEventUpdate, view, doctors, currentDate, onEmptySlotSelect]);
+
+  // Expose method to clear draft
+  useEffect(() => {
+    const handleClearDraft = () => setDraftSelection(null);
+    window.addEventListener('clear-calendar-draft', handleClearDraft);
+    return () => window.removeEventListener('clear-calendar-draft', handleClearDraft);
+  }, []);
   const slots = generateTimeSlots(9, 22)
 
   const globalUnassigned = events.filter(e => !e.doctorId)
@@ -383,13 +450,64 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           )}
         </div>
         <div className="rc-body">
-          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
+          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }} onMouseDown={(e) => {
+            if (e.button !== 0 || dragRef.current.element) return;
+            const gridRect = gridRef.current?.getBoundingClientRect();
+            if (!gridRect) return;
+            const mouseX = e.clientX - gridRect.left - 56;
+            const mouseY = e.clientY - gridRect.top;
+            if (mouseX < 0) return; // clicked on time column
+            
+            const colWidthPx = (gridRect.width - 56) / cols;
+            const colIdx = Math.max(0, Math.min(cols - 1, Math.floor(mouseX / colWidthPx)));
+            
+            // Quantize Y to 30 mins
+            const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
+            const top = Math.floor(mouseY / rowHeight) * rowHeight;
+            
+            setDraftSelection({
+              startX: e.clientX,
+              startY: e.clientY,
+              colIdx,
+              top,
+              height: rowHeight,
+              active: true
+            });
+          }}>
             {slots.map(slot => (
               <div key={slot} style={{ display: 'contents' }}>
                 <div className="rc-time">{slot}</div>
                 {Array.from({ length: cols }).map((_, i) => <div key={`${slot}-${i}`} className="rc-cell" />)}
               </div>
             ))}
+            
+            {/* Draft Selection Ghost Event */}
+            {draftSelection && (
+              <div 
+                className="rc-event" 
+                style={{
+                  top: draftSelection.top,
+                  height: draftSelection.height,
+                  left: `calc(56px + (100% - 56px) * ${draftSelection.colIdx} / ${cols} + 2px)`,
+                  width: `calc(((100% - 56px) / ${cols}) - 4px)`,
+                  background: 'rgba(59,130,246,0.1)',
+                  borderLeftColor: '#3b82f6',
+                  borderStyle: 'dashed',
+                  pointerEvents: 'none',
+                  zIndex: 40
+                }}
+              >
+                <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
+                <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
+                  {(() => {
+                    const s = 9 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const e = s + Math.round(draftSelection.height / 48 * 30);
+                    const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
+                    return `${f(s)} - ${f(e)}`;
+                  })()}
+                </span>
+              </div>
+            )}
           </div>
           {/* Assigned events in doctor columns */}
           {displayDoctors.map((d, colIdx) => {
@@ -491,13 +609,64 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           ))}
         </div>
         <div className="rc-body">
-          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
+          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(7, 1fr)` }} onMouseDown={(e) => {
+            if (e.button !== 0 || dragRef.current.element) return;
+            const gridRect = gridRef.current?.getBoundingClientRect();
+            if (!gridRect) return;
+            const mouseX = e.clientX - gridRect.left - 56;
+            const mouseY = e.clientY - gridRect.top;
+            if (mouseX < 0) return; // clicked on time column
+            
+            const colWidthPx = (gridRect.width - 56) / 7;
+            const colIdx = Math.max(0, Math.min(6, Math.floor(mouseX / colWidthPx)));
+            
+            // Quantize Y to 30 mins
+            const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
+            const top = Math.floor(mouseY / rowHeight) * rowHeight;
+            
+            setDraftSelection({
+              startX: e.clientX,
+              startY: e.clientY,
+              colIdx,
+              top,
+              height: rowHeight,
+              active: true
+            });
+          }}>
             {slots.map(slot => (
               <div key={slot} style={{ display: 'contents' }}>
                 <div className="rc-time">{slot}</div>
-                {weekDays.map(d => <div key={`${slot}-${d.date}`} className="rc-cell" />)}
+                {Array.from({ length: 7 }).map((_, i) => <div key={`${slot}-${i}`} className="rc-cell" />)}
               </div>
             ))}
+            
+            {/* Draft Selection Ghost Event */}
+            {draftSelection && (
+              <div 
+                className="rc-event" 
+                style={{
+                  top: draftSelection.top,
+                  height: draftSelection.height,
+                  left: `calc(56px + (100% - 56px) * ${draftSelection.colIdx} / 7 + 2px)`,
+                  width: `calc(((100% - 56px) / 7) - 4px)`,
+                  background: 'rgba(59,130,246,0.1)',
+                  borderLeftColor: '#3b82f6',
+                  borderStyle: 'dashed',
+                  pointerEvents: 'none',
+                  zIndex: 40
+                }}
+              >
+                <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
+                <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
+                  {(() => {
+                    const s = 9 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const e = s + Math.round(draftSelection.height / 48 * 30);
+                    const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
+                    return `${f(s)} - ${f(e)}`;
+                  })()}
+                </span>
+              </div>
+            )}
           </div>
           {weekDays.map((day, colIdx) => {
             const dayEvents = events.filter(e => e.startTime.slice(0, 10) === day.date);

@@ -5,6 +5,7 @@ import DentalCalendar from './DentalCalendar'
 import { ToothChip, inputStyle } from './ToothChip'
 import PatientSidePanel from './PatientSidePanel'
 import AdvancedTedaviModal from './AdvancedTedaviModal';
+import QuickCreatePopover from './QuickCreatePopover';
 
 import DicomViewer from './DicomViewer'
 
@@ -124,6 +125,9 @@ export default function CalendarTab() {
   const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
   const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
   const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
+  
+  const [quickCreateMenu, setQuickCreateMenu] = useState<{ start: string, end: string, doctorId: string | null, x: number, y: number } | null>(null)
+
   const [showForm, setShowForm] = useState(false)
   const [showDocForm, setShowDocForm] = useState(false)
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -223,19 +227,6 @@ export default function CalendarTab() {
       if (target.closest('.context-menu-container')) return;
 
       setShiftContextMenu(null);
-      // Let's not close eventContextMenu on global click because it contains inputs that need to be interacted with.
-      // We will rely on its onClose or Cancel buttons for eventContextMenu.
-    }
-    window.addEventListener('mousedown', handleGlobalClick);
-    return () => window.removeEventListener('mousedown', handleGlobalClick);
-  }, [])
-
-  useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      if (e.button !== 0 || e.ctrlKey) return;
-      const target = e.target as HTMLElement;
-      if (target.closest('.context-menu-container')) return;
-      setShiftContextMenu(null);
       setEventContextMenu(null);
     }
 
@@ -247,12 +238,27 @@ export default function CalendarTab() {
       setEventContextMenu(null);
     }
 
+    const handleClearDraft = () => {
+      window.dispatchEvent(new Event('clear-calendar-draft'));
+    }
+
+    const closeAll = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShiftContextMenu(null)
+        setEventContextMenu(null)
+        setQuickCreateMenu(null)
+        handleClearDraft()
+      }
+    }
+
     window.addEventListener('mousedown', handleGlobalClick);
-    window.addEventListener('scroll', handleScroll, { capture: true });
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('keydown', closeAll);
     return () => {
       window.removeEventListener('mousedown', handleGlobalClick);
-      window.removeEventListener('scroll', handleScroll, { capture: true });
-    };
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('keydown', closeAll);
+    }
   }, [])
 
   const handleEventClick = (eventId: string, event: CalendarEvent) => {
@@ -527,6 +533,9 @@ export default function CalendarTab() {
           const startTime = new Date(event.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
           const endTime = new Date(event.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
           setEventContextMenu({ x: e.clientX, y: e.clientY, event, doctorId: event.doctorId || '', date, startTime, endTime })
+        }}
+        onEmptySlotSelect={(start, end, doctorId, x, y) => {
+          setQuickCreateMenu({ start, end, doctorId, x, y })
         }}
         onEventUpdate={async (updatedEvent) => {
           console.log("Event updated via drag/resize", updatedEvent);
@@ -1092,6 +1101,59 @@ export default function CalendarTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {quickCreateMenu && (
+        <QuickCreatePopover
+          x={quickCreateMenu.x}
+          y={quickCreateMenu.y}
+          defaultDate={quickCreateMenu.start.slice(0, 10)}
+          defaultStartTime={quickCreateMenu.start.slice(11, 16)}
+          defaultEndTime={quickCreateMenu.end.slice(11, 16)}
+          doctorId={quickCreateMenu.doctorId}
+          onClose={() => {
+            setQuickCreateMenu(null);
+            window.dispatchEvent(new Event('clear-calendar-draft'));
+          }}
+          onSave={async (data) => {
+            if (data.type === 'patient_appointment') {
+              // 1. Create Patient
+              const ptRes = await fetch('/api/dental/patients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  name: data.name, 
+                  phone: data.phone,
+                  email: data.email,
+                  // We don't have TC/Gender backend fields yet unless added, so we store minimally
+                })
+              });
+              const pt = await ptRes.json();
+              if (pt.id) {
+                // 2. Create Appointment
+                await fetch('/api/dental/appointments', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    patientId: pt.id,
+                    doctorId: quickCreateMenu.doctorId,
+                    title: data.title,
+                    startTime: quickCreateMenu.start,
+                    endTime: quickCreateMenu.end,
+                    type: 'Muayene',
+                    status: 'scheduled'
+                  })
+                });
+              }
+            } else if (data.type === 'payment') {
+               // Implementation for payment creation API
+               // E.g. await fetch('/api/dental/payments', { ... })
+            }
+            setQuickCreateMenu(null);
+            window.dispatchEvent(new Event('clear-calendar-draft'));
+            fetchData();
+          }}
+        />
       )}
 
       {selectedDcmUrl && (

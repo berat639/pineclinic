@@ -67,6 +67,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [waShowToken, setWaShowToken] = useState(false)
   const [waCopied, setWaCopied] = useState(false)
 
+  // Branding / Logo State
+  const [brandingLogoUrl, setBrandingLogoUrl] = useState('')
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+
   // Role Permissions State
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
     hekim: ['calendar', 'patients', 'knowledge'],
@@ -112,12 +116,17 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         if (data.whatsappVerifyToken) setWaVerifyToken(data.whatsappVerifyToken)
         if (data.whatsappEnabled !== undefined) setWaEnabled(!!data.whatsappEnabled)
       })
-      .catch(() => showToast('error', 'Veriler alınamadı'))
+      .catch(() => showToast('error', 'Entegrasyon verileri alınamadı'))
       .finally(() => setLoading(false))
 
     fetch('/api/admin/settings/roles')
       .then(r => r.json())
       .then(data => { if (data && Object.keys(data).length) setRolePermissions(data) })
+      .catch(() => {})
+
+    fetch('/api/admin/settings/branding')
+      .then(r => r.json())
+      .then(data => { if (data.logoUrl) setBrandingLogoUrl(data.logoUrl) })
       .catch(() => {})
   }, [])
 
@@ -153,6 +162,28 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
     }
   }
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingLogo(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/admin/settings/logo-upload', {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'Yükleme hatası')
+      setBrandingLogoUrl(data.logoUrl)
+      showToast('success', 'Logo başarıyla yüklendi')
+    } catch (err: any) {
+      showToast('error', err.message || 'Logo yüklenemedi')
+    } finally {
+      setUploadingLogo(false)
+    }
+  }
+
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div>
 
   return (
@@ -171,6 +202,36 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           {toast.text}
         </div>
       )}
+
+      {/* Marka / Logo Ayarları */}
+      <div className="glass-card" style={{ padding: 24 }}>
+        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>Marka ve Görünüm</h3>
+        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
+          Sistemde (özellikle hasta ekranlarında veya panelde) görünecek kurum logonuz.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{
+            width: 80, height: 80, borderRadius: 12, background: 'var(--input-bg)',
+            border: '1px solid var(--input-border)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', overflow: 'hidden'
+          }}>
+            {brandingLogoUrl ? (
+              <img src={brandingLogoUrl} alt="Logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            ) : (
+              <span style={{ fontSize: 24, color: 'var(--foreground-3)' }}>🖼️</span>
+            )}
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="btn btn-primary" style={{ cursor: 'pointer', padding: '8px 16px', fontSize: 13, display: 'inline-block' }}>
+              {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
+              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} disabled={uploadingLogo} />
+            </label>
+            <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginTop: 8 }}>
+              PNG, JPG veya SVG formatlarında, maksimum 2MB boyutunda görsel yükleyebilirsiniz.
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* VoIP Card */}
       <div className="glass-card" style={{ padding: 24 }}>

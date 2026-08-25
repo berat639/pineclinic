@@ -270,22 +270,38 @@ export default function Home() {
         maxWidth: 560,
       }}>
         {/* Header */}
-        <div style={{ textAlign: 'center', animation: 'fadeIn 0.6s ease' }}>
-          <h1 style={{
-            fontSize: '2rem',
-            fontWeight: 800,
-            background: 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #60a5fa 100%)',
-            backgroundSize: '200% auto',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            marginBottom: '0.5rem',
-            letterSpacing: '-0.02em',
-          }}>
-            {sessionConfig?.branding?.title || 'Asistan'}
-          </h1>
-          <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 400 }}>
-            {sessionConfig?.branding?.subtitle || 'Randevu · Bilgi'}
-          </p>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          gap: '1.5rem', 
+          animation: 'fadeIn 0.6s ease',
+          marginBottom: '1rem'
+        }}>
+          {sessionConfig?.branding?.logoUrl && (
+            <img 
+              src={sessionConfig.branding.logoUrl} 
+              alt="Logo" 
+              style={{ width: 72, height: 72, objectFit: 'contain', filter: 'var(--logo-filter)' }}
+            />
+          )}
+          <div style={{ textAlign: sessionConfig?.branding?.logoUrl ? 'left' : 'center' }}>
+            <h1 style={{
+              fontSize: '2rem',
+              fontWeight: 800,
+              background: 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #60a5fa 100%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              marginBottom: '0.5rem',
+              letterSpacing: '-0.02em',
+            }}>
+              {sessionConfig?.branding?.title || 'Asistan'}
+            </h1>
+            <p style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: 400 }}>
+              {sessionConfig?.branding?.subtitle || 'Randevu · Bilgi'}
+            </p>
+          </div>
         </div>
 
         {/* Mode Toggle */}

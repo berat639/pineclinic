@@ -1462,6 +1462,30 @@ const app = new Elysia()
     return { success: true, ...result }
   })
 
+  .post('/api/admin/settings/logo-upload', async ({ body, set }) => {
+    const { file } = body as { file?: File }
+    if (!file || file.size === 0) {
+      set.status = 400
+      return { error: 'Geçersiz dosya' }
+    }
+    const ext = file.name.split('.').pop() || 'png'
+    const fileName = `logo_${Date.now()}.${ext}`
+    
+    const { mkdirSync, writeFileSync } = await import('fs')
+    const { resolve } = await import('path')
+    
+    mkdirSync(resolve(PUBLIC_DIR, 'uploads'), { recursive: true })
+    const dest = resolve(PUBLIC_DIR, 'uploads', fileName)
+    
+    const arrayBuffer = await file.arrayBuffer()
+    writeFileSync(dest, Buffer.from(arrayBuffer))
+    
+    const logoUrl = `/uploads/${fileName}`
+    await setBranding({ logoUrl })
+    
+    return { success: true, logoUrl }
+  })
+
   // ── Prompt Section Settings ─────────────────────────────────────────────────
   .get('/api/admin/settings/prompts', async () => {
     const dbSections = await getAllPromptSections()
