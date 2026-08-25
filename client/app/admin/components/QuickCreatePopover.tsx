@@ -77,7 +77,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           position: 'fixed', 
           left, top, 
           width: modalWidth, 
-          background: 'var(--card-bg, #fff)', 
+          background: '#ffffff', // Solid white to fix transparency
           borderRadius: 12,
           boxShadow: '0 10px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
           zIndex: 1001,
@@ -86,9 +86,10 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
+        className="dark:bg-slate-900"
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border, #eee)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border, #eee)', background: '#ffffff' }} className="dark:bg-slate-900">
           <input 
             type="text"
             placeholder="Başlık ekle"
