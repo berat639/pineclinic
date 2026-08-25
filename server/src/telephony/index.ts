@@ -571,8 +571,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)
           } else if (ev.type === 'audio') {
             const { info } = state
-            // Mikrofon henüz açılmadıysa (greeting öncesi hat gürültüsü) sesi gönderme
-            if (!info.session || !state.micEnabled) continue
+            // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
+            if (!info.session || !state.micEnabled || state.hangupPending) continue
 
             const { frames, justClosed } = state.noiseGate.process(ev.pcm)
 

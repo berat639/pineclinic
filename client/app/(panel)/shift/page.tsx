@@ -27,6 +27,7 @@ export default function ShiftPage() {
   const [formUser, setFormUser] = useState('')
   const [formStart, setFormStart] = useState('09:00')
   const [formEnd, setFormEnd] = useState('18:00')
+  const [formWeekly, setFormWeekly] = useState(false)
 
   const startOfWeek = new Date()
   startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1 + weekOffset * 7)
@@ -46,11 +47,36 @@ export default function ShiftPage() {
 
   async function createShift(e: React.FormEvent) {
     e.preventDefault()
-    const res = await fetch(`/api/shifts`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify({ userId: formUser, date: formDate, startTime: formStart, endTime: formEnd }),
-    })
-    if (res.ok) { const s = await res.json(); setShifts(prev => [...prev, s]); setShowForm(false) }
+    
+    if (formWeekly) {
+      const baseDate = new Date(formDate)
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(baseDate)
+        d.setDate(d.getDate() + i)
+        const dateStr = d.toISOString().split('T')[0]!
+        
+        const res = await fetch(`/api/shifts`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ userId: formUser, date: dateStr, startTime: formStart, endTime: formEnd }),
+        })
+        if (res.ok) {
+          const s = await res.json()
+          setShifts(prev => [...prev, s])
+        }
+      }
+      setShowForm(false)
+      setFormWeekly(false)
+    } else {
+      const res = await fetch(`/api/shifts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ userId: formUser, date: formDate, startTime: formStart, endTime: formEnd }),
+      })
+      if (res.ok) { 
+        const s = await res.json()
+        setShifts(prev => [...prev, s])
+        setShowForm(false) 
+      }
+    }
   }
 
   async function deleteShift(id: string) {
@@ -81,6 +107,10 @@ export default function ShiftPage() {
           <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} required style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', fontSize: 13 }} />
           <input type="time" value={formStart} onChange={e => setFormStart(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', fontSize: 13, width: 90 }} />
           <input type="time" value={formEnd} onChange={e => setFormEnd(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', fontSize: 13, width: 90 }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--foreground)', fontSize: 13, cursor: 'pointer', padding: '0 8px' }}>
+            <input type="checkbox" checked={formWeekly} onChange={e => setFormWeekly(e.target.checked)} />
+            Haftalık Şablon (7 Gün)
+          </label>
           <button type="submit" style={{ padding: '6px 14px', borderRadius: 6, background: 'var(--success)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13 }}>Kaydet</button>
         </form>
       )}

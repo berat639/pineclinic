@@ -181,10 +181,12 @@ export function parseTreatmentVoice(text: string): ParsedTreatment {
     result.isWakeWord = true
   }
 
-  if (/(?:sil|çıkar|iptal|kaldır|temizle|vazgeç)/i.test(lower)) {
+  if (/(?:sil|çıkar|çıkart|iptal|kaldır|temizle|vazgeç|listeden çıkart)/i.test(lower)) {
     result.intent = 'DELETE'
-  } else if (/(?:onayla|evet|kabul|tamam|kaydet|ekle)/i.test(lower)) {
+  } else if (/(?:onayla|evet|kabul|tamam)/i.test(lower)) {
     result.intent = 'CONFIRM'
+  } else if (/(?:kaydet|ekle|ilave et|oluştur)/i.test(lower)) {
+    result.intent = 'ADD'
   } else {
     result.intent = 'ADD'
   }
@@ -310,6 +312,15 @@ export function VoiceInputButton({ onTranscript, size = 'md', label, continuous 
     if (transcript) {
       if (!continuous && isListening) return; // Normal modda konuşma bitene kadar bekle
       
+      const lower = transcript.toLowerCase()
+      // Siri kapatma / durdurma komutları
+      if (/(?:siri|asistan).*?(?:kapat|kapan|dur|durdur)/i.test(lower) || /(?:dinlemeyi durdur|sesimi kapat)/i.test(lower)) {
+        console.log('🛑 [VoiceInput] Asistan sesli komutla kapatıldı.')
+        stop()
+        reset()
+        return
+      }
+
       console.log('🗣️ [VoiceInput] Söylenen metin (işlenmek üzere API\'ye gidiyor):', transcript)
       onTranscriptRef.current(transcript)
       reset() // İşledikten sonra sıfırla ki döngüye girmesin

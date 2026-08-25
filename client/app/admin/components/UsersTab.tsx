@@ -20,6 +20,7 @@ const ROLE_META: Record<string, { label: string; color: string; bg: string }> = 
 export default function UsersTab() {
   const [users, setUsers] = useState<User[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -32,19 +33,51 @@ export default function UsersTab() {
     ? users.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
     : users
 
-  async function addUser(e: React.FormEvent) {
+  async function submitForm(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    const res = await fetch(`/api/yonetici/users`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify(form),
+    
+    if (editingUserId) {
+      const { password, ...rest } = form
+      const body = password ? { ...rest, password } : rest
+      const res = await fetch(`/api/yonetici/users/${editingUserId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setUsers(users.map(u => u.id === editingUserId ? { ...u, ...data } : u))
+        setShowForm(false)
+        setEditingUserId(null)
+        setForm({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' })
+      } else setError(data.error || 'Hata')
+    } else {
+      const res = await fetch(`/api/yonetici/users`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setUsers([...users, { ...data, active: true }])
+        setShowForm(false)
+        setForm({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' })
+      } else setError(data.error || 'Hata')
+    }
+  }
+
+  function handleEditClick(u: User) {
+    setForm({
+      email: u.email,
+      name: u.name,
+      password: '', // Boş bırak, sadece değiştirmek istenirse doldurulur
+      role: u.role,
+      phone: u.phone || '',
+      specialty: u.specialty || '',
+      color: u.color || '#60a5fa'
     })
-    const data = await res.json()
-    if (res.ok) {
-      setUsers([...users, { ...data, active: true }])
-      setShowForm(false)
-      setForm({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' })
-    } else setError(data.error || 'Hata')
+    setEditingUserId(u.id)
+    setShowForm(true)
+    setError('')
   }
 
   async function toggleActive(u: User) {
@@ -68,17 +101,20 @@ export default function UsersTab() {
         <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', padding: '0 8px' }}>
           {users.length} kullanıcı · {users.filter(u => u.role === 'hekim').length} hekim
         </div>
-        <button onClick={() => { setShowForm(!showForm); setError('') }} style={btnStyle}>
-          {showForm ? 'İptal' : '+ Kullanıcı Ekle'}
+        <button onClick={() => { setShowForm(!showForm); setEditingUserId(null); setForm({ email: '', name: '', password: '', role: 'host', phone: '', specialty: '', color: '#60a5fa' }); setError('') }} style={btnStyle}>
+          {showForm && !editingUserId ? 'İptal' : '+ Kullanıcı Ekle'}
         </button>
       </div>
 
       {/* Form */}
       {showForm && (
-        <form onSubmit={addUser} className="glass-card" style={{ padding: 16, marginBottom: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 10 }}>
+        <form onSubmit={submitForm} className="glass-card" style={{ padding: 16, marginBottom: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 10 }}>
+          <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', fontWeight: 600, color: 'var(--foreground)' }}>
+            {editingUserId ? 'Kullanıcıyı Düzenle' : 'Yeni Kullanıcı'}
+          </div>
           <input placeholder="İsim *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required style={inputStyle} />
           <input placeholder="E-posta *" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required style={inputStyle} />
-          <input placeholder="Şifre * (min 6)" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={6} style={inputStyle} />
+          <input placeholder={editingUserId ? "Şifre (Değiştirmek için)" : "Şifre * (min 6)"} type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required={!editingUserId} minLength={6} style={inputStyle} />
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ ...inputStyle, cursor: 'pointer' }}>
             <option value="host">Resepsiyon</option>
             <option value="hekim">Hekim</option>
@@ -95,8 +131,8 @@ export default function UsersTab() {
             </>
           )}
           <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>
-            <button type="button" onClick={() => setShowForm(false)} style={{ ...btnStyle, background: 'var(--glass-bg)', color: 'var(--foreground-2)', border: '1px solid var(--glass-border)' }}>Vazgeç</button>
-            <button type="submit" style={btnStyle}>Oluştur</button>
+            <button type="button" onClick={() => { setShowForm(false); setEditingUserId(null); }} style={{ ...btnStyle, background: 'var(--glass-bg)', color: 'var(--foreground-2)', border: '1px solid var(--glass-border)' }}>Vazgeç</button>
+            <button type="submit" style={btnStyle}>{editingUserId ? 'Güncelle' : 'Oluştur'}</button>
           </div>
           {error && <div style={{ gridColumn: '1/-1', fontSize: '0.75rem', color: 'var(--danger)', padding: '4px 0' }}>{error}</div>}
         </form>
@@ -139,9 +175,14 @@ export default function UsersTab() {
                     <span style={{ fontSize: '0.72rem', color: u.active ? '#10b981' : 'var(--foreground-3)' }}>{u.active ? 'Aktif' : 'Pasif'}</span>
                   </td>
                   <td style={tdStyle}>
-                    <button onClick={() => toggleActive(u)} style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 6, background: u.active ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)', border: `1px solid ${u.active ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`, color: u.active ? '#ef4444' : '#10b981', cursor: 'pointer', fontWeight: 500 }}>
-                      {u.active ? 'Deaktif' : 'Aktif Et'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <button onClick={() => toggleActive(u)} style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 6, background: u.active ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)', border: `1px solid ${u.active ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`, color: u.active ? '#ef4444' : '#10b981', cursor: 'pointer', fontWeight: 500 }}>
+                        {u.active ? 'Deaktif' : 'Aktif Et'}
+                      </button>
+                      <button onClick={() => handleEditClick(u)} style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 6, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 500 }}>
+                        Düzenle
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )

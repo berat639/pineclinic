@@ -883,7 +883,7 @@ export default function KnowledgeTab() {
                   color: greetingTab === 'callerid' ? '#f472b6' : 'var(--foreground-3)',
                 }}
               >
-                📞 Caller ID
+                📞 Arayan Numara
               </button>
             </div>
 
