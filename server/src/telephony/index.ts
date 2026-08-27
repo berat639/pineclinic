@@ -228,8 +228,9 @@ function estimatePitch(pcm: Buffer, sampleRate: number = 24000): number {
 
   for (let lag = minLag; lag <= maxLag; lag++) {
     let sum = 0
+    // Perform integer arithmetic for maximum V8 performance (no floating-point division)
     for (let i = 0; i < samples.length - lag; i++) {
-      sum += (samples[i] / 32768) * (samples[i + lag] / 32768)
+      sum += samples[i] * samples[i + lag]
     }
     if (sum > maxVal) {
       maxVal = sum
@@ -239,8 +240,8 @@ function estimatePitch(pcm: Buffer, sampleRate: number = 24000): number {
 
   // Güvenilirlik eşiği (RMS yeterince yüksek mi?)
   let energy = 0
-  for (let i = 0; i < samples.length; i++) energy += (samples[i] / 32768) ** 2
-  if (energy / samples.length < 0.001) return 0 // Çok sessiz
+  for (let i = 0; i < samples.length; i++) energy += Math.abs(samples[i])
+  if (energy / samples.length < 500) return 0 // Çok sessiz
 
   return bestLag > 0 ? sampleRate / bestLag : 0
 }
