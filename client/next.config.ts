@@ -5,7 +5,14 @@ const BACKEND_PROXY_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:300
 
 const config: NextConfig = {
   output: 'standalone',
-  // rewrites are now handled dynamically by app/api/[...proxy]/route.ts
+  async rewrites() {
+    return [
+      {
+        source: '/uploads/:path*',
+        destination: `${BACKEND_PROXY_URL}/uploads/:path*`,
+      }
+    ]
+  },
 
   webpack: (config, { isServer }) => {
     if (!isServer) {
