@@ -208,6 +208,41 @@ interface CallState {
   micEnabled: boolean
   userSpeechEndTime?: number
   micBuffer: Buffer[]
+  aiVoiceFrames: number
+  lowPitchFrames: number
+}
+
+// ── Pitch Detection (Erkek Sesini Algılama) ──────────────────────────────────
+// Gemini'den dönen ses (24 kHz PCM) üzerinde otokorelasyon ile temel frekans (F0) bulur.
+// Kadın sesi genelde 165-255 Hz, Erkek sesi genelde 85-155 Hz arasındadır.
+function estimatePitch(pcm: Buffer, sampleRate: number = 24000): number {
+  const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2)
+  // İnsan sesi için 70 Hz ile 300 Hz arası periyotları (lag) arayacağız
+  const minLag = Math.floor(sampleRate / 300)
+  const maxLag = Math.floor(sampleRate / 70)
+
+  if (samples.length < maxLag * 2) return 0
+
+  let maxVal = 0
+  let bestLag = 0
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let sum = 0
+    for (let i = 0; i < samples.length - lag; i++) {
+      sum += (samples[i] / 32768) * (samples[i + lag] / 32768)
+    }
+    if (sum > maxVal) {
+      maxVal = sum
+      bestLag = lag
+    }
+  }
+
+  // Güvenilirlik eşiği (RMS yeterince yüksek mi?)
+  let energy = 0
+  for (let i = 0; i < samples.length; i++) energy += (samples[i] / 32768) ** 2
+  if (energy / samples.length < 0.001) return 0 // Çok sessiz
+
+  return bestLag > 0 ? sampleRate / bestLag : 0
 }
 
 /** Timer'ları temizle. */
@@ -297,9 +332,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           closed: false,
           hangupPending: false,
           audioQueue: [],
-          micBuffer: [],
-          micEnabled: false,
           noiseGate: new NoiseGate(gateCfg.threshold, gateCfg.trailingFrames, gateCfg.preRollFrames, shortId),
+          micEnabled: false,
+          micBuffer: [],
+          aiVoiceFrames: 0,
+          lowPitchFrames: 0,
         }
         socket.data = state
 
@@ -407,7 +444,27 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
                     state.userSpeechEndTime = undefined
                   }
-                  // pcm: 24 kHz signed 16-bit LE → 8 kHz SLIN
+                  // pcm: 24 kHz signed 16-bit LE
+                  // Basit pitch (frekans) analizi ile sesin erkek sesine kayıp kaymadığını tespit et
+                  if (pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
+                    const pitch = estimatePitch(pcm, 24000)
+                    if (pitch > 0) {
+                      state.aiVoiceFrames++
+                      // 145 Hz altı genellikle erkek sesidir (veya pitch düşmüştür)
+                      if (pitch < 145) state.lowPitchFrames++
+                      
+                      // Her 10 sesli frame'de bir kontrol et
+                      if (state.aiVoiceFrames >= 10) {
+                        const lowPitchRatio = state.lowPitchFrames / state.aiVoiceFrames
+                        if (lowPitchRatio > 0.6) {
+                          console.warn(`[${shortId}] 🚨 UYARI: AI sesi kalınlaştı (Erkek sesi algılandı)! Ortalama Pitch < 145 Hz. (Olası Gemini Persona hatası)`)
+                        }
+                        state.aiVoiceFrames = 0
+                        state.lowPitchFrames = 0
+                      }
+                    }
+                  }
+
                   const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
                   state.downsampleState = nextState
                   const frames = state.outChunker.chunk(pcm8)

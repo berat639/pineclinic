@@ -590,12 +590,20 @@ export async function createLiveSession(
 
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt,
+    systemInstruction: options.systemPrompt + '\n\nÖNEMLİ: Sen bir kadın asistansın. Sesin ve tonlaman her zaman bir kadın sesi olmalıdır. Hiçbir zaman sesini kalınlaştırma veya erkek sesine geçme.',
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
       languageCode: 'tr-TR',
+    },
+    generationConfig: {
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
+        },
+        languageCode: 'tr-TR',
+      },
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
     // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
