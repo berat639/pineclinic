@@ -450,7 +450,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           )}
         </div>
         <div className="rc-body">
-          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }} onMouseDown={(e) => {
+          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }} onDoubleClick={(e) => {
             if (e.button !== 0 || dragRef.current.element) return;
             const gridRect = gridRef.current?.getBoundingClientRect();
             if (!gridRect) return;
@@ -465,14 +465,17 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
             const top = Math.floor(mouseY / rowHeight) * rowHeight;
             
-            setDraftSelection({
-              startX: e.clientX,
-              startY: e.clientY,
-              colIdx,
-              top,
-              height: rowHeight,
-              active: true
-            });
+            const startMins = 9 * 60 + Math.round(top / 48 * 30);
+            const endMins = startMins + 30;
+            const doctorId = displayDoctors[colIdx]?.id || null;
+            const formatTime = (mins: number) => {
+              const h = Math.floor(mins / 60);
+              const m = mins % 60;
+              return `${currentDate}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
+            };
+            if (onEmptySlotSelect) {
+              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.pageX, e.pageY);
+            }
           }}>
             {slots.map(slot => (
               <div key={slot} style={{ display: 'contents' }}>
@@ -609,7 +612,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           ))}
         </div>
         <div className="rc-body">
-          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(7, 1fr)` }} onMouseDown={(e) => {
+          <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(7, 1fr)` }} onDoubleClick={(e) => {
             if (e.button !== 0 || dragRef.current.element) return;
             const gridRect = gridRef.current?.getBoundingClientRect();
             if (!gridRect) return;
@@ -624,14 +627,17 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
             const top = Math.floor(mouseY / rowHeight) * rowHeight;
             
-            setDraftSelection({
-              startX: e.clientX,
-              startY: e.clientY,
-              colIdx,
-              top,
-              height: rowHeight,
-              active: true
-            });
+            const startMins = 9 * 60 + Math.round(top / 48 * 30);
+            const endMins = startMins + 30;
+            const dateStr = weekDays[colIdx]?.date || currentDate;
+            const formatTime = (mins: number) => {
+              const h = Math.floor(mins / 60);
+              const m = mins % 60;
+              return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
+            };
+            if (onEmptySlotSelect) {
+              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), null, e.pageX, e.pageY);
+            }
           }}>
             {slots.map(slot => (
               <div key={slot} style={{ display: 'contents' }}>

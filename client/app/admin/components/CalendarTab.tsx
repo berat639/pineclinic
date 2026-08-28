@@ -1223,32 +1223,37 @@ export default function CalendarTab() {
           defaultStartTime={quickCreateMenu.start.slice(11, 16)}
           defaultEndTime={quickCreateMenu.end.slice(11, 16)}
           doctorId={quickCreateMenu.doctorId}
+          patients={patients}
+          doctors={doctors}
           onClose={() => {
             setQuickCreateMenu(null);
             window.dispatchEvent(new Event('clear-calendar-draft'));
           }}
           onSave={async (data) => {
             if (data.type === 'patient_appointment') {
-              // 1. Create Patient
-              const ptRes = await fetch('/api/dental/patients', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  name: data.name, 
-                  phone: data.phone,
-                  email: data.email,
-                  // We don't have TC/Gender backend fields yet unless added, so we store minimally
-                })
-              });
-              const pt = await ptRes.json();
-              if (pt.id) {
+              let pId = data.patientId;
+              if (!pId) {
+                // 1. Create Patient
+                const ptRes = await fetch('/api/dental/patients', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    name: data.name, 
+                    phone: data.phone,
+                    email: data.email,
+                  })
+                });
+                const pt = await ptRes.json();
+                pId = pt.id;
+              }
+              if (pId) {
                 // 2. Create Appointment
                 await fetch('/api/dental/appointments', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    patientId: pt.id,
-                    doctorId: quickCreateMenu.doctorId,
+                    patientId: pId,
+                    doctorId: data.doctorId,
                     title: data.title,
                     startTime: quickCreateMenu.start,
                     endTime: quickCreateMenu.end,
