@@ -465,6 +465,9 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
             const top = Math.floor(mouseY / rowHeight) * rowHeight;
             
+            const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
+            const cellY = gridRect.top + window.scrollY + top;
+
             const startMins = 9 * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const doctorId = displayDoctors[colIdx]?.id || null;
@@ -474,7 +477,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
               return `${currentDate}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
             };
             if (onEmptySlotSelect) {
-              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.pageX, e.pageY);
+              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, cellX, cellY);
             }
           }}>
             {slots.map(slot => (
@@ -627,6 +630,9 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const rowHeight = 48; // 60 mins = 96px, 30 mins = 48px
             const top = Math.floor(mouseY / rowHeight) * rowHeight;
             
+            const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
+            const cellY = gridRect.top + window.scrollY + top;
+
             const startMins = 9 * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const dateStr = weekDays[colIdx]?.date || currentDate;
@@ -636,7 +642,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
               return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
             };
             if (onEmptySlotSelect) {
-              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), null, e.pageX, e.pageY);
+              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), null, cellX, cellY);
             }
           }}>
             {slots.map(slot => (

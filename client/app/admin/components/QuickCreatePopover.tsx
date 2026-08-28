@@ -63,10 +63,10 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
   const scrollX = typeof window !== 'undefined' ? window.scrollX : 0;
   const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
 
-  let left = x + 20;
-  let top = y - 50;
+  let left = x;
+  let top = y;
 
-  if (left + modalWidth > scrollX + screenWidth) left = x - modalWidth - 20;
+  if (left + modalWidth > scrollX + screenWidth) left = x - modalWidth;
   if (top + modalHeight > scrollY + screenHeight) top = scrollY + screenHeight - modalHeight - 20;
   if (top < scrollY + 20) top = scrollY + 20;
 
@@ -117,7 +117,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           position: 'absolute', 
           left, top, 
           width: modalWidth, 
-          background: '#ffffff',
+          backgroundColor: 'var(--card-bg, #ffffff)',
           borderRadius: 12,
           boxShadow: '0 10px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
           zIndex: 1001,
@@ -127,20 +127,12 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
-        className="dark:bg-slate-900"
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border, #eee)' }}>
-          <input 
-            type="text"
-            placeholder="Başlık ekle (Otomatik hasta adı)"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            style={{ 
-              border: 'none', background: 'transparent', fontSize: '1.25rem', fontWeight: 600, 
-              color: 'var(--foreground, #111)', outline: 'none', flex: 1 
-            }}
-          />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border, #eee)', backgroundColor: 'var(--card-bg, #ffffff)' }}>
+          <div style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--foreground, #111)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+             {title || 'Yeni Randevu'}
+          </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--foreground-3, #888)' }}>
             <X size={20} />
           </button>
