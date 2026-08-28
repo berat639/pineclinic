@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { toast } from 'react-hot-toast'
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
@@ -161,7 +162,7 @@ export default function StokTab() {
     const isDecreasing = ['cikis', 'fire', 'imha', 'iade'].includes(type)
 
     if (isDecreasing && (currentQty - quantity) < 0) {
-      alert(`Yetersiz stok: ${item?.name || 'Kayıt'} için mevcut ${currentQty} adet var. -1'e düşmeden işlem durduruldu.`)
+      toast.error(`Yetersiz stok: ${item?.name || 'Kayıt'} için mevcut ${currentQty} adet var. -1'e düşmeden işlem durduruldu.`)
       return
     }
 
@@ -174,7 +175,7 @@ export default function StokTab() {
     if (res.ok) fetchData()
     else {
       const data = await res.json().catch(() => ({})) as { error?: string }
-      alert(data.error || 'İşlem yapılamadı')
+      toast.error(data.error || 'İşlem yapılamadı')
     }
   }
 

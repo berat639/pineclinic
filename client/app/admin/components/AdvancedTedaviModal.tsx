@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { toast } from 'react-hot-toast';
 import { BriefcaseMedical, X, Pencil, Trash2, Plus } from 'lucide-react';
 import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
@@ -145,7 +146,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Yazdırma penceresi açılamadı. Lütfen tarayıcınızın pop-up engelleyicisini kapatın.');
+      toast.error('Yazdırma penceresi açılamadı. Lütfen tarayıcınızın pop-up engelleyicisini kapatın.');
       return;
     }
 
@@ -253,7 +254,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     try {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        alert("Tarayıcınız ses tanıma özelliğini desteklemiyor. Lütfen Chrome kullanın.");
+        toast.error("Tarayıcınız ses tanıma özelliğini desteklemiyor. Lütfen Chrome kullanın.");
         return;
       }
       const recognition = new SpeechRecognition();
@@ -307,7 +308,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       recognition.start();
     } catch (err) {
       console.error(err);
-      alert("Ses tanıma başlatılamadı.");
+      toast.error("Ses tanıma başlatılamadı.");
     }
   };
 
@@ -388,7 +389,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
   const handleSave = async () => {
     if (Object.keys(toothDrafts).length === 0) {
-      alert('Lütfen önce dişlere işlem veya endikasyon atayın.');
+      toast.error('Lütfen önce dişlere işlem veya endikasyon atayın.');
       return;
     }
 
@@ -401,11 +402,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     const isEmailMissing = notifyPatient && (notificationType === 'email' || notificationType === 'both') && !patientInfo?.email
 
     if (isPhoneMissing && !missingPhone.trim()) {
-      alert('Lütfen eksik olan telefon numarasını giriniz.');
+      toast.error('Lütfen eksik olan telefon numarasını giriniz.');
       return;
     }
     if (isEmailMissing && !missingEmail.trim()) {
-      alert('Lütfen eksik olan e-posta adresini giriniz.');
+      toast.error('Lütfen eksik olan e-posta adresini giriniz.');
       return;
     }
 
@@ -456,12 +457,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         } else {
           const errText = await uploadRes.text();
           console.error('DCM Upload Error:', errText);
-          alert(`Röntgen dosyası yüklenemedi (Sunucu Hatası): ${errText}`);
+          toast.error(`Röntgen dosyası yüklenemedi (Sunucu Hatası): ${errText}`);
           return;
         }
       } catch (e: any) {
         console.error('DCM Upload Catch Error:', e);
-        alert(`Röntgen yüklenirken ağ hatası oluştu: ${e.message}`);
+        toast.error(`Röntgen yüklenirken ağ hatası oluştu: ${e.message}`);
         return;
       }
     }
@@ -522,7 +523,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       onSaved();
     } catch (error) {
       console.error(error);
-      alert('Kayıt sırasında bir hata oluştu.');
+      toast.error('Kayıt sırasında bir hata oluştu.');
     }
   };
 
@@ -609,7 +610,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   <input type="file" accept=".dcm" style={{ display: 'none' }} onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file && file.size > 20 * 1024 * 1024) {
-                      alert('Dosya boyutu 20 MB\'dan büyük olamaz');
+                      toast.error('Dosya boyutu 20 MB\'dan büyük olamaz');
                       e.target.value = '';
                       return;
                     }
@@ -691,7 +692,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                     if (!last.indications.includes(ind)) last.indications.push(ind);
                                   });
                                 } else {
-                                  alert('Endikasyon atamak için dişte en az bir işlem bulunmalıdır.');
+                                  toast.error('Endikasyon atamak için dişte en az bir işlem bulunmalıdır.');
                                 }
                               }
                             });
@@ -754,7 +755,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                     if (!last.indications.includes(ind)) last.indications.push(ind);
                                   });
                                 } else {
-                                  alert('Endikasyon atamak için dişte en az bir işlem bulunmalıdır.');
+                                  toast.error('Endikasyon atamak için dişte en az bir işlem bulunmalıdır.');
                                 }
                               }
                             });
@@ -782,7 +783,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             return next;
                           });
                         } else if (type === 'indication') {
-                          alert('Endikasyonları sağdaki tablodan işlem satırına sürükleyebilir veya menüden seçebilirsiniz.');
+                          toast.error('Endikasyonları sağdaki tablodan işlem satırına sürükleyebilir veya menüden seçebilirsiniz.');
                         }
                       }}
                     />
@@ -1495,7 +1496,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     onClick={() => {
                       if (!canAddIndication) {
-                        alert('Endikasyon ekleyebilmek için seçili dişlerin tümünde en az bir işlem bulunmalıdır.');
+                        toast.error('Endikasyon ekleyebilmek için seçili dişlerin tümünde en az bir işlem bulunmalıdır.');
                         return;
                       }
                       setToothDrafts(prev => {

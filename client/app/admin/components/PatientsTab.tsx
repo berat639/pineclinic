@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
+import { toast } from 'react-hot-toast'
 import PatientProfileCard from './PatientProfileCard'
 import Pagination from './Pagination'
 
@@ -26,6 +27,7 @@ export default function PatientsTab() {
   
   const [showAddModal, setShowAddModal] = useState(false)
   const [newPatient, setNewPatient] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
+  const [excelErrors, setExcelErrors] = useState<string[]>([])
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -64,16 +66,28 @@ export default function PatientsTab() {
         const ws = wb.Sheets[wsname]
         const data = XLSX.utils.sheet_to_json(ws) as any[]
         
-        const mappedPatients = data.map(row => ({
-          name: row['Ad Soyad'] || row['Name'] || row['Adı Soyadı'] || row['hastaAdiSoyadi'],
-          phone: row['Telefon'] || row['Phone'] || row['hastaTelefonu'],
-          tcIdentity: String(row['TC Kimlik'] || row['TC'] || row['TC Kimlik No'] || row['tcKimlikNo'] || ''),
-          gender: row['Cinsiyet'] || row['Gender'] || '',
-          birthDate: row['Doğum Tarihi'] || row['BirthDate'] || null,
-        })).filter(p => p.name)
+        setExcelErrors([])
+        const errors: string[] = []
+        
+        const mappedPatients = data.map((row, index) => {
+          const name = row['Ad Soyad'] || row['Name'] || row['Adı Soyadı'] || row['hastaAdiSoyadi']
+          if (!name) {
+            errors.push(`${index + 2}. Satır: Ad Soyad eksik`)
+            return null
+          }
+          return {
+            name,
+            phone: row['Telefon'] || row['Phone'] || row['hastaTelefonu'],
+            tcIdentity: String(row['TC Kimlik'] || row['TC'] || row['TC Kimlik No'] || row['tcKimlikNo'] || ''),
+            gender: row['Cinsiyet'] || row['Gender'] || '',
+            birthDate: row['Doğum Tarihi'] || row['BirthDate'] || null,
+          }
+        }).filter(Boolean) as any[]
+
+        setExcelErrors(errors)
 
         if (mappedPatients.length === 0) {
-          alert('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "Ad Soyad" sütunu olduğundan emin olun.')
+          toast.error('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "Ad Soyad" sütunu olduğundan emin olun.')
           return
         }
 
@@ -84,15 +98,15 @@ export default function PatientsTab() {
         })
 
         if (res.ok) {
-          alert(`${mappedPatients.length} hasta başarıyla eklendi!`)
+          toast.success(`${mappedPatients.length} hasta başarıyla eklendi!`)
           loadPatients()
         } else {
           const err = await res.json()
-          alert('Hata: ' + (err.error || 'Bilinmeyen hata'))
+          toast.error('Hata: ' + (err.error || 'Bilinmeyen hata'))
         }
       } catch (err) {
         console.error('Excel parse error:', err)
-        alert('Excel dosyası okunurken bir hata oluştu.')
+        toast.error('Excel dosyası okunurken bir hata oluştu.')
       }
     }
     reader.readAsBinaryString(file)
@@ -102,7 +116,7 @@ export default function PatientsTab() {
 
   const handleAddPatient = async () => {
     if (!newPatient.name.trim()) {
-      alert('Hasta adı zorunludur.')
+      toast.error('Hasta adı zorunludur.')
       return
     }
     
@@ -113,18 +127,27 @@ export default function PatientsTab() {
         body: JSON.stringify(newPatient)
       })
       if (res.ok) {
-        alert('Hasta başarıyla eklendi!')
+        toast.success('Hasta başarıyla eklendi!')
         setShowAddModal(false)
         setNewPatient({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
         loadPatients()
       } else {
         const err = await res.json()
-        alert('Hata: ' + (err.error || 'Bilinmeyen hata'))
+        toast.error('Hata: ' + (err.error || 'Bilinmeyen hata'))
       }
     } catch (err) {
       console.error(err)
-      alert('Hasta eklenirken bir hata oluştu.')
+      toast.error('Hasta eklenirken bir hata oluştu.')
     }
+  }
+
+  const handleDownloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([
+      { 'Ad Soyad': 'Ahmet Yılmaz', 'TC Kimlik': '12345678901', 'Telefon': '05321234567', 'Cinsiyet': 'E', 'Doğum Tarihi': '1990-01-01' }
+    ])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sablon')
+    XLSX.writeFile(wb, 'Hasta_Sablon.xlsx')
   }
 
   useEffect(() => {
@@ -176,6 +199,17 @@ export default function PatientsTab() {
             onChange={handleFileUpload}
           />
           <button
+            onClick={handleDownloadTemplate}
+            style={{
+              padding: '8px 16px', background: 'rgba(59, 130, 246, 0.2)',
+              border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: 8,
+              color: '#60a5fa', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6
+            }}
+          >
+            ⬇️ Şablon İndir
+          </button>
+          <button
             onClick={() => fileInputRef.current?.click()}
             style={{
               padding: '8px 16px', background: 'rgba(34, 197, 94, 0.2)',
@@ -213,6 +247,15 @@ export default function PatientsTab() {
           />
         </div>
       </div>
+
+      {excelErrors.length > 0 && (
+        <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 8, color: '#f87171' }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠️ Excel Yükleme Hataları (Bu satırlar atlandı):</div>
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.85rem' }}>
+            {excelErrors.map((err, i) => <li key={i}>{err}</li>)}
+          </ul>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Yükleniyor...</div>

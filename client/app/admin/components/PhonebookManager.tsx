@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { toast } from 'react-hot-toast'
 
 interface PhonebookEntry {
   label: string
@@ -32,9 +33,9 @@ export default function PhonebookManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entries)
       })
-      alert('Telefon defteri kaydedildi.')
+      toast.success('Telefon defteri kaydedildi.')
     } catch (err) {
-      alert('Kaydedilirken hata oluştu.')
+      toast.error('Kaydedilirken hata oluştu.')
     } finally {
       setSaving(false)
     }

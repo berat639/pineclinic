@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ArrowRight } from 'lucide-react';
 
 interface Props {
@@ -45,6 +46,8 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
   const [paymentStatus, setPaymentStatus] = useState('completed');
   const [plannedDate, setPlannedDate] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
+
+  const finalPatientId = patientMode === 'select' ? selectedPatientId : name;
 
   // Auto-update title when patient changes
   useEffect(() => {
@@ -172,11 +175,8 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           </button>
           <button 
             onClick={() => {
-               // Only allow switching to payment if a patient is selected (step logic part 2)
-               // However, since it's "quick create", the appointment isn't created yet until they hit Save.
-               // We will just disable the tab visually or alert them.
-               if (!selectedPatientId && patientMode !== 'create') {
-                  alert('Lütfen önce bir hasta seçin veya ekleyin.');
+               if (!finalPatientId) {
+                  toast.error('Lütfen önce bir hasta seçin veya ekleyin.');
                   return;
                }
                setTab('payment');

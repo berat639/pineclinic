@@ -384,9 +384,9 @@ export default function CalendarTab() {
     : events;
 
   return (
-    <div className="w-full max-w-[1200px] flex flex-col lg:flex-row gap-6 items-start mx-auto relative">
+    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', width: '100%', maxWidth: '1200px', margin: '0 auto', position: 'relative', alignItems: 'flex-start' }}>
       {/* Left Sidebar */}
-      <div className="w-full lg:w-[280px] shrink-0 flex flex-col gap-4">
+      <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
         
         <div className="relative">
@@ -495,9 +495,9 @@ export default function CalendarTab() {
       </div>
 
       {/* Right Content */}
-      <div className="flex-1 min-w-0 flex flex-col w-full relative z-0">
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 0, width: '100%' }}>
         {/* Header */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 flex-wrap gap-3">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <h3 className="text-lg md:text-xl font-bold text-foreground m-0">
             Günlük Randevu Takvimi
           </h3>

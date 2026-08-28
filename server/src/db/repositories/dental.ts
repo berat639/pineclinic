@@ -761,7 +761,27 @@ export async function createPatientsBulk(patientList: {
 }[]) {
   if (patientList.length === 0) return []
   const { patients } = await import('../schema')
-  const mapped = patientList.map(p => ({ ...p, birthDate: p.birthDate ? new Date(p.birthDate) : null }))
+  
+  const existing = await db.select({ tcIdentity: patients.tcIdentity, phone: patients.phone }).from(patients)
+  const existingTcs = new Set(existing.map(e => e.tcIdentity).filter(Boolean))
+  const existingPhones = new Set(existing.map(e => e.phone).filter(Boolean))
+  
+  const uniqueList = []
+  const currentTcs = new Set()
+  const currentPhones = new Set()
+  
+  for (const p of patientList) {
+    if (p.tcIdentity && (existingTcs.has(p.tcIdentity) || currentTcs.has(p.tcIdentity))) continue
+    if (p.phone && (existingPhones.has(p.phone) || currentPhones.has(p.phone))) continue
+    
+    uniqueList.push(p)
+    if (p.tcIdentity) currentTcs.add(p.tcIdentity)
+    if (p.phone) currentPhones.add(p.phone)
+  }
+  
+  if (uniqueList.length === 0) return []
+  
+  const mapped = uniqueList.map(p => ({ ...p, birthDate: p.birthDate ? new Date(p.birthDate) : null }))
   return await db.insert(patients).values(mapped).returning()
 }
 

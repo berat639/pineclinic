@@ -127,10 +127,6 @@ body {
   color: var(--foreground);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   min-height: 100vh;
-  background-image:
-    radial-gradient(ellipse at 20% 50%, var(--body-gradient-1) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 20%, var(--body-gradient-2) 0%, transparent 50%);
-  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────────── */

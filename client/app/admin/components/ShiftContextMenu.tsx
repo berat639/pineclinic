@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { toast } from 'react-hot-toast'
 
 interface ShiftContextMenuProps {
   x: number
@@ -40,7 +41,7 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
 
   const handleSelectTemplate = (t: { name: string, start: number, end: number }) => {
     if (!selectedDoctorId) {
-      alert("Lütfen bir personel seçin")
+      toast.error("Lütfen bir personel seçin")
       return
     }
     onSave({

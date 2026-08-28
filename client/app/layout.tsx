@@ -7,11 +7,16 @@ export const metadata: Metadata = {
   description: 'Gerçek zamanlı sesli yapay zeka asistanı',
 }
 
+import { Toaster } from 'react-hot-toast'
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <Toaster position="bottom-right" />
+        </ThemeProvider>
       </body>
     </html>
   )
