@@ -386,9 +386,15 @@ export default function FastScheduleModal({
               <option value="">⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
               {doctors.map((d: any) => {
                 const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === formattedDateStr);
-                const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
+                const hasShift = docShifts.length > 0;
+                const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
                 return (
-                  <option key={d.id} value={d.id}>
+                  <option 
+                    key={d.id} 
+                    value={d.id}
+                    disabled={!hasShift}
+                    style={{ color: !hasShift ? '#ef4444' : 'inherit' }}
+                  >
                     Dr. {d.name} {d.specialty ? `(${d.specialty})` : ''} {shiftText}
                   </option>
                 );

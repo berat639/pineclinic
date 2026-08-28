@@ -859,10 +859,20 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <select value={defaultDoctorId || ''} onChange={e => setDefaultDoctorId(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}>
                         <option value="">⚠️ Atanmadı</option>
                         {doctors?.map((d: any) => {
-                          const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : new Date().toLocaleDateString('sv');
-                          const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                          const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
-                          return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                          const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '';
+                          const docShifts = apptDateStr ? (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr) : [];
+                          const hasShift = docShifts.length > 0;
+                          const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                          return (
+                            <option 
+                              key={d.id} 
+                              value={d.id}
+                              disabled={apptDateStr ? !hasShift : false}
+                              style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
+                            >
+                              {d.name} {shiftText}
+                            </option>
+                          );
                         })}
                       </select>
                     </div>
@@ -1241,10 +1251,20 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                     >
                                       <option value="">-- Doktor Seç --</option>
                                       {doctors.map((d: any) => {
-                                        const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : new Date().toLocaleDateString('sv');
-                                        const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                                        const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
-                                        return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                        const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '';
+                                        const docShifts = apptDateStr ? (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr) : [];
+                                        const hasShift = docShifts.length > 0;
+                                        const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                        return (
+                                          <option 
+                                            key={d.id} 
+                                            value={d.id}
+                                            disabled={apptDateStr ? !hasShift : false}
+                                            style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
+                                          >
+                                            {d.name} {shiftText}
+                                          </option>
+                                        );
                                       })}
                                     </select>
                                     {!draft.doctorId && <span style={{ color: '#f59e0b', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }} title="Doktor Atanmadı">⚠️ Atanmadı</span>}

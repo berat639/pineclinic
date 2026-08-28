@@ -1247,8 +1247,18 @@ export default function CalendarTab() {
                                         {doctors.map((d: any) => {
                                           const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
                                           const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                                          const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
-                                          return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                          const hasShift = docShifts.length > 0;
+                                          const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                          return (
+                                            <option 
+                                              key={d.id} 
+                                              value={d.id} 
+                                              disabled={apptDateStr ? !hasShift : false}
+                                              style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
+                                            >
+                                              {d.name} {shiftText}
+                                            </option>
+                                          );
                                         })}
                                       </select>
                                     </div>
@@ -1430,8 +1440,18 @@ export default function CalendarTab() {
                                 {doctors.map((d: any) => {
                                   const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
                                   const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                                  const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
-                                  return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                  const hasShift = docShifts.length > 0;
+                                  const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                  return (
+                                    <option 
+                                      key={d.id} 
+                                      value={d.id} 
+                                      disabled={apptDateStr ? !hasShift : false}
+                                      style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
+                                    >
+                                      {d.name} {shiftText}
+                                    </option>
+                                  );
                                 })}
                               </select>
                             </div>

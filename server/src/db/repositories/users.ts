@@ -81,3 +81,9 @@ export async function deleteSessionByJti(jti: string) {
 export async function deleteAllUserSessions(userId: string) {
   await db.delete(userSessions).where(eq(userSessions.userId, userId))
 }
+
+export async function deleteUser(id: string) {
+  await deleteAllUserSessions(id)
+  const rows = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id })
+  return rows.length > 0
+}

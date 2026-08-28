@@ -629,6 +629,20 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     return { id: updated.id, email: updated.email, name: updated.name, role: updated.role, active: updated.active }
   })
 
+  .delete('/users/:id', async ({ params, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!user || !requireYonetici(user, set)) return { error: 'Yetki yok' }
+
+    if (user.id === params.id) {
+      set.status = 400; return { error: 'Kendi hesabınızı silemezsiniz' }
+    }
+
+    const { deleteUser } = await import('../db/repositories/users')
+    const ok = await deleteUser(params.id)
+    if (!ok) { set.status = 404; return { error: 'Kullanıcı bulunamadı' } }
+    return { success: true }
+  })
+
   // ── Integrations ───────────────────────────────────────────────────────────
   .get('/integrations', async ({ cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
