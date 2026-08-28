@@ -1,100 +1,89 @@
-import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { DayPicker } from 'react-day-picker';
+import 'react-day-picker/dist/style.css';
+import { tr } from 'date-fns/locale';
+import Holidays from 'date-holidays';
+import { format } from 'date-fns';
 
 interface MiniCalendarProps {
   currentDate: string; // YYYY-MM-DD
   onDateSelect: (date: string) => void;
+  customHolidays?: { date: string, name: string }[];
 }
 
-export default function MiniCalendar({ currentDate, onDateSelect }: MiniCalendarProps) {
-  const [viewDate, setViewDate] = useState(new Date(currentDate));
+export default function MiniCalendar({ currentDate, onDateSelect, customHolidays = [] }: MiniCalendarProps) {
+  const [month, setMonth] = useState<Date>(new Date(currentDate));
+  
+  const hd = useMemo(() => new Holidays('TR'), []);
+  const selected = new Date(currentDate);
 
-  const currentMonth = viewDate.getMonth();
-  const currentYear = viewDate.getFullYear();
-
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
-  // Adjust so Monday is 0
-  const startDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
-
-  const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
-  const dayNames = ["P", "P", "S", "Ç", "P", "C", "C"]; // Pzt, Sal, Çar, Per, Cum, Cmt, Paz
-
-  const changeMonth = (offset: number) => {
-    const newDate = new Date(viewDate);
-    newDate.setMonth(newDate.getMonth() + offset);
-    setViewDate(newDate);
+  const modifiers = {
+    holiday: (date: Date) => {
+      const h = hd.isHoliday(date);
+      if (h && h.length > 0) return true;
+      
+      const dateStr = format(date, 'yyyy-MM-dd');
+      if (customHolidays.some(ch => ch.date === dateStr)) return true;
+      
+      return false;
+    }
   };
 
-  const days = [];
-  for (let i = 0; i < startDay; i++) {
-    days.push(null);
-  }
-  for (let i = 1; i <= daysInMonth; i++) {
-    days.push(i);
-  }
-
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const modifiersStyles = {
+    holiday: {
+      color: '#e11d48',
+      fontWeight: 'bold',
+      backgroundColor: 'rgba(225, 29, 72, 0.1)'
+    }
+  };
 
   return (
-    <div style={{ padding: '10px 0', width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h4 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
-          {monthNames[currentMonth]} {currentYear}
-        </h4>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={() => changeMonth(-1)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--foreground)' }}>
-            <ChevronLeft size={20} />
-          </button>
-          <button onClick={() => changeMonth(1)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--foreground)' }}>
-            <ChevronRight size={20} />
-          </button>
-        </div>
-      </div>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', marginBottom: 8 }}>
-        {dayNames.map((d, i) => (
-          <div key={i} style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground-2)', padding: '4px 0' }}>{d}</div>
-        ))}
-      </div>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px 0', textAlign: 'center' }}>
-        {days.map((d, i) => {
-          if (!d) return <div key={i} />;
-          
-          const dateStr = `${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-          const isSelected = dateStr === currentDate;
-          const isToday = dateStr === todayStr;
-
-          return (
-            <div key={i} style={{ display: 'flex', justifyContent: 'center' }}>
-              <button
-                onClick={() => {
-                  setViewDate(new Date(currentYear, currentMonth, d));
-                  onDateSelect(dateStr);
-                }}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.85rem',
-                  fontWeight: isSelected ? 600 : 400,
-                  cursor: 'pointer',
-                  border: 'none',
-                  background: isSelected ? 'var(--brand, #0d6efd)' : isToday ? 'var(--input-bg, #f3f4f6)' : 'transparent',
-                  color: isSelected ? '#fff' : 'var(--foreground, #333)',
-                  transition: 'all 0.2s'
-                }}
-              >
-                {d}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+    <div style={{ width: '100%', display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
+      <style>{`
+        .rdp {
+          --rdp-cell-size: 36px;
+          --rdp-accent-color: var(--brand, #3b82f6);
+          --rdp-background-color: var(--brand, #3b82f6);
+          margin: 0;
+        }
+        .rdp-day_selected, .rdp-day_selected:focus-visible, .rdp-day_selected:hover {
+          color: white !important;
+          background-color: var(--brand, #3b82f6) !important;
+        }
+        .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+          background-color: var(--input-bg, #f3f4f6);
+        }
+        .rdp-caption_label {
+          font-size: 1.1rem;
+          font-weight: 600;
+          color: var(--foreground);
+        }
+        .rdp-head_cell {
+          font-size: 0.8rem;
+          font-weight: 500;
+          color: var(--foreground-2);
+          text-transform: capitalize;
+        }
+        .rdp-day {
+          font-size: 0.85rem;
+          color: var(--foreground);
+        }
+      `}</style>
+      <DayPicker
+        mode="single"
+        locale={tr}
+        selected={selected}
+        onSelect={(date) => {
+          if (date) {
+            onDateSelect(format(date, 'yyyy-MM-dd'));
+          }
+        }}
+        month={month}
+        onMonthChange={setMonth}
+        modifiers={modifiers}
+        modifiersStyles={modifiersStyles}
+        showOutsideDays
+      />
     </div>
   );
 }

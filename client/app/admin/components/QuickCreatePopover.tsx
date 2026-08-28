@@ -12,9 +12,10 @@ interface Props {
   doctorId: string | null;
   patients: any[];
   doctors: any[];
+  events?: any[];
 }
 
-export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate, defaultStartTime, defaultEndTime, doctorId, patients, doctors }: Props) {
+export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate, defaultStartTime, defaultEndTime, doctorId, patients, doctors, events = [] }: Props) {
   const [tab, setTab] = useState<'patient' | 'payment'>('patient');
   
   // patient selection vs creation
@@ -50,10 +51,23 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
     if (patientMode === 'select' && selectedPatientId) {
       const p = patients.find(p => p.id === selectedPatientId);
       if (p) setTitle(p.name);
+
+      // Smart doctor selection
+      if (events && events.length > 0 && !doctorId) {
+        const patientEvents = events.filter((e: any) => e.patientId === selectedPatientId && e.doctorId);
+        if (patientEvents.length > 0) {
+          // Sort descending by date
+          patientEvents.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+          const lastDoctorId = patientEvents[0].doctorId;
+          if (lastDoctorId) {
+            setSelectedDoctorId(lastDoctorId);
+          }
+        }
+      }
     } else if (patientMode === 'create' && name) {
       setTitle(name);
     }
-  }, [patientMode, selectedPatientId, name, patients]);
+  }, [patientMode, selectedPatientId, name, patients, events, doctorId]);
 
   const modalWidth = 400;
   const modalHeight = 550;
@@ -72,9 +86,13 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
 
   const handleSave = () => {
     if (tab === 'patient') {
+      let finalTitle = title || 'Yeni Hasta / Randevu';
+      if (!selectedDoctorId && !finalTitle.includes('Kontrol Randevusu')) {
+        finalTitle = `${finalTitle} - Kontrol Randevusu`;
+      }
       onSave({
         type: 'patient_appointment',
-        title: title || 'Yeni Hasta / Randevu',
+        title: finalTitle,
         patientId: patientMode === 'select' ? selectedPatientId : undefined,
         doctorId: selectedDoctorId || null,
         name, phone, tc, email, gender, birthDate,

@@ -133,6 +133,8 @@ export default function CalendarTab() {
   const [quickCreateMenu, setQuickCreateMenu] = useState<{ start: string, end: string, doctorId: string | null, x: number, y: number } | null>(null)
 
   const [showForm, setShowForm] = useState(false)
+  const [showPatientSearchDropdown, setShowPatientSearchDropdown] = useState(false)
+
   const [showDocForm, setShowDocForm] = useState(false)
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [patientSearchQuery, setPatientSearchQuery] = useState('')
@@ -382,34 +384,48 @@ export default function CalendarTab() {
     : events;
 
   return (
-    <div style={{ maxWidth: 1200, width: '100%', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+    <div className="w-full max-w-[1200px] flex flex-col lg:flex-row gap-6 items-start mx-auto relative">
       {/* Left Sidebar */}
-      <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="w-full lg:w-[280px] shrink-0 flex flex-col gap-4">
         <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
         
-        <div style={{ 
-          background: 'var(--input-bg, #f3f4f6)', 
-          padding: '10px 14px', 
-          borderRadius: 8, 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 10 
-        }}>
-          <Users size={20} color="var(--foreground-2, #6b7280)" />
-          <input 
-            type="text" 
-            placeholder="Kişi arayın" 
-            value={patientSearchQuery}
-            onChange={(e) => setPatientSearchQuery(e.target.value)}
-            style={{ 
-              border: 'none', 
-              background: 'transparent', 
-              outline: 'none', 
-              width: '100%', 
-              fontSize: '1rem', 
-              color: 'var(--foreground, #111827)' 
-            }}
-          />
+        <div className="relative">
+          <div className="bg-gray-100 dark:bg-gray-800/50 px-3 py-2.5 rounded-lg flex items-center gap-2 border border-transparent focus-within:border-brand transition-colors">
+            <Users size={20} className="text-gray-500" />
+            <input
+              type="text"
+              placeholder="Kişi arayın"
+              value={patientSearchQuery}
+              onChange={(e) => {
+                setPatientSearchQuery(e.target.value);
+                setShowPatientSearchDropdown(true);
+              }}
+              onFocus={() => setShowPatientSearchDropdown(true)}
+              onBlur={() => setTimeout(() => setShowPatientSearchDropdown(false), 200)}
+              className="border-none bg-transparent outline-none w-full text-base text-gray-900 dark:text-gray-100"
+            />
+          </div>
+          {showPatientSearchDropdown && patientSearchQuery.length >= 2 && (
+            <div className="absolute top-full mt-2 left-0 right-0 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+              {patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).length > 0 ? (
+                patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setPatientSearchQuery(p.name);
+                      setShowPatientSearchDropdown(false);
+                    }}
+                    className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex flex-col transition-colors"
+                  >
+                    <span className="font-medium text-sm text-gray-900 dark:text-gray-100">{p.name}</span>
+                    {p.phone && <span className="text-xs text-gray-500">{p.phone}</span>}
+                  </div>
+                ))
+              ) : (
+                <div className="px-4 py-3 text-sm text-gray-500 text-center">Sonuç bulunamadı</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Takvimlerim (Doctor Filter) */}
@@ -479,20 +495,13 @@ export default function CalendarTab() {
       </div>
 
       {/* Right Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="flex-1 min-w-0 flex flex-col w-full relative z-0">
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 16,
-          flexWrap: 'wrap',
-          gap: 10,
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 flex-wrap gap-3">
+          <h3 className="text-lg md:text-xl font-bold text-foreground m-0">
             Günlük Randevu Takvimi
           </h3>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="flex gap-2 items-center flex-wrap">
             {/* View tabs */}
             <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--input-border)' }}>
               {(['day', 'week', 'month'] as const).map(v => (
@@ -674,11 +683,17 @@ export default function CalendarTab() {
 
       {/* Right Panel — Event Detail */}
       {panelOpen && selectedEvent && (
-        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)', zIndex: 9999, padding: 24, overflowY: 'auto', boxShadow: '-4px 0 20px rgba(0,0,0,0.19)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Detayı</h3>
-            <button onClick={() => setPanelOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
-          </div>
+        <>
+          {/* Backdrop for click outside */}
+          <div 
+            className="fixed inset-0 z-[9998] bg-black/20 backdrop-blur-sm transition-opacity"
+            onClick={() => setPanelOpen(false)}
+          />
+          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[380px] bg-card border-l border-divider z-[9999] p-6 overflow-y-auto shadow-2xl transform transition-transform duration-300">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold text-foreground m-0">Randevu Detayı</h3>
+              <button onClick={() => setPanelOpen(false)} className="bg-transparent border-none text-foreground-3 hover:text-foreground text-xl cursor-pointer transition-colors">✕</button>
+            </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             {/* ── Hasta Bilgisi ── */}
@@ -1040,6 +1055,7 @@ export default function CalendarTab() {
             </button>
           </div>
         </div>
+        </>
       )}
       {/* Tedavi Ekle Modal */}
       {showTedaviForm && selectedEvent && (
@@ -1225,6 +1241,7 @@ export default function CalendarTab() {
           doctorId={quickCreateMenu.doctorId}
           patients={patients}
           doctors={doctors}
+          events={events}
           onClose={() => {
             setQuickCreateMenu(null);
             window.dispatchEvent(new Event('clear-calendar-draft'));

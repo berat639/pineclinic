@@ -51,49 +51,31 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
 
   return (
     <>
-      {/* Backdrop (invisible) to close when clicked outside, optional, but let's stick to X button */}
+      {/* Backdrop */}
       <div 
-        style={{
-          position: 'fixed',
-          top: 0, left: 0, bottom: 0,
-          width: 400,
-          background: 'var(--card-bg)',
-          borderRight: '1px solid var(--divider)',
-          zIndex: 99999,
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: '4px 0 20px rgba(0,0,0,0.19)',
-          transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.3s ease-in-out',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid var(--divider)' }}>
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)' }}>👥 Hastalar</h2>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--foreground-3)' }}>✕</button>
+        className="fixed inset-0 z-[9998] bg-black/20 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+      />
+      
+      <div className={`fixed top-0 right-0 bottom-0 w-full sm:w-[420px] bg-card border-l border-divider z-[9999] flex flex-col shadow-2xl transform transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between p-4 border-b border-divider">
+          <h2 className="m-0 text-lg font-bold text-foreground flex items-center gap-2">👥 Hastalar</h2>
+          <button onClick={onClose} className="bg-transparent border-none cursor-pointer text-xl text-foreground-3 hover:text-foreground transition-colors">✕</button>
         </div>
 
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--divider)' }}>
+        <div className="p-4 border-b border-divider bg-glass-bg">
           <input 
             type="text" 
             placeholder="Hasta adı veya telefon ara..." 
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            style={{ 
-              width: '100%', 
-              padding: '8px 12px', 
-              borderRadius: 6, 
-              border: '1px solid var(--input-border)',
-              background: 'var(--input-bg)',
-              color: 'var(--foreground)',
-              outline: 'none',
-              fontSize: '0.85rem'
-            }}
+            className="w-full px-3 py-2 rounded-md border border-input-border bg-input-bg text-foreground focus:outline-none focus:border-brand transition-colors text-sm"
           />
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="flex-1 overflow-y-auto">
           {paginatedPatients.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--foreground-3)', fontSize: '0.9rem' }}>Kayıt bulunamadı.</div>
+            <div className="p-6 text-center text-foreground-3 text-sm">Kayıt bulunamadı.</div>
           ) : (
             paginatedPatients.map(p => (
               <div key={p.id}>
