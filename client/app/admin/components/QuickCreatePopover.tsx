@@ -72,20 +72,54 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
     }
   }, [patientMode, selectedPatientId, name, patients, events, doctorId]);
 
-  const modalWidth = 400;
-  const modalHeight = 550;
-  // Use scroll/page boundaries for positioning absolute
-  const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
-  const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
-  const scrollX = typeof window !== 'undefined' ? window.scrollX : 0;
-  const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+  const popoverRef = React.useRef<HTMLDivElement>(null);
+  const [computedLeft, setComputedLeft] = useState(x);
+  const [computedTop, setComputedTop] = useState(y);
 
-  let left = x;
-  let top = y;
+  useEffect(() => {
+      if (popoverRef.current) {
+        const offsetParent = popoverRef.current.offsetParent as HTMLElement;
+        let cLeft = x;
+        let cTop = y;
+        
+        if (offsetParent) {
+          const parentRect = offsetParent.getBoundingClientRect();
+          const scrollY = window.scrollY || 0;
+          const scrollX = window.scrollX || 0;
+          
+          const parentPageTop = parentRect.top + scrollY;
+          const parentPageLeft = parentRect.left + scrollX;
+          
+          cTop = y - parentPageTop;
+          cLeft = x - parentPageLeft;
+        }
 
-  if (left + modalWidth > scrollX + screenWidth) left = x - modalWidth;
-  if (top + modalHeight > scrollY + screenHeight) top = scrollY + screenHeight - modalHeight - 20;
-  if (top < scrollY + 20) top = scrollY + 20;
+        const modalWidth = 400;
+        const modalHeight = 550;
+        
+        // Simple bounds check based on window dimensions
+        if (typeof window !== 'undefined') {
+           const screenWidth = window.innerWidth;
+           const screenHeight = window.innerHeight;
+           // If we know the cTop, and the modal height, we can ensure it doesn't overflow the bottom of the screen.
+           // Actually, since it's absolute, checking against viewport is tricky.
+           // But we can approximate by checking if the initial viewport-relative position would overflow.
+           const viewportY = cTop + (offsetParent ? offsetParent.getBoundingClientRect().top : 0);
+           if (viewportY + modalHeight > screenHeight) {
+              cTop -= (viewportY + modalHeight - screenHeight + 20);
+           }
+           const viewportX = cLeft + (offsetParent ? offsetParent.getBoundingClientRect().left : 0);
+           if (viewportX + modalWidth > screenWidth) {
+              cLeft -= (viewportX + modalWidth - screenWidth + 20);
+           }
+           if (cLeft < 0) cLeft = 10;
+           if (cTop < 0) cTop = 10;
+        }
+
+        setComputedLeft(cLeft);
+        setComputedTop(cTop);
+      }
+  }, [x, y]);
 
   const handleSave = () => {
     if (tab === 'patient') {
@@ -130,18 +164,20 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
   return (
     <>
       <div 
-        style={{ position: 'fixed', inset: 0, zIndex: 1000 }} 
+        style={{ position: 'fixed', inset: 0, zIndex: 100004 }} 
         onClick={onClose} 
       />
       <div 
+        ref={popoverRef}
         style={{ 
           position: 'absolute', 
-          left, top, 
+          left: computedLeft, 
+          top: computedTop, 
           width: modalWidth, 
           backgroundColor: 'var(--card-bg, #ffffff)',
           borderRadius: 12,
           boxShadow: '0 10px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
-          zIndex: 1001,
+          zIndex: 100005,
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',

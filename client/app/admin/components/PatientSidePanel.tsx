@@ -59,13 +59,14 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
       
       <div 
         style={{ 
-          position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '420px', 
-          backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)', 
-          zIndex: 9999, display: 'flex', flexDirection: 'column', 
-          boxShadow: '-4px 0 25px rgba(0,0,0,0.2)',
-          transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
+          position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '420px', 
+          backgroundColor: 'var(--card-bg)', borderRight: '1px solid var(--divider)', 
+          zIndex: 100000, display: 'flex', flexDirection: 'column', 
+          boxShadow: '4px 0 25px rgba(0,0,0,0.2)',
+          transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.3s ease-in-out'
         }}
+        onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid var(--divider)' }}>
           <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: '8px' }}>👥 Hastalar</h2>

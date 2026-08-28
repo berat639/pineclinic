@@ -264,7 +264,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
         if (prev && prev.active && gridRef.current) {
           const gridRect = gridRef.current.getBoundingClientRect();
           // convert top & height to time
-          const startMins = 9 * 60 + Math.round(prev.top / 48 * 30);
+          const startMins = 0 * 60 + Math.round(prev.top / 48 * 30);
           const endMins = startMins + Math.round(prev.height / 48 * 30);
           
           let doctorId: string | null = null;
@@ -402,7 +402,30 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
     window.addEventListener('clear-calendar-draft', handleClearDraft);
     return () => window.removeEventListener('clear-calendar-draft', handleClearDraft);
   }, []);
-  const slots = generateTimeSlots(9, 22)
+
+  // Auto-scroll to current hour
+  useEffect(() => {
+    if (view === 'day' || view === 'week') {
+      const timer = setTimeout(() => {
+        if (!gridRef.current) return;
+        const currentHour = new Date().getHours();
+        const top = currentHour * 96; // 96px per hour (48px per 30 min)
+        
+        let parent = gridRef.current.parentElement;
+        while (parent) {
+          const style = window.getComputedStyle(parent);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            parent.scrollTo({ top: Math.max(0, top - 100), behavior: 'smooth' });
+            break;
+          }
+          parent = parent.parentElement;
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [view]);
+
+  const slots = generateTimeSlots(0, 24)
 
   const globalUnassigned = events.filter(e => !e.doctorId)
 
@@ -469,7 +492,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
             const cellY = gridRect.top + window.scrollY + top;
 
-            const startMins = 9 * 60 + Math.round(top / 48 * 30);
+            const startMins = 0 * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const doctorId = displayDoctors[colIdx]?.id || null;
             const formatTime = (mins: number) => {
@@ -507,7 +530,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
                 <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
                 <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
                   {(() => {
-                    const s = 9 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const s = 0 * 60 + Math.round(draftSelection.top / 48 * 30);
                     const e = s + Math.round(draftSelection.height / 48 * 30);
                     const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
                     return `${f(s)} - ${f(e)}`;
@@ -521,7 +544,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const docEvents = dayEvents.filter(e => e.doctorId === d.id);
             const layout = calculateEventLayout(docEvents);
             return layout.map(({ event: e, col, maxCol }) => {
-              const { top, height } = eventPosition(e.startTime, e.endTime, 9)
+              const { top, height } = eventPosition(e.startTime, e.endTime, 0)
               const isTimeWarning = e.timeConfirmed === false
               const colors = isTimeWarning ? TIME_WARNING_STYLE : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled)
               
@@ -551,7 +574,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           {hasUnassigned && calculateEventLayout(unassigned).map(({ event: e, col, maxCol }) => {
             const left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
             const width = `calc((100% - 56px - 4px) / ${maxCol})`;
-            const { top, height } = eventPosition(e.startTime, e.endTime, 9);
+            const { top, height } = eventPosition(e.startTime, e.endTime, 0);
             const isTimeWarning = e.timeConfirmed === false;
             const colors = isTimeWarning ? TIME_WARNING_STYLE : STATUS_COLORS.pending_assignment;
             
@@ -636,7 +659,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
             const cellY = gridRect.top + window.scrollY + top;
 
-            const startMins = 9 * 60 + Math.round(top / 48 * 30);
+            const startMins = 0 * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const dateStr = weekDays[colIdx]?.date || currentDate;
             const formatTime = (mins: number) => {
@@ -674,7 +697,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
                 <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
                 <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
                   {(() => {
-                    const s = 9 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const s = 0 * 60 + Math.round(draftSelection.top / 48 * 30);
                     const e = s + Math.round(draftSelection.height / 48 * 30);
                     const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
                     return `${f(s)} - ${f(e)}`;
@@ -687,7 +710,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const dayEvents = events.filter(e => e.startTime.slice(0, 10) === day.date);
             const layout = calculateEventLayout(dayEvents);
             return layout.map(({ event: e, col, maxCol }) => {
-              const { top, height } = eventPosition(e.startTime, e.endTime, 9)
+              const { top, height } = eventPosition(e.startTime, e.endTime, 0)
               const isTimeWarning = e.timeConfirmed === false
               const isUnassigned = !e.doctorId
               const colors = isTimeWarning ? TIME_WARNING_STYLE : (isUnassigned ? STATUS_COLORS.pending_assignment : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled))

@@ -57,7 +57,7 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
     <div
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top: y, left: x, zIndex: 99999,
+        position: 'fixed', top: y, left: x, zIndex: 100005,
         background: 'var(--card-bg)', border: '1px solid var(--glass-border)',
         borderRadius: 8, padding: 12, boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
         width: 220,
