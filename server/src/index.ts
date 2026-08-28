@@ -257,12 +257,18 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
   .use(staticPlugin({ assets: PUBLIC_DIR, prefix: '/' }))
-  .get('/uploads/:filename', async ({ params, set }) => {
-    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '')
-    const filePath = resolve(PUBLIC_DIR, 'uploads', safeName)
+  .get('/uploads/*', async ({ params, set }) => {
+    const rawPath = (params as Record<string, string>)['*'] || ''
+    const safeParts = rawPath.split('/').map(p => p.replace(/[^a-zA-Z0-9._-]/g, '')).filter(Boolean)
+    if (safeParts.length === 0) {
+      set.status = 404
+      return { error: 'Dosya bulunamadı' }
+    }
+    const filePath = resolve(PUBLIC_DIR, 'uploads', ...safeParts)
     const file = Bun.file(filePath)
     if (await file.exists()) {
-      const ext = safeName.split('.').pop()?.toLowerCase()
+      const fileName = safeParts[safeParts.length - 1] || ''
+      const ext = fileName.split('.').pop()?.toLowerCase()
       if (ext === 'png') set.headers['content-type'] = 'image/png'
       else if (ext === 'jpg' || ext === 'jpeg') set.headers['content-type'] = 'image/jpeg'
       else if (ext === 'svg') set.headers['content-type'] = 'image/svg+xml'
@@ -271,7 +277,8 @@ const app = new Elysia()
       return file
     }
     // Check database if it's a logo and restore
-    if (safeName.startsWith('logo_')) {
+    const fileName = safeParts[safeParts.length - 1] || ''
+    if (fileName.startsWith('logo_')) {
       const { getSetting } = await import('./db/repositories/settings')
       const logoData = await getSetting('branding.logo_data')
       if (logoData) {
@@ -288,18 +295,6 @@ const app = new Elysia()
         set.headers['cache-control'] = 'public, max-age=86400'
         return new Response(buf)
       }
-    }
-    set.status = 404
-    return { error: 'Dosya bulunamadı' }
-  })
-  .get('/uploads/:subfolder/:filename', async ({ params, set }) => {
-    const safeSubfolder = params.subfolder.replace(/[^a-zA-Z0-9._-]/g, '')
-    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '')
-    const filePath = resolve(PUBLIC_DIR, 'uploads', safeSubfolder, safeName)
-    const file = Bun.file(filePath)
-    if (await file.exists()) {
-      set.headers['cache-control'] = 'public, max-age=86400'
-      return file
     }
     set.status = 404
     return { error: 'Dosya bulunamadı' }
