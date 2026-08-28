@@ -21,13 +21,32 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
   
   const hd = useMemo(() => new Holidays('TR'), []);
   
-  // Get all holidays for the current and next year to avoid month-edge issues
-  const allHolidays = useMemo(() => {
+  // Calculate exact days for each holiday to avoid timezone/duration overlaps
+  const holidayMap = useMemo(() => {
     const y = new Date(currentDate).getFullYear();
     const h1 = hd.getHolidays(y) || [];
     const h2 = hd.getHolidays(y + 1) || [];
     const h3 = hd.getHolidays(y - 1) || [];
-    return [...h3, ...h1, ...h2];
+    
+    const map = new Map<string, string>();
+    [...h3, ...h1, ...h2].forEach(h => {
+      const baseDate = h.date.substring(0, 10);
+      let days = 1;
+      if (h.name.includes('Ramazan')) days = 3;
+      if (h.name.includes('Kurban')) days = 4;
+      
+      for (let i = 0; i < days; i++) {
+         const d = new Date(baseDate + "T12:00:00Z");
+         d.setUTCDate(d.getUTCDate() + i);
+         const dStr = d.toISOString().substring(0, 10);
+         if (map.has(dStr) && !map.get(dStr)?.includes(h.name)) {
+            map.set(dStr, map.get(dStr) + ' & ' + h.name);
+         } else {
+            map.set(dStr, h.name);
+         }
+      }
+    });
+    return map;
   }, [currentDate, hd]);
 
   const selected = new Date(currentDate);
@@ -35,21 +54,17 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
   const modifiers = {
     holiday: (date: Date) => {
       const dateStr = format(date, 'yyyy-MM-dd');
-      
-      const isHol = allHolidays.some(h => h.date.startsWith(dateStr));
-      if (isHol) return true;
-      
+      if (holidayMap.has(dateStr)) return true;
       if (customHolidays.some(ch => ch.date === dateStr)) return true;
-      
       return false;
     }
   };
 
   const modifiersStyles = {
     holiday: {
-      color: '#e11d48',
+      color: '#f59e0b', // Amber
       fontWeight: 'bold',
-      backgroundColor: 'rgba(225, 29, 72, 0.1)'
+      backgroundColor: 'rgba(245, 158, 11, 0.12)'
     }
   };
 
@@ -138,9 +153,9 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
             const dateStr = format(props.date, 'yyyy-MM-dd');
             let title = '';
             
-            const hol = allHolidays.find(h => h.date.startsWith(dateStr));
-            if (hol) {
-              title = hol.name;
+            const holName = holidayMap.get(dateStr);
+            if (holName) {
+              title = holName;
             } else {
               const ch = customHolidays.find(c => c.date === dateStr);
               if (ch) title = ch.name;

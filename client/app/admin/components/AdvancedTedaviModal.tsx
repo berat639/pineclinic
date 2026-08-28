@@ -90,7 +90,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
   const [selectedToothForDetails, setSelectedToothForDetails] = useState<string | null>(null);
 
-  const [defaultDoctorId, setDefaultDoctorId] = useState<string | null>(selectedEvent?.doctorId || null);
+  const [defaultDoctorId, setDefaultDoctorId] = useState<string | null>(null);
   const [activeSelectionMaterials, setActiveSelectionMaterials] = useState<any[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -802,7 +802,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   <div style={{ display: 'flex', gap: 12 }}>
                     <div style={{ flex: 1 }}>
                       <select value={defaultDoctorId || ''} onChange={e => setDefaultDoctorId(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}>
-                        <option value="">Doktor Seçin</option>
+                        <option value="">⚠️ Atanmadı</option>
                         {doctors?.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
                       </select>
                     </div>
@@ -1133,58 +1133,74 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.entries(toothDrafts).map(([tooth, drafts]) => {
-                          const isSelectedRow = selectedToothForDetails === tooth;
-                          const allProcedures = drafts.map(p => p.name).join(', ');
-                          const allIndications = Array.from(new Set(drafts.flatMap(p => p.indications))).filter(Boolean).join(', ');
-                          const totalPrice = drafts.reduce((sum, p) => sum + p.price, 0);
-                          const docIds = Array.from(new Set(drafts.map(p => p.doctorId).filter(Boolean)));
-                          const totalMats = drafts.reduce((sum, p) => sum + p.materials.length, 0);
-                          return (
-                            <tr
-                              key={tooth}
-                              style={{
-                                borderBottom: '1px solid var(--glass-border)',
-                                background: isSelectedRow ? 'var(--glass-bg)' : 'transparent',
-                                transition: 'all 0.2s'
-                              }}
-                            >
-                              <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--accent)' }}>#{tooth}</td>
-                              <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
-                                {allProcedures}
-                                {(totalMats > 0 || docIds.length > 0) && (
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
-                                    {docIds.length > 0 && <span title="Atanan Doktorlar">👨‍⚕️ {docIds.length}</span>}
-                                    {totalMats > 0 && <span title="Eklenen Malzemeler">📦 {totalMats} mlz.</span>}
+                        {Object.entries(toothDrafts).flatMap(([tooth, drafts]) => {
+                          return drafts.map((draft, idx) => {
+                            const isSelectedRow = selectedToothForDetails === tooth;
+                            const totalMats = draft.materials ? draft.materials.length : 0;
+                            return (
+                              <tr
+                                key={`${tooth}-${draft.id}`}
+                                style={{
+                                  borderBottom: '1px solid var(--glass-border)',
+                                  background: isSelectedRow ? 'var(--glass-bg)' : 'transparent',
+                                  transition: 'all 0.2s'
+                                }}
+                              >
+                                <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--accent)' }}>#{tooth}</td>
+                                <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    {draft.name}
                                   </div>
-                                )}
-                              </td>
-                              <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
-                                {allIndications || <span style={{ color: 'var(--foreground-3)' }}>-</span>}
-                              </td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{totalPrice} ₺</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                                  <button onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedToothForDetails(tooth);
-                                  }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }} title="Detayları Düzenle">
-                                    <Pencil size={14} />
-                                  </button>
-                                  <button onClick={(e) => {
-                                    e.stopPropagation();
-                                    setToothDrafts(prev => {
-                                      const next = { ...prev };
-                                      delete next[tooth];
-                                      return next;
-                                    });
-                                  }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="Tüm İşlemleri Sil">
-                                    <X size={14} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
+                                  <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <select
+                                      value={draft.doctorId || ''}
+                                      onChange={(e) => {
+                                        setToothDrafts(prev => {
+                                          const next = { ...prev };
+                                          const index = next[tooth].findIndex(d => d.id === draft.id);
+                                          if (index !== -1) {
+                                            next[tooth][index] = { ...next[tooth][index], doctorId: e.target.value || null };
+                                          }
+                                          return next;
+                                        });
+                                      }}
+                                      style={{ padding: '4px 6px', fontSize: '0.75rem', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', maxWidth: 140, cursor: 'pointer' }}
+                                    >
+                                      <option value="">-- Doktor Seç --</option>
+                                      {doctors.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                    </select>
+                                    {!draft.doctorId && <span style={{ color: '#f59e0b', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }} title="Doktor Atanmadı">⚠️ Atanmadı</span>}
+                                    {totalMats > 0 && <span title="Eklenen Malzemeler" style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>📦 {totalMats} mlz.</span>}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
+                                  {draft.indications && draft.indications.length > 0 ? draft.indications.join(', ') : <span style={{ color: 'var(--foreground-3)' }}>-</span>}
+                                </td>
+                                <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{draft.price} ₺</td>
+                                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                                    <button onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedToothForDetails(tooth);
+                                    }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }} title="Detayları Düzenle">
+                                      <Pencil size={14} />
+                                    </button>
+                                    <button onClick={(e) => {
+                                      e.stopPropagation();
+                                      setToothDrafts(prev => {
+                                        const next = { ...prev };
+                                        next[tooth] = next[tooth].filter(d => d.id !== draft.id);
+                                        if (next[tooth].length === 0) delete next[tooth];
+                                        return next;
+                                      });
+                                    }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="İşlemi Sil">
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
                         })}
                       </tbody>
                     </table>
@@ -1287,12 +1303,16 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100005 }} onClick={() => setSelectedToothForDetails(null)}>
-            <div style={{ background: 'var(--background)', width: 1200, maxWidth: '98vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, border: '1px solid var(--glass-border)', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }} onClick={e => e.stopPropagation()}>
-
-              <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
+            <div style={{ background: 'var(--background)', width: 1400, maxWidth: '98vw', height: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, border: '1px solid var(--glass-border)', boxShadow: '0 24px 48px rgba(0,0,0,0.4)', overflow: 'hidden', position: 'relative' }} onClick={e => e.stopPropagation()}>
+              
+              <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--glass-bg)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--foreground)' }}>Diş #{tooth} Detayları</h3>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', marginTop: 4 }}>Bu dişteki tüm işlemleri aşağıdan yönetebilirsiniz.</div>
+                  {editingGroup && editingGroup.creatorName && (
+                    <span style={{ fontSize: '0.75rem', padding: '4px 8px', borderRadius: 12, background: 'rgba(255,255,255,0.1)', border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
+                      Oluşturan: {editingGroup.creatorName} {editingGroup.creatorRole && `(${editingGroup.creatorRole})`}
+                    </span>
+                  )}
                 </div>
                 <button onClick={() => setSelectedToothForDetails(null)} style={{ background: 'none', border: 'none', color: 'var(--foreground-2)', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
               </div>
@@ -1334,7 +1354,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           }}
                           style={{ ...inputStyle, width: '100%', padding: '10px 12px', fontSize: '0.9rem' }}
                         >
-                          <option value="">Doktor Seçin...</option>
+                          <option value="">⚠️ Atanmadı</option>
                           {doctors?.map((d: any) => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                           ))}

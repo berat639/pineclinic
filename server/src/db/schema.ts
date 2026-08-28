@@ -154,6 +154,8 @@ export const treatmentGroups = pgTable('treatment_groups', {
   name: text('name').notNull(),
   description: text('description'),
   status: text('status').notNull().default('active'), // active, completed, cancelled
+  createdById: uuid('created_by_id').references(() => users.id),
+  updatedById: uuid('updated_by_id').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 

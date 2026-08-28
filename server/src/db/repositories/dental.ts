@@ -260,7 +260,19 @@ export async function createPatient(data: { name: string; phone?: string; balanc
 // ── Treatment Groups ─────────────────────────────────────────────────────────
 
 export async function getPatientTreatmentGroups(patientId: string) {
-  const groups = await db.select().from(treatmentGroups)
+  const groups = await db.select({
+    id: treatmentGroups.id,
+    patientId: treatmentGroups.patientId,
+    name: treatmentGroups.name,
+    description: treatmentGroups.description,
+    status: treatmentGroups.status,
+    createdById: treatmentGroups.createdById,
+    updatedById: treatmentGroups.updatedById,
+    createdAt: treatmentGroups.createdAt,
+    creatorName: users.name,
+    creatorRole: users.role,
+  }).from(treatmentGroups)
+    .leftJoin(users, eq(treatmentGroups.createdById, users.id))
     .where(eq(treatmentGroups.patientId, patientId))
     .orderBy(desc(treatmentGroups.createdAt))
   
@@ -285,11 +297,13 @@ export async function createTreatmentGroup(data: {
   patientId: string
   name: string
   description?: string
+  createdById?: string
 }) {
   const [row] = await db.insert(treatmentGroups).values({
     patientId: data.patientId,
     name: data.name,
     description: data.description,
+    createdById: data.createdById,
   }).returning()
   return row
 }
@@ -298,11 +312,13 @@ export async function updateTreatmentGroup(id: string, data: {
   name?: string
   description?: string
   status?: string
+  updatedById?: string
 }) {
   const values: Record<string, unknown> = {}
   if (data.name !== undefined) values.name = data.name
   if (data.description !== undefined) values.description = data.description
   if (data.status !== undefined) values.status = data.status
+  if (data.updatedById !== undefined) values.updatedById = data.updatedById
   if (Object.keys(values).length === 0) return null
   const [row] = await db.update(treatmentGroups)
     .set(values)
@@ -361,10 +377,11 @@ export async function createTreatmentPlan(data: {
   return row
 }
 
-export async function updateTreatmentPlan(id: string, data: { status?: string; groupId?: string | null }) {
+export async function updateTreatmentPlan(id: string, data: { status?: string; groupId?: string | null; doctorId?: string | null }) {
   const values: Record<string, unknown> = {}
   if (data.status !== undefined) values.status = data.status
   if (data.groupId !== undefined) values.groupId = data.groupId
+  if (data.doctorId !== undefined) values.doctorId = data.doctorId
   if (Object.keys(values).length === 0) return null
   const [row] = await db.update(treatmentPlans)
     .set(values)
@@ -790,8 +807,9 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
   description?: string
   patientId: string
   treatments: any[]
+  updatedById?: string
 }) {
-  await updateTreatmentGroup(groupId, { name: data.name, description: data.description })
+  await updateTreatmentGroup(groupId, { name: data.name, description: data.description, updatedById: data.updatedById })
   
   const existing = await db.select().from(treatmentPlans).where(eq(treatmentPlans.groupId, groupId))
   const existingIds = existing.map(t => t.id)

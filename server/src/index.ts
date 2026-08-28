@@ -564,22 +564,28 @@ const app = new Elysia()
     const { getPatientTreatmentGroups } = await import('./db/repositories/dental')
     return await getPatientTreatmentGroups(params.id)
   })
-  .post('/api/dental/patients/:id/treatment-groups', async ({ params, body, set }) => {
+  .post('/api/dental/patients/:id/treatment-groups', async ({ params, body, set, cookie }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { createTreatmentGroup } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.name) { set.status = 400; return { error: 'name gerekli' } }
-    return await createTreatmentGroup({ patientId: params.id, name: b.name, description: b.description })
+    return await createTreatmentGroup({ patientId: params.id, name: b.name, description: b.description, createdById: user?.id })
   })
-  .put("/api/dental/treatment-groups/:id/full", async ({ params, body, set }) => {
+  .put("/api/dental/treatment-groups/:id/full", async ({ params, body, set, cookie }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { updateTreatmentGroupFull } = await import("./db/repositories/dental")
     const b = body as any
     if (!b.name || !b.patientId || !b.treatments) { set.status = 400; return { error: "Missing fields" } }
-    return await updateTreatmentGroupFull(params.id, { name: b.name, description: b.description, patientId: b.patientId, treatments: b.treatments })
+    return await updateTreatmentGroupFull(params.id, { name: b.name, description: b.description, patientId: b.patientId, treatments: b.treatments, updatedById: user?.id })
   })
-  .put('/api/dental/treatment-groups/:id', async ({ params, body }) => {
+  .put('/api/dental/treatment-groups/:id', async ({ params, body, cookie }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { updateTreatmentGroup } = await import('./db/repositories/dental')
     const b = body as any
-    return await updateTreatmentGroup(params.id, { name: b.name, description: b.description, status: b.status })
+    return await updateTreatmentGroup(params.id, { name: b.name, description: b.description, status: b.status, updatedById: user?.id })
   })
   .delete('/api/dental/treatment-groups/:id', async ({ params, set }) => {
     const { deleteTreatmentGroup } = await import('./db/repositories/dental')
@@ -593,14 +599,16 @@ const app = new Elysia()
     const groups = await getPatientTreatmentGroups(params.id)
     return { treatments, groups: groups.groups }
   })
-  .post('/api/dental/patients/:id/treatments/bulk', async ({ params, body, set }) => {
+  .post('/api/dental/patients/:id/treatments/bulk', async ({ params, body, set, cookie }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { createTreatmentGroup, createTreatmentPlan } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.treatments || !Array.isArray(b.treatments)) { set.status = 400; return { error: 'Missing treatments array' } }
     
     // Create treatment group
     const groupName = b.groupName || `Tedavi Planı - ${new Date().toLocaleDateString('tr-TR')}`
-    const group = await createTreatmentGroup({ patientId: params.id, name: groupName })
+    const group = await createTreatmentGroup({ patientId: params.id, name: groupName, createdById: user?.id })
     if (!group) { set.status = 500; return { error: 'Failed to create group' } }
     
     const results = []
@@ -836,7 +844,7 @@ const app = new Elysia()
   .put('/api/dental/treatments/:id', async ({ params, body }) => {
     const { updateTreatmentPlan } = await import('./db/repositories/dental')
     const b = body as any
-    return await updateTreatmentPlan(params.id, { status: b.status, groupId: b.groupId })
+    return await updateTreatmentPlan(params.id, { status: b.status, groupId: b.groupId, doctorId: b.doctorId })
   })
   .delete('/api/dental/treatments/:id', async ({ params, set }) => {
     const { deleteTreatmentPlan } = await import('./db/repositories/dental')

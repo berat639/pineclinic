@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ArrowRight } from 'lucide-react';
+import FancyHourPicker from './FancyHourPicker';
 
 interface Props {
   x: number;
@@ -14,9 +15,10 @@ interface Props {
   patients: any[];
   doctors: any[];
   events?: any[];
+  isCentered?: boolean;
 }
 
-export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate, defaultStartTime, defaultEndTime, doctorId, patients, doctors, events = [] }: Props) {
+export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate, defaultStartTime, defaultEndTime, doctorId, patients, doctors, events = [], isCentered = false }: Props) {
   const [tab, setTab] = useState<'patient' | 'payment'>('patient');
   
   // patient selection vs creation
@@ -47,6 +49,22 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
   const [plannedDate, setPlannedDate] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
 
+  const timeToNumber = (t: string) => {
+    if (!t) return 9;
+    const [h, m] = t.split(':').map(Number);
+    return h + (m === 30 ? 0.5 : 0);
+  };
+  const formatNumberTime = (val: number) => {
+    const h = Math.floor(val).toString().padStart(2, '0');
+    const m = (val % 1 === 0.5) ? '30' : '00';
+    return `${h}:${m}`;
+  };
+
+  const [timeRange, setTimeRange] = useState<[number, number]>([
+    timeToNumber(defaultStartTime) || 9,
+    timeToNumber(defaultEndTime) || 9.5
+  ]);
+
   const finalPatientId = patientMode === 'select' ? selectedPatientId : name;
 
   // Auto-update title when patient changes
@@ -76,6 +94,9 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
   const [computedLeft, setComputedLeft] = useState(x);
   const [computedTop, setComputedTop] = useState(y);
 
+  const modalWidth = 400;
+  const modalHeight = 550;
+
   useEffect(() => {
       if (popoverRef.current) {
         const offsetParent = popoverRef.current.offsetParent as HTMLElement;
@@ -93,9 +114,6 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           cTop = y - parentPageTop;
           cLeft = x - parentPageLeft;
         }
-
-        const modalWidth = 400;
-        const modalHeight = 550;
         
         // Simple bounds check based on window dimensions
         if (typeof window !== 'undefined') {
@@ -119,7 +137,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         setComputedLeft(cLeft);
         setComputedTop(cTop);
       }
-  }, [x, y]);
+  }, [x, y, isCentered]);
 
   const handleSave = () => {
     if (tab === 'patient') {
@@ -132,6 +150,8 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         title: finalTitle,
         patientId: patientMode === 'select' ? selectedPatientId : undefined,
         doctorId: selectedDoctorId || null,
+        startTime: formatNumberTime(timeRange[0]),
+        endTime: formatNumberTime(timeRange[1]),
         name, phone, tc, email, gender, birthDate,
         sms, emailOpt, waOpt
       });
@@ -170,9 +190,10 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
       <div 
         ref={popoverRef}
         style={{ 
-          position: 'absolute', 
-          left: computedLeft, 
-          top: computedTop, 
+          position: isCentered ? 'fixed' : 'absolute', 
+          left: isCentered ? '50%' : computedLeft, 
+          top: isCentered ? '50%' : computedTop, 
+          transform: isCentered ? 'translate(-50%, -50%)' : 'none',
           width: modalWidth, 
           backgroundColor: 'var(--card-bg, #ffffff)',
           borderRadius: 12,
@@ -300,7 +321,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                 )}
               </div>
 
-              {/* STEP 2: DOCTOR SELECTION */}
+               {/* STEP 2: DOCTOR SELECTION */}
               {(selectedPatientId || patientMode === 'create') && (
                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                    <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>2. Doktor Ataması</label>
@@ -314,9 +335,17 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                        <option key={d.id} value={d.id}>{d.name}</option>
                      ))}
                    </select>
-                   <div style={{ fontSize: '0.7rem', color: '#6b7280', marginTop: 4 }}>
-                     {defaultDate} {defaultStartTime} - {defaultEndTime} arası için randevu oluşturulacak.
+                 </div>
+              )}
+
+              {/* STEP 3: TIME SELECTION */}
+              {(selectedPatientId || patientMode === 'create') && (
+                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                     <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>3. Randevu Saati</label>
+                     <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>Tarih: {defaultDate}</span>
                    </div>
+                   <FancyHourPicker range={timeRange} onChange={setTimeRange} />
                  </div>
               )}
 
