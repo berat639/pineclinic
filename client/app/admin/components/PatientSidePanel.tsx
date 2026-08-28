@@ -57,13 +57,16 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
         onClick={onClose}
       />
       
-      <div className={`fixed top-0 right-0 bottom-0 w-full sm:w-[420px] bg-card border-l border-divider z-[9999] flex flex-col shadow-2xl transform transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="flex items-center justify-between p-4 border-b border-divider">
+      <div 
+        className={`fixed top-0 right-0 bottom-0 w-full sm:w-[420px] z-[9999] flex flex-col shadow-2xl transform transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)' }}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-divider" style={{ borderColor: 'var(--divider)' }}>
           <h2 className="m-0 text-lg font-bold text-foreground flex items-center gap-2">👥 Hastalar</h2>
           <button onClick={onClose} className="bg-transparent border-none cursor-pointer text-xl text-foreground-3 hover:text-foreground transition-colors">✕</button>
         </div>
 
-        <div className="p-4 border-b border-divider bg-glass-bg">
+        <div className="p-4 border-b border-divider bg-glass-bg" style={{ borderColor: 'var(--divider)' }}>
           <input 
             type="text" 
             placeholder="Hasta adı veya telefon ara..." 

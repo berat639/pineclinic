@@ -402,7 +402,8 @@ export default function CalendarTab() {
               }}
               onFocus={() => setShowPatientSearchDropdown(true)}
               onBlur={() => setTimeout(() => setShowPatientSearchDropdown(false), 200)}
-              className="border-none bg-transparent outline-none w-full text-base text-gray-900 dark:text-gray-100"
+              className="border-none bg-transparent outline-none focus:outline-none focus:ring-0 w-full text-base text-gray-900 dark:text-gray-100"
+              autoComplete="off"
             />
           </div>
           {showPatientSearchDropdown && patientSearchQuery.length >= 2 && (
@@ -495,7 +496,7 @@ export default function CalendarTab() {
       </div>
 
       {/* Right Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 0, width: '100%' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 0 }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <h3 className="text-lg md:text-xl font-bold text-foreground m-0">
@@ -689,7 +690,10 @@ export default function CalendarTab() {
             className="fixed inset-0 z-[9998] bg-black/20 backdrop-blur-sm transition-opacity"
             onClick={() => setPanelOpen(false)}
           />
-          <div className="fixed top-0 right-0 bottom-0 w-full sm:w-[380px] bg-card border-l border-divider z-[9999] p-6 overflow-y-auto shadow-2xl transform transition-transform duration-300">
+          <div 
+            className="fixed top-0 right-0 bottom-0 w-full sm:w-[380px] z-[9999] p-6 overflow-y-auto shadow-2xl transform transition-transform duration-300"
+            style={{ backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)' }}
+          >
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-bold text-foreground m-0">Randevu Detayı</h3>
               <button onClick={() => setPanelOpen(false)} className="bg-transparent border-none text-foreground-3 hover:text-foreground text-xl cursor-pointer transition-colors">✕</button>
