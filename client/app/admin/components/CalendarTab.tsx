@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { toast } from 'react-hot-toast'
 import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DentalCalendar from './DentalCalendar'
@@ -1896,8 +1897,8 @@ export default function CalendarTab() {
 
         {/* Ödeme Bilgisi Modal */}
         {showPaymentModal && selectedEvent && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(4px)' }}>
-            <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '90%', maxWidth: 480, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100002 }}>
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '90%', maxWidth: 480, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)' }}>{paymentIdBeingEdited ? 'Ödemeyi Düzenle' : 'Yeni Ödeme Ekle'}</h3>
                 <button onClick={() => { setShowPaymentModal(false); setPaymentIdBeingEdited(null); }} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
@@ -1962,37 +1963,56 @@ export default function CalendarTab() {
                       fetch(`/api/dental/payments/${paymentIdBeingEdited}`, { method: 'DELETE' }).then(() => {
                         setShowPaymentModal(false); setPaymentIdBeingEdited(null);
                         fetch(`/api/dental/patients/${selectedEvent.patientId}/payments`).then(r => r.json()).then(setPatientPayments)
+                        toast.success('Ödeme silindi')
+                      }).catch(() => {
+                        toast.error('Ödeme silinemedi')
                       })
                     }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}>Sil</button>
                   )}
                   <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                     <button onClick={() => { setShowPaymentModal(false); setPaymentIdBeingEdited(null); }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer' }}>İptal</button>
-                    <button onClick={() => {
-                      if (!paymentAmount) return
+                    <button onClick={async () => {
+                      if (!paymentAmount || isNaN(Number(paymentAmount)) || Number(paymentAmount) <= 0) {
+                        toast.error('Lütfen geçerli bir tutar girin')
+                        return
+                      }
+                      if (!paymentDate) {
+                        toast.error('Lütfen ödeme tarihini girin')
+                        return
+                      }
                       const endpoint = paymentIdBeingEdited
                         ? `/api/dental/payments/${paymentIdBeingEdited}`
                         : `/api/dental/patients/${selectedEvent.patientId}/payments`
                       const method = paymentIdBeingEdited ? 'PUT' : 'POST'
 
-                      fetch(endpoint, {
-                        method,
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          amount: Number(paymentAmount),
-                          date: paymentDate,
-                          method: paymentMethod,
-                          status: paymentStatus,
-                          dueDate: paymentDueDate || null,
-                          notes: paymentNote || null,
-                          treatmentPlanId: paymentTreatmentId || undefined
+                      try {
+                        const res = await fetch(endpoint, {
+                          method,
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            amount: Math.round(Number(paymentAmount)),
+                            date: paymentDate,
+                            method: paymentMethod || 'Nakit',
+                            status: paymentStatus || 'completed',
+                            dueDate: paymentDueDate || null,
+                            notes: paymentNote || null,
+                            treatmentPlanId: paymentTreatmentId || undefined
+                          })
                         })
-                      }).then(() => {
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}))
+                          toast.error(err.error || 'Ödeme kaydedilemedi')
+                          return
+                        }
+                        toast.success('Ödeme başarıyla kaydedildi')
                         setShowPaymentModal(false); setPaymentIdBeingEdited(null);
                         setPaymentAmount(''); setPaymentTreatmentId(''); setPaymentNote('');
                         setPaymentMethod('Nakit'); setPaymentStatus('completed'); setPaymentDueDate('');
                         fetch(`/api/dental/patients/${selectedEvent.patientId}/payments`).then(r => r.json()).then(setPatientPayments)
-                      }).catch(() => { })
-                    }} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
+                      } catch {
+                        toast.error('İşlem sırasında bir hata oluştu')
+                      }
+                    }} style={{ padding: '8px 16px', borderRadius: 8, background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
                   </div>
                 </div>
               </div>
@@ -2002,8 +2022,8 @@ export default function CalendarTab() {
 
         {/* Geçmiş İşlemler Modalı */}
         {showPastTreatmentsModal && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, backdropFilter: 'blur(4px)' }}>
-            <div className="glass-card" style={{ width: '90%', maxWidth: 700, padding: 24, borderRadius: 16, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100002 }}>
+            <div style={{ width: '90%', maxWidth: 700, padding: 24, borderRadius: 16, maxHeight: '85vh', display: 'flex', flexDirection: 'column', background: 'var(--card-bg)', border: '1px solid var(--glass-border)', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)' }}>Geçmiş Tedaviler</h3>
                 <button onClick={() => setShowPastTreatmentsModal(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
@@ -2022,7 +2042,7 @@ export default function CalendarTab() {
                   </thead>
                   <tbody>
                     {patientTreatments.filter((t: any) => t.status === 'completed').map((t: any) => (
-                      <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background 0.2s', cursor: 'default' }} onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'} onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                      <tr key={t.id} style={{ borderBottom: '1px solid var(--glass-border)', transition: 'background 0.2s', cursor: 'default' }}>
                         <td style={{ padding: '10px 8px', color: 'var(--foreground-2)' }}>{new Date(t.createdAt).toLocaleDateString('tr-TR')}</td>
                         <td style={{ padding: '10px 8px' }}>
                           {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>#{t.toothNumber}</span> : '-'}
@@ -2069,51 +2089,104 @@ export default function CalendarTab() {
                 let pId = data.patientId;
                 if (!pId) {
                   // 1. Create Patient
-                  const ptRes = await fetch('/api/dental/patients', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      name: data.name,
-                      phone: data.phone,
-                      email: data.email,
-                    })
-                  });
-                  const pt = await ptRes.json();
-                  pId = pt.id;
+                  try {
+                    const ptRes = await fetch('/api/dental/patients', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        name: data.name,
+                        phone: data.phone,
+                        email: data.email,
+                      })
+                    });
+                    if (!ptRes.ok) {
+                      toast.error('Hasta oluşturulamadı');
+                      return;
+                    }
+                    const pt = await ptRes.json();
+                    pId = pt.id;
+                  } catch {
+                    toast.error('Hasta oluşturulurken hata oluştu');
+                    return;
+                  }
                 }
                 if (pId) {
                   // 2. Create Appointment
-                  const apptDate = quickCreateMenu.start.slice(0, 10);
-                  const startStr = data.startTime ? `${apptDate}T${data.startTime}:00+03:00` : (quickCreateMenu.start.includes('+') ? quickCreateMenu.start : `${quickCreateMenu.start}+03:00`);
-                  const endStr = data.endTime ? `${apptDate}T${data.endTime}:00+03:00` : (quickCreateMenu.end.includes('+') ? quickCreateMenu.end : `${quickCreateMenu.end}+03:00`);
-                  await fetch('/api/dental/appointments', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      patientId: pId,
-                      doctorId: data.doctorId,
-                      title: data.title,
-                      startTime: startStr,
-                      endTime: endStr,
-                      type: 'Muayene',
-                      status: data.doctorId ? 'scheduled' : 'pending_assignment'
-                    })
-                  });
+                  try {
+                    const apptDate = quickCreateMenu.start.slice(0, 10);
+                    const startStr = data.startTime ? `${apptDate}T${data.startTime}:00+03:00` : (quickCreateMenu.start.includes('+') ? quickCreateMenu.start : `${quickCreateMenu.start}+03:00`);
+                    const endStr = data.endTime ? `${apptDate}T${data.endTime}:00+03:00` : (quickCreateMenu.end.includes('+') ? quickCreateMenu.end : `${quickCreateMenu.end}+03:00`);
+                    const res = await fetch('/api/dental/appointments', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        patientId: pId,
+                        doctorId: data.doctorId,
+                        title: data.title,
+                        startTime: startStr,
+                        endTime: endStr,
+                        type: 'Muayene',
+                        status: data.doctorId ? 'scheduled' : 'pending_assignment'
+                      })
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      toast.error(err.error || 'Randevu oluşturulamadı');
+                      return;
+                    }
+                    toast.success('Randevu başarıyla oluşturuldu');
+                  } catch {
+                    toast.error('Randevu oluşturulurken bir hata oluştu');
+                    return;
+                  }
                 }
               } else if (data.type === 'payment') {
-                if (data.patientId) {
-                  await fetch(`/api/dental/patients/${data.patientId}/payments`, {
+                let pId = data.patientId;
+                if (!pId && data.name) {
+                  try {
+                    const ptRes = await fetch('/api/dental/patients', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        name: data.name,
+                        phone: data.phone,
+                        email: data.email,
+                      })
+                    });
+                    if (ptRes.ok) {
+                      const pt = await ptRes.json();
+                      pId = pt.id;
+                    }
+                  } catch {}
+                }
+
+                if (!pId) {
+                  toast.error('Lütfen geçerli bir hasta seçin veya ekleyin');
+                  return;
+                }
+
+                try {
+                  const res = await fetch(`/api/dental/patients/${pId}/payments`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      amount: Number(data.amount),
+                      amount: Math.round(Number(data.amount)),
                       date: data.paymentDate,
-                      method: data.paymentMethod,
-                      status: data.paymentStatus,
+                      method: data.paymentMethod || 'Nakit',
+                      status: data.paymentStatus || 'completed',
                       dueDate: data.plannedDate || null,
                       notes: data.paymentNote || null,
                     })
                   });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    toast.error(err.error || 'Ödeme kaydedilemedi');
+                    return;
+                  }
+                  toast.success('Ödeme başarıyla kaydedildi');
+                } catch {
+                  toast.error('Ödeme işlemi sırasında bir hata oluştu');
+                  return;
                 }
               }
               setQuickCreateMenu(null);

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
-import { X, Search, Plus, User, Stethoscope, Clock, Check, ChevronRight } from 'lucide-react';
+import { X, Search, Plus, ChevronRight } from 'lucide-react';
 import FancyHourPicker from './FancyHourPicker';
 
 interface Props {
@@ -57,7 +57,7 @@ export default function QuickCreatePopover({
   // Payment Form
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Nakit');
-  const [paymentDate, setPaymentDate] = useState(defaultDate);
+  const [paymentDate, setPaymentDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
   const [paymentStatus, setPaymentStatus] = useState('completed');
   const [plannedDate, setPlannedDate] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
@@ -168,9 +168,22 @@ export default function QuickCreatePopover({
     }
   }, [x, y, isCentered]);
 
+  const selectedPatientObj = useMemo(() => {
+    return uniquePatients.find(p => p.id === selectedPatientId);
+  }, [uniquePatients, selectedPatientId]);
+
   const handleSave = () => {
     if (tab === 'patient') {
-      let finalTitle = title || 'Yeni Hasta / Randevu';
+      if (patientMode === 'select' && !selectedPatientId) {
+        toast.error('Lütfen listeden bir hasta seçin veya yeni hasta ekleyin.');
+        return;
+      }
+      if (patientMode === 'create' && !name.trim()) {
+        toast.error('Lütfen hasta adını girin.');
+        return;
+      }
+
+      let finalTitle = title || (patientMode === 'select' ? selectedPatientObj?.name : name) || 'Yeni Randevu';
       if (!selectedDoctorId && !finalTitle.includes('Kontrol Randevusu')) {
         finalTitle = `${finalTitle} - Kontrol Randevusu`;
       }
@@ -185,34 +198,56 @@ export default function QuickCreatePopover({
         sms, emailOpt, waOpt
       });
     } else {
+      if (patientMode === 'select' && !selectedPatientId) {
+        toast.error('Lütfen önce bir hasta seçin.');
+        return;
+      }
+      if (patientMode === 'create' && !name.trim()) {
+        toast.error('Lütfen hasta adını girin.');
+        return;
+      }
+      if (!paymentAmount || isNaN(Number(paymentAmount)) || Number(paymentAmount) <= 0) {
+        toast.error('Lütfen geçerli bir ödeme tutarı girin.');
+        return;
+      }
+      if (!paymentDate) {
+        toast.error('Lütfen ödeme tarihini girin.');
+        return;
+      }
+
       onSave({
         type: 'payment',
         title: title || 'Yeni Ödeme',
-        patientId: selectedPatientId || '',
-        amount: paymentAmount, paymentMethod, paymentDate, paymentStatus, plannedDate, paymentNote
+        patientId: patientMode === 'select' ? selectedPatientId : undefined,
+        name: patientMode === 'create' ? name : undefined,
+        phone: patientMode === 'create' ? phone : undefined,
+        email: patientMode === 'create' ? email : undefined,
+        amount: paymentAmount,
+        paymentMethod,
+        paymentDate,
+        paymentStatus,
+        plannedDate,
+        paymentNote
       });
     }
   };
 
-  const selectedPatientObj = useMemo(() => {
-    return uniquePatients.find(p => p.id === selectedPatientId);
-  }, [uniquePatients, selectedPatientId]);
-
-  // Solid, high-contrast styling tokens
-  const solidCardBg = '#1e293b';       // Solid slate-800
-  const solidSubCardBg = '#0f172a';    // Solid slate-900
-  const solidBorder = '#334155';       // Solid slate-700
-  const solidText = '#ffffff';         // Pure white
-  const solidMuted = '#94a3b8';        // Slate-400
-  const solidInputBg = '#0f172a';      // Solid slate-900
-  const solidBrand = '#2563eb';        // Solid blue-600
+  // Theme tokens
+  const cardBg = 'var(--card-bg)';
+  const subCardBg = 'var(--background-2)';
+  const borderCol = 'var(--glass-border)';
+  const inputBorder = 'var(--input-border)';
+  const textCol = 'var(--foreground)';
+  const mutedCol = 'var(--foreground-3)';
+  const inputBg = 'var(--input-bg)';
+  const brandBlue = '#2563eb';
 
   const inputStyle: React.CSSProperties = {
     padding: '10px 12px',
     borderRadius: '8px',
-    border: `1px solid ${solidBorder}`,
-    background: solidInputBg,
-    color: solidText,
+    border: `1px solid ${inputBorder}`,
+    background: inputBg,
+    color: textCol,
     fontSize: '0.875rem',
     outline: 'none',
     width: '100%',
@@ -220,9 +255,13 @@ export default function QuickCreatePopover({
   };
 
   const selectOptionStyle: React.CSSProperties = {
-    background: solidSubCardBg,
-    color: solidText
+    background: cardBg,
+    color: textCol
   };
+
+  const isSaveDisabled = tab === 'patient' 
+    ? (patientMode === 'select' ? !selectedPatientId : !name.trim())
+    : (patientMode === 'select' ? !selectedPatientId : !name.trim()) || !paymentAmount || Number(paymentAmount) <= 0;
 
   return (
     <>
@@ -231,7 +270,7 @@ export default function QuickCreatePopover({
           position: 'fixed', 
           inset: 0, 
           zIndex: 100004, 
-          background: 'rgba(0, 0, 0, 0.65)' 
+          background: 'rgba(0, 0, 0, 0.55)' 
         }} 
         onClick={onClose} 
       />
@@ -243,10 +282,10 @@ export default function QuickCreatePopover({
           top: isCentered ? '50%' : computedTop, 
           transform: isCentered ? 'translate(-50%, -50%)' : 'none',
           width: modalWidth, 
-          background: solidCardBg,
-          border: `1px solid ${solidBorder}`,
+          background: cardBg,
+          border: `1px solid ${borderCol}`,
           borderRadius: '12px',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6)',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2)',
           zIndex: 100005,
           display: 'flex',
           flexDirection: 'column',
@@ -261,15 +300,15 @@ export default function QuickCreatePopover({
           alignItems: 'center', 
           justifyContent: 'space-between', 
           padding: '16px 20px', 
-          borderBottom: `1px solid ${solidBorder}`, 
-          background: solidSubCardBg 
+          borderBottom: `1px solid ${borderCol}`, 
+          background: subCardBg 
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '32px',
               height: '32px',
               borderRadius: '8px',
-              background: solidBrand,
+              background: brandBlue,
               color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
@@ -279,10 +318,10 @@ export default function QuickCreatePopover({
               📅
             </div>
             <div>
-              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: solidText, lineHeight: 1.2 }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: textCol, lineHeight: 1.2 }}>
                 {title || 'Yeni Randevu'}
               </div>
-              <div style={{ fontSize: '0.75rem', color: solidMuted, marginTop: '2px' }}>
+              <div style={{ fontSize: '0.75rem', color: mutedCol, marginTop: '2px' }}>
                 Tarih: {defaultDate}
               </div>
             </div>
@@ -290,8 +329,8 @@ export default function QuickCreatePopover({
           <button 
             onClick={onClose} 
             style={{ 
-              background: solidBorder, 
-              border: 'none', 
+              background: inputBg, 
+              border: `1px solid ${borderCol}`, 
               borderRadius: '6px', 
               width: '28px', 
               height: '28px', 
@@ -299,7 +338,7 @@ export default function QuickCreatePopover({
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center', 
-              color: solidText
+              color: textCol
             }}
           >
             <X size={16} />
@@ -311,8 +350,8 @@ export default function QuickCreatePopover({
           display: 'flex', 
           gap: '8px', 
           padding: '12px 20px', 
-          borderBottom: `1px solid ${solidBorder}`, 
-          background: solidSubCardBg 
+          borderBottom: `1px solid ${borderCol}`, 
+          background: subCardBg 
         }}>
           <button 
             onClick={() => setTab('patient')}
@@ -322,9 +361,10 @@ export default function QuickCreatePopover({
               fontSize: '0.85rem',
               fontWeight: 600,
               cursor: 'pointer',
-              border: tab === 'patient' ? `1px solid ${solidBrand}` : `1px solid ${solidBorder}`,
-              background: tab === 'patient' ? solidBrand : solidCardBg,
-              color: tab === 'patient' ? '#ffffff' : solidMuted
+              border: tab === 'patient' ? `1px solid ${brandBlue}` : `1px solid ${borderCol}`,
+              background: tab === 'patient' ? brandBlue : cardBg,
+              color: tab === 'patient' ? '#ffffff' : mutedCol,
+              transition: 'all 0.15s ease'
             }}
           >
             Hasta Randevu
@@ -343,10 +383,11 @@ export default function QuickCreatePopover({
               fontSize: '0.85rem',
               fontWeight: 600,
               cursor: 'pointer',
-              border: tab === 'payment' ? `1px solid ${solidBrand}` : `1px solid ${solidBorder}`,
-              background: tab === 'payment' ? solidBrand : solidCardBg,
-              color: tab === 'payment' ? '#ffffff' : solidMuted,
-              opacity: (!selectedPatientId && patientMode !== 'create') ? 0.5 : 1
+              border: tab === 'payment' ? `1px solid ${brandBlue}` : `1px solid ${borderCol}`,
+              background: tab === 'payment' ? brandBlue : cardBg,
+              color: tab === 'payment' ? '#ffffff' : mutedCol,
+              opacity: (!selectedPatientId && patientMode !== 'create') ? 0.6 : 1,
+              transition: 'all 0.15s ease'
             }}
           >
             Ödeme
@@ -354,21 +395,21 @@ export default function QuickCreatePopover({
         </div>
 
         {/* Form Body */}
-        <div style={{ padding: '20px', flex: 1, overflowY: 'auto', background: solidCardBg }}>
+        <div style={{ padding: '20px', flex: 1, overflowY: 'auto', background: cardBg }}>
           {tab === 'patient' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               
               {/* STEP 1: PATIENT SELECTION / CREATION */}
               <div style={{ 
-                background: solidSubCardBg, 
+                background: subCardBg, 
                 padding: '14px', 
                 borderRadius: '10px', 
-                border: `1px solid ${solidBorder}` 
+                border: `1px solid ${borderCol}` 
               }}>
                 <div style={{ 
                   fontSize: '0.85rem', 
                   fontWeight: 700, 
-                  color: solidText, 
+                  color: textCol, 
                   marginBottom: '12px',
                   display: 'flex',
                   alignItems: 'center',
@@ -378,7 +419,7 @@ export default function QuickCreatePopover({
                     width: '22px',
                     height: '22px',
                     borderRadius: '50%',
-                    background: solidBrand,
+                    background: brandBlue,
                     color: '#ffffff',
                     fontSize: '0.75rem',
                     display: 'flex',
@@ -394,7 +435,7 @@ export default function QuickCreatePopover({
                     {!selectedPatientId ? (
                       <>
                         <div style={{ position: 'relative' }}>
-                          <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: solidMuted }} />
+                          <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: mutedCol }} />
                           <input 
                             type="text" 
                             placeholder="Kayıtlı Hasta Ara..." 
@@ -404,12 +445,12 @@ export default function QuickCreatePopover({
                           />
                         </div>
 
-                        {/* Search list with solid opaque items */}
+                        {/* Search list */}
                         <div style={{ 
                           maxHeight: '160px', 
                           overflowY: 'auto', 
-                          background: solidSubCardBg, 
-                          border: `1px solid ${solidBorder}`, 
+                          background: subCardBg, 
+                          border: `1px solid ${borderCol}`, 
                           borderRadius: '8px',
                           padding: '4px'
                         }}>
@@ -420,30 +461,31 @@ export default function QuickCreatePopover({
                                style={{ 
                                  padding: '9px 12px', 
                                  cursor: 'pointer', 
-                                 borderRadius: '6px',
+                                 borderRadius: '6px', 
                                  marginBottom: '2px',
-                                 background: solidCardBg,
-                                 border: `1px solid ${solidBorder}`,
+                                 background: cardBg,
+                                 border: `1px solid ${borderCol}`,
                                  display: 'flex',
                                  alignItems: 'center',
-                                 justifyContent: 'space-between'
+                                 justifyContent: 'space-between',
+                                 transition: 'all 0.15s ease'
                                }}
                                onMouseEnter={e => {
-                                 e.currentTarget.style.background = '#334155';
-                                 e.currentTarget.style.borderColor = '#60a5fa';
+                                 e.currentTarget.style.background = 'var(--glass-bg-hover, rgba(37,99,235,0.08))';
+                                 e.currentTarget.style.borderColor = 'var(--accent, #3b82f6)';
                                }}
                                onMouseLeave={e => {
-                                 e.currentTarget.style.background = solidCardBg;
-                                 e.currentTarget.style.borderColor = solidBorder;
+                                 e.currentTarget.style.background = cardBg;
+                                 e.currentTarget.style.borderColor = borderCol;
                                }}
                              >
                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                  <div style={{
-                                   width: '26px',
-                                   height: '26px',
+                                   width: '28px',
+                                   height: '28px',
                                    borderRadius: '50%',
-                                   background: '#334155',
-                                   color: '#60a5fa',
+                                   background: 'rgba(37, 99, 235, 0.15)',
+                                   color: brandBlue,
                                    fontSize: '0.75rem',
                                    fontWeight: 700,
                                    display: 'flex',
@@ -453,15 +495,15 @@ export default function QuickCreatePopover({
                                    {p.name.charAt(0).toUpperCase()}
                                  </div>
                                  <div>
-                                   <div style={{ fontWeight: 600, fontSize: '0.875rem', color: solidText }}>{p.name}</div>
-                                   {p.phone && <div style={{ fontSize: '0.75rem', color: solidMuted }}>📞 {p.phone}</div>}
+                                   <div style={{ fontWeight: 600, fontSize: '0.875rem', color: textCol }}>{p.name}</div>
+                                   {p.phone && <div style={{ fontSize: '0.75rem', color: mutedCol }}>📞 {p.phone}</div>}
                                  </div>
                                </div>
-                               <ChevronRight size={16} color={solidMuted} />
+                               <ChevronRight size={16} color={mutedCol} />
                              </div>
                            ))}
                            {filteredPatients.length === 0 && (
-                             <div style={{ padding: '14px', textAlign: 'center', fontSize: '0.85rem', color: solidMuted }}>
+                             <div style={{ padding: '14px', textAlign: 'center', fontSize: '0.85rem', color: mutedCol }}>
                                Hasta bulunamadı.
                              </div>
                            )}
@@ -475,7 +517,7 @@ export default function QuickCreatePopover({
                              justifyContent: 'center', 
                              gap: '6px', 
                              padding: '10px 14px', 
-                             background: solidBrand, 
+                             background: brandBlue, 
                              color: '#ffffff', 
                              border: 'none', 
                              borderRadius: '8px', 
@@ -492,7 +534,7 @@ export default function QuickCreatePopover({
                         display: 'flex', 
                         justifyContent: 'space-between', 
                         alignItems: 'center', 
-                        background: '#1e3a8a', 
+                        background: 'rgba(37, 99, 235, 0.1)', 
                         padding: '12px 14px', 
                         borderRadius: '8px', 
                         border: '1px solid #3b82f6' 
@@ -502,7 +544,7 @@ export default function QuickCreatePopover({
                              width: '32px',
                              height: '32px',
                              borderRadius: '50%',
-                             background: '#3b82f6',
+                             background: brandBlue,
                              color: '#ffffff',
                              fontSize: '0.85rem',
                              fontWeight: 700,
@@ -513,10 +555,10 @@ export default function QuickCreatePopover({
                              {selectedPatientObj?.name?.charAt(0).toUpperCase() || 'H'}
                            </div>
                            <div>
-                             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#ffffff' }}>
+                             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: textCol }}>
                                {selectedPatientObj?.name}
                              </div>
-                             <div style={{ fontSize: '0.75rem', color: '#93c5fd' }}>
+                             <div style={{ fontSize: '0.75rem', color: mutedCol }}>
                                {selectedPatientObj?.phone ? `📞 ${selectedPatientObj.phone}` : 'Kayıtlı Hasta'}
                              </div>
                            </div>
@@ -524,9 +566,9 @@ export default function QuickCreatePopover({
                          <button 
                            onClick={() => setSelectedPatientId('')} 
                            style={{ 
-                             background: '#7f1d1d', 
+                             background: 'rgba(239, 68, 68, 0.1)', 
                              border: '1px solid #ef4444', 
-                             color: '#fca5a5', 
+                             color: '#ef4444', 
                              padding: '6px 12px', 
                              borderRadius: '6px', 
                              fontSize: '0.75rem', 
@@ -542,10 +584,10 @@ export default function QuickCreatePopover({
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: solidText }}>Yeni Hasta Bilgileri</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: textCol }}>Yeni Hasta Bilgileri</span>
                       <button 
                         onClick={() => setPatientMode('select')} 
-                        style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}
+                        style={{ background: 'none', border: 'none', color: brandBlue, fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}
                       >
                         Listeden Seç
                       </button>
@@ -558,12 +600,12 @@ export default function QuickCreatePopover({
               </div>
 
               {/* STEP 2: DOCTOR SELECTION */}
-              {(selectedPatientId || patientMode === 'create') && (
+              {(selectedPatientId || (patientMode === 'create' && name)) && (
                  <div style={{ 
-                   background: solidSubCardBg, 
+                   background: subCardBg, 
                    padding: '14px', 
                    borderRadius: '10px', 
-                   border: `1px solid ${solidBorder}`,
+                   border: `1px solid ${borderCol}`,
                    display: 'flex',
                    flexDirection: 'column',
                    gap: '8px'
@@ -572,7 +614,7 @@ export default function QuickCreatePopover({
                      <label style={{ 
                        fontSize: '0.85rem', 
                        fontWeight: 700, 
-                       color: solidText,
+                       color: textCol,
                        display: 'flex',
                        alignItems: 'center',
                        gap: '8px'
@@ -581,7 +623,7 @@ export default function QuickCreatePopover({
                          width: '22px',
                          height: '22px',
                          borderRadius: '50%',
-                         background: solidBrand,
+                         background: brandBlue,
                          color: '#ffffff',
                          fontSize: '0.75rem',
                          display: 'flex',
@@ -600,9 +642,8 @@ export default function QuickCreatePopover({
                      onChange={e => setSelectedDoctorId(e.target.value)} 
                      style={{
                        ...inputStyle,
-                       border: !selectedDoctorId ? '1.5px solid #f59e0b' : `1px solid ${solidBorder}`,
-                       background: solidInputBg,
-                       color: !selectedDoctorId ? '#f59e0b' : solidText,
+                       border: !selectedDoctorId ? '1.5px solid #f59e0b' : `1px solid ${inputBorder}`,
+                       color: !selectedDoctorId ? '#f59e0b' : textCol,
                        fontWeight: !selectedDoctorId ? 600 : 400
                      }}
                    >
@@ -620,12 +661,12 @@ export default function QuickCreatePopover({
               )}
 
               {/* STEP 3: TIME SELECTION */}
-              {(selectedPatientId || patientMode === 'create') && (
+              {(selectedPatientId || (patientMode === 'create' && name)) && (
                  <div style={{ 
-                   background: solidSubCardBg, 
+                   background: subCardBg, 
                    padding: '14px', 
                    borderRadius: '10px', 
-                   border: `1px solid ${solidBorder}`,
+                   border: `1px solid ${borderCol}`,
                    display: 'flex',
                    flexDirection: 'column',
                    gap: '10px'
@@ -634,7 +675,7 @@ export default function QuickCreatePopover({
                      <label style={{ 
                        fontSize: '0.85rem', 
                        fontWeight: 700, 
-                       color: solidText,
+                       color: textCol,
                        display: 'flex',
                        alignItems: 'center',
                        gap: '8px'
@@ -643,7 +684,7 @@ export default function QuickCreatePopover({
                          width: '22px',
                          height: '22px',
                          borderRadius: '50%',
-                         background: solidBrand,
+                         background: brandBlue,
                          color: '#ffffff',
                          fontSize: '0.75rem',
                          display: 'flex',
@@ -653,7 +694,7 @@ export default function QuickCreatePopover({
                        }}>3</span>
                        <span>Randevu Saati</span>
                      </label>
-                     <span style={{ fontSize: '0.8rem', color: '#60a5fa', fontWeight: 700 }}>{defaultDate}</span>
+                     <span style={{ fontSize: '0.8rem', color: brandBlue, fontWeight: 700 }}>{defaultDate}</span>
                    </div>
                    <FancyHourPicker range={timeRange} onChange={setTimeRange} />
                  </div>
@@ -662,13 +703,72 @@ export default function QuickCreatePopover({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Selected patient preview in payment mode */}
+              <div style={{ 
+                background: subCardBg, 
+                padding: '12px 14px', 
+                borderRadius: '8px', 
+                border: `1px solid ${borderCol}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: brandBlue,
+                    color: '#ffffff',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    {patientMode === 'select' ? (selectedPatientObj?.name?.charAt(0).toUpperCase() || 'H') : (name.charAt(0).toUpperCase() || '+')}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 700, color: textCol }}>
+                      {patientMode === 'select' ? (selectedPatientObj?.name || 'Hasta Seçilmedi') : (name || 'Yeni Hasta')}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: mutedCol }}>
+                      {patientMode === 'select' ? (selectedPatientObj?.phone ? `📞 ${selectedPatientObj.phone}` : 'Kayıtlı Hasta') : (phone ? `📞 ${phone}` : 'Yeni Kayıt')}
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setTab('patient')} 
+                  style={{ 
+                    background: 'transparent', 
+                    border: `1px solid ${borderCol}`, 
+                    color: brandBlue, 
+                    padding: '4px 10px', 
+                    borderRadius: '6px', 
+                    fontSize: '0.75rem', 
+                    cursor: 'pointer', 
+                    fontWeight: 600 
+                  }}
+                >
+                  Değiştir
+                </button>
+              </div>
+
               <div>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Tutar (₺) *</label>
-                <input type="number" placeholder="Örn: 1500" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} style={inputStyle} />
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Tutar (₺) *</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  step="1"
+                  placeholder="Örn: 1500" 
+                  value={paymentAmount} 
+                  onChange={e => setPaymentAmount(e.target.value)} 
+                  style={inputStyle} 
+                />
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Ödeme Yöntemi</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Ödeme Yöntemi</label>
                   <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} style={inputStyle}>
                     <option value="Nakit" style={selectOptionStyle}>Nakit</option>
                     <option value="Kredi Kartı" style={selectOptionStyle}>Kredi Kartı</option>
@@ -676,25 +776,25 @@ export default function QuickCreatePopover({
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Ödeme Tarihi *</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Ödeme Tarihi *</label>
                   <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} style={inputStyle} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Durum</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Durum</label>
                   <select value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} style={inputStyle}>
                     <option value="completed" style={selectOptionStyle}>✅ Yapıldı</option>
                     <option value="pending" style={selectOptionStyle}>⏳ Bekliyor</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Planlanan Tarih</label>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Planlanan Tarih</label>
                   <input type="date" value={plannedDate} onChange={e => setPlannedDate(e.target.value)} style={inputStyle} />
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: solidMuted, marginBottom: '6px', display: 'block' }}>Not (opsiyonel)</label>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: textCol, marginBottom: '6px', display: 'block' }}>Not (opsiyonel)</label>
                 <input type="text" placeholder="Kısa not ekleyin" value={paymentNote} onChange={e => setPaymentNote(e.target.value)} style={inputStyle} />
               </div>
             </div>
@@ -704,20 +804,20 @@ export default function QuickCreatePopover({
         {/* Footer */}
         <div style={{ 
           padding: '16px 20px', 
-          borderTop: `1px solid ${solidBorder}`, 
+          borderTop: `1px solid ${borderCol}`, 
           display: 'flex', 
           justifyContent: 'flex-end', 
           gap: '10px', 
-          background: solidSubCardBg 
+          background: subCardBg 
         }}>
           <button 
             onClick={onClose} 
             style={{ 
               padding: '9px 18px', 
               borderRadius: '8px', 
-              border: `1px solid ${solidBorder}`, 
-              background: solidCardBg, 
-              color: solidText, 
+              border: `1px solid ${borderCol}`, 
+              background: cardBg, 
+              color: textCol, 
               cursor: 'pointer', 
               fontSize: '0.875rem',
               fontWeight: 600
@@ -727,17 +827,18 @@ export default function QuickCreatePopover({
           </button>
           <button 
              onClick={handleSave} 
-             disabled={tab === 'patient' && (!selectedPatientId && patientMode !== 'create')}
+             disabled={isSaveDisabled}
              style={{ 
                padding: '9px 24px', 
                borderRadius: '8px', 
-               background: solidBrand, 
+               background: brandBlue, 
                color: '#ffffff', 
                border: 'none', 
-               cursor: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 'not-allowed' : 'pointer', 
+               cursor: isSaveDisabled ? 'not-allowed' : 'pointer', 
                fontWeight: 700,
                fontSize: '0.875rem',
-               opacity: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 0.5 : 1
+               opacity: isSaveDisabled ? 0.5 : 1,
+               transition: 'all 0.15s ease'
              }}
           >
             Kaydet

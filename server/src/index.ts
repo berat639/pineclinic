@@ -556,7 +556,7 @@ const app = new Elysia()
     const b = body as Record<string, unknown>
     const updated = await updatePayment(params.id, {
       date: b.date as string | undefined,
-      amount: b.amount !== undefined ? Number(b.amount) : undefined,
+      amount: b.amount !== undefined && !isNaN(Number(b.amount)) ? Math.round(Number(b.amount)) : undefined,
       method: b.method as string | undefined,
       notes: b.notes as string | undefined,
       status: b.status as string | undefined,
@@ -972,8 +972,21 @@ const app = new Elysia()
   .post('/api/dental/patients/:id/payments', async ({ params, body, set }) => {
     const { createPayment } = await import('./db/repositories/dental')
     const b = body as any
-    if (!b.date || !b.amount) { set.status = 400; return { error: 'Missing fields' } }
-    return await createPayment({ patientId: params.id, date: b.date, amount: b.amount, method: b.method || 'Nakit', notes: b.notes, status: b.status, dueDate: b.dueDate, treatmentPlanId: b.treatmentPlanId })
+    const numAmount = Number(b.amount)
+    if (!b.date || isNaN(numAmount) || numAmount <= 0) { 
+      set.status = 400
+      return { error: 'Geçerli bir ödeme tarihi ve tutar girilmelidir.' } 
+    }
+    return await createPayment({ 
+      patientId: params.id, 
+      date: b.date, 
+      amount: Math.round(numAmount), 
+      method: b.method || 'Nakit', 
+      notes: b.notes || null, 
+      status: b.status || 'completed', 
+      dueDate: b.dueDate || null, 
+      treatmentPlanId: b.treatmentPlanId || null 
+    })
   })
   .get('/api/dental/patients/:id/works', async ({ params }) => {
     const { getPatientCompletedWorks } = await import('./db/repositories/dental')
