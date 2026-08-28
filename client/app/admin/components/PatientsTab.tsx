@@ -168,6 +168,8 @@ export default function PatientsTab() {
     }
   }, [selectedPatientId])
 
+
+
   const filtered = patients.filter(p => {
     const term = searchTerm.toLowerCase()
     return (

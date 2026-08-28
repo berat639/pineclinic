@@ -6,6 +6,7 @@ import {
   dentalAppointments,
   treatmentPlans,
   treatmentGroups,
+  appointmentTreatments,
   patientPayments,
   completedWorks,
   businessSettings,
@@ -38,16 +39,31 @@ export async function createDoctor(data: { name: string; specialty: string; colo
 // ── Dental Appointments ──────────────────────────────────────────────────────
 
 export async function listDentalAppointments(dateStr?: string) {
+  let appts: any[] = [];
   if (dateStr) {
     const dayStart = new Date(`${dateStr}T00:00:00+03:00`)
     const dayEnd = new Date(`${dateStr}T23:59:59+03:00`)
-    return db
+    appts = await db
       .select()
       .from(dentalAppointments)
       .where(and(gte(dentalAppointments.startTime, dayStart), lte(dentalAppointments.startTime, dayEnd)))
       .orderBy(dentalAppointments.startTime)
+  } else {
+    appts = await db.select().from(dentalAppointments).orderBy(dentalAppointments.startTime)
   }
-  return db.select().from(dentalAppointments).orderBy(dentalAppointments.startTime)
+  
+  if (appts.length === 0) return appts;
+  
+  const { appointmentTreatments } = await import('../schema');
+  const { inArray } = await import('drizzle-orm');
+  
+  const apptIds = appts.map((a: any) => a.id);
+  const links = await db.select({ appointmentId: appointmentTreatments.appointmentId })
+    .from(appointmentTreatments)
+    .where(inArray(appointmentTreatments.appointmentId, apptIds));
+    
+  const linkedApptIds = new Set(links.map(l => l.appointmentId));
+  return appts.map(a => ({ ...a, hasTreatment: linkedApptIds.has(a.id) }));
 }
 
 export async function createDentalAppointment(data: {
@@ -276,21 +292,103 @@ export async function getPatientTreatmentGroups(patientId: string) {
     .where(eq(treatmentGroups.patientId, patientId))
     .orderBy(desc(treatmentGroups.createdAt))
   
-  // For each group, fetch its treatment plans
+  // For each group, fetch its treatment plans + attached sessions
   const result = []
   for (const group of groups) {
     const plans = await db.select().from(treatmentPlans)
       .where(and(eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id)))
       .orderBy(desc(treatmentPlans.createdAt))
+    
+    for (const p of plans) {
+      const sessions = await db.select({
+        id: appointmentTreatments.id,
+        appointmentId: appointmentTreatments.appointmentId,
+        sessionNumber: appointmentTreatments.sessionNumber,
+        sessionStatus: appointmentTreatments.sessionStatus,
+        notes: appointmentTreatments.notes,
+        startTime: dentalAppointments.startTime,
+        endTime: dentalAppointments.endTime
+      }).from(appointmentTreatments)
+        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+        .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+      ;(p as any).sessions = sessions
+    }
+
     result.push({ ...group, treatments: plans })
   }
   
-  // Also fetch ungrouped treatments
+  // Also fetch ungrouped treatments + attached sessions
   const ungrouped = await db.select().from(treatmentPlans)
     .where(and(eq(treatmentPlans.patientId, patientId), sql`group_id IS NULL`))
     .orderBy(desc(treatmentPlans.createdAt))
+
+  for (const p of ungrouped) {
+    const sessions = await db.select({
+      id: appointmentTreatments.id,
+      appointmentId: appointmentTreatments.appointmentId,
+      sessionNumber: appointmentTreatments.sessionNumber,
+      sessionStatus: appointmentTreatments.sessionStatus,
+      notes: appointmentTreatments.notes,
+      startTime: dentalAppointments.startTime,
+      endTime: dentalAppointments.endTime
+    }).from(appointmentTreatments)
+      .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+      .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+    ;(p as any).sessions = sessions
+  }
   
   return { groups: result, ungrouped }
+}
+
+export async function getAppointmentTreatments(appointmentId: string) {
+  return await db.select({
+    id: appointmentTreatments.id,
+    appointmentId: appointmentTreatments.appointmentId,
+    treatmentPlanId: appointmentTreatments.treatmentPlanId,
+    sessionNumber: appointmentTreatments.sessionNumber,
+    sessionStatus: appointmentTreatments.sessionStatus,
+    notes: appointmentTreatments.notes,
+    createdAt: appointmentTreatments.createdAt,
+    procedureName: treatmentPlans.procedureName,
+    toothNumber: treatmentPlans.toothNumber,
+    cost: treatmentPlans.cost,
+    status: treatmentPlans.status
+  }).from(appointmentTreatments)
+    .innerJoin(treatmentPlans, eq(appointmentTreatments.treatmentPlanId, treatmentPlans.id))
+    .where(eq(appointmentTreatments.appointmentId, appointmentId))
+    .orderBy(appointmentTreatments.sessionNumber)
+}
+
+export async function linkTreatmentToAppointment(appointmentId: string, treatmentPlanId: string, sessionNumber: number = 1, notes?: string) {
+  // Check if already linked
+  const existing = await db.select().from(appointmentTreatments)
+    .where(and(eq(appointmentTreatments.appointmentId, appointmentId), eq(appointmentTreatments.treatmentPlanId, treatmentPlanId)))
+  if (existing.length > 0) return existing[0]
+
+  const [row] = await db.insert(appointmentTreatments).values({
+    appointmentId,
+    treatmentPlanId,
+    sessionNumber,
+    notes
+  }).returning()
+  return row
+}
+
+export async function unlinkTreatmentFromAppointment(appointmentId: string, treatmentPlanId: string) {
+  const rows = await db.delete(appointmentTreatments)
+    .where(and(eq(appointmentTreatments.appointmentId, appointmentId), eq(appointmentTreatments.treatmentPlanId, treatmentPlanId)))
+    .returning()
+  return rows.length > 0
+}
+
+export async function updateAppointmentTreatmentSession(atId: string, data: { sessionStatus?: string; notes?: string }) {
+  const values: Record<string, unknown> = {}
+  if (data.sessionStatus !== undefined) values.sessionStatus = data.sessionStatus
+  if (data.notes !== undefined) values.notes = data.notes
+  if (Object.keys(values).length === 0) return null
+
+  const [row] = await db.update(appointmentTreatments).set(values).where(eq(appointmentTreatments.id, atId)).returning()
+  return row
 }
 
 export async function createTreatmentGroup(data: {
@@ -337,7 +435,24 @@ export async function deleteTreatmentGroup(id: string): Promise<boolean> {
 // ── Treatment Plans ──────────────────────────────────────────────────────────
 
 export async function getPatientTreatments(patientId: string) {
-  return db.select().from(treatmentPlans).where(eq(treatmentPlans.patientId, patientId)).orderBy(desc(treatmentPlans.createdAt))
+  const plans = await db.select().from(treatmentPlans).where(eq(treatmentPlans.patientId, patientId)).orderBy(desc(treatmentPlans.createdAt))
+
+  for (const p of plans) {
+    const sessions = await db.select({
+      id: appointmentTreatments.id,
+      appointmentId: appointmentTreatments.appointmentId,
+      sessionNumber: appointmentTreatments.sessionNumber,
+      sessionStatus: appointmentTreatments.sessionStatus,
+      notes: appointmentTreatments.notes,
+      startTime: dentalAppointments.startTime,
+      endTime: dentalAppointments.endTime
+    }).from(appointmentTreatments)
+      .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+      .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+    ;(p as any).sessions = sessions
+  }
+
+  return plans
 }
 
 export async function createTreatmentPlan(data: {
@@ -808,6 +923,7 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
   patientId: string
   treatments: any[]
   updatedById?: string
+  appointmentId?: string
 }) {
   await updateTreatmentGroup(groupId, { name: data.name, description: data.description, updatedById: data.updatedById })
   
@@ -821,7 +937,8 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
   }
   
   for (const t of data.treatments) {
-    if (t.id) {
+    let tId = t.id
+    if (t.id && existingIds.includes(t.id)) {
        await db.update(treatmentPlans).set({
          procedureName: t.procedureName,
          toothNumber: t.toothNumber,
@@ -830,7 +947,7 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
          doctorId: t.doctorId
        }).where(eq(treatmentPlans.id, t.id))
     } else {
-       await createTreatmentPlan({ 
+       const created = await createTreatmentPlan({ 
          patientId: data.patientId,
          procedureName: t.procedureName,
          toothNumber: t.toothNumber,
@@ -839,6 +956,10 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
          doctorId: t.doctorId,
          groupId 
        })
+       tId = created?.id
+    }
+    if (data.appointmentId && tId) {
+      await linkTreatmentToAppointment(data.appointmentId, tId, 1).catch(() => {})
     }
   }
   return true

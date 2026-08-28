@@ -82,7 +82,7 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
           border-radius: 6px;
           padding: 6px 10px;
           position: absolute;
-          z-index: 10000;
+          z-index: 50;
           bottom: 110%;
           left: 50%;
           transform: translateX(-50%);
@@ -123,16 +123,31 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
           font-size: 1.1rem;
           font-weight: 600;
           color: var(--foreground);
+          background: transparent !important;
+          user-select: none;
+          outline: none !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        .rdp-caption {
+          user-select: none;
+          outline: none;
+        }
+        .rdp-button, .rdp-nav_button, .rdp-button:focus, .rdp-button:focus-visible {
+          outline: none !important;
+          box-shadow: none !important;
         }
         .rdp-head_cell {
           font-size: 0.8rem;
           font-weight: 500;
           color: var(--foreground-2);
           text-transform: capitalize;
+          user-select: none;
         }
         .rdp-day {
           font-size: 0.85rem;
           color: var(--foreground);
+          user-select: none;
         }
       `}</style>
       <DayPicker

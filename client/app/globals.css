@@ -1155,4 +1155,11 @@ body {
   }
 }
 
+/* ── React Hot Toast Highest Z-Index Guarantee ── */
+#_react-hot-toast,
+.react-hot-toast,
+#_react-hot-toast > div {
+  z-index: 99999999 !important;
+}
+
 

@@ -323,18 +323,35 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
 
                {/* STEP 2: DOCTOR SELECTION */}
               {(selectedPatientId || patientMode === 'create') && (
-                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>2. Doktor Ataması</label>
+                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                     <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>2. Doktor Ataması</label>
+                     {!selectedDoctorId && (
+                       <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 700 }}>⚠️ Doktor Seçilmedi</span>
+                     )}
+                   </div>
                    <select 
                      value={selectedDoctorId} 
                      onChange={e => setSelectedDoctorId(e.target.value)} 
-                     style={inputBaseStyle}
+                     style={{
+                       ...inputBaseStyle,
+                       border: !selectedDoctorId ? '1.5px solid #f59e0b' : inputBaseStyle.border,
+                       background: !selectedDoctorId ? 'rgba(245, 158, 11, 0.06)' : inputBaseStyle.background,
+                       color: !selectedDoctorId ? '#f59e0b' : 'inherit',
+                       fontWeight: !selectedDoctorId ? 600 : 400
+                     }}
                    >
-                     <option value="">⚠️ Atanmamış</option>
+                     <option value="">⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
                      {doctors.map(d => (
-                       <option key={d.id} value={d.id}>{d.name}</option>
+                       <option key={d.id} value={d.id}>Dr. {d.name}</option>
                      ))}
                    </select>
+                   {!selectedDoctorId && (
+                     <div style={{ fontSize: '0.7rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                       <span>ℹ️</span>
+                       <span>Doktor seçilmezse randevu "Doktor Atanmadı" uyarısıyla açılır.</span>
+                     </div>
+                   )}
                  </div>
               )}
 

@@ -20,6 +20,7 @@ interface CalendarEvent {
   type: string
   notes?: string
   timeConfirmed?: boolean
+  hasTreatment?: boolean
 }
 
 interface ShiftItem {
@@ -158,6 +159,15 @@ function calculateEventLayout(events: CalendarEvent[]) {
   return result;
 }
 
+function getLocalYMD(dateStrOrObj: string | Date): string {
+  if (!dateStrOrObj) return '';
+  try {
+    return new Date(dateStrOrObj).toLocaleDateString('sv');
+  } catch {
+    return String(dateStrOrObj).slice(0, 10);
+  }
+}
+
 export default function DentalCalendar({ doctors, events, shifts, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
@@ -200,10 +210,12 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
     initialStartTime: '', initialEndTime: '', initialColIdx: 0, eventId: '',
     originalTop: '', originalHeight: '', originalLeft: '', originalZIndex: '', originalOpacity: ''
   });
+  const hasDraggedRef = useRef(false);
 
   const startInteraction = (evt: React.MouseEvent, e: CalendarEvent, type: 'move' | 'resize-top' | 'resize-bottom', initialColIdx: number) => {
     if (evt.button !== 0) return;
     evt.stopPropagation();
+    hasDraggedRef.current = false;
     
     const element = (evt.currentTarget as HTMLElement).closest('.rc-event') as HTMLElement;
     if (!element) return;
@@ -230,6 +242,10 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
       if (state.element) {
         const deltaY = e.clientY - state.startY;
         const deltaX = e.clientX - state.startX;
+
+        if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+          hasDraggedRef.current = true;
+        }
 
         if (state.type === 'move') {
           state.element.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
@@ -343,10 +359,17 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
       state.element.style.transition = '';
       document.body.style.userSelect = '';
       
+      const wasDragged = hasDraggedRef.current;
+      if (wasDragged) {
+        setTimeout(() => {
+          hasDraggedRef.current = false;
+        }, 150);
+      }
+
       const { type: t, initialStartTime: iStart, initialEndTime: iEnd } = state;
       state.element = null;
 
-      if (onEventUpdate && targetEvent) {
+      if (wasDragged && onEventUpdate && targetEvent) {
         const timeChanged = deltaMins !== 0;
         const doctorChanged = targetEvent.doctorId !== newDoctorId;
         const dateChanged = targetEvent.startTime.slice(0, 10) !== newDate;
@@ -375,6 +398,39 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             newEndTime = new Date(e_time.getTime() + deltaMins * 60000);
             if (newEndTime.getTime() <= newStartTime.getTime() + 15 * 60000) {
               newEndTime = new Date(newStartTime.getTime() + 15 * 60000);
+            }
+          }
+
+          // Vardiya Kontrolü: Hedef hekimin o gün ve saatte vardiyası var mı?
+          if (newDoctorId) {
+            const targetDocShifts = (shifts || []).filter(s => s.userId === newDoctorId && s.date === newDate);
+            const docObj = doctors.find(d => d.id === newDoctorId);
+            const docName = docObj?.name || 'Seçilen hekimin';
+
+            if (targetDocShifts.length === 0) {
+              import('react-hot-toast').then(mod =>
+                mod.toast.error(`⚠️ ${docName} için bu tarihte (${newDate}) vardiya bulunmuyor!`)
+              );
+              return;
+            }
+
+            const startMinOfDay = newStartTime.getHours() * 60 + newStartTime.getMinutes();
+            const endMinOfDay = newEndTime.getHours() * 60 + newEndTime.getMinutes();
+
+            const isCovered = targetDocShifts.some(shift => {
+              const [sH, sM] = (shift.startTime || '00:00').split(':').map(Number);
+              const [eH, eM] = (shift.endTime || '23:59').split(':').map(Number);
+              const shiftStartMin = sH * 60 + (sM || 0);
+              const shiftEndMin = eH * 60 + (eM || 0);
+              return startMinOfDay >= shiftStartMin && endMinOfDay <= shiftEndMin;
+            });
+
+            if (!isCovered) {
+              const shiftRanges = targetDocShifts.map(s => `${s.startTime}-${s.endTime}`).join(', ');
+              import('react-hot-toast').then(mod =>
+                mod.toast.error(`⚠️ Randevu saati ${docName} vardiya saatleri (${shiftRanges}) dışındadır!`)
+              );
+              return;
             }
           }
 
@@ -434,7 +490,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
     const dayShifts = shifts?.filter(s => s.date === currentDate) || []
     let displayDoctors = doctors;
 
-    const dayEvents = events.filter(e => e.startTime.slice(0, 10) === currentDate);
+    const dayEvents = events.filter(e => getLocalYMD(e.startTime) === currentDate);
     const unassigned = dayEvents.filter(e => !e.doctorId)
     const hasUnassigned = globalUnassigned.length > 0 || unassigned.length > 0
     const cols = displayDoctors.length || 1
@@ -546,7 +602,17 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             return layout.map(({ event: e, col, maxCol }) => {
               const { top, height } = eventPosition(e.startTime, e.endTime, 0)
               const isTimeWarning = e.timeConfirmed === false
-              const colors = isTimeWarning ? TIME_WARNING_STYLE : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled)
+              const doc = doctors.find(docItem => docItem.id === e.doctorId) || d
+              const docColor = doc?.color || '#3b82f6'
+              
+              let bg = doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)'
+              let borderLeftColor = docColor
+              let borderStyle = 'solid'
+
+              if (isTimeWarning) {
+                bg = TIME_WARNING_STYLE.bg
+                borderLeftColor = TIME_WARNING_STYLE.border
+              }
               
               const colWidth = `((100% - 56px) / ${cols})`
               const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px + (${colWidth} - 4px) / ${maxCol} * ${col})`
@@ -555,8 +621,8 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
               const isShort = height < 36
               
               return (
-                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border }} 
-                     onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
+                <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle }} 
+                     onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                      onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
                      title={e.title}
                      onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
@@ -575,14 +641,12 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
             const width = `calc((100% - 56px - 4px) / ${maxCol})`;
             const { top, height } = eventPosition(e.startTime, e.endTime, 0);
-            const isTimeWarning = e.timeConfirmed === false;
-            const colors = isTimeWarning ? TIME_WARNING_STYLE : STATUS_COLORS.pending_assignment;
             
             return (
-              <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: colors.border, borderStyle: 'dashed' }} 
-                   onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
+              <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: 'rgba(245, 158, 11, 0.16)', border: '1.5px dashed #f59e0b', borderLeft: '4px solid #f59e0b', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }} 
+                   onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                    onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                   title={`${e.title} — Atanmamış`}
+                   title={`${e.title} — Doktor Atanmadı`}
                    onMouseDown={(evt) => {
                      let initialColIdx = 0;
                      if (gridRef.current) {
@@ -594,8 +658,13 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
                    }}
               >
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', 0)} />
-                <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>⚠️ {e.title}</span>
-                {height > 36 && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                  <span style={{ fontSize: '0.6rem', padding: '1px 5px', borderRadius: 4, background: '#f59e0b', color: '#181c24', fontWeight: 800, letterSpacing: '0.3px' }}>
+                    ⚠️ DOKTOR ATANMADI
+                  </span>
+                </div>
+                <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--foreground)' }}>{e.title}</span>
+                {height > 44 && <span className="rc-ev-time" style={{ pointerEvents: 'none', color: 'var(--foreground-2)' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', 0)} />
               </div>
             )
@@ -628,7 +697,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           {weekDays.map(d => (
             <div key={d.date} className="rc-col-head" style={{ borderBottomColor: d.isToday ? '#3b82f6' : 'transparent' }}>
               <div className="rc-col-title" style={d.isToday ? { color: '#3b82f6' } : {}}>{d.label}</div>
-              <div className="rc-col-sub">{events.filter(e => e.startTime.slice(0, 10) === d.date).length} randevu</div>
+              <div className="rc-col-sub">{events.filter(e => getLocalYMD(e.startTime) === d.date).length} randevu</div>
               {shifts && shifts.filter(s => s.date === d.date).map(s => {
                 const isPast = new Date(`${s.date}T${s.endTime}:00+03:00`).getTime() < Date.now();
                 return (
@@ -707,29 +776,44 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             )}
           </div>
           {weekDays.map((day, colIdx) => {
-            const dayEvents = events.filter(e => e.startTime.slice(0, 10) === day.date);
+            const dayEvents = events.filter(e => getLocalYMD(e.startTime) === day.date);
             const layout = calculateEventLayout(dayEvents);
             return layout.map(({ event: e, col, maxCol }) => {
               const { top, height } = eventPosition(e.startTime, e.endTime, 0)
+              const doc = doctors.find(d => d.id === e.doctorId)
+              const docColor = doc?.color || '#3b82f6'
               const isTimeWarning = e.timeConfirmed === false
               const isUnassigned = !e.doctorId
-              const colors = isTimeWarning ? TIME_WARNING_STYLE : (isUnassigned ? STATUS_COLORS.pending_assignment : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled))
+
+              let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
+              let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
+              let borderStyle = isUnassigned ? 'dashed' : 'solid'
               
+              if (isTimeWarning) {
+                bg = TIME_WARNING_STYLE.bg
+                borderLeftColor = TIME_WARNING_STYLE.border
+              }
+
               const colWidth = `((100% - 56px) / ${cols})`
               const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 1px + (${colWidth} - 2px) / ${maxCol} * ${col})`
               const width = `calc((${colWidth} - 2px) / ${maxCol})`
-              
-              const doc = doctors.find(d => d.id === e.doctorId)
 
               return (
-                <div key={e.id} className="rc-event" style={{ top, height, left, width, background: colors.bg, borderLeftColor: doc?.color || colors.border, borderStyle: isUnassigned ? 'dashed' : undefined }} 
-                     onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }} 
+                <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle, border: isUnassigned ? '1.5px dashed #f59e0b' : undefined, borderLeft: isUnassigned ? '4px solid #f59e0b' : undefined }} 
+                     onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                      onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                     title={e.title}
+                     title={`${e.title}${isUnassigned ? ' — Doktor Atanmadı' : ''}`}
                      onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                 >
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
-                  <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{(isUnassigned || isTimeWarning) ? '⚠️ ' : ''}{e.title}</span>
+                  {isUnassigned ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, pointerEvents: 'none' }}>
+                      <span style={{ fontSize: '0.58rem', color: '#f59e0b', fontWeight: 800 }}>⚠️ DOKTOR ATANMADI</span>
+                      <span className="rc-ev-title" style={{ fontWeight: 600 }}>{e.title}</span>
+                    </div>
+                  ) : (
+                    <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
+                  )}
                   <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
                 </div>
               )
@@ -756,7 +840,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
         </div>
       )}
       {weeks.map(week => {
-        const weekEvents = events.filter(e => { const d = e.startTime.slice(0, 10); return d >= week.startDate && d <= week.endDate })
+        const weekEvents = events.filter(e => { const d = getLocalYMD(e.startTime); return d >= week.startDate && d <= week.endDate })
         return (
           <div key={week.startDate} className="rc-week-row">
             <div className="rc-week-label">{week.label}</div>
@@ -769,12 +853,22 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
                 </div>
               ))}
               {weekEvents.slice(0, 10).map(e => {
+                const doc = doctors.find(d => d.id === e.doctorId)
+                const docColor = doc?.color || '#3b82f6'
                 const isTimeWarning = e.timeConfirmed === false
                 const isUnassigned = !e.doctorId
-                const colors = isTimeWarning ? TIME_WARNING_STYLE : (isUnassigned ? STATUS_COLORS.pending_assignment : (STATUS_COLORS[e.status] || STATUS_COLORS.scheduled))
-                const doc = doctors.find(d => d.id === e.doctorId)
+
+                let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
+                let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
+                let borderStyle = isUnassigned ? 'dashed' : 'solid'
+                
+                if (isTimeWarning) {
+                  bg = TIME_WARNING_STYLE.bg
+                  borderLeftColor = TIME_WARNING_STYLE.border
+                }
+
                 return (
-                  <div key={e.id} className="rc-month-ev" style={{ background: colors.bg, borderLeftColor: doc?.color || colors.border, borderStyle: isUnassigned ? 'dashed' : undefined }} onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }}>
+                  <div id={`cal-event-${e.id}`} key={e.id} className="rc-month-ev" style={{ background: bg, borderLeftColor: borderLeftColor, borderStyle }} onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }}>
                     <span className="rc-ev-title">{(isUnassigned || isTimeWarning) ? '⚠️ ' : ''}{e.title}</span>
                     <span className="rc-ev-time">{new Date(e.startTime).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>

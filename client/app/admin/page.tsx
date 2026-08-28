@@ -421,6 +421,8 @@ export default function AdminPage() {
 
   useEffect(() => { fetchAppointments() }, [fetchAppointments])
 
+
+
   // ── Calendar ──────────────────────────────────────────────────────────────
 
   const fetchCalStatus = useCallback(async () => {

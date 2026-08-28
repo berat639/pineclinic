@@ -3,8 +3,9 @@ import { toast } from 'react-hot-toast';
 import { BriefcaseMedical, X, Pencil, Trash2, Plus } from 'lucide-react';
 import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
+import ConfirmModal from './ConfirmModal';
 
-export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, onClose, onSaved, editingGroup }: any) {
+export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, shifts = [], onClose, onSaved, editingGroup }: any) {
   const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[], color?: string }[]>>({})
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([])
 
@@ -15,6 +16,23 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [inventory, setInventory] = useState<any[]>([])
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
   const [editingConsultationDate, setEditingConsultationDate] = useState<string>('')
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'danger' | 'warning' | 'primary';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Evet, Sil',
+    variant: 'danger',
+    onConfirm: () => {}
+  });
 
   React.useEffect(() => {
     fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json()).then(setConsultations).catch(() => { });
@@ -393,6 +411,40 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       return;
     }
 
+    // Vardiya Kontrolü
+    if (selectedEvent?.startTime) {
+      const apptDateStr = new Date(selectedEvent.startTime).toLocaleDateString('sv');
+      const startMin = new Date(selectedEvent.startTime).getHours() * 60 + new Date(selectedEvent.startTime).getMinutes();
+      
+      for (const drafts of Object.values(toothDrafts)) {
+        for (const proc of drafts) {
+          const docId = proc.doctorId || defaultDoctorId;
+          if (docId) {
+            const docShifts = (shifts || []).filter((s: any) => s.userId === docId && s.date === apptDateStr);
+            const docObj = doctors.find((d: any) => d.id === docId);
+            const docName = docObj?.name || 'Seçilen hekim';
+
+            if (docShifts.length === 0) {
+              toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) tanımlı vardiya bulunmuyor! Lütfen vardiyası olan bir hekim seçin.`);
+              return;
+            }
+
+            const isCovered = docShifts.some((s: any) => {
+              const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+              const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+              return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+            });
+
+            if (!isCovered) {
+              const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+              toast.error(`⚠️ Randevu saati (${new Date(selectedEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}) ${docName} vardiya saatleri (${shiftRanges}) dışındadır!`);
+              return;
+            }
+          }
+        }
+      }
+    }
+
     const hasMissingProc = Object.values(toothDrafts).some(drafts => drafts.some(p => p.name === 'Belirtilmedi'));
     if (hasMissingProc) {
       if (!confirm('Bazı dişlere sadece endikasyon atanmış (işlem adı yok). Yine de devam etmek istiyor musunuz?')) return;
@@ -475,6 +527,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           const toothFinalPrice = Math.round(toothOriginalPrice * discountFactor);
 
           payloadTreatments.push({
+            id: (proc.id && String(proc.id).includes('-')) ? proc.id : undefined,
             procedureName: proc.name,
             toothNumber: tooth,
             indication: proc.indications.length > 0 ? proc.indications.join(', ') : undefined,
@@ -501,7 +554,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           body: JSON.stringify({
             name: groupName,
             patientId: selectedEvent.patientId,
-            treatments: payloadTreatments
+            treatments: payloadTreatments,
+            appointmentId: selectedEvent?.id || undefined
           })
         });
       } else {
@@ -510,7 +564,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupName: groupName,
-            treatments: payloadTreatments
+            treatments: payloadTreatments,
+            appointmentId: selectedEvent?.id || undefined
           })
         });
       }
@@ -803,7 +858,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     <div style={{ flex: 1 }}>
                       <select value={defaultDoctorId || ''} onChange={e => setDefaultDoctorId(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}>
                         <option value="">⚠️ Atanmadı</option>
-                        {doctors?.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        {doctors?.map((d: any) => {
+                          const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : new Date().toLocaleDateString('sv');
+                          const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
+                          const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
+                          return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                        })}
                       </select>
                     </div>
                   </div>
@@ -1096,7 +1156,20 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           <td style={{ padding: '6px 8px' }}>{c.diseaseNote || '-'}</td>
                           <td style={{ padding: '6px 8px', display: 'flex', gap: 6 }}>
                             <button onClick={() => { setEditingConsultationId(c.id); setNewConsultation(c.consultationNote || ''); setNewDisease(c.diseaseNote || ''); }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}><Pencil size={14} /></button>
-                            <button onClick={async () => { if (confirm('Emin misiniz?')) { await fetch(`/api/dental/consultations/${c.id}`, { method: 'DELETE' }); const updated = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json()); setConsultations(updated); } }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}><Trash2 size={14} /></button>
+                            <button onClick={() => {
+                              setConfirmModal({
+                                isOpen: true,
+                                title: 'Konsültasyonu Sil',
+                                message: 'Bu konsültasyon notunu silmek istediğinize emin misiniz?',
+                                confirmText: 'Evet, Sil',
+                                variant: 'danger',
+                                onConfirm: async () => {
+                                  await fetch(`/api/dental/consultations/${c.id}`, { method: 'DELETE' });
+                                  const updated = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json());
+                                  setConsultations(updated);
+                                }
+                              });
+                            }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}><Trash2 size={14} /></button>
                           </td>
                         </tr>
                       ))}
@@ -1164,10 +1237,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                           return next;
                                         });
                                       }}
-                                      style={{ padding: '4px 6px', fontSize: '0.75rem', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', maxWidth: 140, cursor: 'pointer' }}
+                                      style={{ padding: '4px 6px', fontSize: '0.75rem', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground)', maxWidth: 180, cursor: 'pointer' }}
                                     >
                                       <option value="">-- Doktor Seç --</option>
-                                      {doctors.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                      {doctors.map((d: any) => {
+                                        const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : new Date().toLocaleDateString('sv');
+                                        const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
+                                        const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
+                                        return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                      })}
                                     </select>
                                     {!draft.doctorId && <span style={{ color: '#f59e0b', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }} title="Doktor Atanmadı">⚠️ Atanmadı</span>}
                                     {totalMats > 0 && <span title="Eklenen Malzemeler" style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>📦 {totalMats} mlz.</span>}
@@ -1546,6 +1624,18 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           </div>
         </div>
       )}
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        variant={confirmModal.variant}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
 
     </div>
   );

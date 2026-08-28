@@ -478,6 +478,28 @@ const app = new Elysia()
     if (!updated) { set.status = 404; return { error: 'Not found' } }
     return updated
   })
+  .get('/api/dental/appointments/:id/treatments', async ({ params }) => {
+    const { getAppointmentTreatments } = await import('./db/repositories/dental')
+    return await getAppointmentTreatments(params.id)
+  })
+  .post('/api/dental/appointments/:id/treatments', async ({ params, body }) => {
+    const { linkTreatmentToAppointment } = await import('./db/repositories/dental')
+    const b = body as any
+    return await linkTreatmentToAppointment(params.id, b.treatmentPlanId, b.sessionNumber, b.notes)
+  })
+  .delete('/api/dental/appointments/:id/treatments/:tpId', async ({ params, set }) => {
+    const { unlinkTreatmentFromAppointment } = await import('./db/repositories/dental')
+    const ok = await unlinkTreatmentFromAppointment(params.id, params.tpId)
+    if (!ok) { set.status = 404; return { error: 'Not found' } }
+    return { success: true }
+  })
+  .patch('/api/dental/appointments/:id/treatments/:atId', async ({ params, body, set }) => {
+    const { updateAppointmentTreatmentSession } = await import('./db/repositories/dental')
+    const b = body as any
+    const updated = await updateAppointmentTreatmentSession(params.atId, { sessionStatus: b.sessionStatus, notes: b.notes })
+    if (!updated) { set.status = 404; return { error: 'Not found' } }
+    return updated
+  })
   .get('/api/dental/payments', async ({ query }) => {
     const { listAllPayments } = await import('./db/repositories/dental')
     return await listAllPayments({
@@ -578,7 +600,14 @@ const app = new Elysia()
     const { updateTreatmentGroupFull } = await import("./db/repositories/dental")
     const b = body as any
     if (!b.name || !b.patientId || !b.treatments) { set.status = 400; return { error: "Missing fields" } }
-    return await updateTreatmentGroupFull(params.id, { name: b.name, description: b.description, patientId: b.patientId, treatments: b.treatments, updatedById: user?.id })
+    return await updateTreatmentGroupFull(params.id, { 
+      name: b.name, 
+      description: b.description, 
+      patientId: b.patientId, 
+      treatments: b.treatments, 
+      updatedById: user?.id,
+      appointmentId: b.appointmentId
+    })
   })
   .put('/api/dental/treatment-groups/:id', async ({ params, body, cookie }) => {
     const { authenticateRequest } = await import('./middleware/auth')
@@ -681,7 +710,17 @@ const app = new Elysia()
       }
     }
     
-    return { success: true, groupId: group.id, count: results.length }
+    // Auto-link to appointment if appointmentId provided
+    if (b.appointmentId) {
+      const { linkTreatmentToAppointment } = await import('./db/repositories/dental')
+      for (const item of results) {
+        if (item?.id) {
+          await linkTreatmentToAppointment(b.appointmentId, item.id, 1).catch(() => {})
+        }
+      }
+    }
+
+    return { success: true, groupId: group.id, count: results.length, treatments: results }
   })
   .post('/api/dental/patients/:id/treatments', async ({ params, body, set }) => {
     const { createTreatmentPlan } = await import('./db/repositories/dental')

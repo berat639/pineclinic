@@ -183,6 +183,18 @@ export const treatmentPlans = pgTable('treatment_plans', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+// Junction table: links appointments to treatment plan items (many-to-many)
+// One treatment can be done across multiple appointments (sessions), one appointment can include many treatments
+export const appointmentTreatments = pgTable('appointment_treatments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  appointmentId: uuid('appointment_id').notNull().references(() => dentalAppointments.id, { onDelete: 'cascade' }),
+  treatmentPlanId: uuid('treatment_plan_id').notNull().references(() => treatmentPlans.id, { onDelete: 'cascade' }),
+  sessionNumber: integer('session_number').notNull().default(1), // For multi-session treatments (e.g., Canal 1st, 2nd session)
+  sessionStatus: text('session_status').notNull().default('planned'), // planned | done | skipped
+  notes: text('notes'), // Session-specific notes
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
 export const patientPayments = pgTable('patient_payments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   patientId: uuid('patient_id').notNull().references(() => patients.id),

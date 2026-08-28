@@ -7,6 +7,9 @@ import PatientSidePanel from './PatientSidePanel'
 import AdvancedTedaviModal from './AdvancedTedaviModal';
 import QuickCreatePopover from './QuickCreatePopover';
 import MiniCalendar from './MiniCalendar';
+import PatientProfileCard from './PatientProfileCard';
+import FastScheduleModal from './FastScheduleModal';
+import ConfirmModal from './ConfirmModal';
 
 import DicomViewer from './DicomViewer'
 
@@ -130,6 +133,23 @@ export default function CalendarTab() {
   const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
   const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
 
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'danger' | 'warning' | 'primary';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Evet, Sil',
+    variant: 'danger',
+    onConfirm: () => {}
+  });
+
   const [quickCreateMenu, setQuickCreateMenu] = useState<{ start: string, end: string, doctorId: string | null, x: number, y: number, isCentered?: boolean } | null>(null)
 
   const [showPatientSearchDropdown, setShowPatientSearchDropdown] = useState(false)
@@ -145,6 +165,183 @@ export default function CalendarTab() {
   const [treatmentGroups, setTreatmentGroups] = useState<any[]>([])
   const [patientPayments, setPatientPayments] = useState<any[]>([])
   const [patientInfo, setPatientInfo] = useState<Patient | null>(null)
+
+  const [patientProfileId, setPatientProfileId] = useState<string | null>(null)
+  const [patientProfileData, setPatientProfileData] = useState<any>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+
+  useEffect(() => {
+    if (patientProfileId) {
+      setProfileLoading(true)
+      fetch(`/api/dental/patients/${patientProfileId}/profile`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.error) setPatientProfileData(data)
+          setProfileLoading(false)
+        })
+        .catch(err => {
+          console.error(err)
+          setProfileLoading(false)
+        })
+    } else {
+      setPatientProfileData(null)
+    }
+  }, [patientProfileId])
+
+  useEffect(() => {
+    if (panelOpen && selectedEvent) {
+      const allTreatments = [
+        ...(patientTreatments || []),
+        ...(treatmentGroups || []).flatMap((g: any) => g.treatments || [])
+      ];
+      const linkedTreatment = allTreatments.find((t: any) => t.sessions?.some((s: any) => s.appointmentId === selectedEvent.id));
+      if (linkedTreatment) {
+        const timer = setTimeout(() => {
+          const el = document.getElementById(`treatment-${linkedTreatment.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'all 0.4s ease';
+            el.style.boxShadow = '0 0 16px rgba(59, 130, 246, 0.6)';
+            setTimeout(() => {
+              if (el) el.style.boxShadow = 'none';
+            }, 1500);
+          }
+        }, 250);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [panelOpen, selectedEvent?.id, patientTreatments?.length, treatmentGroups?.length])
+
+  const focusAppointmentOnCalendar = (eventId: string, startTime: string) => {
+    try {
+      const eventDate = new Date(startTime).toLocaleDateString('sv');
+      setCurrentDate(eventDate);
+      
+      const targetEvt = events.find(ev => ev.id === eventId);
+      if (targetEvt) {
+        setSelectedEvent(targetEvt);
+      }
+
+      setTimeout(() => {
+        const el = document.getElementById(`cal-event-${eventId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('pulse-highlight-cal');
+          setTimeout(() => el.classList.remove('pulse-highlight-cal'), 2800);
+        }
+      }, 250);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const parseDateFromString = (str: string): string | null => {
+    if (!str) return null;
+    const matchTR = str.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    if (matchTR) {
+      const [, d, m, y] = matchTR;
+      return `${y}-${m}-${d}`;
+    }
+    const matchISO = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (matchISO) {
+      return matchISO[0];
+    }
+    return null;
+  };
+
+  const handleTreatmentCardClick = (t: any, g?: any) => {
+    const apptTime = t?.sessions?.[0]?.startTime || t?.plannedDate;
+
+    // 1. If has sessions/appointment, match valid event from events list
+    if (t?.sessions && t.sessions.length > 0) {
+      const sessionWithAppt = t.sessions.find((s: any) => s.appointmentId && events.some(ev => ev.id === s.appointmentId)) || t.sessions[0];
+      if (sessionWithAppt?.appointmentId && sessionWithAppt?.startTime) {
+        focusAppointmentOnCalendar(sessionWithAppt.appointmentId, sessionWithAppt.startTime);
+        import('react-hot-toast').then(mod =>
+          mod.toast.success(`📅 ${new Date(sessionWithAppt.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} randevusuna gidildi`)
+        );
+        return;
+      }
+    }
+
+    // 2. If apptTime exists (e.g. plannedDate or session startTime)
+    if (apptTime) {
+      const targetTimeMs = new Date(apptTime).getTime();
+      const targetDateStr = new Date(apptTime).toLocaleDateString('sv');
+      setCurrentDate(targetDateStr);
+
+      // Find all appointments for this patient on this day
+      const patientEvtsOnDate = events.filter(ev => 
+        (ev.patientId === selectedEvent?.patientId || (selectedEvent?.title && ev.title?.includes(selectedEvent.title.split(' - ')[0]))) && 
+        new Date(ev.startTime).toLocaleDateString('sv') === targetDateStr
+      );
+
+      if (patientEvtsOnDate.length > 0) {
+        // Sort by closest start time to apptTime so 14:30 matches the 14:30 event, not 11:30!
+        patientEvtsOnDate.sort((a, b) => 
+          Math.abs(new Date(a.startTime).getTime() - targetTimeMs) - 
+          Math.abs(new Date(b.startTime).getTime() - targetTimeMs)
+        );
+        const bestMatch = patientEvtsOnDate[0];
+        focusAppointmentOnCalendar(bestMatch.id, bestMatch.startTime);
+        import('react-hot-toast').then(mod =>
+          mod.toast.success(`📅 ${new Date(bestMatch.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} randevusuna gidildi`)
+        );
+        return;
+      }
+    }
+
+    // 3. Fallback: Parse date from group name (e.g., "Tedavi Planı - 28.08.2026")
+    let targetDate = g?.name ? parseDateFromString(g.name) : null;
+    if (!targetDate && t?.procedureName) targetDate = parseDateFromString(t.procedureName);
+    if (!targetDate && t?.createdAt) targetDate = new Date(t.createdAt).toLocaleDateString('sv');
+
+    if (targetDate) {
+      setCurrentDate(targetDate);
+      const patientEvtOnDate = events.find(ev => 
+        (ev.patientId === selectedEvent?.patientId || (selectedEvent?.title && ev.title?.includes(selectedEvent.title.split(' - ')[0]))) && 
+        new Date(ev.startTime).toLocaleDateString('sv') === targetDate
+      );
+      if (patientEvtOnDate) {
+        focusAppointmentOnCalendar(patientEvtOnDate.id, patientEvtOnDate.startTime);
+        import('react-hot-toast').then(mod =>
+          mod.toast.success(`📅 ${new Date(targetDate + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} tarihindeki randevuya gidildi`)
+        );
+      } else {
+        import('react-hot-toast').then(mod =>
+          mod.toast(`📅 Takvim ${new Date(targetDate + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} tarihine yönlendirildi.`, { icon: '📅' })
+        );
+      }
+    }
+  };
+
+  const handleGroupHeaderClick = (g: any) => {
+    const targetDate = parseDateFromString(g?.name || '');
+    if (targetDate) {
+      setCurrentDate(targetDate);
+      const patientEvtOnDate = events.find(ev => 
+        (ev.patientId === selectedEvent?.patientId || (selectedEvent?.title && ev.title?.includes(selectedEvent.title.split(' - ')[0]))) && 
+        new Date(ev.startTime).toLocaleDateString('sv') === targetDate
+      );
+      if (patientEvtOnDate) {
+        focusAppointmentOnCalendar(patientEvtOnDate.id, patientEvtOnDate.startTime);
+        import('react-hot-toast').then(mod =>
+          mod.toast.success(`📁 ${g.name} plan tarihindeki randevuya gidildi`)
+        );
+      } else {
+        import('react-hot-toast').then(mod =>
+          mod.toast(`📁 Takvim ${g.name} tarihine yönlendirildi.`, { icon: '📅' })
+        );
+      }
+    }
+  };
+
+  // Fast Schedule Treatment State
+  const [fastScheduleTreatment, setFastScheduleTreatment] = useState<any>(null)
+  const [fsDate, setFsDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10);
+  })
+  const [fsTime, setFsTime] = useState('10:00')
 
   // Treatment Form state
   const [showTedaviForm, setShowTedaviForm] = useState(false)
@@ -279,14 +476,23 @@ export default function CalendarTab() {
 
   }
 
-  const handleDeleteEvent = async () => {
-    if (!selectedEvent || !confirm('Bu randevuyu silmek istediğinizden emin misiniz?')) return
-    try {
-      await fetch(`/api/dental/appointments/${selectedEvent.id}`, { method: 'DELETE' })
-      setPanelOpen(false)
-      setSelectedEvent(null)
-      fetchData()
-    } catch { }
+  const handleDeleteEvent = () => {
+    if (!selectedEvent) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Randevuyu Sil',
+      message: `"${selectedEvent.title}" randevusunu silmek istediğinizden emin misiniz? Randevuya bağlı tedavi planları korunacaktır.`,
+      confirmText: 'Evet, Sil',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await fetch(`/api/dental/appointments/${selectedEvent.id}`, { method: 'DELETE' });
+          setPanelOpen(false);
+          setSelectedEvent(null);
+          fetchData();
+        } catch { }
+      }
+    });
   }
 
   const handleAddDoctor = async (e: React.FormEvent) => {
@@ -325,6 +531,28 @@ export default function CalendarTab() {
 
   return (
     <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', width: '100%', maxWidth: '1200px', margin: '0 auto', position: 'relative', alignItems: 'flex-start' }}>
+      <style>{`
+        @keyframes pulseCalGlow {
+          0% {
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.8), 0 0 15px rgba(59, 130, 246, 0.6);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 8px rgba(59, 130, 246, 0), 0 0 25px rgba(59, 130, 246, 0.9);
+            transform: scale(1.03);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(59, 130, 246, 0), 0 0 15px rgba(59, 130, 246, 0.4);
+            transform: scale(1);
+          }
+        }
+        .pulse-highlight-cal {
+          animation: pulseCalGlow 0.9s ease-in-out infinite alternate !important;
+          z-index: 9999 !important;
+          outline: 2.5px solid #3b82f6 !important;
+          outline-offset: 1px !important;
+        }
+      `}</style>
       {/* Left Sidebar */}
       <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -337,7 +565,7 @@ export default function CalendarTab() {
 
         <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
 
-        <div style={{ position: 'relative', zIndex: 100 }}>
+        <div style={{ position: 'relative', zIndex: 10 }}>
           <div style={{
             background: 'var(--input-bg)',
             padding: '10px 14px',
@@ -376,7 +604,7 @@ export default function CalendarTab() {
               marginTop: '8px',
               left: 0,
               right: 0,
-              zIndex: 9999,
+              zIndex: 50,
               background: 'var(--card-bg, #ffffff)',
               border: '1px solid var(--border)',
               borderRadius: '10px',
@@ -596,15 +824,44 @@ export default function CalendarTab() {
           onEventClick={handleEventClick}
           view={view}
         />
+      </div>
+
+      {/* Backdrop for click outside (shared) */}
+      {(panelOpen || patientProfileId) && (
+          <div
+            onClick={() => { setPanelOpen(false); setPatientProfileId(null); }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: showTedaviForm ? 'none' : 'block' }}
+          />
+      )}
+
+        {/* Left Panel — Patient Profile */}
+        {patientProfileId && (
+            <div
+              style={{
+                position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '500px',
+                backgroundColor: 'var(--card-bg)', borderRight: '1px solid var(--divider)',
+                zIndex: 9999, padding: '24px', overflowY: 'auto',
+                boxShadow: '4px 0 20px rgba(0,0,0,0.19)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Hasta Detayı</h3>
+                <button onClick={() => setPatientProfileId(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', fontSize: '1.25rem', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              {profileLoading ? (
+                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Profil yükleniyor...</div>
+              ) : patientProfileData ? (
+                 <PatientProfileCard profile={patientProfileData} />
+              ) : (
+                 <div style={{ padding: '2rem', textAlign: 'center', color: '#ef4444' }}>Profil yüklenemedi.</div>
+              )}
+            </div>
+        )}
 
         {/* Right Panel — Event Detail */}
         {panelOpen && selectedEvent && (
           <>
-            {/* Backdrop for click outside */}
-            <div
-              onClick={() => setPanelOpen(false)}
-              style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: showTedaviForm ? 'none' : 'block' }}
-            />
             <div
               style={{
                 position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '380px',
@@ -621,17 +878,43 @@ export default function CalendarTab() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                 {/* ── Hasta Bilgisi ── */}
                 <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Hasta Bilgisi</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Hasta Bilgisi</div>
+                    {patientInfo && (
+                       <button 
+                         onClick={(e) => {
+                           e.preventDefault();
+                           setPatientProfileId(patientInfo.id);
+                         }} 
+                         style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.65rem', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}
+                       >
+                         Profile Git ↗
+                       </button>
+                    )}
+                  </div>
                   <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--foreground)' }}>{patientInfo?.name || selectedEvent.title.split(' - ')[0]}</div>
                   {patientInfo?.phone && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 2 }}>📞 {patientInfo.phone}</div>}
                 </div>
+
+                {/* ── Doktor Atanmadı Uyarısı ── */}
+                {!selectedEvent.doctorId && (
+                  <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(245, 158, 11, 0.14)', border: '1.5px solid #f59e0b', color: '#f59e0b', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }}>
+                    <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                    <div>
+                      <div>Doktor Atanmadı!</div>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 500, color: 'var(--foreground-2)', marginTop: 2 }}>Bu randevuyu gerçekleştirecek hekimi lütfen aşağıdan seçiniz.</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Randevu Bilgisi ── */}
                 <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
                   <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Randevu Bilgisi</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div>
-                      <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Doktor</div>
+                      <div style={{ fontSize: '0.6rem', color: !selectedEvent.doctorId ? '#f59e0b' : 'var(--foreground-3)', marginBottom: 2, fontWeight: !selectedEvent.doctorId ? 700 : 500 }}>
+                        {!selectedEvent.doctorId ? '⚠️ Doktor (Atanmadı)' : 'Doktor'}
+                      </div>
                       <select
                         value={selectedEvent.doctorId || ''}
                         onChange={async (e) => {
@@ -650,9 +933,18 @@ export default function CalendarTab() {
                             setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
                           }
                         }}
-                        style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: selectedEvent.doctorId ? 'var(--foreground)' : '#9ca3af' }}
+                        style={{
+                          width: '100%',
+                          fontSize: '0.8rem',
+                          padding: '4px 6px',
+                          borderRadius: 6,
+                          border: !selectedEvent.doctorId ? '1.5px solid #f59e0b' : '1px solid var(--glass-border)',
+                          background: !selectedEvent.doctorId ? 'rgba(245, 158, 11, 0.08)' : 'var(--background)',
+                          color: !selectedEvent.doctorId ? '#f59e0b' : 'var(--foreground)',
+                          fontWeight: !selectedEvent.doctorId ? 700 : 500
+                        }}
                       >
-                        <option value="">⚠️ Atanmamış</option>
+                        <option value="">⚠️ Doktor Seçiniz (Atanmamış)</option>
                         {doctors
                           .filter(d => {
                             const evtDate = new Date(selectedEvent.startTime).toLocaleDateString('sv')
@@ -718,17 +1010,6 @@ export default function CalendarTab() {
                         <option value="waiting_in_clinic">🏥 Klinikte Bekliyor</option>
                       </select>
                     </div>
-                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center' }}>
-                      <div style={{ flex: 1, padding: '8px 10px', background: 'rgba(156,163,175,0.05)', borderRadius: 6, border: '1px solid var(--glass-border)' }}>
-                        <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Tarih</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--foreground)', fontWeight: 600 }}>{new Date(selectedEvent.startTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-                      </div>
-                      <div style={{ flex: 1, padding: '8px 10px', background: 'rgba(156,163,175,0.05)', borderRadius: 6, border: '1px solid var(--glass-border)' }}>
-                        <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Saat</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--foreground)', fontWeight: 600 }}>{new Date(selectedEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} - {new Date(selectedEvent.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
-                      </div>
-                    </div>
-
                   </div>
                   <div style={{ marginTop: 12 }}>
                     <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 4 }}>Hasta Şikayeti / İlk Talep</div>
@@ -774,150 +1055,432 @@ export default function CalendarTab() {
                       ⚠️ {treatmentDeleteError}
                     </div>
                   )}
-                  {patientTreatments.filter((t: any) => t.status !== 'completed').length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* ── UNIFIED TEDAVİ PLANI & GRUPLARI ── */}
+                  {patientTreatments.filter((t: any) => t.status !== 'completed').length === 0 ? (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', padding: '14px', background: 'rgba(255,255,255,0.015)', borderRadius: 8, textAlign: 'center', border: '1px dashed var(--glass-border)' }}>
+                      Hastaya ait aktif tedavi planı bulunmuyor.<br />
+                      Yukarıdaki <strong style={{ color: 'var(--brand)' }}>"+ Tedavi Ekle"</strong> butonundan yeni tedavi planı oluşturabilirsiniz.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {Array.isArray(treatmentGroups) && treatmentGroups.map((g: any) => {
                         const groupTreatments = patientTreatments.filter((t: any) => t.status !== 'completed' && t.groupId === g.id);
                         if (groupTreatments.length === 0) return null;
                         return (
-                          <div key={g.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid var(--glass-border)' }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)', display: 'flex', alignItems: 'center' }}>
-                                {g.name}
-                                {g.creatorName && (
-                                  <span style={{ marginLeft: 8, fontSize: '0.65rem', fontWeight: 500, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.1)', color: 'var(--foreground-2)' }}>
-                                    {g.creatorName} {g.creatorRole && `(${g.creatorRole})`}
-                                  </span>
-                                )}
+                          <div key={g.id} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
+                            <div 
+                              onClick={() => handleGroupHeaderClick(g)}
+                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: 'rgba(0,0,0,0.2)', borderBottom: '1px solid var(--glass-border)', cursor: 'pointer', transition: 'all 0.15s ease' }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,0,0,0.2)'}
+                              title="Takvimde bu plan tarihine git"
+                            >
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>📁</span>
+                                <span>{g.name}</span>
+                                <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: 'var(--foreground-2)' }}>
+                                  {groupTreatments.length}
+                                </span>
                               </span>
-                              <div style={{ display: 'flex', gap: '8px' }}>
+                              <div style={{ display: 'flex', gap: '6px' }} onClick={e => e.stopPropagation()}>
                                 <button
                                   onClick={(e) => {
                                     e.preventDefault();
+                                    e.stopPropagation();
                                     setEditingGroup({ ...g, treatments: patientTreatments.filter((t: any) => t.groupId === g.id) });
                                     setShowTedaviForm(true);
                                   }}
-                                  style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  title="Düzenle"
                                 >
-                                  ✏️ Düzenle
+                                  ✏️
                                 </button>
                                 <button
-                                  onClick={async (e) => {
+                                  onClick={(e) => {
                                     e.preventDefault();
-                                    if (!confirm('Bu grubun tamamını silmek istediğinize emin misiniz?')) return;
-                                    await fetch(`/api/dental/treatment-groups/${g.id}`, { method: 'DELETE' });
-                                    fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); });
+                                    e.stopPropagation();
+                                    setConfirmModal({
+                                      isOpen: true,
+                                      title: 'Tedavi Grubunu Sil',
+                                      message: `"${g.name}" tedavi grubunun ve içindeki tüm işlemlerin silinmesini onaylıyor musunuz?`,
+                                      confirmText: 'Evet, Sil',
+                                      variant: 'danger',
+                                      onConfirm: async () => {
+                                        await fetch(`/api/dental/treatment-groups/${g.id}`, { method: 'DELETE' });
+                                        fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); });
+                                      }
+                                    });
                                   }}
-                                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  title="Sil"
                                 >
-                                  🗑️ Tüm Planı Sil
+                                  🗑️
                                 </button>
                               </div>
                             </div>
-                            <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              {groupTreatments.map((t: any) => (
-                                <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ color: 'var(--foreground)', display: 'flex', alignItems: 'center' }}>
-                                      {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600, marginRight: 4 }}>#{t.toothNumber}</span> : null}
-                                      {t.procedureName}
-                                      {!t.doctorId && <span style={{ marginLeft: 6, color: '#f59e0b', fontSize: '0.65rem', fontWeight: 600 }} title="Doktor Atanmadı">⚠️ Atanmadı</span>}
-                                    </span>
-                                    {t.indication && <span style={{ fontSize: '0.65rem', color: 'var(--foreground-3)', marginTop: 2 }}>Endikasyon: {t.indication}</span>}
-                                  </div>
-                                  <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    {t.dcmUrl && (
-                                      <button onClick={() => setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`)} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer' }}>
-                                        Röntgen
+                            <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {groupTreatments.map((t: any) => {
+                                const apptTime = t.sessions?.[0]?.startTime || t.plannedDate;
+                                return (
+                                  <div 
+                                    id={`treatment-${t.id}`} 
+                                    key={t.id} 
+                                    onClick={() => handleTreatmentCardClick(t, g)}
+                                    style={{ 
+                                      display: 'flex', 
+                                      flexDirection: 'column',
+                                      gap: 8, 
+                                      padding: '10px 11px', 
+                                      borderRadius: 8, 
+                                      background: 'rgba(255,255,255,0.03)', 
+                                      border: '1px solid var(--glass-border)', 
+                                      fontSize: '0.75rem', 
+                                      cursor: 'pointer', 
+                                      transition: 'all 0.15s ease',
+                                      boxSizing: 'border-box'
+                                    }}
+                                    onMouseEnter={e => {
+                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                                      e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+                                    }}
+                                    onMouseLeave={e => {
+                                      e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                                      e.currentTarget.style.borderColor = 'var(--glass-border)';
+                                    }}
+                                    title="Takvimde bu tedavi / randevu tarihine git"
+                                  >
+                                    {/* 1. Satır: Diş No + Tedavi Adı + Sil Butonu */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                                        {t.toothNumber && (
+                                          <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', fontWeight: 700, fontSize: '0.72rem', flexShrink: 0 }}>
+                                            #{t.toothNumber}
+                                          </span>
+                                        )}
+                                        <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.procedureName}>
+                                          {t.procedureName}
+                                        </span>
+                                        {t.dcmUrl && (
+                                          <button onClick={(e) => { e.stopPropagation(); setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`); }} style={{ fontSize: '0.58rem', padding: '1px 5px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer', flexShrink: 0 }}>
+                                            Röntgen
+                                          </button>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setConfirmModal({
+                                            isOpen: true,
+                                            title: 'İşlemi Sil',
+                                            message: `"${t.procedureName}" işlemini silmek istediğinize emin misiniz?`,
+                                            confirmText: 'Evet, Sil',
+                                            variant: 'danger',
+                                            onConfirm: async () => {
+                                              await fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' });
+                                              fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); });
+                                            }
+                                          });
+                                        }}
+                                        style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px 4px', fontSize: '0.75rem', opacity: 0.7, flexShrink: 0 }}
+                                        title="Sil"
+                                      >
+                                        🗑️
                                       </button>
-                                    )}
-                                    <select value={t.doctorId || ''} onChange={(e) => {
-                                      fetch(`/api/dental/treatments/${t.id}`, {
-                                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ doctorId: e.target.value || null })
-                                      }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
-                                    }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', maxWidth: 80 }}>
-                                      <option value="">Atanmadı</option>
-                                      {doctors.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    </select>
-                                    <select defaultValue={t.status} onChange={(e) => {
-                                      fetch(`/api/dental/treatments/${t.id}`, {
-                                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ status: e.target.value })
-                                      }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
-                                    }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                                      <option value="planned">Planlandı</option>
-                                      <option value="in_progress">Devam Ediyor</option>
-                                      <option value="completed">Yapıldı</option>
-                                    </select>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' })
-                                          .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }))
-                                          .catch(() => { })
-                                      }}
-                                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }}
-                                    >🗑️</button>
-                                  </span>
-                                </div>
-                              ))}
+                                    </div>
+
+                                    {/* 2. Satır: Durum ve Doktor (Yan yana 2 eşit sütunlu Grid) */}
+                                    <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                                      <select 
+                                        defaultValue={t.status} 
+                                        onChange={(e) => {
+                                          fetch(`/api/dental/treatments/${t.id}`, {
+                                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ status: e.target.value })
+                                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                        }} 
+                                        style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', outline: 'none', boxSizing: 'border-box' }}
+                                      >
+                                        <option value="planned">Planlandı</option>
+                                        <option value="in_progress">Devam Ediyor</option>
+                                        <option value="completed">Yapıldı ✓</option>
+                                      </select>
+
+                                      <select 
+                                        value={t.doctorId || ''} 
+                                        onChange={(e) => {
+                                          const newDocId = e.target.value || null;
+                                          if (newDocId && apptTime) {
+                                            const apptDateStr = new Date(apptTime).toLocaleDateString('sv');
+                                            const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
+                                            const docObj = doctors.find((d: any) => d.id === newDocId);
+                                            const docName = docObj?.name || 'Hekim';
+
+                                            if (docShifts.length === 0) {
+                                              import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
+                                              return;
+                                            }
+
+                                            const startMin = new Date(apptTime).getHours() * 60 + new Date(apptTime).getMinutes();
+                                            const isCovered = docShifts.some((s: any) => {
+                                              const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+                                              const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+                                              return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+                                            });
+
+                                            if (!isCovered) {
+                                              const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+                                              import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
+                                              return;
+                                            }
+                                          }
+
+                                          fetch(`/api/dental/treatments/${t.id}`, {
+                                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ doctorId: newDocId })
+                                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                        }} 
+                                        style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: t.doctorId ? 'var(--foreground-2)' : '#f59e0b', cursor: 'pointer', outline: 'none', boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                      >
+                                        <option value="">👤 Doktor Seç</option>
+                                        {doctors.map((d: any) => {
+                                          const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
+                                          const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
+                                          const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                          return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                        })}
+                                      </select>
+                                    </div>
+
+                                    {/* 3. Satır: Tarih / Randevu Butonu (Tam Genişlikte) */}
+                                    <div onClick={e => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setFastScheduleTreatment(t);
+                                        }}
+                                        style={{
+                                          width: '100%',
+                                          background: apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)',
+                                          border: apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)',
+                                          color: apptTime ? '#22c55e' : '#60a5fa',
+                                          borderRadius: 6,
+                                          cursor: 'pointer',
+                                          padding: '5px 8px',
+                                          fontSize: '0.7rem',
+                                          fontWeight: 600,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          transition: 'all 0.15s ease',
+                                          boxSizing: 'border-box'
+                                        }}
+                                        onMouseEnter={e => {
+                                          e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                                        }}
+                                        onMouseLeave={e => {
+                                          e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)';
+                                        }}
+                                        title="Tarih / Saat Belirle veya Değiştir"
+                                      >
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                          <span>📅</span>
+                                          <span>{apptTime ? new Date(apptTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'Tarih / Randevu Belirle'}</span>
+                                        </span>
+                                        <span style={{ fontSize: '0.65rem', opacity: 0.85 }}>{apptTime ? 'Değiştir ↗' : '+ Planla'}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                        )
+                        );
                       })}
 
-                      {/* Ungrouped Treatments */}
-                      {patientTreatments.filter((t: any) => t.status !== 'completed' && !t.groupId).map((t: any) => (
-                        <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '0.75rem' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ color: 'var(--foreground)' }}>
-                              {t.toothNumber ? <span style={{ color: 'var(--accent)', fontWeight: 600, marginRight: 4 }}>#{t.toothNumber}</span> : null}
-                              {t.procedureName}
-                            </span>
-                            {t.indication && <span style={{ fontSize: '0.65rem', color: 'var(--foreground-3)', marginTop: 2 }}>Endikasyon: {t.indication}</span>}
-                          </div>
-                          <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            {t.dcmUrl && (
-                              <button onClick={() => setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`)} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer' }}>
-                                Röntgen
+                      {/* Ungrouped treatments if any */}
+                      {patientTreatments.filter((t: any) => t.status !== 'completed' && !t.groupId).map((t: any) => {
+                        const apptTime = t.sessions?.[0]?.startTime || t.plannedDate;
+                        return (
+                          <div 
+                            id={`treatment-${t.id}`} 
+                            key={t.id} 
+                            onClick={() => handleTreatmentCardClick(t)}
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column',
+                              gap: 8, 
+                              padding: '10px 11px', 
+                              borderRadius: 8, 
+                              background: 'rgba(255,255,255,0.03)', 
+                              border: '1px solid var(--glass-border)', 
+                              fontSize: '0.75rem', 
+                              cursor: 'pointer', 
+                              transition: 'all 0.15s ease',
+                              boxSizing: 'border-box'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
+                              e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                              e.currentTarget.style.borderColor = 'var(--glass-border)';
+                            }}
+                            title="Takvimde bu tedavi / randevu tarihine git"
+                          >
+                            {/* 1. Satır: Diş No + Tedavi Adı + Sil Butonu */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                                {t.toothNumber && (
+                                  <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', fontWeight: 700, fontSize: '0.72rem', flexShrink: 0 }}>
+                                    #{t.toothNumber}
+                                  </span>
+                                )}
+                                <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.procedureName}>
+                                  {t.procedureName}
+                                </span>
+                                {t.dcmUrl && (
+                                  <button onClick={(e) => { e.stopPropagation(); setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`); }} style={{ fontSize: '0.58rem', padding: '1px 5px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer', flexShrink: 0 }}>
+                                    Röntgen
+                                  </button>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setConfirmModal({
+                                    isOpen: true,
+                                    title: 'İşlemi Sil',
+                                    message: `"${t.procedureName}" işlemini silmek istediğinize emin misiniz?`,
+                                    confirmText: 'Evet, Sil',
+                                    variant: 'danger',
+                                    onConfirm: async () => {
+                                      await fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' });
+                                      fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); });
+                                    }
+                                  });
+                                }}
+                                style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px 4px', fontSize: '0.75rem', opacity: 0.7, flexShrink: 0 }}
+                                title="Sil"
+                              >
+                                🗑️
                               </button>
-                            )}
-                            <select value={t.doctorId || ''} onChange={(e) => {
-                              fetch(`/api/dental/treatments/${t.id}`, {
-                                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ doctorId: e.target.value || null })
-                              }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
-                            }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', maxWidth: 80 }}>
-                              <option value="">Atanmadı</option>
-                              {doctors.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                            </select>
-                            <select defaultValue={t.status} onChange={(e) => {
-                              fetch(`/api/dental/treatments/${t.id}`, {
-                                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ status: e.target.value })
-                              }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
-                            }} style={{ fontSize: '0.6rem', padding: '1px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                              <option value="planned">Planlandı</option>
-                              <option value="in_progress">Devam Ediyor</option>
-                              <option value="completed">Yapıldı</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                fetch(`/api/dental/treatments/${t.id}`, { method: 'DELETE' })
-                                  .then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }))
-                                  .catch(() => { })
-                              }}
-                              style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '0.85rem' }}
-                            >🗑️</button>
-                          </span>
-                        </div>
-                      ))}
+                            </div>
+
+                            {/* 2. Satır: Durum ve Doktor (Yan yana 2 eşit sütunlu Grid) */}
+                            <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                              <select 
+                                defaultValue={t.status} 
+                                onChange={(e) => {
+                                  fetch(`/api/dental/treatments/${t.id}`, {
+                                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: e.target.value })
+                                  }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                }} 
+                                style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', outline: 'none', boxSizing: 'border-box' }}
+                              >
+                                <option value="planned">Planlandı</option>
+                                <option value="in_progress">Devam Ediyor</option>
+                                <option value="completed">Yapıldı ✓</option>
+                              </select>
+
+                              <select 
+                                value={t.doctorId || ''} 
+                                onChange={(e) => {
+                                  const newDocId = e.target.value || null;
+                                  if (newDocId && apptTime) {
+                                    const apptDateStr = new Date(apptTime).toLocaleDateString('sv');
+                                    const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
+                                    const docObj = doctors.find((d: any) => d.id === newDocId);
+                                    const docName = docObj?.name || 'Hekim';
+
+                                    if (docShifts.length === 0) {
+                                      import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
+                                      return;
+                                    }
+
+                                    const startMin = new Date(apptTime).getHours() * 60 + new Date(apptTime).getMinutes();
+                                    const isCovered = docShifts.some((s: any) => {
+                                      const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+                                      const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+                                      return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+                                    });
+
+                                    if (!isCovered) {
+                                      const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+                                      import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
+                                      return;
+                                    }
+                                  }
+
+                                  fetch(`/api/dental/treatments/${t.id}`, {
+                                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ doctorId: newDocId })
+                                  }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                }} 
+                                style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: t.doctorId ? 'var(--foreground-2)' : '#f59e0b', cursor: 'pointer', outline: 'none', boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                              >
+                                <option value="">👤 Doktor Seç</option>
+                                {doctors.map((d: any) => {
+                                  const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
+                                  const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
+                                  const shiftText = docShifts.length > 0 ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                  return <option key={d.id} value={d.id}>{d.name} {shiftText}</option>;
+                                })}
+                              </select>
+                            </div>
+
+                            {/* 3. Satır: Tarih / Randevu Butonu (Tam Genişlikte) */}
+                            <div onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setFastScheduleTreatment(t);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  background: apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)',
+                                  border: apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)',
+                                  color: apptTime ? '#22c55e' : '#60a5fa',
+                                  borderRadius: 6,
+                                  cursor: 'pointer',
+                                  padding: '5px 8px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  transition: 'all 0.15s ease',
+                                  boxSizing: 'border-box'
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)';
+                                }}
+                                title="Tarih / Saat Belirle veya Değiştir"
+                              >
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span>📅</span>
+                                  <span>{apptTime ? new Date(apptTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'Tarih / Randevu Belirle'}</span>
+                                </span>
+                                <span style={{ fontSize: '0.65rem', opacity: 0.85 }}>{apptTime ? 'Değiştir ↗' : '+ Planla'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ) : <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)' }}>Tedavi planı yok</div>}
+                  )}
                 </div>
               </div>
 
@@ -1006,6 +1569,44 @@ export default function CalendarTab() {
             </div>
           </>
         )}
+        {/* Hızlı Randevu / Tarih Atama Modalı (Modern DayPicker & Interaktif Saat Seçici) */}
+        {fastScheduleTreatment && selectedEvent && (
+          <FastScheduleModal
+            treatment={fastScheduleTreatment}
+            patientInfo={patientProfileData?.patient || { name: selectedEvent.title?.split(' - ')[0] }}
+            selectedEvent={selectedEvent}
+            doctors={doctors}
+            shifts={shifts}
+            existingEvents={events}
+            onClose={() => setFastScheduleTreatment(null)}
+            onSuccess={(targetAppt, targetDate) => {
+              setFastScheduleTreatment(null);
+              fetchData();
+              if (selectedEvent.patientId) {
+                fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`)
+                  .then(r => r.json())
+                  .then(d => {
+                    setPatientTreatments(d?.treatments || []);
+                    setTreatmentGroups(d?.groups || []);
+                  });
+              }
+              fetch('/api/dental/appointments')
+                .then(r => r.json())
+                .then(d => {
+                  setEvents(d);
+                  if (targetAppt) {
+                    const freshAppt = d.find((ev: any) => ev.id === targetAppt.id) || targetAppt;
+                    setSelectedEvent(freshAppt);
+                    if (targetDate) setCurrentDate(targetDate);
+                    focusAppointmentOnCalendar(freshAppt.id, freshAppt.startTime);
+                  } else if (targetDate) {
+                    setCurrentDate(targetDate);
+                  }
+                });
+            }}
+          />
+        )}
+
         {/* Tedavi Ekle Modal */}
         {showTedaviForm && selectedEvent && (
           <AdvancedTedaviModal
@@ -1013,6 +1614,7 @@ export default function CalendarTab() {
             patientInfo={patientInfo}
             clinicId={clinicId}
             doctors={doctors}
+            shifts={shifts}
             editingGroup={editingGroup}
             onClose={() => {
               setShowTedaviForm(false);
@@ -1398,12 +2000,21 @@ export default function CalendarTab() {
           </div>
         )}
 
-      </div>
-
       <PatientSidePanel
         isOpen={patientPanelOpen}
         onClose={() => setPatientPanelOpen(false)}
         patients={patients}
+      />
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        variant={confirmModal.variant}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
       />
 
     </div>

@@ -44,7 +44,7 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
       {/* Demografik */}
       <div style={cardStyle}>
         <div style={headerStyle}>📋 Demografik Bilgiler</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
           <div><span style={{ color: 'var(--foreground-3)' }}>Ad:</span> {patient.name}</div>
           {patient.phone && <div><span style={{ color: 'var(--foreground-3)' }}>Tel:</span> {patient.phone}</div>}
           {patient.email && <div><span style={{ color: 'var(--foreground-3)' }}>E-posta:</span> {patient.email}</div>}
@@ -56,7 +56,7 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
       {/* İletişim İzinleri (KVKK) */}
       <div style={cardStyle}>
         <div style={headerStyle}>🛡️ İletişim İzinleri (KVKK)</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span>💬 SMS:</span>
             {patient.smsOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}

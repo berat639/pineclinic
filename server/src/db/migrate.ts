@@ -716,11 +716,28 @@ async function runMigrations() {
       name        TEXT NOT NULL,
       description TEXT,
       status      TEXT NOT NULL DEFAULT 'active',
+      created_by_id UUID REFERENCES users(id),
+      updated_by_id UUID REFERENCES users(id),
       created_at  TIMESTAMPTZ DEFAULT now()
     )
   `
+  await sql`ALTER TABLE treatment_groups ADD COLUMN IF NOT EXISTS created_by_id UUID REFERENCES users(id)`.catch(() => {})
+  await sql`ALTER TABLE treatment_groups ADD COLUMN IF NOT EXISTS updated_by_id UUID REFERENCES users(id)`.catch(() => {})
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES treatment_groups(id)`
   await sql`ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES users(id)`
+
+  // ── Appointment Treatments (Junction) ──────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS appointment_treatments (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      appointment_id    UUID NOT NULL REFERENCES dental_appointments(id) ON DELETE CASCADE,
+      treatment_plan_id UUID NOT NULL REFERENCES treatment_plans(id) ON DELETE CASCADE,
+      session_number    INTEGER NOT NULL DEFAULT 1,
+      session_status    TEXT NOT NULL DEFAULT 'planned',
+      notes             TEXT,
+      created_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `
 
   // ── Patient Diseases ──────────────────────────────────────────────────────
   await sql`
