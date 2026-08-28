@@ -14,6 +14,7 @@ interface Props {
   doctorId: string | null;
   patients: any[];
   doctors: any[];
+  shifts?: any[];
   events?: any[];
   isCentered?: boolean;
 }
@@ -29,6 +30,7 @@ export default function QuickCreatePopover({
   doctorId, 
   patients, 
   doctors, 
+  shifts = [],
   events = [], 
   isCentered = false 
 }: Props) {
@@ -170,6 +172,41 @@ export default function QuickCreatePopover({
 
   const handleSave = () => {
     if (tab === 'patient') {
+      if (patientMode === 'select' && !selectedPatientId) {
+        toast.error('Lütfen önce listeden bir hasta seçiniz veya "Yeni Hasta Ekle" butonuna tıklayınız.');
+        return;
+      }
+      if (patientMode === 'create' && !name.trim()) {
+        toast.error('Lütfen hastanın adını ve soyadını giriniz.');
+        return;
+      }
+
+      // Vardiya Doğrulaması:
+      if (selectedDoctorId && defaultDate) {
+        const docShifts = (shifts || []).filter((s: any) => s.userId === selectedDoctorId && s.date === defaultDate);
+        const docObj = doctors.find((d: any) => d.id === selectedDoctorId);
+        const docName = docObj?.name || 'Seçilen hekim';
+
+        if (docShifts.length === 0) {
+          toast.error(`⚠️ ${docName} için seçilen tarihte (${defaultDate}) vardiya bulunmuyor!`);
+          return;
+        }
+
+        const startMin = timeRange[0] * 60;
+        const endMin = timeRange[1] * 60;
+        const isCovered = docShifts.some((s: any) => {
+          const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+          const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+          return startMin >= (sH * 60 + (sM || 0)) && endMin <= (eH * 60 + (eM || 0));
+        });
+
+        if (!isCovered) {
+          const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+          toast.error(`⚠️ Randevu saati (${formatNumberTime(timeRange[0])}-${formatNumberTime(timeRange[1])}) ${docName} vardiyası (${shiftRanges}) dışındadır!`);
+          return;
+        }
+      }
+
       let finalTitle = title || 'Yeni Hasta / Randevu';
       if (!selectedDoctorId && !finalTitle.includes('Kontrol Randevusu')) {
         finalTitle = `${finalTitle} - Kontrol Randevusu`;
@@ -181,10 +218,24 @@ export default function QuickCreatePopover({
         doctorId: selectedDoctorId || null,
         startTime: formatNumberTime(timeRange[0]),
         endTime: formatNumberTime(timeRange[1]),
-        name, phone, tc, email, gender, birthDate,
+        name: name.trim(), 
+        phone: phone.trim(), 
+        tc: tc.trim(), 
+        email: email.trim(), 
+        gender, 
+        birthDate,
         sms, emailOpt, waOpt
       });
     } else {
+      if (!selectedPatientId && !name.trim()) {
+        toast.error('Lütfen ödeme kaydı için bir hasta seçiniz.');
+        return;
+      }
+      if (!paymentAmount || Number(paymentAmount) <= 0) {
+        toast.error('Lütfen geçerli bir ödeme tutarı giriniz.');
+        return;
+      }
+
       onSave({
         type: 'payment',
         title: title || 'Yeni Ödeme',
@@ -346,7 +397,7 @@ export default function QuickCreatePopover({
               border: tab === 'payment' ? `1px solid ${solidBrand}` : `1px solid ${solidBorder}`,
               background: tab === 'payment' ? solidBrand : solidCardBg,
               color: tab === 'payment' ? '#ffffff' : solidMuted,
-              opacity: (!selectedPatientId && patientMode !== 'create') ? 0.5 : 1
+              opacity: (!selectedPatientId && patientMode !== 'create') ? 0.6 : 1
             }}
           >
             Ödeme
@@ -387,6 +438,11 @@ export default function QuickCreatePopover({
                     fontWeight: 700
                   }}>1</span>
                   <span>Hasta Seçimi</span>
+                  {selectedPatientId && (
+                    <span style={{ fontSize: '0.75rem', color: '#4ade80', fontWeight: 600, marginLeft: 'auto' }}>
+                      ✓ Hasta Seçildi
+                    </span>
+                  )}
                 </div>
                 
                 {patientMode === 'select' ? (
@@ -416,7 +472,10 @@ export default function QuickCreatePopover({
                            {filteredPatients.map((p, idx) => (
                              <div 
                                key={p.id || idx} 
-                               onClick={() => setSelectedPatientId(p.id)}
+                               onClick={() => {
+                                 setSelectedPatientId(p.id);
+                                 toast.success(`✓ ${p.name} seçildi`);
+                               }}
                                style={{ 
                                  padding: '9px 12px', 
                                  cursor: 'pointer', 
@@ -456,8 +515,11 @@ export default function QuickCreatePopover({
                                    <div style={{ fontWeight: 600, fontSize: '0.875rem', color: solidText }}>{p.name}</div>
                                    {p.phone && <div style={{ fontSize: '0.75rem', color: solidMuted }}>📞 {p.phone}</div>}
                                  </div>
+                                </div>
+                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                 <span style={{ fontSize: '0.7rem', color: '#60a5fa', fontWeight: 600 }}>Seç</span>
+                                 <ChevronRight size={16} color="#60a5fa" />
                                </div>
-                               <ChevronRight size={16} color={solidMuted} />
                              </div>
                            ))}
                            {filteredPatients.length === 0 && (
@@ -468,7 +530,12 @@ export default function QuickCreatePopover({
                         </div>
 
                         <button 
-                           onClick={() => setPatientMode('create')}
+                           onClick={() => {
+                             setPatientMode('create');
+                             if (patientSearchQuery.trim()) {
+                               setName(patientSearchQuery.trim());
+                             }
+                           }}
                            style={{ 
                              display: 'flex', 
                              alignItems: 'center', 
@@ -597,7 +664,19 @@ export default function QuickCreatePopover({
                    </div>
                    <select 
                      value={selectedDoctorId} 
-                     onChange={e => setSelectedDoctorId(e.target.value)} 
+                     onChange={e => {
+                       const chosenDocId = e.target.value;
+                       if (chosenDocId && defaultDate) {
+                         const docShifts = (shifts || []).filter((s: any) => s.userId === chosenDocId && s.date === defaultDate);
+                         const docObj = doctors.find((d: any) => d.id === chosenDocId);
+                         const docName = docObj?.name || 'Hekim';
+                         if (docShifts.length === 0) {
+                           toast.error(`⚠️ ${docName} için bu tarihte (${defaultDate}) vardiya bulunmuyor!`);
+                           return;
+                         }
+                       }
+                       setSelectedDoctorId(chosenDocId);
+                     }} 
                      style={{
                        ...inputStyle,
                        border: !selectedDoctorId ? '1.5px solid #f59e0b' : `1px solid ${solidBorder}`,
@@ -607,9 +686,21 @@ export default function QuickCreatePopover({
                      }}
                    >
                      <option value="" style={selectOptionStyle}>⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
-                     {doctors.map(d => (
-                       <option key={d.id} value={d.id} style={selectOptionStyle}>Dr. {d.name}</option>
-                     ))}
+                     {doctors.map(d => {
+                       const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === defaultDate);
+                       const hasShift = docShifts.length > 0;
+                       const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (defaultDate ? `(Vardiya Yok ⚠️)` : '');
+                       return (
+                         <option 
+                           key={d.id} 
+                           value={d.id} 
+                           disabled={defaultDate ? !hasShift : false}
+                           style={{ ...selectOptionStyle, color: !hasShift && defaultDate ? '#ef4444' : 'inherit' }}
+                         >
+                           Dr. {d.name} {shiftText}
+                         </option>
+                       );
+                     })}
                    </select>
                    {!selectedDoctorId && (
                      <div style={{ fontSize: '0.75rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -727,17 +818,16 @@ export default function QuickCreatePopover({
           </button>
           <button 
              onClick={handleSave} 
-             disabled={tab === 'patient' && (!selectedPatientId && patientMode !== 'create')}
              style={{ 
                padding: '9px 24px', 
                borderRadius: '8px', 
                background: solidBrand, 
                color: '#ffffff', 
                border: 'none', 
-               cursor: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 'not-allowed' : 'pointer', 
+               cursor: 'pointer', 
                fontWeight: 700,
                fontSize: '0.875rem',
-               opacity: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 0.5 : 1
+               boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
              }}
           >
             Kaydet

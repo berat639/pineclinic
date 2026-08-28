@@ -2059,6 +2059,7 @@ export default function CalendarTab() {
             doctorId={quickCreateMenu.doctorId}
             patients={patients}
             doctors={doctors}
+            shifts={shifts}
             events={events}
             onClose={() => {
               setQuickCreateMenu(null);
