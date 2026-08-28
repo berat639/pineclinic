@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DentalCalendar from './DentalCalendar'
@@ -212,7 +212,7 @@ export default function CalendarTab() {
     }
   }, [panelOpen, selectedEvent?.id, patientTreatments?.length, treatmentGroups?.length])
 
-  const focusAppointmentOnCalendar = (eventId: string, startTime: string) => {
+  const focusAppointmentOnCalendar = (eventId: string, startTime: string, openPanel = true) => {
     try {
       const eventDate = new Date(startTime).toLocaleDateString('sv');
       setCurrentDate(eventDate);
@@ -220,6 +220,13 @@ export default function CalendarTab() {
       const targetEvt = events.find(ev => ev.id === eventId);
       if (targetEvt) {
         setSelectedEvent(targetEvt);
+        if (targetEvt.doctorId) {
+          setSelectedDoctorIds(prev => prev.includes(targetEvt.doctorId!) ? prev : [...prev, targetEvt.doctorId!]);
+        }
+      }
+
+      if (openPanel && targetEvt) {
+        setPanelOpen(true);
       }
 
       setTimeout(() => {
@@ -229,7 +236,7 @@ export default function CalendarTab() {
           el.classList.add('pulse-highlight-cal');
           setTimeout(() => el.classList.remove('pulse-highlight-cal'), 2800);
         }
-      }, 250);
+      }, 300);
     } catch (e) {
       console.error(e);
     }
@@ -525,6 +532,106 @@ export default function CalendarTab() {
     setCurrentDate(d.toISOString().slice(0, 10))
   }
 
+  const searchResults = useMemo(() => {
+    const q = patientSearchQuery.trim().toLowerCase();
+    if (q.length < 1) return [];
+
+    const personMap = new Map<string, {
+      name: string;
+      phone: string | null;
+      patientIds: Set<string>;
+      appointments: CalendarEvent[];
+    }>();
+
+    // 1. Scan patients
+    patients.forEach((p: any) => {
+      if (!p?.name) return;
+      const cleanName = p.name.trim();
+      const normalizedName = cleanName.toLowerCase();
+      const pPhone = p.phone?.trim() || null;
+      const key = `${normalizedName}_${pPhone || ''}`;
+
+      if (!personMap.has(key)) {
+        personMap.set(key, {
+          name: cleanName,
+          phone: pPhone,
+          patientIds: new Set(p.id ? [p.id] : []),
+          appointments: []
+        });
+      } else {
+        const existing = personMap.get(key)!;
+        if (p.id) existing.patientIds.add(p.id);
+        if (!existing.phone && pPhone) existing.phone = pPhone;
+      }
+    });
+
+    // 2. Associate appointments
+    events.forEach(ev => {
+      if (!ev) return;
+      let matchedPersonKey: string | null = null;
+
+      // Match by patientId
+      if (ev.patientId) {
+        for (const [key, person] of personMap.entries()) {
+          if (person.patientIds.has(ev.patientId)) {
+            matchedPersonKey = key;
+            break;
+          }
+        }
+      }
+
+      // Match by title
+      if (!matchedPersonKey && ev.title) {
+        const titleLower = ev.title.toLowerCase();
+        for (const [key, person] of personMap.entries()) {
+          if (titleLower.includes(person.name.toLowerCase())) {
+            matchedPersonKey = key;
+            break;
+          }
+        }
+      }
+
+      // Extract name if not found
+      if (!matchedPersonKey && ev.title) {
+        const candidateName = ev.title.split(' - ')[0].trim();
+        if (candidateName.length >= 2) {
+          const key = `${candidateName.toLowerCase()}_`;
+          if (!personMap.has(key)) {
+            personMap.set(key, {
+              name: candidateName,
+              phone: null,
+              patientIds: new Set(ev.patientId ? [ev.patientId] : []),
+              appointments: []
+            });
+          }
+          matchedPersonKey = key;
+        }
+      }
+
+      if (matchedPersonKey && personMap.has(matchedPersonKey)) {
+        const person = personMap.get(matchedPersonKey)!;
+        if (!person.appointments.some(a => a.id === ev.id)) {
+          person.appointments.push(ev);
+        }
+      }
+    });
+
+    // 3. Filter by search query
+    const results = Array.from(personMap.values()).filter(person => {
+      const nameMatch = person.name.toLowerCase().includes(q);
+      const phoneMatch = person.phone ? person.phone.includes(q) : false;
+      const apptMatch = person.appointments.some(a => a.title?.toLowerCase().includes(q));
+      return nameMatch || phoneMatch || apptMatch;
+    });
+
+    // 4. Sort appointments inside each person descending by start time
+    results.forEach(p => {
+      p.appointments.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    });
+
+    return results.slice(0, 15);
+  }, [patients, events, patientSearchQuery]);
+
   const filteredEvents = patientSearchQuery
     ? events.filter(e => e.title?.toLowerCase().includes(patientSearchQuery.toLowerCase()))
     : events;
@@ -565,17 +672,17 @@ export default function CalendarTab() {
 
         <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
 
-        <div style={{ position: 'relative', zIndex: 10 }}>
+        <div style={{ position: 'relative', zIndex: 100 }}>
           <div style={{
             background: 'var(--input-bg)',
-            padding: '10px 14px',
+            padding: '9px 12px',
             borderRadius: 10,
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             border: '1px solid var(--input-border)'
           }}>
-            <Users size={20} color="var(--foreground-3)" />
+            <Users size={18} color="var(--foreground-3)" />
             <input
               type="text"
               placeholder="Kişi arayın"
@@ -585,57 +692,180 @@ export default function CalendarTab() {
                 setShowPatientSearchDropdown(true);
               }}
               onFocus={() => setShowPatientSearchDropdown(true)}
-              onBlur={() => setTimeout(() => setShowPatientSearchDropdown(false), 200)}
+              onBlur={() => setTimeout(() => setShowPatientSearchDropdown(false), 250)}
               style={{
                 border: 'none',
                 background: 'transparent',
                 outline: 'none',
                 width: '100%',
-                fontSize: '1rem',
+                fontSize: '0.9rem',
                 color: 'var(--foreground)'
               }}
               autoComplete="off"
             />
+            {patientSearchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPatientSearchQuery('');
+                  setShowPatientSearchDropdown(false);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+              >
+                <X size={15} />
+              </button>
+            )}
           </div>
-          {showPatientSearchDropdown && patientSearchQuery.length >= 2 && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              marginTop: '8px',
-              left: 0,
-              right: 0,
-              zIndex: 50,
-              background: 'var(--card-bg, #ffffff)',
-              border: '1px solid var(--border)',
-              borderRadius: '10px',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-              maxHeight: '240px',
-              overflowY: 'auto'
-            }}>
-              {patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).length > 0 ? (
-                patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).map(p => (
+          {showPatientSearchDropdown && patientSearchQuery.trim().length >= 1 && (
+            <div 
+              onMouseDown={(e) => e.preventDefault()}
+              style={{
+                position: 'absolute',
+                top: '100%',
+                marginTop: '8px',
+                left: 0,
+                width: '320px',
+                zIndex: 1000,
+                background: 'var(--card-bg, #0f172a)',
+                border: '1px solid var(--glass-border, rgba(255,255,255,0.12))',
+                borderRadius: '12px',
+                boxShadow: '0 16px 40px -10px rgba(0,0,0,0.6), 0 0 0 1px var(--glass-border, rgba(255,255,255,0.08))',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                padding: '6px'
+              }}
+            >
+              {searchResults.length > 0 ? (
+                searchResults.map((person, idx) => (
                   <div
-                    key={p.id}
-                    onClick={() => {
-                      setPatientSearchQuery(p.name);
-                      setShowPatientSearchDropdown(false);
-                    }}
+                    key={`${person.name}_${idx}`}
                     style={{
-                      padding: '10px 16px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      borderBottom: '1px solid var(--divider)'
+                      marginBottom: '8px',
+                      paddingBottom: '8px',
+                      borderBottom: idx === searchResults.length - 1 ? 'none' : '1px solid var(--divider, rgba(255,255,255,0.06))'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--glass-bg-hover)'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
-                    <span style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--foreground)' }}>{p.name}</span>
-                    {p.phone && <span style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>{p.phone}</span>}
+                    {/* Person Header */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        background: 'rgba(255,255,255,0.02)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          width: '26px',
+                          height: '26px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.75rem',
+                          fontWeight: 700
+                        }}>
+                          {person.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--foreground)' }}>
+                            {person.name}
+                          </div>
+                          {person.phone && (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>
+                              📞 {person.phone}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        background: person.appointments.length > 0 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255,255,255,0.05)',
+                        color: person.appointments.length > 0 ? '#60a5fa' : 'var(--foreground-3)'
+                      }}>
+                        {person.appointments.length} Randevu
+                      </span>
+                    </div>
+
+                    {/* Appointments List for this person */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', paddingLeft: '4px' }}>
+                      {person.appointments.length > 0 ? (
+                        person.appointments.map((appt) => {
+                          const doc = doctors.find(d => d.id === appt.doctorId);
+                          const apptDate = new Date(appt.startTime);
+                          const isInvalidDate = isNaN(apptDate.getTime());
+                          const dateStr = isInvalidDate ? '' : apptDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', weekday: 'short' });
+                          const timeStr = isInvalidDate ? '' : `${apptDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} - ${new Date(appt.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+
+                          return (
+                            <div
+                              key={appt.id}
+                              onClick={() => {
+                                focusAppointmentOnCalendar(appt.id, appt.startTime, true);
+                                setShowPatientSearchDropdown(false);
+                                setPatientSearchQuery(person.name);
+                                import('react-hot-toast').then(mod =>
+                                  mod.toast.success(`📅 ${person.name} (${dateStr} ${timeStr}) randevusuna gidildi`)
+                                );
+                              }}
+                              style={{
+                                padding: '8px 10px',
+                                borderRadius: '8px',
+                                background: 'var(--input-bg, rgba(255,255,255,0.04))',
+                                border: '1px solid var(--glass-border, rgba(255,255,255,0.08))',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '3px'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = 'rgba(59,130,246,0.15)';
+                                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'var(--input-bg, rgba(255,255,255,0.04))';
+                                e.currentTarget.style.borderColor = 'var(--glass-border, rgba(255,255,255,0.08))';
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <span>📅</span> {dateStr}
+                                </span>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>
+                                  {timeStr}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: 'var(--foreground-3)' }}>
+                                <span>{doc ? `Dr. ${doc.name}` : 'Doktor Atanmadı'}</span>
+                                <span style={{ color: 'var(--foreground-2)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                                  {appt.title?.includes(' - ') ? appt.title.split(' - ')[1] : (appt.title || 'Randevu')}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', padding: '4px 8px', fontStyle: 'italic' }}>
+                          Kayıtlı randevusu bulunmuyor
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))
               ) : (
-                <div style={{ padding: '12px 16px', fontSize: '0.875rem', color: 'var(--foreground-3)', textAlign: 'center' }}>Sonuç bulunamadı</div>
+                <div style={{ padding: '16px', fontSize: '0.82rem', color: 'var(--foreground-3)', textAlign: 'center' }}>
+                  "{patientSearchQuery}" ile eşleşen kişi bulunamadı
+                </div>
               )}
             </div>
           )}
