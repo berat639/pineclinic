@@ -389,9 +389,17 @@ export default function CalendarTab() {
       <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <MiniCalendar currentDate={currentDate} onDateSelect={setCurrentDate} />
         
-        <div className="relative">
-          <div className="bg-gray-100 dark:bg-gray-800/50 px-3 py-2.5 rounded-lg flex items-center gap-2 border border-transparent focus-within:border-brand transition-colors">
-            <Users size={20} className="text-gray-500" />
+        <div style={{ position: 'relative' }}>
+          <div style={{ 
+            background: 'var(--input-bg)', 
+            padding: '10px 14px', 
+            borderRadius: 10, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 10,
+            border: '1px solid var(--input-border)'
+          }}>
+            <Users size={20} color="var(--foreground-3)" />
             <input
               type="text"
               placeholder="Kişi arayın"
@@ -402,12 +410,32 @@ export default function CalendarTab() {
               }}
               onFocus={() => setShowPatientSearchDropdown(true)}
               onBlur={() => setTimeout(() => setShowPatientSearchDropdown(false), 200)}
-              className="border-none bg-transparent outline-none focus:outline-none focus:ring-0 w-full text-base text-gray-900 dark:text-gray-100"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                outline: 'none',
+                width: '100%',
+                fontSize: '1rem',
+                color: 'var(--foreground)'
+              }}
               autoComplete="off"
             />
           </div>
           {showPatientSearchDropdown && patientSearchQuery.length >= 2 && (
-            <div className="absolute top-full mt-2 left-0 right-0 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              marginTop: '8px',
+              left: 0,
+              right: 0,
+              zIndex: 50,
+              background: 'var(--card-bg)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '10px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+              maxHeight: '240px',
+              overflowY: 'auto'
+            }}>
               {patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).length > 0 ? (
                 patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase())).map(p => (
                   <div
@@ -416,14 +444,22 @@ export default function CalendarTab() {
                       setPatientSearchQuery(p.name);
                       setShowPatientSearchDropdown(false);
                     }}
-                    className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex flex-col transition-colors"
+                    style={{
+                      padding: '10px 16px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      borderBottom: '1px solid var(--divider)'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--glass-bg-hover)'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
-                    <span className="font-medium text-sm text-gray-900 dark:text-gray-100">{p.name}</span>
-                    {p.phone && <span className="text-xs text-gray-500">{p.phone}</span>}
+                    <span style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--foreground)' }}>{p.name}</span>
+                    {p.phone && <span style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>{p.phone}</span>}
                   </div>
                 ))
               ) : (
-                <div className="px-4 py-3 text-sm text-gray-500 text-center">Sonuç bulunamadı</div>
+                <div style={{ padding: '12px 16px', fontSize: '0.875rem', color: 'var(--foreground-3)', textAlign: 'center' }}>Sonuç bulunamadı</div>
               )}
             </div>
           )}
@@ -499,10 +535,10 @@ export default function CalendarTab() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 0 }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-          <h3 className="text-lg md:text-xl font-bold text-foreground m-0">
+          <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
             Günlük Randevu Takvimi
           </h3>
-          <div className="flex gap-2 items-center flex-wrap">
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* View tabs */}
             <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--input-border)' }}>
               {(['day', 'week', 'month'] as const).map(v => (
@@ -687,16 +723,20 @@ export default function CalendarTab() {
         <>
           {/* Backdrop for click outside */}
           <div 
-            className="fixed inset-0 z-[9998] bg-black/20 backdrop-blur-sm transition-opacity"
             onClick={() => setPanelOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}
           />
           <div 
-            className="fixed top-0 right-0 bottom-0 w-full sm:w-[380px] z-[9999] p-6 overflow-y-auto shadow-2xl transform transition-transform duration-300"
-            style={{ backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)' }}
+            style={{ 
+              position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '380px', 
+              backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)', 
+              zIndex: 9999, padding: '24px', overflowY: 'auto', 
+              boxShadow: '-4px 0 20px rgba(0,0,0,0.19)' 
+            }}
           >
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-foreground m-0">Randevu Detayı</h3>
-              <button onClick={() => setPanelOpen(false)} className="bg-transparent border-none text-foreground-3 hover:text-foreground text-xl cursor-pointer transition-colors">✕</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Detayı</h3>
+              <button onClick={() => setPanelOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', fontSize: '1.25rem', cursor: 'pointer' }}>✕</button>
             </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
