@@ -257,6 +257,53 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 const app = new Elysia()
   .use(cors({ origin: corsOrigins }))
   .use(staticPlugin({ assets: PUBLIC_DIR, prefix: '/' }))
+  .get('/uploads/:filename', async ({ params, set }) => {
+    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '')
+    const filePath = resolve(PUBLIC_DIR, 'uploads', safeName)
+    const file = Bun.file(filePath)
+    if (await file.exists()) {
+      const ext = safeName.split('.').pop()?.toLowerCase()
+      if (ext === 'png') set.headers['content-type'] = 'image/png'
+      else if (ext === 'jpg' || ext === 'jpeg') set.headers['content-type'] = 'image/jpeg'
+      else if (ext === 'svg') set.headers['content-type'] = 'image/svg+xml'
+      else if (ext === 'webp') set.headers['content-type'] = 'image/webp'
+      set.headers['cache-control'] = 'public, max-age=86400'
+      return file
+    }
+    // Check database if it's a logo and restore
+    if (safeName.startsWith('logo_')) {
+      const { getSetting } = await import('./db/repositories/settings')
+      const logoData = await getSetting('branding.logo_data')
+      if (logoData) {
+        const parts = logoData.split(',')
+        const base64 = parts.length > 1 ? parts[1] : parts[0]
+        const mime = parts.length > 1 ? (parts[0]?.match(/:(.*?);/)?.[1] || 'image/png') : 'image/png'
+        const buf = Buffer.from(base64, 'base64')
+        try {
+          mkdirSync(resolve(PUBLIC_DIR, 'uploads'), { recursive: true })
+          const { writeFileSync } = await import('fs')
+          writeFileSync(filePath, buf)
+        } catch {}
+        set.headers['content-type'] = mime
+        set.headers['cache-control'] = 'public, max-age=86400'
+        return new Response(buf)
+      }
+    }
+    set.status = 404
+    return { error: 'Dosya bulunamadı' }
+  })
+  .get('/uploads/:subfolder/:filename', async ({ params, set }) => {
+    const safeSubfolder = params.subfolder.replace(/[^a-zA-Z0-9._-]/g, '')
+    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '')
+    const filePath = resolve(PUBLIC_DIR, 'uploads', safeSubfolder, safeName)
+    const file = Bun.file(filePath)
+    if (await file.exists()) {
+      set.headers['cache-control'] = 'public, max-age=86400'
+      return file
+    }
+    set.status = 404
+    return { error: 'Dosya bulunamadı' }
+  })
   .use(authPlugin)
   .use(shiftsPlugin)
   .use(notificationsPlugin)
@@ -1525,10 +1572,15 @@ const app = new Elysia()
     const dest = resolve(PUBLIC_DIR, 'uploads', fileName)
     
     const arrayBuffer = await file.arrayBuffer()
-    writeFileSync(dest, Buffer.from(arrayBuffer))
+    const buf = Buffer.from(arrayBuffer)
+    writeFileSync(dest, buf)
     
+    const mime = file.type || `image/${ext === 'svg' ? 'svg+xml' : ext}`
+    const base64Data = `data:${mime};base64,${buf.toString('base64')}`
     const logoUrl = `/uploads/${fileName}`
     await setBranding({ logoUrl })
+    const { setSetting } = await import('./db/repositories/settings')
+    await setSetting('branding.logo_data', base64Data)
     
     return { success: true, logoUrl }
   })

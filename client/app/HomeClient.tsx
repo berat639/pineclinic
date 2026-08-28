@@ -41,6 +41,7 @@ export default function Home() {
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
   const [mode, setMode] = useState<'audio' | 'text'>('audio')
   const [textInput, setTextInput] = useState('')
+  const [logoError, setLogoError] = useState(false)
 
   const sessionRef = useRef<AiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
@@ -228,10 +229,11 @@ export default function Home() {
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {sessionConfig?.branding?.logoUrl ? (
+          {sessionConfig?.branding?.logoUrl && !logoError ? (
             <img
               src={sessionConfig.branding.logoUrl}
               alt="Logo"
+              onError={() => setLogoError(true)}
               style={{ height: 24, width: 'auto', filter: 'var(--logo-filter)' }}
             />
           ) : (
@@ -278,14 +280,15 @@ export default function Home() {
           animation: 'fadeIn 0.6s ease',
           marginBottom: '1rem'
         }}>
-          {sessionConfig?.branding?.logoUrl && (
+          {sessionConfig?.branding?.logoUrl && !logoError && (
             <img 
               src={sessionConfig.branding.logoUrl} 
               alt="Logo" 
+              onError={() => setLogoError(true)}
               style={{ width: 72, height: 72, objectFit: 'contain', filter: 'var(--logo-filter)' }}
             />
           )}
-          <div style={{ textAlign: sessionConfig?.branding?.logoUrl ? 'left' : 'center' }}>
+          <div style={{ textAlign: sessionConfig?.branding?.logoUrl && !logoError ? 'left' : 'center' }}>
             <h1 style={{
               fontSize: '2rem',
               fontWeight: 800,

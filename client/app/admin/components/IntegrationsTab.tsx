@@ -70,6 +70,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   // Branding / Logo State
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('')
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [logoPreviewError, setLogoPreviewError] = useState(false)
 
   // Role Permissions State
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
@@ -176,6 +177,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error || 'Yükleme hatası')
       setBrandingLogoUrl(data.logoUrl)
+      setLogoPreviewError(false)
       showToast('success', 'Logo başarıyla yüklendi')
     } catch (err: any) {
       showToast('error', err.message || 'Logo yüklenemedi')
@@ -215,8 +217,13 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
             border: '1px solid var(--input-border)', display: 'flex', alignItems: 'center',
             justifyContent: 'center', overflow: 'hidden'
           }}>
-            {brandingLogoUrl ? (
-              <img src={brandingLogoUrl} alt="Logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            {brandingLogoUrl && !logoPreviewError ? (
+              <img
+                src={brandingLogoUrl}
+                alt="Logo"
+                onError={() => setLogoPreviewError(true)}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              />
             ) : (
               <span style={{ fontSize: 24, color: 'var(--foreground-3)' }}>🖼️</span>
             )}
