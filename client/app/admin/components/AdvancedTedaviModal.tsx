@@ -564,8 +564,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupName: groupName,
-            treatments: payloadTreatments,
-            appointmentId: selectedEvent?.id || undefined
+            treatments: payloadTreatments
           })
         });
       }

@@ -985,8 +985,8 @@ export default function CalendarTab() {
                 const t1 = `${now.getHours().toString().padStart(2, '0')}:00`
                 const t2 = `${(now.getHours() + 1).toString().padStart(2, '0')}:00`
                 setQuickCreateMenu({ 
-                  start: `${currentDate}T${t1}:00`, 
-                  end: `${currentDate}T${t2}:00`, 
+                  start: `${currentDate}T${t1}:00+03:00`, 
+                  end: `${currentDate}T${t2}:00+03:00`, 
                   doctorId: null, 
                   x: 0, 
                   y: 0, 
@@ -2083,6 +2083,9 @@ export default function CalendarTab() {
                 }
                 if (pId) {
                   // 2. Create Appointment
+                  const apptDate = quickCreateMenu.start.slice(0, 10);
+                  const startStr = data.startTime ? `${apptDate}T${data.startTime}:00+03:00` : (quickCreateMenu.start.includes('+') ? quickCreateMenu.start : `${quickCreateMenu.start}+03:00`);
+                  const endStr = data.endTime ? `${apptDate}T${data.endTime}:00+03:00` : (quickCreateMenu.end.includes('+') ? quickCreateMenu.end : `${quickCreateMenu.end}+03:00`);
                   await fetch('/api/dental/appointments', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2090,8 +2093,8 @@ export default function CalendarTab() {
                       patientId: pId,
                       doctorId: data.doctorId,
                       title: data.title,
-                      startTime: data.startTime ? `${quickCreateMenu.start.slice(0, 10)}T${data.startTime}:00` : quickCreateMenu.start,
-                      endTime: data.endTime ? `${quickCreateMenu.end.slice(0, 10)}T${data.endTime}:00` : quickCreateMenu.end,
+                      startTime: startStr,
+                      endTime: endStr,
                       type: 'Muayene',
                       status: data.doctorId ? 'scheduled' : 'pending_assignment'
                     })
