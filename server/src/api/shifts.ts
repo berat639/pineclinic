@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, sql, gte, lte, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { shifts, shiftSwapRequests, users } from '../db/schema'
 import { authenticateRequest } from '../middleware/auth'
@@ -12,17 +12,23 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const week = query.week as string | undefined
-    let dateFilter: string | undefined
-    if (week) {
-      // week format: "2026-W32" or just filter by date prefix
-      dateFilter = week
+    const startDate = query.startDate as string | undefined
+    const endDate = query.endDate as string | undefined
+    const month = query.month as string | undefined // e.g. "2026-08"
+
+    const conditions = []
+    if (startDate && endDate) {
+      conditions.push(gte(shifts.date, startDate), lte(shifts.date, endDate))
+    } else if (month) {
+      conditions.push(gte(shifts.date, `${month}-01`), lte(shifts.date, `${month}-31`))
     }
 
-    const rows = await db.select({
+    let q = db.select({
       id: shifts.id,
       userId: shifts.userId,
       userName: users.name,
       userRole: users.role,
+      userColor: users.color,
       date: shifts.date,
       startTime: shifts.startTime,
       endTime: shifts.endTime,
@@ -32,9 +38,101 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     })
       .from(shifts)
       .leftJoin(users, eq(shifts.userId, users.id))
-      .orderBy(shifts.date, shifts.startTime)
 
+    if (conditions.length > 0) {
+      return await q.where(and(...conditions)).orderBy(shifts.date, shifts.startTime)
+    }
+
+    const rows = await q.orderBy(shifts.date, shifts.startTime)
     return rows
+  })
+
+  .post('/batch', async ({ body, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+
+    const b = body as {
+      shifts: Array<{
+        userId: string
+        date: string
+        startTime: string
+        endTime: string
+        shiftType?: string
+        notes?: string
+      }>
+      overwrite?: boolean
+    }
+
+    if (!b || !Array.isArray(b.shifts) || b.shifts.length === 0) {
+      set.status = 400; return { error: 'Vardiya listesi boş' }
+    }
+
+    const insertedOrUpdated = []
+    for (const s of b.shifts) {
+      if (!s.userId || !s.date || !s.startTime || !s.endTime) continue
+
+      const existing = await db.select().from(shifts)
+        .where(and(eq(shifts.userId, s.userId), eq(shifts.date, s.date)))
+
+      if (existing.length > 0) {
+        if (b.overwrite) {
+          const [updated] = await db.update(shifts).set({
+            startTime: s.startTime,
+            endTime: s.endTime,
+            shiftType: s.shiftType || 'tam',
+            notes: s.notes || null,
+          }).where(eq(shifts.id, existing[0].id)).returning()
+          if (updated) insertedOrUpdated.push(updated)
+        }
+      } else {
+        const [created] = await db.insert(shifts).values({
+          userId: s.userId,
+          date: s.date,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          shiftType: s.shiftType || 'tam',
+          notes: s.notes || null,
+          createdBy: user.id,
+        }).returning()
+        if (created) insertedOrUpdated.push(created)
+      }
+    }
+
+    return { ok: true, count: insertedOrUpdated.length, data: insertedOrUpdated }
+  })
+
+  .post('/clear', async ({ body, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+
+    const b = body as {
+      userId?: string
+      userIds?: string[]
+      startDate: string
+      endDate: string
+    }
+
+    if (!b || !b.startDate || !b.endDate) {
+      set.status = 400; return { error: 'startDate ve endDate gerekli' }
+    }
+
+    const conditions = [
+      gte(shifts.date, b.startDate),
+      lte(shifts.date, b.endDate),
+    ]
+
+    if (b.userId) {
+      conditions.push(eq(shifts.userId, b.userId))
+    } else if (b.userIds && b.userIds.length > 0) {
+      conditions.push(inArray(shifts.userId, b.userIds))
+    }
+
+    await db.delete(shifts).where(and(...conditions))
+    return { ok: true }
   })
 
   .post('/', async ({ body, cookie, set }) => {
