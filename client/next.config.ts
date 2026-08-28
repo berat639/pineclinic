@@ -5,14 +5,6 @@ const BACKEND_PROXY_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:300
 
 const config: NextConfig = {
   output: 'standalone',
-  async rewrites() {
-    return [
-      {
-        source: '/uploads/:path*',
-        destination: `${BACKEND_PROXY_URL}/uploads/:path*`,
-      }
-    ]
-  },
 
   webpack: (config, { isServer }) => {
     if (!isServer) {

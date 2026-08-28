@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const resolvedParams = await params
-  const backendUrl = process.env.BACKEND_PROXY_URL || 'http://localhost:3001'
+  const backendUrl = process.env.BACKEND_PROXY_URL || process.env.SERVER_URL || 'http://localhost:3001'
   const uploadPath = resolvedParams.path.join('/')
   const targetUrl = new URL(`${backendUrl}/uploads/${uploadPath}${req.nextUrl.search}`)
 
