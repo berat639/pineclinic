@@ -119,9 +119,6 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         if (typeof window !== 'undefined') {
            const screenWidth = window.innerWidth;
            const screenHeight = window.innerHeight;
-           // If we know the cTop, and the modal height, we can ensure it doesn't overflow the bottom of the screen.
-           // Actually, since it's absolute, checking against viewport is tricky.
-           // But we can approximate by checking if the initial viewport-relative position would overflow.
            const viewportY = cTop + (offsetParent ? offsetParent.getBoundingClientRect().top : 0);
            if (viewportY + modalHeight > screenHeight) {
               cTop -= (viewportY + modalHeight - screenHeight + 20);
@@ -167,24 +164,30 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
 
   const filteredPatients = patientSearchQuery 
     ? patients.filter(p => p.name.toLowerCase().includes(patientSearchQuery.toLowerCase()) || p.phone?.includes(patientSearchQuery))
-    : patients.slice(0, 15); // limit default list
+    : patients.slice(0, 15);
 
-  // Base input style mimicking tooth-input
-  const inputBaseStyle = {
-    padding: '8px 12px',
+  // Base input style respecting dark & light modes
+  const inputBaseStyle: React.CSSProperties = {
+    padding: '9px 12px',
     borderRadius: '8px',
-    border: '1px solid var(--glass-border, #e5e7eb)',
-    background: '#f9fafb',
-    color: 'var(--foreground, #111827)',
+    border: '1px solid var(--input-border, var(--glass-border, rgba(255,255,255,0.12)))',
+    background: 'var(--input-bg, rgba(255,255,255,0.05))',
+    color: 'var(--foreground, #fff)',
     fontSize: '0.85rem',
     outline: 'none',
-    width: '100%'
+    width: '100%',
+    boxSizing: 'border-box'
+  };
+
+  const optionStyle: React.CSSProperties = {
+    background: 'var(--background-2, #0f172a)',
+    color: 'var(--foreground, #fff)'
   };
 
   return (
     <>
       <div 
-        style={{ position: 'fixed', inset: 0, zIndex: 100004 }} 
+        style={{ position: 'fixed', inset: 0, zIndex: 100004, background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(2px)' }} 
         onClick={onClose} 
       />
       <div 
@@ -195,9 +198,13 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
           top: isCentered ? '50%' : computedTop, 
           transform: isCentered ? 'translate(-50%, -50%)' : 'none',
           width: modalWidth, 
-          backgroundColor: 'var(--card-bg, #ffffff)',
-          borderRadius: 12,
-          boxShadow: '0 10px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
+          backgroundColor: 'var(--card-bg, #0f172a)',
+          background: 'var(--card-bg, #0f172a)',
+          border: '1px solid var(--glass-border, rgba(255,255,255,0.12))',
+          borderRadius: 16,
+          boxShadow: '0 20px 50px -10px rgba(0,0,0,0.6), 0 0 0 1px var(--glass-border, rgba(255,255,255,0.08))',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
           zIndex: 100005,
           display: 'flex',
           flexDirection: 'column',
@@ -207,24 +214,38 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border, #eee)', backgroundColor: 'var(--card-bg, #ffffff)' }}>
-          <div style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--foreground, #111)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--glass-border, rgba(255,255,255,0.08))', background: 'transparent' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--foreground)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
              {title || 'Yeni Randevu'}
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--foreground-3, #888)' }}>
-            <X size={20} />
+          <button 
+            onClick={onClose} 
+            style={{ 
+              background: 'rgba(255,255,255,0.06)', 
+              border: 'none', 
+              borderRadius: '50%', 
+              width: 28, 
+              height: 28, 
+              cursor: 'pointer', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              color: 'var(--foreground-3)' 
+            }}
+          >
+            <X size={16} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 8, padding: '12px 20px', borderBottom: '1px solid var(--border, #eee)' }}>
+        <div style={{ display: 'flex', gap: 8, padding: '10px 20px', borderBottom: '1px solid var(--glass-border, rgba(255,255,255,0.08))', background: 'rgba(255,255,255,0.02)' }}>
           <button 
             onClick={() => setTab('patient')}
             style={{
-              padding: '6px 12px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer',
-              border: 'none',
-              background: tab === 'patient' ? 'var(--brand, #3b82f6)' : 'transparent',
-              color: tab === 'patient' ? '#fff' : 'var(--foreground-2, #555)',
+              padding: '6px 14px', borderRadius: 20, fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer',
+              border: tab === 'patient' ? '1px solid var(--brand, #3b82f6)' : '1px solid transparent',
+              background: tab === 'patient' ? 'var(--brand, #3b82f6)' : 'rgba(255,255,255,0.04)',
+              color: tab === 'patient' ? '#fff' : 'var(--foreground-2)',
               transition: 'all 0.2s'
             }}
           >
@@ -239,10 +260,10 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                setTab('payment');
             }}
             style={{
-              padding: '6px 12px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer',
-              border: 'none',
-              background: tab === 'payment' ? 'var(--brand, #3b82f6)' : 'transparent',
-              color: tab === 'payment' ? '#fff' : 'var(--foreground-2, #555)',
+              padding: '6px 14px', borderRadius: 20, fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer',
+              border: tab === 'payment' ? '1px solid var(--brand, #3b82f6)' : '1px solid transparent',
+              background: tab === 'payment' ? 'var(--brand, #3b82f6)' : 'rgba(255,255,255,0.04)',
+              color: tab === 'payment' ? '#fff' : 'var(--foreground-2)',
               opacity: (!selectedPatientId && patientMode !== 'create') ? 0.5 : 1,
               transition: 'all 0.2s'
             }}
@@ -257,15 +278,15 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               
               {/* STEP 1: PATIENT SELECTION / CREATION */}
-              <div style={{ background: 'rgba(59,130,246,0.05)', padding: 12, borderRadius: 8, border: '1px solid rgba(59,130,246,0.1)' }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--brand, #3b82f6)', marginBottom: 12 }}>1. Hasta Seçimi</div>
+              <div style={{ background: 'rgba(59,130,246,0.06)', padding: 14, borderRadius: 10, border: '1px solid rgba(59,130,246,0.18)' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--brand, #3b82f6)', marginBottom: 10 }}>1. Hasta Seçimi</div>
                 
                 {patientMode === 'select' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {!selectedPatientId ? (
                       <>
                         <div style={{ position: 'relative' }}>
-                          <Search size={16} style={{ position: 'absolute', left: 10, top: 10, color: '#9ca3af' }} />
+                          <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--foreground-3)' }} />
                           <input 
                             type="text" 
                             placeholder="Kayıtlı Hasta Ara..." 
@@ -274,45 +295,45 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                             style={{ ...inputBaseStyle, paddingLeft: 34 }} 
                           />
                         </div>
-                        <div style={{ maxHeight: 150, overflowY: 'auto', background: '#fff', border: '1px solid #eee', borderRadius: 6 }}>
+                        <div style={{ maxHeight: 160, overflowY: 'auto', background: 'var(--background, #0f172a)', border: '1px solid var(--glass-border, rgba(255,255,255,0.1))', borderRadius: 8 }}>
                            {filteredPatients.map(p => (
                              <div 
                                key={p.id} 
                                onClick={() => setSelectedPatientId(p.id)}
-                               style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', fontSize: '0.85rem' }}
-                               onMouseOver={e => e.currentTarget.style.background = '#f9fafb'}
-                               onMouseOut={e => e.currentTarget.style.background = '#fff'}
+                               style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border, rgba(255,255,255,0.06))', fontSize: '0.85rem', color: 'var(--foreground)' }}
+                               onMouseOver={e => e.currentTarget.style.background = 'rgba(59,130,246,0.12)'}
+                               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
                              >
                                <div style={{ fontWeight: 500 }}>{p.name}</div>
-                               {p.phone && <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{p.phone}</div>}
+                               {p.phone && <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>{p.phone}</div>}
                              </div>
                            ))}
                            {filteredPatients.length === 0 && (
-                             <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.8rem', color: '#6b7280' }}>Hasta bulunamadı.</div>
+                             <div style={{ padding: '14px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--foreground-3)' }}>Hasta bulunamadı.</div>
                            )}
                         </div>
                         <button 
                            onClick={() => setPatientMode('create')}
-                           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500 }}
+                           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px 12px', background: 'var(--brand, #3b82f6)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500 }}
                         >
                           <Plus size={16} /> Yeni Hasta Ekle
                         </button>
                       </>
                     ) : (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '10px 12px', borderRadius: 6, border: '1px solid #eee' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--background, #0f172a)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border, rgba(255,255,255,0.1))' }}>
                          <div>
-                           <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{patients.find(p => p.id === selectedPatientId)?.name}</div>
-                           <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Kayıtlı Hasta</div>
+                           <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--foreground)' }}>{patients.find(p => p.id === selectedPatientId)?.name}</div>
+                           <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>Kayıtlı Hasta</div>
                          </div>
-                         <button onClick={() => setSelectedPatientId('')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 500 }}>Değiştir</button>
+                         <button onClick={() => setSelectedPatientId('')} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer', fontWeight: 500 }}>Değiştir</button>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>Yeni Hasta Bilgileri</span>
-                      <button onClick={() => setPatientMode('select')} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: '0.75rem', cursor: 'pointer' }}>Vazgeç</button>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground)' }}>Yeni Hasta Bilgileri</span>
+                      <button onClick={() => setPatientMode('select')} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', fontSize: '0.75rem', cursor: 'pointer' }}>Vazgeç</button>
                     </div>
                     <input type="text" placeholder="Ad Soyad (Zorunlu)" value={name} onChange={e => setName(e.target.value)} style={inputBaseStyle} />
                     <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={phone} onChange={e => setPhone(e.target.value)} style={inputBaseStyle} />
@@ -336,14 +357,14 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                      style={{
                        ...inputBaseStyle,
                        border: !selectedDoctorId ? '1.5px solid #f59e0b' : inputBaseStyle.border,
-                       background: !selectedDoctorId ? 'rgba(245, 158, 11, 0.06)' : inputBaseStyle.background,
-                       color: !selectedDoctorId ? '#f59e0b' : 'inherit',
+                       background: !selectedDoctorId ? 'rgba(245, 158, 11, 0.08)' : inputBaseStyle.background,
+                       color: !selectedDoctorId ? '#f59e0b' : 'var(--foreground)',
                        fontWeight: !selectedDoctorId ? 600 : 400
                      }}
                    >
-                     <option value="">⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
+                     <option value="" style={optionStyle}>⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
                      {doctors.map(d => (
-                       <option key={d.id} value={d.id}>Dr. {d.name}</option>
+                       <option key={d.id} value={d.id} style={optionStyle}>Dr. {d.name}</option>
                      ))}
                    </select>
                    {!selectedDoctorId && (
@@ -360,7 +381,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>3. Randevu Saati</label>
-                     <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>Tarih: {defaultDate}</span>
+                     <span style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>Tarih: {defaultDate}</span>
                    </div>
                    <FancyHourPicker range={timeRange} onChange={setTimeRange} />
                  </div>
@@ -371,39 +392,39 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Tutar (₺) *</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Tutar (₺) *</label>
                   <input type="number" placeholder="Örn: 1500" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} style={inputBaseStyle} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Ödeme Yöntemi</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Ödeme Yöntemi</label>
                   <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} style={inputBaseStyle}>
-                    <option value="Nakit">Nakit</option>
-                    <option value="Kredi Kartı">Kredi Kartı</option>
-                    <option value="Havale/EFT">Havale/EFT</option>
+                    <option value="Nakit" style={optionStyle}>Nakit</option>
+                    <option value="Kredi Kartı" style={optionStyle}>Kredi Kartı</option>
+                    <option value="Havale/EFT" style={optionStyle}>Havale/EFT</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Ödeme Tarihi *</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Ödeme Tarihi *</label>
                   <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} style={inputBaseStyle} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Durum</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Durum</label>
                   <select value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} style={inputBaseStyle}>
-                    <option value="completed">✅ Yapıldı</option>
-                    <option value="pending">⏳ Bekliyor</option>
+                    <option value="completed" style={optionStyle}>✅ Yapıldı</option>
+                    <option value="pending" style={optionStyle}>⏳ Bekliyor</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Planlanan Tarih</label>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Planlanan Tarih</label>
                   <input type="date" value={plannedDate} onChange={e => setPlannedDate(e.target.value)} style={inputBaseStyle} />
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, display: 'block' }}>Not (opsiyonel)</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4, display: 'block' }}>Not (opsiyonel)</label>
                 <input type="text" placeholder="Kısa not ekleyin" value={paymentNote} onChange={e => setPaymentNote(e.target.value)} style={inputBaseStyle} />
               </div>
             </div>
@@ -411,8 +432,8 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border, #eee)', display: 'flex', justifyContent: 'flex-end', gap: 12, background: 'var(--bg, #f9fafb)' }}>
-          <button onClick={onClose} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #d1d5db', background: 'transparent', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--glass-border, rgba(255,255,255,0.08))', display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'rgba(255,255,255,0.02)' }}>
+          <button onClick={onClose} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--glass-border, rgba(255,255,255,0.15))', background: 'transparent', color: 'var(--foreground-2)', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
           <button 
              onClick={handleSave} 
              disabled={tab === 'patient' && (!selectedPatientId && patientMode !== 'create')}
@@ -424,6 +445,7 @@ export default function QuickCreatePopover({ x, y, onClose, onSave, defaultDate,
                border: 'none', 
                cursor: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 'not-allowed' : 'pointer', 
                fontWeight: 600,
+               fontSize: '0.85rem',
                opacity: (tab === 'patient' && (!selectedPatientId && patientMode !== 'create')) ? 0.5 : 1
              }}
           >
