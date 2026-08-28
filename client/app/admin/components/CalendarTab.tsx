@@ -1296,16 +1296,17 @@ export default function CalendarTab() {
                     </div>
                   )}
                   {/* ── UNIFIED TEDAVİ PLANI & GRUPLARI ── */}
-                  {patientTreatments.filter((t: any) => t.status !== 'completed').length === 0 ? (
+                  {patientTreatments.length === 0 ? (
                     <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', padding: '14px', background: 'rgba(255,255,255,0.015)', borderRadius: 8, textAlign: 'center', border: '1px dashed var(--glass-border)' }}>
                       Hastaya ait aktif tedavi planı bulunmuyor.<br />
-                      Yukarıdaki <strong style={{ color: 'var(--brand)' }}>"+ Tedavi Ekle"</strong> butonundan yeni tedavi planı oluşturabilirsiniz.
+                      Yukarıdaki <strong style={{ color: 'var(--brand, #3b82f6)' }}>"+ Tedavi Ekle"</strong> butonundan yeni tedavi planı oluşturabilirsiniz.
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {Array.isArray(treatmentGroups) && treatmentGroups.map((g: any) => {
-                        const groupTreatments = patientTreatments.filter((t: any) => t.status !== 'completed' && t.groupId === g.id);
+                        const groupTreatments = patientTreatments.filter((t: any) => t.groupId === g.id);
                         if (groupTreatments.length === 0) return null;
+                        const completedCount = groupTreatments.filter((t: any) => t.status === 'completed').length;
                         return (
                           <div key={g.id} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
                             <div 
@@ -1318,8 +1319,15 @@ export default function CalendarTab() {
                               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span>📁</span>
                                 <span>{g.name}</span>
-                                <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: 'var(--foreground-2)' }}>
-                                  {groupTreatments.length}
+                                <span style={{ 
+                                  fontSize: '0.65rem', 
+                                  padding: '1px 6px', 
+                                  borderRadius: 4, 
+                                  background: completedCount === groupTreatments.length ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.08)', 
+                                  color: completedCount === groupTreatments.length ? '#10b981' : 'var(--foreground-2)',
+                                  fontWeight: 600
+                                }}>
+                                  {completedCount > 0 ? `${completedCount}/${groupTreatments.length} Yapıldı` : `${groupTreatments.length} İşlem`}
                                 </span>
                               </span>
                               <div style={{ display: 'flex', gap: '6px' }} onClick={e => e.stopPropagation()}>
@@ -1361,6 +1369,7 @@ export default function CalendarTab() {
                             <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                               {groupTreatments.map((t: any) => {
                                 const apptTime = t.sessions?.[0]?.startTime || t.plannedDate;
+                                const isCompleted = t.status === 'completed';
                                 return (
                                   <div 
                                     id={`treatment-${t.id}`} 
@@ -1372,20 +1381,20 @@ export default function CalendarTab() {
                                       gap: 8, 
                                       padding: '10px 11px', 
                                       borderRadius: 8, 
-                                      background: 'rgba(255,255,255,0.03)', 
-                                      border: '1px solid var(--glass-border)', 
+                                      background: isCompleted ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255,255,255,0.03)', 
+                                      border: isCompleted ? '1px solid rgba(16, 185, 129, 0.28)' : '1px solid var(--glass-border)', 
                                       fontSize: '0.75rem', 
                                       cursor: 'pointer', 
                                       transition: 'all 0.15s ease',
                                       boxSizing: 'border-box'
                                     }}
                                     onMouseEnter={e => {
-                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                                      e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+                                      e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.05)';
+                                      e.currentTarget.style.borderColor = isCompleted ? 'rgba(16, 185, 129, 0.5)' : 'rgba(59, 130, 246, 0.35)';
                                     }}
                                     onMouseLeave={e => {
-                                      e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                                      e.currentTarget.style.borderColor = 'var(--glass-border)';
+                                      e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255,255,255,0.03)';
+                                      e.currentTarget.style.borderColor = isCompleted ? 'rgba(16, 185, 129, 0.28)' : 'var(--glass-border)';
                                     }}
                                     title="Takvimde bu tedavi / randevu tarihine git"
                                   >
@@ -1393,13 +1402,33 @@ export default function CalendarTab() {
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                                         {t.toothNumber && (
-                                          <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', fontWeight: 700, fontSize: '0.72rem', flexShrink: 0 }}>
+                                          <span style={{ 
+                                            padding: '2px 6px', 
+                                            borderRadius: 4, 
+                                            background: isCompleted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)', 
+                                            color: isCompleted ? '#10b981' : '#3b82f6', 
+                                            fontWeight: 700, 
+                                            fontSize: '0.72rem', 
+                                            flexShrink: 0 
+                                          }}>
                                             #{t.toothNumber}
                                           </span>
                                         )}
-                                        <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.procedureName}>
+                                        <span style={{ 
+                                          fontWeight: 600, 
+                                          color: isCompleted ? 'var(--foreground)' : 'var(--foreground)', 
+                                          fontSize: '0.82rem', 
+                                          whiteSpace: 'nowrap', 
+                                          overflow: 'hidden', 
+                                          textOverflow: 'ellipsis' 
+                                        }} title={t.procedureName}>
                                           {t.procedureName}
                                         </span>
+                                        {isCompleted && (
+                                          <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 700, flexShrink: 0 }}>
+                                            ✓ Yapıldı
+                                          </span>
+                                        )}
                                         {t.dcmUrl && (
                                           <button onClick={(e) => { e.stopPropagation(); setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`); }} style={{ fontSize: '0.58rem', padding: '1px 5px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer', flexShrink: 0 }}>
                                             Röntgen
@@ -1433,18 +1462,41 @@ export default function CalendarTab() {
                                     {/* 2. Satır: Durum ve Doktor (Yan yana 2 eşit sütunlu Grid) */}
                                     <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                                       <select 
-                                        defaultValue={t.status} 
+                                        value={t.status || 'planned'} 
                                         onChange={(e) => {
+                                          const newStatus = e.target.value;
                                           fetch(`/api/dental/treatments/${t.id}`, {
                                             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ status: e.target.value })
-                                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                            body: JSON.stringify({ status: newStatus })
+                                          }).then(() => {
+                                            fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { 
+                                              setPatientTreatments(d?.treatments || []); 
+                                              setTreatmentGroups(d?.groups || []); 
+                                            });
+                                            if (newStatus === 'completed') {
+                                              toast.success(`✅ "${t.procedureName}" yapıldı olarak işaretlendi`);
+                                            }
+                                          }).catch(() => { 
+                                            toast.error('Durum güncellenemedi');
+                                          })
                                         }} 
-                                        style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', outline: 'none', boxSizing: 'border-box' }}
+                                        style={{ 
+                                          width: '100%', 
+                                          fontSize: '0.7rem', 
+                                          padding: '4px 6px', 
+                                          borderRadius: 6, 
+                                          border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--glass-border)', 
+                                          background: isCompleted ? 'rgba(16, 185, 129, 0.08)' : 'var(--glass-bg)', 
+                                          color: isCompleted ? '#10b981' : (t.status === 'in_progress' ? '#f59e0b' : 'var(--foreground-2)'), 
+                                          fontWeight: isCompleted ? 700 : 500,
+                                          cursor: 'pointer', 
+                                          outline: 'none', 
+                                          boxSizing: 'border-box' 
+                                        }}
                                       >
                                         <option value="planned">Planlandı</option>
                                         <option value="in_progress">Devam Ediyor</option>
-                                        <option value="completed">Yapıldı ✓</option>
+                                        <option value="completed">✅ Yapıldı</option>
                                       </select>
 
                                       <select 
@@ -1518,9 +1570,9 @@ export default function CalendarTab() {
                                         }}
                                         style={{
                                           width: '100%',
-                                          background: apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)',
-                                          border: apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)',
-                                          color: apptTime ? '#22c55e' : '#60a5fa',
+                                          background: isCompleted ? 'rgba(16, 185, 129, 0.08)' : (apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)'),
+                                          border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : (apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)'),
+                                          color: isCompleted ? '#10b981' : (apptTime ? '#22c55e' : '#60a5fa'),
                                           borderRadius: 6,
                                           cursor: 'pointer',
                                           padding: '5px 8px',
@@ -1533,10 +1585,10 @@ export default function CalendarTab() {
                                           boxSizing: 'border-box'
                                         }}
                                         onMouseEnter={e => {
-                                          e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                                          e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.15)' : (apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)');
                                         }}
                                         onMouseLeave={e => {
-                                          e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)';
+                                          e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.08)' : (apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)');
                                         }}
                                         title="Tarih / Saat Belirle veya Değiştir"
                                       >
@@ -1556,8 +1608,9 @@ export default function CalendarTab() {
                       })}
 
                       {/* Ungrouped treatments if any */}
-                      {patientTreatments.filter((t: any) => t.status !== 'completed' && !t.groupId).map((t: any) => {
+                      {patientTreatments.filter((t: any) => !t.groupId).map((t: any) => {
                         const apptTime = t.sessions?.[0]?.startTime || t.plannedDate;
+                        const isCompleted = t.status === 'completed';
                         return (
                           <div 
                             id={`treatment-${t.id}`} 
@@ -1569,20 +1622,20 @@ export default function CalendarTab() {
                               gap: 8, 
                               padding: '10px 11px', 
                               borderRadius: 8, 
-                              background: 'rgba(255,255,255,0.03)', 
-                              border: '1px solid var(--glass-border)', 
+                              background: isCompleted ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255,255,255,0.03)', 
+                              border: isCompleted ? '1px solid rgba(16, 185, 129, 0.28)' : '1px solid var(--glass-border)', 
                               fontSize: '0.75rem', 
                               cursor: 'pointer', 
                               transition: 'all 0.15s ease',
                               boxSizing: 'border-box'
                             }}
                             onMouseEnter={e => {
-                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)';
-                              e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+                              e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.05)';
+                              e.currentTarget.style.borderColor = isCompleted ? 'rgba(16, 185, 129, 0.5)' : 'rgba(59, 130, 246, 0.35)';
                             }}
                             onMouseLeave={e => {
-                              e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                              e.currentTarget.style.borderColor = 'var(--glass-border)';
+                              e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255,255,255,0.03)';
+                              e.currentTarget.style.borderColor = isCompleted ? 'rgba(16, 185, 129, 0.28)' : 'var(--glass-border)';
                             }}
                             title="Takvimde bu tedavi / randevu tarihine git"
                           >
@@ -1590,13 +1643,33 @@ export default function CalendarTab() {
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                                 {t.toothNumber && (
-                                  <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', fontWeight: 700, fontSize: '0.72rem', flexShrink: 0 }}>
+                                  <span style={{ 
+                                    padding: '2px 6px', 
+                                    borderRadius: 4, 
+                                    background: isCompleted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)', 
+                                    color: isCompleted ? '#10b981' : '#3b82f6', 
+                                    fontWeight: 700, 
+                                    fontSize: '0.72rem', 
+                                    flexShrink: 0 
+                                  }}>
                                     #{t.toothNumber}
                                   </span>
                                 )}
-                                <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.procedureName}>
+                                <span style={{ 
+                                  fontWeight: 600, 
+                                  color: 'var(--foreground)', 
+                                  fontSize: '0.82rem', 
+                                  whiteSpace: 'nowrap', 
+                                  overflow: 'hidden', 
+                                  textOverflow: 'ellipsis' 
+                                }} title={t.procedureName}>
                                   {t.procedureName}
                                 </span>
+                                {isCompleted && (
+                                  <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 700, flexShrink: 0 }}>
+                                    ✓ Yapıldı
+                                  </span>
+                                )}
                                 {t.dcmUrl && (
                                   <button onClick={(e) => { e.stopPropagation(); setSelectedDcmUrl(process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}${t.dcmUrl}` : `http://localhost:3001${t.dcmUrl}`); }} style={{ fontSize: '0.58rem', padding: '1px 5px', borderRadius: 4, border: '1px solid #3b82f6', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer', flexShrink: 0 }}>
                                     Röntgen
@@ -1630,18 +1703,41 @@ export default function CalendarTab() {
                             {/* 2. Satır: Durum ve Doktor (Yan yana 2 eşit sütunlu Grid) */}
                             <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                               <select 
-                                defaultValue={t.status} 
+                                value={t.status || 'planned'} 
                                 onChange={(e) => {
+                                  const newStatus = e.target.value;
                                   fetch(`/api/dental/treatments/${t.id}`, {
                                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ status: e.target.value })
-                                  }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                    body: JSON.stringify({ status: newStatus })
+                                  }).then(() => {
+                                    fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { 
+                                      setPatientTreatments(d?.treatments || []); 
+                                      setTreatmentGroups(d?.groups || []); 
+                                    });
+                                    if (newStatus === 'completed') {
+                                      toast.success(`✅ "${t.procedureName}" yapıldı olarak işaretlendi`);
+                                    }
+                                  }).catch(() => { 
+                                    toast.error('Durum güncellenemedi');
+                                  })
                                 }} 
-                                style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: 'var(--foreground-2)', cursor: 'pointer', outline: 'none', boxSizing: 'border-box' }}
+                                style={{ 
+                                  width: '100%', 
+                                  fontSize: '0.7rem', 
+                                  padding: '4px 6px', 
+                                  borderRadius: 6, 
+                                  border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--glass-border)', 
+                                  background: isCompleted ? 'rgba(16, 185, 129, 0.08)' : 'var(--glass-bg)', 
+                                  color: isCompleted ? '#10b981' : (t.status === 'in_progress' ? '#f59e0b' : 'var(--foreground-2)'), 
+                                  fontWeight: isCompleted ? 700 : 500,
+                                  cursor: 'pointer', 
+                                  outline: 'none', 
+                                  boxSizing: 'border-box' 
+                                }}
                               >
                                 <option value="planned">Planlandı</option>
                                 <option value="in_progress">Devam Ediyor</option>
-                                <option value="completed">Yapıldı ✓</option>
+                                <option value="completed">✅ Yapıldı</option>
                               </select>
 
                               <select 
@@ -1715,9 +1811,9 @@ export default function CalendarTab() {
                                 }}
                                 style={{
                                   width: '100%',
-                                  background: apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)',
-                                  border: apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)',
-                                  color: apptTime ? '#22c55e' : '#60a5fa',
+                                  background: isCompleted ? 'rgba(16, 185, 129, 0.08)' : (apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)'),
+                                  border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : (apptTime ? '1px solid rgba(34, 197, 94, 0.3)' : '1px dashed rgba(59, 130, 246, 0.3)'),
+                                  color: isCompleted ? '#10b981' : (apptTime ? '#22c55e' : '#60a5fa'),
                                   borderRadius: 6,
                                   cursor: 'pointer',
                                   padding: '5px 8px',
@@ -1730,10 +1826,10 @@ export default function CalendarTab() {
                                   boxSizing: 'border-box'
                                 }}
                                 onMouseEnter={e => {
-                                  e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)';
+                                  e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.15)' : (apptTime ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.12)');
                                 }}
                                 onMouseLeave={e => {
-                                  e.currentTarget.style.background = apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)';
+                                  e.currentTarget.style.background = isCompleted ? 'rgba(16, 185, 129, 0.08)' : (apptTime ? 'rgba(34, 197, 94, 0.08)' : 'rgba(59, 130, 246, 0.06)');
                                 }}
                                 title="Tarih / Saat Belirle veya Değiştir"
                               >
