@@ -1438,59 +1438,63 @@ export default function CalendarTab() {
                                       </select>
 
                                       <select 
-                                        value={t.doctorId || ''} 
-                                        onChange={(e) => {
-                                          const newDocId = e.target.value || null;
-                                          if (newDocId && apptTime) {
-                                            const apptDateStr = new Date(apptTime).toLocaleDateString('sv');
-                                            const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
-                                            const docObj = doctors.find((d: any) => d.id === newDocId);
-                                            const docName = docObj?.name || 'Hekim';
+                                         value={t.doctorId || ''} 
+                                         onChange={(e) => {
+                                           const newDocId = e.target.value || null;
+                                           const targetApptTime = apptTime || selectedEvent?.startTime;
+                                           if (newDocId && targetApptTime) {
+                                             const apptDateStr = new Date(targetApptTime).toLocaleDateString('sv');
+                                             const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
+                                             const docObj = doctors.find((d: any) => d.id === newDocId);
+                                             const docName = docObj?.name || 'Hekim';
 
-                                            if (docShifts.length === 0) {
-                                              import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
-                                              return;
-                                            }
+                                             if (docShifts.length === 0) {
+                                               e.target.value = t.doctorId || '';
+                                               import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
+                                               return;
+                                             }
 
-                                            const startMin = new Date(apptTime).getHours() * 60 + new Date(apptTime).getMinutes();
-                                            const isCovered = docShifts.some((s: any) => {
-                                              const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
-                                              const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
-                                              return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
-                                            });
+                                             const startMin = new Date(targetApptTime).getHours() * 60 + new Date(targetApptTime).getMinutes();
+                                             const isCovered = docShifts.some((s: any) => {
+                                               const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+                                               const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+                                               return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+                                             });
 
-                                            if (!isCovered) {
-                                              const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
-                                              import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
-                                              return;
-                                            }
-                                          }
+                                             if (!isCovered) {
+                                               e.target.value = t.doctorId || '';
+                                               const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+                                               import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
+                                               return;
+                                             }
+                                           }
 
-                                          fetch(`/api/dental/treatments/${t.id}`, {
-                                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ doctorId: newDocId })
-                                          }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
-                                        }} 
-                                        style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: t.doctorId ? 'var(--foreground-2)' : '#f59e0b', cursor: 'pointer', outline: 'none', boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                                      >
-                                        <option value="">👤 Doktor Seç</option>
-                                        {doctors.map((d: any) => {
-                                          const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
-                                          const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                                          const hasShift = docShifts.length > 0;
-                                          const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
-                                          return (
-                                            <option 
-                                              key={d.id} 
-                                              value={d.id} 
-                                              disabled={apptDateStr ? !hasShift : false}
-                                              style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
-                                            >
-                                              {d.name} {shiftText}
-                                            </option>
-                                          );
-                                        })}
-                                      </select>
+                                           fetch(`/api/dental/treatments/${t.id}`, {
+                                             method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                             body: JSON.stringify({ doctorId: newDocId })
+                                           }).then(() => fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); })).catch(() => { })
+                                         }} 
+                                         style={{ width: '100%', fontSize: '0.7rem', padding: '4px 6px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', color: t.doctorId ? 'var(--foreground-2)' : '#f59e0b', cursor: 'pointer', outline: 'none', boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                       >
+                                         <option value="">👤 Doktor Seç</option>
+                                         {doctors.map((d: any) => {
+                                           const targetApptTime = apptTime || selectedEvent?.startTime;
+                                           const apptDateStr = targetApptTime ? new Date(targetApptTime).toLocaleDateString('sv') : '';
+                                           const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
+                                           const hasShift = docShifts.length > 0;
+                                           const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
+                                           return (
+                                             <option 
+                                               key={d.id} 
+                                               value={d.id} 
+                                               disabled={apptDateStr ? !hasShift : false}
+                                               style={{ color: !hasShift && apptDateStr ? '#ef4444' : 'inherit' }}
+                                             >
+                                               {d.name} {shiftText}
+                                             </option>
+                                           );
+                                         })}
+                                       </select>
                                     </div>
 
                                     {/* 3. Satır: Tarih / Randevu Butonu (Tam Genişlikte) */}
@@ -1634,18 +1638,20 @@ export default function CalendarTab() {
                                 value={t.doctorId || ''} 
                                 onChange={(e) => {
                                   const newDocId = e.target.value || null;
-                                  if (newDocId && apptTime) {
-                                    const apptDateStr = new Date(apptTime).toLocaleDateString('sv');
+                                  const targetApptTime = apptTime || selectedEvent?.startTime;
+                                  if (newDocId && targetApptTime) {
+                                    const apptDateStr = new Date(targetApptTime).toLocaleDateString('sv');
                                     const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
                                     const docObj = doctors.find((d: any) => d.id === newDocId);
                                     const docName = docObj?.name || 'Hekim';
 
                                     if (docShifts.length === 0) {
+                                      e.target.value = t.doctorId || '';
                                       import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
                                       return;
                                     }
 
-                                    const startMin = new Date(apptTime).getHours() * 60 + new Date(apptTime).getMinutes();
+                                    const startMin = new Date(targetApptTime).getHours() * 60 + new Date(targetApptTime).getMinutes();
                                     const isCovered = docShifts.some((s: any) => {
                                       const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
                                       const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
@@ -1653,6 +1659,7 @@ export default function CalendarTab() {
                                     });
 
                                     if (!isCovered) {
+                                      e.target.value = t.doctorId || '';
                                       const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
                                       import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
                                       return;
@@ -1668,7 +1675,8 @@ export default function CalendarTab() {
                               >
                                 <option value="">👤 Doktor Seç</option>
                                 {doctors.map((d: any) => {
-                                  const apptDateStr = apptTime ? new Date(apptTime).toLocaleDateString('sv') : (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
+                                  const targetApptTime = apptTime || selectedEvent?.startTime;
+                                  const apptDateStr = targetApptTime ? new Date(targetApptTime).toLocaleDateString('sv') : '';
                                   const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
                                   const hasShift = docShifts.length > 0;
                                   const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');

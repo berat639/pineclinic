@@ -418,7 +418,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       
       for (const drafts of Object.values(toothDrafts)) {
         for (const proc of drafts) {
-          const docId = proc.doctorId || defaultDoctorId;
+          const docId = proc.doctorId || defaultDoctorId || selectedEvent?.doctorId;
           if (docId) {
             const docShifts = (shifts || []).filter((s: any) => s.userId === docId && s.date === apptDateStr);
             const docObj = doctors.find((d: any) => d.id === docId);
@@ -856,7 +856,24 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 <div style={{ padding: 12, background: 'var(--glass-bg)', border: '1px dashed var(--glass-border)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', gap: 12 }}>
                     <div style={{ flex: 1 }}>
-                      <select value={defaultDoctorId || ''} onChange={e => setDefaultDoctorId(e.target.value)} style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}>
+                      <select 
+                        value={defaultDoctorId || ''} 
+                        onChange={e => {
+                          const chosenDocId = e.target.value;
+                          if (chosenDocId && selectedEvent?.startTime) {
+                            const apptDateStr = new Date(selectedEvent.startTime).toLocaleDateString('sv');
+                            const docShifts = (shifts || []).filter((s: any) => s.userId === chosenDocId && s.date === apptDateStr);
+                            const docObj = doctors.find((d: any) => d.id === chosenDocId);
+                            const docName = docObj?.name || 'Seçilen hekim';
+                            if (docShifts.length === 0) {
+                              toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) tanımlı vardiya bulunmuyor!`);
+                              return;
+                            }
+                          }
+                          setDefaultDoctorId(chosenDocId);
+                        }} 
+                        style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}
+                      >
                         <option value="">⚠️ Atanmadı</option>
                         {doctors?.map((d: any) => {
                           const apptDateStr = selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '';
@@ -1238,11 +1255,22 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                     <select
                                       value={draft.doctorId || ''}
                                       onChange={(e) => {
+                                        const chosenDocId = e.target.value || null;
+                                        if (chosenDocId && selectedEvent?.startTime) {
+                                          const apptDateStr = new Date(selectedEvent.startTime).toLocaleDateString('sv');
+                                          const docShifts = (shifts || []).filter((s: any) => s.userId === chosenDocId && s.date === apptDateStr);
+                                          const docObj = doctors.find((d: any) => d.id === chosenDocId);
+                                          const docName = docObj?.name || 'Seçilen hekim';
+                                          if (docShifts.length === 0) {
+                                            toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) tanımlı vardiya bulunmuyor!`);
+                                            return;
+                                          }
+                                        }
                                         setToothDrafts(prev => {
                                           const next = { ...prev };
                                           const index = next[tooth].findIndex(d => d.id === draft.id);
                                           if (index !== -1) {
-                                            next[tooth][index] = { ...next[tooth][index], doctorId: e.target.value || null };
+                                            next[tooth][index] = { ...next[tooth][index], doctorId: chosenDocId };
                                           }
                                           return next;
                                         });

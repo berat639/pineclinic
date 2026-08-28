@@ -922,9 +922,41 @@ const app = new Elysia()
     set.headers['content-disposition'] = `inline; filename="${safeName.replace('.gz', '')}"`;
     return new Response(raw);
   })
-  .put('/api/dental/treatments/:id', async ({ params, body }) => {
+  .put('/api/dental/treatments/:id', async ({ params, body, set }) => {
     const { updateTreatmentPlan } = await import('./db/repositories/dental')
+    const { db } = await import('./db/client')
+    const { appointmentTreatments, dentalAppointments, shifts } = await import('./db/schema')
+    const { eq, and } = await import('drizzle-orm')
     const b = body as any
+
+    if (b.doctorId) {
+      // Check if this treatment has linked appointments and validate doctor shift
+      const linkedAppts = await db
+        .select({
+          id: dentalAppointments.id,
+          startTime: dentalAppointments.startTime,
+          endTime: dentalAppointments.endTime
+        })
+        .from(appointmentTreatments)
+        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+        .where(eq(appointmentTreatments.treatmentPlanId, params.id))
+
+      for (const appt of linkedAppts) {
+        if (appt.startTime) {
+          const apptDateStr = new Date(appt.startTime).toISOString().split('T')[0]
+          const docShifts = await db
+            .select()
+            .from(shifts)
+            .where(and(eq(shifts.userId, b.doctorId), eq(shifts.date, apptDateStr)))
+
+          if (docShifts.length === 0) {
+            set.status = 400
+            return { error: `Seçilen hekimin bu randevu tarihinde (${apptDateStr}) vardiyası bulunmuyor` }
+          }
+        }
+      }
+    }
+
     return await updateTreatmentPlan(params.id, { status: b.status, groupId: b.groupId, doctorId: b.doctorId })
   })
   .delete('/api/dental/treatments/:id', async ({ params, set }) => {
