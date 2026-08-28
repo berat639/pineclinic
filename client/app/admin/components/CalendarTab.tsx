@@ -217,6 +217,9 @@ export default function CalendarTab() {
     try {
       const eventDate = new Date(startTime).toLocaleDateString('sv');
       setCurrentDate(eventDate);
+      if (view === 'month') {
+        setView('day');
+      }
       
       const targetEvt = events.find(ev => ev.id === eventId);
       if (targetEvt) {
@@ -230,14 +233,20 @@ export default function CalendarTab() {
         setPanelOpen(true);
       }
 
-      setTimeout(() => {
+      let attempts = 0;
+      const maxAttempts = 15;
+      const interval = setInterval(() => {
+        attempts++;
         const el = document.getElementById(`cal-event-${eventId}`);
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          clearInterval(interval);
+          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
           el.classList.add('pulse-highlight-cal');
-          setTimeout(() => el.classList.remove('pulse-highlight-cal'), 2800);
+          setTimeout(() => el.classList.remove('pulse-highlight-cal'), 3200);
+        } else if (attempts >= maxAttempts) {
+          clearInterval(interval);
         }
-      }, 300);
+      }, 70);
     } catch (e) {
       console.error(e);
     }
@@ -2273,40 +2282,54 @@ export default function CalendarTab() {
             <div
               onClick={e => e.stopPropagation()}
               style={{
-                position: 'fixed', top: Math.min(unassignedListMenu.y, window.innerHeight - 300), left: Math.min(unassignedListMenu.x, window.innerWidth - 250), zIndex: 9999,
+                position: 'fixed', top: Math.min(unassignedListMenu.y, window.innerHeight - 340), left: Math.min(unassignedListMenu.x, window.innerWidth - 280), zIndex: 9999,
                 background: 'var(--card-bg, #ffffff)', border: '1px solid var(--glass-border)',
-                borderRadius: 8, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', width: 250, maxHeight: 300, overflowY: 'auto'
+                borderRadius: 10, padding: 14, boxShadow: '0 12px 30px rgba(0,0,0,0.25)', width: 280, maxHeight: 340, overflowY: 'auto'
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                <span>⚠️ Bekleyen Randevular</span>
-                <button onClick={() => setUnassignedListMenu(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer' }}>✕</button>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>⚠️ Bekleyen Randevular</span>
+                <button onClick={() => setUnassignedListMenu(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px' }}>✕</button>
               </div>
               {events.filter(e => !e.doctorId).length === 0 ? (
-                <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)' }}>Bekleyen randevu yok.</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', textAlign: 'center', padding: '12px 0' }}>Bekleyen randevu yok.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {events.filter(e => !e.doctorId).map(e => (
-                    <div
-                      key={e.id}
-                      onClick={() => {
-                        setCurrentDate(e.startTime.slice(0, 10))
-                        setView('day')
-                        setUnassignedListMenu(null)
-                      }}
-                      style={{
-                        padding: '8px 10px', borderRadius: 6, border: '1px solid var(--glass-border)',
-                        background: 'var(--glass-bg)', cursor: 'pointer', fontSize: '0.8rem'
-                      }}
-                      onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                      onMouseLeave={ev => ev.currentTarget.style.background = 'var(--glass-bg)'}
-                    >
-                      <div style={{ fontWeight: 600, color: 'var(--foreground)', marginBottom: 2 }}>{e.title}</div>
-                      <div style={{ color: 'var(--foreground-3)', fontSize: '0.7rem' }}>
-                        {new Date(e.startTime).toLocaleDateString('tr-TR')} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                  {events.filter(e => !e.doctorId).map(e => {
+                    const apptDate = new Date(e.startTime);
+                    const isInvalidDate = isNaN(apptDate.getTime());
+                    const dateStr = isInvalidDate ? '' : apptDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+                    const timeStr = isInvalidDate ? '' : apptDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+                    return (
+                      <div
+                        key={e.id}
+                        onClick={() => {
+                          focusAppointmentOnCalendar(e.id, e.startTime, true);
+                          setUnassignedListMenu(null);
+                          toast.success(`📅 ${e.title} (${dateStr} ${timeStr}) randevusuna gidildi`);
+                        }}
+                        style={{
+                          padding: '9px 12px', borderRadius: 8, border: '1px solid var(--glass-border)',
+                          background: 'var(--input-bg)', cursor: 'pointer', fontSize: '0.8rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={ev => {
+                          ev.currentTarget.style.background = 'var(--glass-bg-hover, rgba(37,99,235,0.08))';
+                          ev.currentTarget.style.borderColor = 'var(--accent, #3b82f6)';
+                        }}
+                        onMouseLeave={ev => {
+                          ev.currentTarget.style.background = 'var(--input-bg)';
+                          ev.currentTarget.style.borderColor = 'var(--glass-border)';
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: 'var(--foreground)', marginBottom: 2 }}>{e.title}</div>
+                        <div style={{ color: 'var(--foreground-3)', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>🕒 {dateStr} {timeStr}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
