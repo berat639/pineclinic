@@ -36,16 +36,16 @@ const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
   const endMM = String(range[1] % 60).padStart(2, '0');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--foreground)', fontSize: '0.85rem', fontWeight: 600 }}>
-        <span>Başlangıç: <span style={{ color: 'var(--brand)' }}>{startHH}:{startMM}</span></span>
-        <span>Bitiş: <span style={{ color: 'var(--brand)' }}>{endHH}:{endMM}</span></span>
+        <span>Başlangıç: <span style={{ color: 'var(--accent, #3b82f6)', fontWeight: 700 }}>{startHH}:{startMM}</span></span>
+        <span>Bitiş: <span style={{ color: 'var(--accent, #3b82f6)', fontWeight: 700 }}>{endHH}:{endMM}</span></span>
       </div>
-      <div style={{ padding: '0 10px' }}>
+      <div style={{ padding: '0 6px' }}>
         <Slider
           range
-          min={480}
-          max={1200}
+          min={0}
+          max={1440}
           step={15}
           value={range}
           onChange={(val: any) => setRange(val)}
@@ -59,24 +59,24 @@ const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
           allowCross={false}
           pushable={15}
           styles={{
-            track: { backgroundColor: 'var(--brand)', height: 6 },
-            rail: { backgroundColor: 'rgba(156,163,175,0.2)', height: 6 },
+            track: { backgroundColor: 'var(--accent, #3b82f6)', height: 6 },
+            rail: { backgroundColor: 'rgba(156,163,175,0.25)', height: 6 },
             handle: {
               borderColor: 'transparent',
-              backgroundColor: 'var(--brand)',
+              backgroundColor: 'var(--accent, #3b82f6)',
               opacity: 1,
-              width: 8,
-              height: 18,
-              marginTop: -6,
+              width: 12,
+              height: 20,
+              marginTop: -7,
               borderRadius: 4,
-              boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+              boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
             }
           }}
         />
       </div>
     </div>
-  )
-}
+  );
+};
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: '📅 Planlandı',
@@ -350,6 +350,49 @@ export default function CalendarTab() {
           mod.toast(`📁 Takvim ${g.name} tarihine yönlendirildi.`, { icon: '📅' })
         );
       }
+    }
+  };
+
+  const handleTreatmentStatusChange = async (treatmentId: string, treatmentName: string, newStatus: string) => {
+    if (!selectedEvent?.patientId) return;
+    try {
+      const res = await fetch(`/api/dental/treatments/${treatmentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (!res.ok) {
+        toast.error('Durum güncellenemedi');
+        return;
+      }
+      const dRes = await fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`);
+      const d = dRes.ok ? await dRes.json() : { treatments: [], groups: [] };
+      const updatedTreatments = d?.treatments || [];
+      setPatientTreatments(updatedTreatments);
+      setTreatmentGroups(d?.groups || []);
+
+      if (newStatus === 'completed' && updatedTreatments.length > 0) {
+        const allCompleted = updatedTreatments.every((tr: any) => tr.status === 'completed');
+        if (allCompleted && selectedEvent.status !== 'completed') {
+          const apptRes = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' }),
+          });
+          if (apptRes.ok) {
+            const updatedAppt = await apptRes.json();
+            setEvents(prev => prev.map(ev => ev.id === updatedAppt.id ? { ...ev, ...updatedAppt, status: 'completed' } : ev));
+            setSelectedEvent(prev => prev ? { ...prev, ...updatedAppt, status: 'completed' } : null);
+            toast.success(`🎉 Tüm tedavi planı tamamlandı! Randevu durumu otomatik olarak "Tamamlandı"ya alındı.`);
+            return;
+          }
+        }
+        toast.success(`✅ "${treatmentName}" yapıldı olarak işaretlendi`);
+      } else {
+        toast.success('Durum güncellendi');
+      }
+    } catch {
+      toast.error('Durum güncellenirken hata oluştu');
     }
   };
 
@@ -1047,13 +1090,15 @@ export default function CalendarTab() {
           onEventUpdate={async (updatedEvent) => {
             console.log("Event updated via drag/resize", updatedEvent);
             try {
+              const newStatus = updatedEvent.doctorId ? 'scheduled' : 'pending_assignment';
               await fetch(`/api/dental/appointments/${updatedEvent.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   startTime: updatedEvent.startTime,
                   endTime: updatedEvent.endTime,
-                  doctorId: updatedEvent.doctorId
+                  doctorId: updatedEvent.doctorId || null,
+                  status: newStatus
                 })
               });
               fetchData();
@@ -1159,18 +1204,25 @@ export default function CalendarTab() {
                         value={selectedEvent.doctorId || ''}
                         onChange={async (e) => {
                           const val = e.target.value;
-                          let newStatus = selectedEvent.status;
-                          if (val && selectedEvent.status === 'pending_assignment') {
-                            newStatus = 'scheduled';
-                          }
-                          const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
-                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ doctorId: val || null, status: newStatus })
-                          });
-                          if (res.ok) {
-                            const updated = await res.json();
-                            setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
-                            setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                          const newStatus = val ? 'scheduled' : 'pending_assignment';
+                          try {
+                            const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ doctorId: val || null, status: newStatus })
+                            });
+                            if (res.ok) {
+                              const updated = await res.json();
+                              setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated, doctorId: val || null, status: newStatus } : ev));
+                              setSelectedEvent(prev => prev ? { ...prev, ...updated, doctorId: val || null, status: newStatus } : null);
+                              if (val) {
+                                toast.success('👨‍⚕️ Doktor atandı, durum "Planlandı" olarak güncellendi');
+                              } else {
+                                toast('⚠️ Doktor kaldırıldı, durum "Atama Bekliyor" yapıldı', { icon: '⚠️' });
+                              }
+                              fetchData();
+                            }
+                          } catch {
+                            toast.error('Doktor atanırken hata oluştu');
                           }
                         }}
                         style={{
@@ -1463,23 +1515,7 @@ export default function CalendarTab() {
                                     <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                                       <select 
                                         value={t.status || 'planned'} 
-                                        onChange={(e) => {
-                                          const newStatus = e.target.value;
-                                          fetch(`/api/dental/treatments/${t.id}`, {
-                                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ status: newStatus })
-                                          }).then(() => {
-                                            fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { 
-                                              setPatientTreatments(d?.treatments || []); 
-                                              setTreatmentGroups(d?.groups || []); 
-                                            });
-                                            if (newStatus === 'completed') {
-                                              toast.success(`✅ "${t.procedureName}" yapıldı olarak işaretlendi`);
-                                            }
-                                          }).catch(() => { 
-                                            toast.error('Durum güncellenemedi');
-                                          })
-                                        }} 
+                                        onChange={(e) => handleTreatmentStatusChange(t.id, t.procedureName, e.target.value)} 
                                         style={{ 
                                           width: '100%', 
                                           fontSize: '0.7rem', 
@@ -1704,23 +1740,7 @@ export default function CalendarTab() {
                             <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                               <select 
                                 value={t.status || 'planned'} 
-                                onChange={(e) => {
-                                  const newStatus = e.target.value;
-                                  fetch(`/api/dental/treatments/${t.id}`, {
-                                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ status: newStatus })
-                                  }).then(() => {
-                                    fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments`).then(r => r.json()).then(d => { 
-                                      setPatientTreatments(d?.treatments || []); 
-                                      setTreatmentGroups(d?.groups || []); 
-                                    });
-                                    if (newStatus === 'completed') {
-                                      toast.success(`✅ "${t.procedureName}" yapıldı olarak işaretlendi`);
-                                    }
-                                  }).catch(() => { 
-                                    toast.error('Durum güncellenemedi');
-                                  })
-                                }} 
+                                onChange={(e) => handleTreatmentStatusChange(t.id, t.procedureName, e.target.value)} 
                                 style={{ 
                                   width: '100%', 
                                   fontSize: '0.7rem', 
@@ -1852,19 +1872,21 @@ export default function CalendarTab() {
 
                 {/* Date/time edit */}
                 <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', marginBottom: 6, fontWeight: 600 }}>📅 Tarih/Saat Değiştir</div>
-                  <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 8, fontWeight: 700 }}>📅 Tarih/Saat Değiştir</div>
+                  <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
                     <input
                       type="date"
-                      defaultValue={selectedEvent.startTime.slice(0, 10)}
+                      value={selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : ''}
                       id="edit-date"
                       onChange={async (e) => {
                         const dateVal = e.target.value;
                         if (!dateVal) return;
-                        const startHH = String(new Date(selectedEvent.startTime).getHours()).padStart(2, '0');
-                        const startMM = String(new Date(selectedEvent.startTime).getMinutes()).padStart(2, '0');
-                        const endHH = String(new Date(selectedEvent.endTime).getHours()).padStart(2, '0');
-                        const endMM = String(new Date(selectedEvent.endTime).getMinutes()).padStart(2, '0');
+                        const sDate = new Date(selectedEvent.startTime);
+                        const eDate = new Date(selectedEvent.endTime);
+                        const startHH = String(sDate.getHours()).padStart(2, '0');
+                        const startMM = String(sDate.getMinutes()).padStart(2, '0');
+                        const endHH = String(eDate.getHours()).padStart(2, '0');
+                        const endMM = String(eDate.getMinutes()).padStart(2, '0');
                         const startTime = new Date(`${dateVal}T${startHH}:${startMM}:00+03:00`);
                         const endTime = new Date(`${dateVal}T${endHH}:${endMM}:00+03:00`);
                         try {
@@ -1877,30 +1899,47 @@ export default function CalendarTab() {
                             const updated = await res.json();
                             setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
                             setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                            setCurrentDate(dateVal);
+                            fetchData();
+                            focusAppointmentOnCalendar(updated.id, updated.startTime, true);
+                            toast.success(`📅 Randevu ${new Date(dateVal).toLocaleDateString('tr-TR')} tarihine taşındı`);
+                          } else {
+                            toast.error('Tarih güncellenemedi');
                           }
-                        } catch { }
+                        } catch {
+                          toast.error('Tarih güncellenirken hata oluştu');
+                        }
                       }}
                       style={{ ...inputStyle, width: '100%' }}
                     />
                     <TimeRangeEditor
                       selectedEvent={selectedEvent}
                       onSave={async (startHH: string, startMM: string, endHH: string, endMM: string) => {
-                        const dateEl = document.getElementById('edit-date') as HTMLInputElement
-                        if (!dateEl?.value) return
-                        const startTime = new Date(`${dateEl.value}T${startHH}:${startMM}:00+03:00`)
-                        const endTime = new Date(`${dateEl.value}T${endHH}:${endMM}:00+03:00`)
+                        const dateEl = document.getElementById('edit-date') as HTMLInputElement;
+                        const dateVal = dateEl?.value || (selectedEvent?.startTime ? new Date(selectedEvent.startTime).toLocaleDateString('sv') : '');
+                        if (!dateVal) return;
+                        const startTime = new Date(`${dateVal}T${startHH}:${startMM}:00+03:00`);
+                        const endTime = new Date(`${dateVal}T${endHH}:${endMM}:00+03:00`);
                         try {
                           const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ startTime: startTime.toISOString(), endTime: endTime.toISOString(), timeConfirmed: true }),
-                          })
+                          });
                           if (res.ok) {
                             const updated = await res.json();
                             setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
                             setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                            setCurrentDate(dateVal);
+                            fetchData();
+                            focusAppointmentOnCalendar(updated.id, updated.startTime, true);
+                            toast.success(`⏰ Randevu saati ${startHH}:${startMM} - ${endHH}:${endMM} olarak güncellendi`);
+                          } else {
+                            toast.error('Saat güncellenemedi');
                           }
-                        } catch { }
+                        } catch {
+                          toast.error('Saat güncellenirken hata oluştu');
+                        }
                       }}
                     />
                   </div>
@@ -2270,6 +2309,30 @@ export default function CalendarTab() {
                   return;
                 }
 
+                // 1. Hücreye Randevuyu Oluştur
+                try {
+                  const apptDate = quickCreateMenu.start.slice(0, 10);
+                  const startStr = data.startTime ? `${apptDate}T${data.startTime}:00+03:00` : (quickCreateMenu.start.includes('+') ? quickCreateMenu.start : `${quickCreateMenu.start}+03:00`);
+                  const endStr = data.endTime ? `${apptDate}T${data.endTime}:00+03:00` : (quickCreateMenu.end.includes('+') ? quickCreateMenu.end : `${quickCreateMenu.end}+03:00`);
+                  const apptDoctorId = data.doctorId !== undefined ? data.doctorId : (quickCreateMenu.doctorId || null);
+                  await fetch('/api/dental/appointments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      patientId: pId,
+                      doctorId: apptDoctorId,
+                      title: data.title || 'Muayene',
+                      startTime: startStr,
+                      endTime: endStr,
+                      type: 'Muayene',
+                      status: apptDoctorId ? 'scheduled' : 'pending_assignment'
+                    })
+                  });
+                } catch {
+                  console.error('Randevu oluşturulurken hata');
+                }
+
+                // 2. Ödemeyi Kaydet
                 try {
                   const res = await fetch(`/api/dental/patients/${pId}/payments`, {
                     method: 'POST',
@@ -2288,7 +2351,7 @@ export default function CalendarTab() {
                     toast.error(err.error || 'Ödeme kaydedilemedi');
                     return;
                   }
-                  toast.success('Ödeme başarıyla kaydedildi');
+                  toast.success('Randevu ve ödeme başarıyla kaydedildi');
                 } catch {
                   toast.error('Ödeme işlemi sırasında bir hata oluştu');
                   return;
@@ -2359,9 +2422,10 @@ export default function CalendarTab() {
               <button onClick={async () => {
                 const startTime = new Date(`${eventContextMenu.date}T${eventContextMenu.startTime}:00+03:00`)
                 const endTime = new Date(`${eventContextMenu.date}T${eventContextMenu.endTime}:00+03:00`)
+                const newStatus = eventContextMenu.doctorId ? 'scheduled' : 'pending_assignment'
                 await fetch(`/api/dental/appointments/${eventContextMenu.event.id}`, {
                   method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ doctorId: eventContextMenu.doctorId || null, startTime: startTime.toISOString(), endTime: endTime.toISOString() })
+                  body: JSON.stringify({ doctorId: eventContextMenu.doctorId || null, startTime: startTime.toISOString(), endTime: endTime.toISOString(), status: newStatus })
                 })
                 setEventContextMenu(null)
                 fetchData()

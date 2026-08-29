@@ -215,13 +215,20 @@ export default function QuickCreatePopover({
         return;
       }
 
+      let finalTitle = title || (patientMode === 'select' ? selectedPatientObj?.name : name) || 'Yeni Randevu';
+      if (!selectedDoctorId && !finalTitle.includes('Kontrol Randevusu')) {
+        finalTitle = `${finalTitle} - Kontrol Randevusu`;
+      }
+
       onSave({
         type: 'payment',
-        title: title || 'Yeni Ödeme',
+        title: finalTitle,
         patientId: patientMode === 'select' ? selectedPatientId : undefined,
-        name: patientMode === 'create' ? name : undefined,
-        phone: patientMode === 'create' ? phone : undefined,
-        email: patientMode === 'create' ? email : undefined,
+        doctorId: selectedDoctorId || null,
+        startTime: formatNumberTime(timeRange[0]),
+        endTime: formatNumberTime(timeRange[1]),
+        name, phone, tc, email, gender, birthDate,
+        sms, emailOpt, waOpt,
         amount: paymentAmount,
         paymentMethod,
         paymentDate,
