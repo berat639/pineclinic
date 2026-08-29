@@ -614,11 +614,18 @@ const app = new Elysia()
     const { eq } = await import('drizzle-orm')
     const b = body as any
     const updateData: any = {}
-    if (b.phone !== undefined) updateData.phone = b.phone
-    if (b.email !== undefined) updateData.email = b.email
-    if (b.whatsappOptOut !== undefined) updateData.whatsappOptOut = b.whatsappOptOut
-    if (b.smsOptOut !== undefined) updateData.smsOptOut = b.smsOptOut
-    if (b.emailOptOut !== undefined) updateData.emailOptOut = b.emailOptOut
+    if (b.name !== undefined && b.name.trim() !== '') updateData.name = b.name.trim()
+    if (b.phone !== undefined) updateData.phone = b.phone ? b.phone.trim() : null
+    if (b.email !== undefined) updateData.email = b.email ? b.email.trim() : null
+    if (b.tcIdentity !== undefined) updateData.tcIdentity = b.tcIdentity ? b.tcIdentity.trim() : null
+    if (b.gender !== undefined) updateData.gender = b.gender || null
+    if (b.birthDate !== undefined) {
+      updateData.birthDate = b.birthDate ? new Date(b.birthDate) : null
+    }
+    if (b.whatsappOptOut !== undefined) updateData.whatsappOptOut = Boolean(b.whatsappOptOut)
+    if (b.smsOptOut !== undefined) updateData.smsOptOut = Boolean(b.smsOptOut)
+    if (b.emailOptOut !== undefined) updateData.emailOptOut = Boolean(b.emailOptOut)
+    
     if (Object.keys(updateData).length === 0) return { success: true }
     
     await db.update(patients).set(updateData).where(eq(patients.id, params.id))

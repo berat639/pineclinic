@@ -2,9 +2,10 @@ import React from 'react'
 
 interface PatientProfileCardProps {
   profile: any
+  onEdit?: (patient: any) => void
 }
 
-export default function PatientProfileCard({ profile }: PatientProfileCardProps) {
+export default function PatientProfileCard({ profile, onEdit }: PatientProfileCardProps) {
   if (!profile) return (
     <div style={{ padding: 24, textAlign: 'center', color: 'var(--foreground-3)' }}>
       Yükleniyor...
@@ -14,12 +15,12 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
   const { patient, appointments, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
 
   const cardStyle = {
-    background: 'var(--glass-bg)',
-    border: '1px solid var(--glass-border)',
+    background: 'var(--card-bg, #1e293b)',
+    border: '1px solid var(--input-border, #334155)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
-    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+    boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
   }
   
   const headerStyle = {
@@ -28,7 +29,7 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
     color: 'var(--foreground-2)',
     textTransform: 'uppercase' as const,
     marginBottom: 8,
-    borderBottom: '1px solid var(--glass-border)',
+    borderBottom: '1px solid var(--divider, #334155)',
     paddingBottom: 4
   }
 
@@ -39,15 +40,40 @@ export default function PatientProfileCard({ profile }: PatientProfileCardProps)
   }
 
   return (
-    <div style={{ padding: '16px', background: 'var(--glass-bg)', fontSize: '0.85rem', color: 'var(--foreground)' }}>
+    <div style={{ padding: '16px', background: 'var(--card-bg, #1e293b)', fontSize: '0.85rem', color: 'var(--foreground)' }}>
       
       {/* Demografik */}
       <div style={cardStyle}>
-        <div style={headerStyle}>📋 Demografik Bilgiler</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+        <div style={{ ...headerStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>📋 Demografik Bilgiler</span>
+          {onEdit && (
+            <button
+              onClick={() => onEdit(patient)}
+              style={{
+                background: 'rgba(59,130,246,0.15)',
+                border: '1px solid rgba(59,130,246,0.3)',
+                color: '#60a5fa',
+                borderRadius: 6,
+                padding: '2px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              ✏️ Düzenle
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
           <div><span style={{ color: 'var(--foreground-3)' }}>Ad:</span> {patient.name}</div>
+          {patient.tcIdentity && <div><span style={{ color: 'var(--foreground-3)' }}>TC:</span> {patient.tcIdentity}</div>}
           {patient.phone && <div><span style={{ color: 'var(--foreground-3)' }}>Tel:</span> {patient.phone}</div>}
           {patient.email && <div><span style={{ color: 'var(--foreground-3)' }}>E-posta:</span> {patient.email}</div>}
+          {patient.gender && <div><span style={{ color: 'var(--foreground-3)' }}>Cinsiyet:</span> {patient.gender === 'E' ? 'Erkek' : patient.gender === 'K' ? 'Kadın' : patient.gender}</div>}
+          {patient.birthDate && <div><span style={{ color: 'var(--foreground-3)' }}>D. Tarihi:</span> {formatDate(patient.birthDate)}</div>}
           <div><span style={{ color: 'var(--foreground-3)' }}>Kayıt:</span> {formatDate(patient.createdAt)}</div>
           {payments && payments.length > 0 && <div><span style={{ color: 'var(--foreground-3)' }}>Son Ödeme:</span> {formatDate(payments[0].date)}</div>}
         </div>
