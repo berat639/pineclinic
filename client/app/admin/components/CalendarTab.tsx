@@ -130,6 +130,7 @@ export default function CalendarTab() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [patientPanelOpen, setPatientPanelOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
   const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
   const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
@@ -690,7 +691,7 @@ export default function CalendarTab() {
     : events;
 
   return (
-    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', width: '100%', maxWidth: '1200px', margin: '0 auto', position: 'relative', alignItems: 'flex-start' }}>
+    <div className="cal-root-container">
       <style>{`
         @keyframes pulseCalGlow {
           0% {
@@ -712,9 +713,214 @@ export default function CalendarTab() {
           outline: 2.5px solid #3b82f6 !important;
           outline-offset: 1px !important;
         }
+        .cal-root-container {
+          display: flex;
+          gap: 20px;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          margin: 0 auto;
+          position: relative;
+          align-items: flex-start;
+          box-sizing: border-box;
+        }
+        .cal-sidebar {
+          width: 250px;
+          max-width: 100%;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          box-sizing: border-box;
+        }
+        .cal-mobile-toggle-btn {
+          display: none;
+          width: 100%;
+          max-width: 100%;
+          margin-bottom: 8px;
+          box-sizing: border-box;
+        }
+        .cal-main-area {
+          flex: 1;
+          min-width: 0;
+          max-width: 100%;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+          width: 100%;
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+        .cal-header-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 16px;
+          flex-wrap: nowrap;
+          gap: 16px;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+        }
+        .cal-header-top-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: nowrap;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+        .cal-view-tabs {
+          display: flex;
+          border-radius: 8px;
+          overflow: hidden;
+          border: 1px solid var(--input-border);
+          flex-shrink: 0;
+        }
+        .cal-header-controls {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-wrap: nowrap;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+        .cal-nav-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+        .cal-actions-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+        @media (max-width: 1024px) {
+          .cal-root-container {
+            flex-direction: column;
+            gap: 12px;
+          }
+          .cal-mobile-toggle-btn {
+            display: flex !important;
+          }
+          .cal-sidebar {
+            width: 100% !important;
+            max-width: 100% !important;
+            display: none;
+            background: var(--card-bg, #1e293b);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid var(--input-border, #334155);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+          }
+          .cal-sidebar.is-open {
+            display: flex !important;
+          }
+        }
+        @media (max-width: 768px) {
+          .cal-header-bar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+          }
+          .cal-header-top-row {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+          }
+          .cal-header-top-row h3 {
+            font-size: 1rem !important;
+          }
+          .cal-view-tabs {
+            width: 100% !important;
+            display: flex !important;
+          }
+          .cal-view-tabs button {
+            flex: 1 !important;
+            text-align: center !important;
+            padding: 8px 4px !important;
+          }
+          .cal-header-controls {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            gap: 8px;
+          }
+          .cal-nav-group {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+          }
+          .cal-nav-group input[type="date"] {
+            flex: 1;
+            text-align: center;
+            min-width: 0;
+          }
+          .cal-actions-group {
+            width: 100%;
+            display: flex;
+            gap: 8px;
+          }
+          .cal-actions-group button {
+            flex: 1 !important;
+            justify-content: center !important;
+            padding: 9px 8px !important;
+            font-size: 0.82rem !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .cal-responsive-panel {
+            max-width: 100% !important;
+            left: 0 !important;
+            right: 0 !important;
+            padding: 16px !important;
+          }
+        }
       `}</style>
+
+      {/* Mobile Toggle Button for Filters & Mini Calendar */}
+      <div className="cal-mobile-toggle-btn">
+        <button 
+          type="button"
+          onClick={() => setMobileSidebarOpen(prev => !prev)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '11px 16px',
+            borderRadius: 10,
+            border: '1px solid var(--input-border)',
+            background: 'var(--card-bg, #1e293b)',
+            color: 'var(--foreground)',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Calendar size={16} color="var(--accent, #3b82f6)" />
+            <span>Mini Takvim & Hekim Filtresi</span>
+            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', fontWeight: 700 }}>
+              {selectedDoctorIds.length}/{doctors.length} Hekim
+            </span>
+          </div>
+          <span style={{ fontSize: '0.8rem', color: 'var(--foreground-3)' }}>
+            {mobileSidebarOpen ? '▲ Kapat' : '▼ Göster'}
+          </span>
+        </button>
+      </div>
+
       {/* Left Sidebar */}
-      <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className={`cal-sidebar ${mobileSidebarOpen ? 'is-open' : ''}`}>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
           <button 
             onClick={() => { setView('day'); setCurrentDate(new Date().toISOString().slice(0, 10)); }} 
@@ -777,14 +983,13 @@ export default function CalendarTab() {
                 top: '100%',
                 marginTop: '8px',
                 left: 0,
-                width: '320px',
+                width: '100%',
+                maxWidth: '100%',
                 zIndex: 1000,
-                background: 'var(--card-bg, #0f172a)',
-                border: '1px solid var(--glass-border, rgba(255,255,255,0.12))',
+                background: 'var(--card-bg, #1e293b)',
+                border: '1px solid var(--input-border, #334155)',
                 borderRadius: '12px',
-                boxShadow: '0 16px 40px -10px rgba(0,0,0,0.6), 0 0 0 1px var(--glass-border, rgba(255,255,255,0.08))',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
+                boxShadow: '0 16px 40px -10px rgba(0,0,0,0.6)',
                 maxHeight: '400px',
                 overflowY: 'auto',
                 padding: '6px'
@@ -991,74 +1196,96 @@ export default function CalendarTab() {
       </div>
 
       {/* Right Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <div className="cal-main-area">
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-          <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
-            Günlük Randevu Takvimi
-          </h3>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* View tabs */}
-            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--input-border)' }}>
+        <div className="cal-header-bar">
+          <div className="cal-header-top-row">
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap' }}>
+              {view === 'day' ? 'Günlük Randevu Takvimi' : view === 'week' ? 'Haftalık Randevu Takvimi' : 'Aylık Randevu Takvimi'}
+            </h3>
+            <div className="cal-view-tabs">
               {(['day', 'week', 'month'] as const).map(v => (
-                <button key={v} onClick={() => setView(v)} style={{ padding: '5px 14px', fontSize: '0.75rem', fontWeight: 600, border: 'none', background: view === v ? 'var(--accent)' : 'var(--input-bg)', color: view === v ? 'white' : 'var(--foreground-2)', cursor: 'pointer', borderRight: v !== 'month' ? '1px solid var(--input-border)' : 'none' }}>
+                <button key={v} onClick={() => setView(v)} style={{ padding: '6px 14px', fontSize: '0.75rem', fontWeight: 600, border: 'none', background: view === v ? 'var(--accent)' : 'var(--input-bg)', color: view === v ? 'white' : 'var(--foreground-2)', cursor: 'pointer', borderRight: v !== 'month' ? '1px solid var(--input-border)' : 'none' }}>
                   {v === 'day' ? 'Günlük' : v === 'week' ? 'Haftalık' : 'Aylık'}
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="cal-header-controls">
             {/* Navigation */}
-            <button onClick={() => goDate(-1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>◀</button>
-            <input
-              type="date"
-              value={currentDate}
-              onChange={(e) => setCurrentDate(e.target.value)}
-              style={{
-                padding: '5px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.8rem',
-              }}
-            />
-            <button onClick={() => goDate(1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem' }}>▶</button>
-            <button
-              className="btn btn-primary"
-              style={{ padding: '8px 16px', borderRadius: 8, fontSize: '0.82rem' }}
-              onClick={() => {
-                setPatientPanelOpen(true)
-                setPanelOpen(false)
-              }}
-            >
-              <Users size={16} /> Hastalar
-            </button>
-            <button
-              onClick={() => {
-                const now = new Date()
-                const t1 = `${now.getHours().toString().padStart(2, '0')}:00`
-                const t2 = `${(now.getHours() + 1).toString().padStart(2, '0')}:00`
-                setQuickCreateMenu({ 
-                  start: `${currentDate}T${t1}:00+03:00`, 
-                  end: `${currentDate}T${t2}:00+03:00`, 
-                  doctorId: null, 
-                  x: 0, 
-                  y: 0, 
-                  isCentered: true 
-                })
-              }}
-              style={{
-                padding: '7px 14px',
-                borderRadius: 8,
-                border: 'none',
-                background: 'var(--accent)',
-                color: '#fff',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              + Randevu Ekle
-            </button>
+            <div className="cal-nav-group">
+              <button onClick={() => goDate(-1)} style={{ width: 34, height: 34, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>◀</button>
+              <button 
+                onClick={() => { setView('day'); setCurrentDate(new Date().toISOString().slice(0, 10)); }} 
+                style={{ padding: '0 10px', height: 34, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--input-border)', borderRadius: 6, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', flexShrink: 0 }}>
+                Bugün
+              </button>
+              <input
+                type="date"
+                value={currentDate}
+                onChange={(e) => setCurrentDate(e.target.value)}
+                style={{
+                  padding: '6px 10px',
+                  height: 34,
+                  width: 135,
+                  borderRadius: 6,
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--input-bg)',
+                  color: 'var(--foreground)',
+                  fontSize: '0.82rem',
+                  minWidth: 0,
+                  boxSizing: 'border-box'
+                }}
+              />
+              <button onClick={() => goDate(1)} style={{ width: 34, height: 34, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>▶</button>
+            </div>
+
+            {/* Action buttons */}
+            <div className="cal-actions-group">
+              <button
+                className="btn btn-primary"
+                style={{ padding: '8px 14px', borderRadius: 8, fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flexShrink: 0 }}
+                onClick={() => {
+                  setPatientPanelOpen(true)
+                  setPanelOpen(false)
+                }}
+              >
+                <Users size={16} /> Hastalar
+              </button>
+              <button
+                onClick={() => {
+                  const now = new Date()
+                  const t1 = `${now.getHours().toString().padStart(2, '0')}:00`
+                  const t2 = `${(now.getHours() + 1).toString().padStart(2, '0')}:00`
+                  setQuickCreateMenu({ 
+                    start: `${currentDate}T${t1}:00+03:00`, 
+                    end: `${currentDate}T${t2}:00+03:00`, 
+                    doctorId: null, 
+                    x: 0, 
+                    y: 0, 
+                    isCentered: true 
+                  })
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <Plus size={16} /> Randevu Ekle
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1115,18 +1342,19 @@ export default function CalendarTab() {
       {(panelOpen || patientProfileId) && (
           <div
             onClick={() => { setPanelOpen(false); setPatientProfileId(null); }}
-            style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: showTedaviForm ? 'none' : 'block' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.6)', display: showTedaviForm ? 'none' : 'block' }}
           />
       )}
 
         {/* Left Panel — Patient Profile */}
         {patientProfileId && (
             <div
+              className="cal-responsive-panel"
               style={{
                 position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '500px',
-                backgroundColor: 'var(--card-bg)', borderRight: '1px solid var(--divider)',
+                backgroundColor: 'var(--card-bg, #1e293b)', borderRight: '1px solid var(--divider)',
                 zIndex: 9999, padding: '24px', overflowY: 'auto',
-                boxShadow: '4px 0 20px rgba(0,0,0,0.19)'
+                boxShadow: '4px 0 20px rgba(0,0,0,0.3)'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -1148,11 +1376,12 @@ export default function CalendarTab() {
         {panelOpen && selectedEvent && (
           <>
             <div
+              className="cal-responsive-panel"
               style={{
                 position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '380px',
-                backgroundColor: 'var(--card-bg)', borderLeft: '1px solid var(--divider)',
+                backgroundColor: 'var(--card-bg, #1e293b)', borderLeft: '1px solid var(--divider)',
                 zIndex: 9999, padding: '24px', overflowY: 'auto',
-                boxShadow: '-4px 0 20px rgba(0,0,0,0.19)'
+                boxShadow: '-4px 0 20px rgba(0,0,0,0.3)'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -1162,7 +1391,7 @@ export default function CalendarTab() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                 {/* ── Hasta Bilgisi ── */}
-                <div style={{ padding: 12, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                <div style={{ padding: 12, borderRadius: 8, background: 'var(--input-bg, #0f172a)', border: '1px solid var(--input-border, #334155)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Hasta Bilgisi</div>
                     {patientInfo && (

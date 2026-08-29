@@ -598,13 +598,13 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div className="admin-content" style={{ minHeight: '100vh', padding: '32px 20px' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+      <div className="admin-content" style={{ minHeight: '100vh', padding: '24px clamp(20px, 3.5vw, 56px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+        <div style={{ maxWidth: '100%', margin: '0 auto', width: '100%' }}>
 
           {/* ── Header ──────────────────────────────────────────────────── */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 24,
+            marginBottom: 24, flexWrap: 'wrap', gap: 12, width: '100%', maxWidth: '100%'
           }}>
             <div>
               <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
@@ -614,7 +614,7 @@ export default function AdminPage() {
                 Müşteri Rezervasyon Yönetim Sistemi
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <ThemeToggle />
               <button
                 onClick={handleLogout}
@@ -644,6 +644,14 @@ export default function AdminPage() {
             display: 'flex', gap: 2,
             borderBottom: '1px solid rgba(255,255,255,0.07)',
             marginBottom: 24,
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            scrollbarWidth: 'none',
+            whiteSpace: 'nowrap',
+            width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
+            boxSizing: 'border-box'
           }}>
             {TABS.map(tab => (
               <button
@@ -661,6 +669,7 @@ export default function AdminPage() {
                   fontWeight: activeTab === tab.id ? 600 : 400,
                   transition: 'color 0.2s, border-color 0.2s',
                   marginBottom: -1,
+                  flexShrink: 0,
                 }}
               >
                 {tab.label}

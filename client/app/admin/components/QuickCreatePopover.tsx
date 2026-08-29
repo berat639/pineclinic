@@ -261,6 +261,17 @@ export default function QuickCreatePopover({
     boxSizing: 'border-box'
   };
 
+  const [isMobileScreen, setIsMobileScreen] = useState(false);
+
+  useEffect(() => {
+    const checkScreen = () => {
+      setIsMobileScreen(typeof window !== 'undefined' && window.innerWidth < 640);
+    };
+    checkScreen();
+    window.addEventListener('resize', checkScreen);
+    return () => window.removeEventListener('resize', checkScreen);
+  }, []);
+
   const selectOptionStyle: React.CSSProperties = {
     background: cardBg,
     color: textCol
@@ -270,6 +281,9 @@ export default function QuickCreatePopover({
     ? (patientMode === 'select' ? !selectedPatientId : !name.trim())
     : (patientMode === 'select' ? !selectedPatientId : !name.trim()) || !paymentAmount || Number(paymentAmount) <= 0;
 
+  const effectiveCentered = isCentered || isMobileScreen;
+  const effectiveWidth = isMobileScreen ? 'calc(100vw - 24px)' : modalWidth;
+
   return (
     <>
       <div 
@@ -277,22 +291,23 @@ export default function QuickCreatePopover({
           position: 'fixed', 
           inset: 0, 
           zIndex: 100004, 
-          background: 'rgba(0, 0, 0, 0.55)' 
+          background: 'rgba(0, 0, 0, 0.6)' 
         }} 
         onClick={onClose} 
       />
       <div 
         ref={popoverRef}
         style={{ 
-          position: isCentered ? 'fixed' : 'absolute', 
-          left: isCentered ? '50%' : computedLeft, 
-          top: isCentered ? '50%' : computedTop, 
-          transform: isCentered ? 'translate(-50%, -50%)' : 'none',
-          width: modalWidth, 
+          position: effectiveCentered ? 'fixed' : 'absolute', 
+          left: effectiveCentered ? '50%' : computedLeft, 
+          top: effectiveCentered ? '50%' : computedTop, 
+          transform: effectiveCentered ? 'translate(-50%, -50%)' : 'none',
+          width: effectiveWidth, 
+          maxWidth: '440px',
           background: cardBg,
           border: `1px solid ${borderCol}`,
-          borderRadius: '12px',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2)',
+          borderRadius: '14px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4)',
           zIndex: 100005,
           display: 'flex',
           flexDirection: 'column',

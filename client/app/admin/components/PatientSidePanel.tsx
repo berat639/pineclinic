@@ -54,15 +54,15 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
       {/* Backdrop */}
       <div 
         onClick={onClose}
-        style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', opacity: isOpen ? 1 : 0, pointerEvents: isOpen ? 'auto' : 'none', transition: 'opacity 0.3s' }}
+        style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.6)', opacity: isOpen ? 1 : 0, pointerEvents: isOpen ? 'auto' : 'none', transition: 'opacity 0.3s' }}
       />
       
       <div 
         style={{ 
-          position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: '420px', 
-          backgroundColor: 'var(--card-bg)', borderRight: '1px solid var(--divider)', 
+          position: 'fixed', top: 0, left: 0, bottom: 0, width: '100%', maxWidth: 'min(420px, 100vw)', 
+          backgroundColor: 'var(--card-bg, #1e293b)', borderRight: '1px solid var(--divider)', 
           zIndex: 100000, display: 'flex', flexDirection: 'column', 
-          boxShadow: '4px 0 25px rgba(0,0,0,0.2)',
+          boxShadow: '4px 0 25px rgba(0,0,0,0.3)',
           transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.3s ease-in-out'
         }}
@@ -73,7 +73,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--foreground-3)' }}>✕</button>
         </div>
 
-        <div style={{ padding: '16px', borderBottom: '1px solid var(--divider)', background: 'var(--glass-bg)' }}>
+        <div style={{ padding: '16px', borderBottom: '1px solid var(--divider)', background: 'var(--input-bg)' }}>
           <input 
             type="text" 
             placeholder="Hasta adı veya telefon ara..." 

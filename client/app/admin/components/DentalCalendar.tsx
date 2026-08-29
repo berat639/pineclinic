@@ -494,9 +494,10 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
     const unassigned = dayEvents.filter(e => !e.doctorId)
     const hasUnassigned = globalUnassigned.length > 0 || unassigned.length > 0
     const cols = displayDoctors.length || 1
+    const minDayWidth = cols <= 1 ? '100%' : `${cols * 220 + 56}px`
     return (
-      <div className="w-full overflow-x-auto pb-4">
-        <div className="rc-wrap min-w-[800px]">
+      <div className="rc-scroll-container">
+        <div className="rc-wrap" style={{ minWidth: minDayWidth, width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" />
           {displayDoctors.map(d => {
@@ -680,8 +681,8 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
     const weekDays = getWeekDays(currentDate)
     const cols = weekDays.length
     return (
-      <div className="w-full overflow-x-auto pb-4">
-        <div className="rc-wrap min-w-[1000px]">
+      <div className="rc-scroll-container">
+        <div className="rc-wrap" style={{ minWidth: '840px', width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" style={{ position: 'relative' }}>
             {globalUnassigned.length > 0 && (
@@ -828,8 +829,8 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
   // ── MONTH VIEW ──
   const weeks = getMonthWeeks(currentDate)
   return (
-    <div className="w-full overflow-x-auto pb-4">
-      <div className="rc-wrap rc-month min-w-[700px]" style={{ position: 'relative' }}>
+    <div className="rc-scroll-container">
+      <div className="rc-wrap rc-month" style={{ minWidth: '700px', width: '100%', position: 'relative' }}>
       {globalUnassigned.length > 0 && (
         <div 
           style={{ position: 'absolute', top: 12, right: 16, background: 'var(--accent)', color: '#fff', fontSize: '0.7rem', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontWeight: 600, zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}

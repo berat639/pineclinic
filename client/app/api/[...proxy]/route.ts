@@ -26,16 +26,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
 }
 
 async function handleProxy(req: NextRequest, proxyPath: string[]) {
-  const backendUrl = process.env.BACKEND_PROXY_URL || 'http://localhost:3001'
-  const targetUrl = new URL(req.url)
-  
-  // Construct the backend URL
-  const path = `/api/${proxyPath.join('/')}`
-  targetUrl.href = `${backendUrl}${path}${targetUrl.search}`
+  const backendUrl = process.env.BACKEND_PROXY_URL || 'http://127.0.0.1:3001'
+  const path = `/api/${(proxyPath || []).join('/')}`
+  const search = req.nextUrl.search || ''
+  const targetUrl = `${backendUrl}${path}${search}`
 
   const headers = new Headers(req.headers)
-  headers.set('host', new URL(backendUrl).host)
-  // Ensure we don't send Next.js specific headers that might confuse the backend
+  headers.delete('host')
   headers.delete('connection')
 
   try {
@@ -61,7 +58,7 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
       headers: responseHeaders,
     })
   } catch (error: any) {
-    console.error(`[Proxy Error] ${req.method} ${targetUrl.href}`, error)
+    console.error(`[Proxy Error] ${req.method} ${targetUrl}`, error)
     return NextResponse.json({ error: 'Proxy failed', details: error.message }, { status: 500 })
   }
 }
