@@ -1,9 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
-import { BriefcaseMedical, X, Pencil, Trash2, Plus } from 'lucide-react';
+import { BriefcaseMedical, X, Pencil, Trash2, Plus, Mic, MicOff, Check, RotateCcw, Send, ChevronDown, ChevronUp, Bot, Sparkles } from 'lucide-react';
 import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
 import ConfirmModal from './ConfirmModal';
+
+export interface AssistantCommand {
+  id: string;
+  timestamp: string;
+  rawText: string;
+  parsedResult: any;
+  status: 'preview' | 'applied' | 'rejected';
+  treatments: {
+    procedureName: string | null;
+    toothNumbers: string[];
+    indication: string | null;
+    intent: 'ADD' | 'DELETE' | 'UPDATE' | 'EDIT';
+  }[];
+}
 
 export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, shifts = [], onClose, onSaved, editingGroup }: any) {
   const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[], color?: string }[]>>({})
@@ -112,7 +126,18 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [activeSelectionMaterials, setActiveSelectionMaterials] = useState<any[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
+  const [commandHistory, setCommandHistory] = useState<AssistantCommand[]>([]);
+  const [manualInput, setManualInput] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [editingCommandId, setEditingCommandId] = useState<string | null>(null);
+  const [editingCommandText, setEditingCommandText] = useState('');
   const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef(false);
+  const isAnalyzingRef = useRef(false);
+  const triggerDebounceRef = useRef<any>(null);
+  const silenceDebounceRef = useRef<any>(null);
+  const lastProcessedTextRef = useRef<string>('');
 
   const handleToothClick = (n: number, e: React.MouseEvent) => {
     if (e.shiftKey && lastSelectedTooth !== null) {
@@ -259,67 +284,366 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     printWindow.document.close();
   };
 
-  const listenTimeoutRef = useRef<any>(null);
+  const executeTreatmentCommand = (treatments: any[]) => {
+    if (!treatments || treatments.length === 0) return;
+
+    setToothDrafts(prev => {
+      const next = { ...prev };
+      treatments.forEach((t: any) => {
+        const teeth = t.toothNumbers && t.toothNumbers.length > 0 ? t.toothNumbers : ['general'];
+        
+        if (t.intent === 'DELETE') {
+          teeth.forEach((tn: string) => {
+            if (t.procedureName) {
+              const target = t.procedureName.toLowerCase();
+              next[tn] = next[tn]?.filter(x => {
+                const pName = x.name.toLowerCase();
+                return !pName.includes(target) && !target.includes(pName);
+              }) || [];
+            } else {
+              next[tn] = []; // Clear all procedures on this tooth
+            }
+            if (next[tn] && next[tn].length === 0) {
+              delete next[tn];
+            }
+          });
+        } else if (t.intent === 'UPDATE' || t.intent === 'EDIT') {
+          teeth.forEach((tn: string) => {
+            const procTemp = procTemplates.find(p => {
+              const pName = p.name.toLowerCase();
+              const targetName = (t.procedureName || '').toLowerCase();
+              return pName === targetName || pName.includes(targetName) || targetName.includes(pName);
+            });
+            const procName = procTemp ? procTemp.name : (t.procedureName || 'Kompozit Dolgu (Tek Yüzey)');
+            const procPrice = procTemp ? procTemp.price : (t.cost || 0);
+            const procColor = procTemp ? procTemp.color : '#3b82f6';
+            const procMaterials = procTemp ? procTemp.materials : [];
+            const matchedIndication = t.indication 
+              ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[]
+              : [];
+
+            next[tn] = [{
+              id: Math.random().toString(36).substring(2, 9),
+              name: procName,
+              price: procPrice,
+              indications: matchedIndication,
+              doctorId: defaultDoctorId,
+              materials: [...(procMaterials || []).map((m: any) => ({ ...m }))],
+              color: procColor
+            }];
+          });
+        } else {
+          // ADD
+          teeth.forEach((tn: string) => {
+            next[tn] = next[tn] ? [...next[tn]] : [];
+            if (t.procedureName) {
+              const procTemp = procTemplates.find(p => {
+                const pName = p.name.toLowerCase();
+                const targetName = t.procedureName.toLowerCase();
+                return pName === targetName || pName.includes(targetName) || targetName.includes(pName);
+              });
+              const procName = procTemp ? procTemp.name : t.procedureName;
+              const procPrice = procTemp ? procTemp.price : (t.cost || 0);
+              const procColor = procTemp ? procTemp.color : '#3b82f6';
+              const procMaterials = procTemp ? procTemp.materials : [];
+
+              const exists = next[tn].find(x => {
+                const pName = x.name.toLowerCase();
+                const targetName = procName.toLowerCase();
+                return pName === targetName || pName.includes(targetName) || targetName.includes(pName);
+              });
+
+              if (!exists) {
+                const matchedIndication = t.indication 
+                  ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[]
+                  : [];
+                next[tn].push({
+                  id: Math.random().toString(36).substring(2, 9),
+                  name: procName,
+                  price: procPrice,
+                  indications: matchedIndication,
+                  doctorId: defaultDoctorId,
+                  materials: [...(procMaterials || []).map((m: any) => ({ ...m }))],
+                  color: procColor
+                });
+              }
+            } else if (t.indication) {
+              if (next[tn].length > 0) {
+                const indTemp = indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication;
+                const lastProc = { ...next[tn][next[tn].length - 1] };
+                if (indTemp && !lastProc.indications.includes(indTemp)) {
+                  lastProc.indications = [...lastProc.indications, indTemp];
+                  next[tn][next[tn].length - 1] = lastProc;
+                }
+              }
+            }
+          });
+        }
+      });
+      return next;
+    });
+  };
+
+  const undoTreatmentCommand = (treatments: any[]) => {
+    if (!treatments || treatments.length === 0) return;
+    setToothDrafts(prev => {
+      const next = { ...prev };
+      treatments.forEach((t: any) => {
+        const teeth = t.toothNumbers && t.toothNumbers.length > 0 ? t.toothNumbers : ['general'];
+        if (t.intent === 'ADD' || !t.intent) {
+          teeth.forEach((tn: string) => {
+            if (t.procedureName && next[tn]) {
+              const target = t.procedureName.toLowerCase();
+              next[tn] = next[tn].filter(x => {
+                const pName = x.name.toLowerCase();
+                return !pName.includes(target) && !target.includes(pName);
+              });
+              if (next[tn].length === 0) delete next[tn];
+            }
+          });
+        }
+      });
+      return next;
+    });
+  };
+
+  const processAICommand = async (text: string) => {
+    if (!text || !text.trim() || isAnalyzingRef.current) return;
+    const cleanText = text.trim();
+    isAnalyzingRef.current = true;
+    setIsAnalyzing(true);
+    setTranscript(`⚙️ "${cleanText}" analiz ediliyor...`);
+
+    try {
+      const res = await fetch('/api/ai/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: cleanText,
+          procNames: procTemplates.map(p => p.name),
+          indNames: indTemplates
+        })
+      });
+      const data = await res.json();
+      if (data.result) {
+        const { globalIntent, treatments } = data.result;
+
+        if (globalIntent === 'CONFIRM') {
+          toast.success("AI 'Kaydet' komutu algıladı.");
+          handleSave();
+          return;
+        }
+
+        if (treatments && treatments.length > 0) {
+          // Immediately apply the treatment modifications
+          executeTreatmentCommand(treatments);
+
+          const newCommand: AssistantCommand = {
+            id: Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
+            timestamp: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            rawText: cleanText,
+            parsedResult: data.result,
+            status: 'applied',
+            treatments: treatments || []
+          };
+          setCommandHistory(prev => [newCommand, ...prev]);
+          toast.success(`✅ Komut uygulandı: "${cleanText}"`);
+        } else {
+          toast.error(`"${cleanText}" için işlem veya diş tespit edilemedi.`);
+        }
+      } else {
+        toast.error("Komut çözümlenemedi.");
+      }
+    } catch (err) {
+      console.error("processAICommand error:", err);
+      toast.error("Asistan yanıtı alınırken bir hata oluştu.");
+    } finally {
+      isAnalyzingRef.current = false;
+      setIsAnalyzing(false);
+      if (isListeningRef.current) {
+        setTranscript("🎙️ Dinleniyor... Yeni komut söyleyebilirsiniz.");
+      } else {
+        setTranscript("");
+      }
+    }
+  };
+
+  // Ses Metnini Temizleme & Normalize Etme (Türkçe kesme işaretleri ' ve noktalama temizliği)
+  const normalizeSpeechText = (text: string) => {
+    if (!text) return '';
+    return text
+      .toLocaleLowerCase('tr-TR')
+      .replace(/['’`´]/g, '') // Kesme işaretlerini kaldır: asistan'ı -> asistanı
+      .replace(/[-_.,!?:;]/g, ' ') // Noktalamaları boşluğa çevir
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  // Kapatma/Durdurma eylemleri: "asistanı kapat", "asistan'ı kapat", "dinlemeyi kapat", "mikrofonu kapat" vb.
+  const CLOSE_PATTERNS = [
+    'asistanı kapat', 'asistani kapat', 'asistan kapat',
+    'asistanı durdur', 'asistani durdur', 'asistan durdur',
+    'dinlemeyi kapat', 'dinleme kapat', 'dinlemeyi durdur', 'dinleme durdur', 'dinlemeyi bitir', 'dinleme bitir',
+    'mikrofonu kapat', 'mikrofon kapat', 'mikrofonu durdur', 'mikrofon durdur',
+    'sesi kapat', 'ses kapat', 'kapat asistanı', 'kapat asistan', 'kapat dinlemeyi', 'dinleme dur',
+    'asistanı sonlandır', 'dinlemeyi sonlandır'
+  ];
+
+  const checkCloseTrigger = (text: string) => {
+    if (!text) return false;
+    const norm = normalizeSpeechText(text);
+    if (!norm) return false;
+
+    // Tek başına "kapat" veya "durdur" dendiğinde
+    if (norm === 'kapat' || norm === 'durdur') {
+      return true;
+    }
+
+    // Kalıp eşleşmesi
+    if (CLOSE_PATTERNS.some(p => norm.includes(p))) {
+      return true;
+    }
+
+    // (asistan / dinleme / mikrofon / ses) + (kapat / durdur / bitir / sonlandır) ikilisi
+    const hasSubject = /\b(asistan|asistanı|asistani|dinleme|dinlemeyi|mikrofon|mikrofonu|ses|sesi)\b/i.test(norm);
+    const hasCloseVerb = /\b(kapat|kapatılsın|durdur|durdurulsun|bitir|bitirilsin|sonlandır)\b/i.test(norm);
+    return Boolean(hasSubject && hasCloseVerb);
+  };
+
+  // Eylemler: Ekle, Sil, Düzenle, Güncelle, Değiştir, Kaydet, Onayla vb.
+  const ACTION_KEYWORDS = [
+    'ekle', 'eklensin', 'ekleyelim', 'ekler misin', 'yap', 'yapılsın', 'yapalım', 'yaz', 'yazılsın', 'koy', 'koyulsun', 'işle',
+    'sil', 'silinsin', 'silelim', 'kaldır', 'kaldırılsın', 'çıkar', 'çıkart', 'iptal', 'iptal et', 'vazgeç', 'temizle',
+    'düzenle', 'düzenlensin', 'güncelle', 'güncellensin', 'değiştir', 'değiştirilsin', 'çevir', 'olsun',
+    'kaydet', 'kaydedilsin', 'onayla', 'onaylansın', 'bitir', 'tamamla'
+  ];
+
+  const checkActionTrigger = (text: string) => {
+    if (!text) return null;
+    const norm = normalizeSpeechText(text);
+    for (const kw of ACTION_KEYWORDS) {
+      const regex = new RegExp(`(^|\\s)${kw}($|\\s)`, 'i');
+      if (regex.test(norm)) {
+        return kw;
+      }
+    }
+    return null;
+  };
 
   const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
+    if (isListeningRef.current) {
+      isListeningRef.current = false;
       setIsListening(false);
+      if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
+      if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      setTranscript("");
       return;
     }
 
     try {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        toast.error("Tarayıcınız ses tanıma özelliğini desteklemiyor. Lütfen Chrome kullanın.");
+        toast.error("Tarayıcınız ses tanıma özelliğini desteklemiyor. Lütfen Chrome veya Edge kullanın.");
         return;
       }
       const recognition = new SpeechRecognition();
       recognition.lang = 'tr-TR';
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
-      recognition.continuous = true; // Keep listening until stopped manually
+      recognition.continuous = true;
 
       recognition.onstart = () => {
+        isListeningRef.current = true;
         setIsListening(true);
-        setTranscript("Dinliyorum...");
-        listenTimeoutRef.current = setTimeout(() => {
-          if (recognitionRef.current) recognitionRef.current.stop();
-          setIsListening(false);
-          setTranscript("Zaman aşımı (20sn). Lütfen tekrar deneyin.");
-          setTimeout(() => setTranscript(""), 2000);
-        }, 20000);
+        setTranscript("🎙️ Dinleniyor... (Örn: '18-17 16 kompozit dolgu ekle', 'asistanı kapat')");
       };
 
       recognition.onresult = (event: any) => {
-        const currentTranscript = event.results[event.results.length - 1][0].transcript;
-        setTranscript(currentTranscript);
-        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
-        listenTimeoutRef.current = setTimeout(() => {
-          if (recognitionRef.current) recognitionRef.current.stop();
+        let interimText = '';
+        let finalText = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            finalText += res[0].transcript + ' ';
+          } else {
+            interimText += res[0].transcript;
+          }
+        }
+
+        const activeText = (finalText + interimText).trim();
+        if (!activeText) return;
+
+        setTranscript(activeText);
+
+        // 1. Kullanıcı "asistanı kapat" / "dinlemeyi kapat" dediyse anında dinlemeyi sonlandır
+        if (checkCloseTrigger(activeText)) {
+          if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
+          if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
+          isListeningRef.current = false;
           setIsListening(false);
-        }, 20000);
+          if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch {}
+          }
+          setTranscript("");
+          toast('🛑 Sesli asistan dinlemeyi kapattı.', { icon: '🎙️' });
+          return;
+        }
+
+        if (isAnalyzingRef.current) return;
+        if (activeText === lastProcessedTextRef.current) return;
+
+        if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
+        if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
+
+        const matchedKeyword = checkActionTrigger(activeText);
+
+        if (matchedKeyword) {
+          // Tetikleyici kelime algılandı ("ekle", "sil", "düzenle", "güncelle", "kaydet" vb.)
+          const delay = finalText.trim() ? 100 : 350;
+          triggerDebounceRef.current = setTimeout(() => {
+            if (!isAnalyzingRef.current && activeText && activeText !== lastProcessedTextRef.current) {
+              lastProcessedTextRef.current = activeText;
+              processAICommand(activeText);
+            }
+          }, delay);
+          // Tetikleyici kelime henüz söylenmediyse, doğal duraklama (1.3 sn sessizlik) kontrolü
+          silenceDebounceRef.current = setTimeout(() => {
+            if (!isAnalyzingRef.current && activeText && activeText !== lastProcessedTextRef.current && activeText.length >= 4) {
+              lastProcessedTextRef.current = activeText;
+              processAICommand(activeText);
+            }
+          }, 1300);
+        }
       };
 
       recognition.onerror = (event: any) => {
+        if (event.error === 'no-speech') {
+          return;
+        }
         console.error("Speech recognition error", event.error);
-        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
-        setIsListening(false);
-        setTranscript("Hata: " + event.error);
-        setTimeout(() => setTranscript(""), 2000);
+        if (event.error === 'not-allowed') {
+          isListeningRef.current = false;
+          setIsListening(false);
+          toast.error("Mikrofon izni verilmedi.");
+        }
       };
 
       recognition.onend = () => {
-        setIsListening(false);
-        if (listenTimeoutRef.current) clearTimeout(listenTimeoutRef.current);
-        // Process final transcript if it's not just "Dinliyorum..."
-        setTranscript((prev) => {
-          if (prev && prev !== "Dinliyorum..." && !prev.startsWith("Hata:") && !prev.startsWith("Zaman")) {
-            processAICommand(prev);
+        if (isListeningRef.current) {
+          // Continuous session auto-restart
+          try {
+            recognition.start();
+          } catch (err) {
+            // Already started or restarting
           }
-          return "";
-        });
+        } else {
+          setIsListening(false);
+          setTranscript("");
+        }
       };
 
       recognitionRef.current = recognition;
@@ -330,79 +654,39 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     }
   };
 
-  const processAICommand = async (text: string) => {
-    try {
-      setTranscript("Analiz ediliyor...");
-      const res = await fetch('/api/ai/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          procNames: procTemplates.map(p => p.name),
-          indNames: indTemplates
-        })
-      });
-      const data = await res.json();
-      if (data.result) {
-        const { globalIntent, treatments } = data.result;
+  const applyCommand = (commandId: string) => {
+    const cmd = commandHistory.find(c => c.id === commandId);
+    if (!cmd || !cmd.treatments) return;
+    executeTreatmentCommand(cmd.treatments);
+    setCommandHistory(prev => prev.map(c => c.id === commandId ? { ...c, status: 'applied' } : c));
+    toast.success('Komut tekrar uygulandı.');
+  };
 
-        if (globalIntent === 'CONFIRM') {
-          handleSave();
-          return;
-        }
-
-        if (treatments && treatments.length > 0) {
-          setToothDrafts(prev => {
-            const next = { ...prev };
-            treatments.forEach((t: any) => {
-              if (t.intent === 'DELETE') {
-                t.toothNumbers.forEach((tn: string) => {
-                  if (t.procedureName) {
-                    next[tn] = next[tn]?.filter(x => x.name !== t.procedureName) || [];
-                  } else {
-                    next[tn] = []; // Clear all
-                  }
-                });
-              } else if (t.intent === 'ADD') {
-                t.toothNumbers.forEach((tn: string) => {
-                  next[tn] = next[tn] || [];
-                  if (t.procedureName) {
-                    const procTemp = procTemplates.find(p => p.name.toLowerCase() === t.procedureName.toLowerCase());
-                    if (procTemp) {
-                      // Avoid duplicates
-                      const exists = next[tn].find(x => x.name === procTemp.name);
-                      if (!exists) {
-                        next[tn].push({
-                          id: Math.random().toString(36).substr(2, 9),
-                          name: procTemp.name,
-                          price: procTemp.price || 0,
-                          indications: t.indication ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase())].filter(Boolean) as any[] : [],
-                          doctorId: defaultDoctorId,
-                          materials: procTemp.materials || []
-                        });
-                      }
-                    }
-                  } else if (t.indication) {
-                    // Add indication to existing procedures
-                    if (next[tn].length > 0) {
-                      const indTemp = indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase());
-                      if (indTemp) {
-                        next[tn][next[tn].length - 1].indications.push(indTemp);
-                      }
-                    }
-                  }
-                });
-              }
-            });
-            return next;
-          });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setTranscript("");
+  const undoCommand = (commandId: string) => {
+    const cmd = commandHistory.find(c => c.id === commandId);
+    if (cmd && cmd.treatments) {
+      undoTreatmentCommand(cmd.treatments);
     }
+    setCommandHistory(prev => prev.map(c => c.id === commandId ? { ...c, status: 'rejected' } : c));
+    toast.success('İşlem geri alındı.');
+  };
+
+  const deleteCommand = (commandId: string) => {
+    setCommandHistory(prev => prev.filter(c => c.id !== commandId));
+    toast.success('Komut listeden kaldırıldı.');
+  };
+
+  const handleSaveEditCommand = async (commandId: string) => {
+    if (!editingCommandText.trim()) return;
+    const oldCmd = commandHistory.find(c => c.id === commandId);
+    if (oldCmd && oldCmd.treatments) {
+      undoTreatmentCommand(oldCmd.treatments);
+    }
+    const textToProcess = editingCommandText.trim();
+    setEditingCommandId(null);
+    setEditingCommandText('');
+    setCommandHistory(prev => prev.filter(c => c.id !== commandId));
+    await processAICommand(textToProcess);
   };
 
   const handleSave = async () => {
@@ -582,69 +866,538 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000, backdropFilter: 'blur(4px)' }}>
-      <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '95%', maxWidth: 1800, maxHeight: '98vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000 }}>
+      <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '95%', maxWidth: 1800, maxHeight: '98vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', position: 'relative' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>Tedavi Planı Oluştur</h3>
-            <style>{`
-              @keyframes siriWave {
-                0% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #ec4899, 0 0 20px #8b5cf6, 0 0 30px #3b82f6; }
-                50% { transform: scale(1.03); opacity: 1; box-shadow: 0 0 20px #ec4899, 0 0 40px #8b5cf6, 0 0 60px #3b82f6; }
-                100% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #ec4899, 0 0 20px #8b5cf6, 0 0 30px #3b82f6; }
-              }
-              @keyframes siriRotate {
-                0% { background-position: 0% 50%; }
-                50% { background-position: 100% 50%; }
-                100% { background-position: 0% 50%; }
-              }
-            `}</style>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>
+              {editingGroup ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}
+            </h3>
 
+            {/* 1. Instant Mic/Voice Listening Button (Does not force-open panel) */}
             <button
               onClick={toggleListening}
               style={{
-                background: isListening ? 'linear-gradient(270deg, #ec4899, #8b5cf6, #3b82f6, #ec4899)' : 'var(--glass-bg)',
-                backgroundSize: isListening ? '300% 300%' : 'auto',
-                border: `1px solid ${isListening ? 'transparent' : 'var(--glass-border)'}`,
-                color: isListening ? '#fff' : 'var(--foreground)',
-                padding: '6px 16px',
-                borderRadius: 20,
+                background: isListening ? '#dc2626' : '#2563eb',
+                border: `1px solid ${isListening ? '#ef4444' : '#3b82f6'}`,
+                color: '#ffffff',
+                padding: '7px 15px',
+                borderRadius: 8,
                 cursor: 'pointer',
                 fontSize: '0.85rem',
                 fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                animation: isListening ? 'siriWave 1.5s infinite ease-in-out, siriRotate 3s infinite linear' : 'none',
-                transition: 'all 0.3s ease'
-              }}>
-              <span style={{ fontSize: '1.1rem' }}>🎙️</span> {isListening ? 'Asistan Dinliyor...' : 'Asistanı Başlat'}
+                boxShadow: isListening ? '0 0 14px rgba(220,38,38,0.7)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+              title={isListening ? "Dinlemeyi Durdur (veya 'asistanı kapat' deyin)" : "Sesli komut ile diş ve tedavi eklemek için tıklayın"}
+            >
+              {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+              <span>{isListening ? '🔴 Dinliyor (Durdur)' : '🎙️ Sesli Komut'}</span>
             </button>
 
-            {transcript && (
+            {/* 2. Compact Live Listening Header Bar (Visible when listening and panel is closed) */}
+            {isListening && !assistantPanelOpen && (
               <div style={{
-                background: 'rgba(30,41,59,0.9)',
-                color: '#fff',
-                padding: '8px 16px',
+                background: '#0f172a',
+                border: `1px solid ${checkActionTrigger(transcript) ? '#22c55e' : '#ef4444'}`,
                 borderRadius: 8,
-                fontSize: '0.85rem',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid #3b82f6',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                left: 0,
-                zIndex: 100005,
+                padding: '5px 12px',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 4
+                alignItems: 'center',
+                gap: 8,
+                maxWidth: 420,
+                overflow: 'hidden',
+                transition: 'border-color 0.2s ease'
               }}>
-                <span style={{ color: '#60a5fa', fontWeight: 'bold', fontSize: '0.7rem', letterSpacing: 1 }}>ASİSTAN DUYUYOR</span>
-                <span>{transcript}</span>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: checkActionTrigger(transcript) ? '#22c55e' : '#ef4444', display: 'inline-block' }} />
+                <span style={{ color: checkActionTrigger(transcript) ? '#4ade80' : '#ef4444', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                  {checkActionTrigger(transcript) ? '⚡ İŞLENİYOR:' : 'DİNLENİYOR:'}
+                </span>
+                <span style={{ color: '#ffffff', fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {transcript || "Konuşun ('18 dolgu ekle', 'asistanı kapat')..."}
+                </span>
               </div>
             )}
+
+            {/* 3. Optional Assistant Panel & History Toggle Button (Opens ONLY when user clicks) */}
+            <button
+              onClick={() => setAssistantPanelOpen(prev => !prev)}
+              style={{
+                background: assistantPanelOpen ? '#1e3a8a' : '#1e293b',
+                border: `1px solid ${assistantPanelOpen ? '#3b82f6' : '#334155'}`,
+                color: assistantPanelOpen ? '#ffffff' : '#cbd5e1',
+                padding: '7px 14px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                transition: 'all 0.2s ease'
+              }}
+              title="Komut geçmişi ve manuel komut giriş panelini aç/kapat"
+            >
+              <Bot size={16} />
+              <span>{assistantPanelOpen ? '📋 Paneli Gizle' : '📋 Komut Paneli'}</span>
+              {commandHistory.length > 0 && (
+                <span style={{
+                  background: assistantPanelOpen ? '#2563eb' : '#334155',
+                  color: '#ffffff',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '2px 7px',
+                  borderRadius: 10
+                }}>
+                  {commandHistory.length}
+                </span>
+              )}
+              {assistantPanelOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
+
+          {/* Expanded Assistant Panel */}
+          {assistantPanelOpen && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 8px)',
+              left: 0,
+              right: 0,
+              background: '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: 12,
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)',
+              zIndex: 100010,
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+              maxHeight: '75vh',
+              overflowY: 'auto'
+            }}>
+              {/* Panel Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ background: '#2563eb', padding: '6px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Bot size={20} color="#ffffff" />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#ffffff' }}>AI Tedavi Asistanı & Sesli Komut Merkezi</h4>
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      Sesli komut verin veya yazın; işlemler anında tedavi planına eklenir, düzenlenir veya silinir.
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => setAssistantPanelOpen(false)}
+                    style={{ background: '#1e293b', border: '1px solid #334155', color: '#cbd5e1', cursor: 'pointer', padding: '5px 10px', borderRadius: 6, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <X size={14} /> Kapat
+                  </button>
+                </div>
+              </div>
+
+              {/* Voice & Manual Input Section */}
+              <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                  {/* Voice Button */}
+                  <button
+                    onClick={toggleListening}
+                    disabled={isAnalyzing}
+                    style={{
+                      background: isListening ? '#dc2626' : '#2563eb',
+                      border: `1px solid ${isListening ? '#ef4444' : '#3b82f6'}`,
+                      color: '#ffffff',
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      boxShadow: isListening ? '0 0 14px rgba(220, 38, 38, 0.7)' : 'none',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    {isListening ? 'Dinlemeyi Durdur & İşle' : '🎙️ Sesle Komut Ver'}
+                  </button>
+
+                  {/* Manual Text Input */}
+                  <div style={{ flex: 1, minWidth: 260, display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      value={manualInput}
+                      onChange={e => setManualInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && manualInput.trim() && !isAnalyzing) {
+                          const txt = manualInput.trim();
+                          setManualInput('');
+                          processAICommand(txt);
+                        }
+                      }}
+                      placeholder="Örn: 18 ve 28 numaraya kompozit dolgu ekle, 36 nolu dişi sil..."
+                      disabled={isAnalyzing}
+                      style={{
+                        flex: 1,
+                        background: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: 6,
+                        padding: '8px 12px',
+                        fontSize: '0.85rem',
+                        color: '#ffffff',
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!manualInput.trim() || isAnalyzing) return;
+                        const txt = manualInput.trim();
+                        setManualInput('');
+                        processAICommand(txt);
+                      }}
+                      disabled={!manualInput.trim() || isAnalyzing}
+                      style={{
+                        background: manualInput.trim() && !isAnalyzing ? '#2563eb' : '#334155',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 6,
+                        padding: '8px 14px',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        cursor: manualInput.trim() && !isAnalyzing ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Send size={14} /> Gönder
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Trigger Keyword Badges */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: '0.73rem', color: '#94a3b8', paddingTop: 2 }}>
+                  <span style={{ fontWeight: 600, color: '#cbd5e1' }}>⚡ Otomatik Tetikleyiciler:</span>
+                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#38bdf8', fontWeight: 500 }}>➕ "ekle" / "yap" / "yaz"</span>
+                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#f87171', fontWeight: 500 }}>🗑️ "sil" / "kaldır" / "iptal"</span>
+                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#fbbf24', fontWeight: 500 }}>✏️ "düzenle" / "güncelle" / "değiştir"</span>
+                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#4ade80', fontWeight: 500 }}>💾 "kaydet" / "onayla"</span>
+                </div>
+
+                {/* Real-time speech transcript or AI analyzing indicator */}
+                {isListening && (
+                  <div style={{
+                    background: '#0f172a',
+                    border: `1px solid ${checkActionTrigger(transcript) ? '#22c55e' : '#ef4444'}`,
+                    borderRadius: 6,
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    transition: 'border-color 0.2s'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: checkActionTrigger(transcript) ? '#22c55e' : '#ef4444', display: 'inline-block' }} />
+                      <span style={{ color: checkActionTrigger(transcript) ? '#4ade80' : '#ef4444', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                        {checkActionTrigger(transcript) ? '⚡ TETİKLENİYOR:' : 'DİNLENİYOR:'}
+                      </span>
+                      <span style={{ color: '#ffffff', fontSize: '0.85rem', fontWeight: 500 }}>{transcript || 'Konuşmanız bekleniyor...'}</span>
+                    </div>
+                    {checkActionTrigger(transcript) && (
+                      <span style={{ background: '#16a34a', color: '#ffffff', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
+                        {checkActionTrigger(transcript)?.toUpperCase()} ALGILANDI
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {isAnalyzing && (
+                  <div style={{ background: '#0f172a', border: '1px solid #3b82f6', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600 }}>⚙️ AI komutu analiz ediyor ve tedaviye uyguluyor...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Command History & CRUD Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#f8fafc' }}>
+                    📋 Uygulanan Komut Geçmişi ({commandHistory.length})
+                  </span>
+                </div>
+
+                {commandHistory.length === 0 ? (
+                  <div style={{
+                    background: '#1e293b',
+                    border: '1px dashed #334155',
+                    borderRadius: 8,
+                    padding: '20px 16px',
+                    textAlign: 'center',
+                    color: '#94a3b8',
+                    fontSize: '0.82rem'
+                  }}>
+                    Henüz bir komut verilmedi. Konuşmaya başlayarak veya metin kutusuna yazarak komut verebilirsiniz.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
+                    {commandHistory.map((cmd) => {
+                      const isEditing = editingCommandId === cmd.id;
+                      return (
+                        <div
+                          key={cmd.id}
+                          style={{
+                            background: '#1e293b',
+                            border: `1px solid ${cmd.status === 'applied' ? '#16a34a' : '#475569'}`,
+                            borderRadius: 8,
+                            padding: 10,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8
+                          }}
+                        >
+                          {/* Command Top Row */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              {cmd.status === 'applied' && (
+                                <span style={{ background: '#16a34a', color: '#ffffff', padding: '2px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700 }}>
+                                  ✅ Tedaviye Eklendi
+                                </span>
+                              )}
+                              {cmd.status === 'rejected' && (
+                                <span style={{ background: '#475569', color: '#ffffff', padding: '2px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700 }}>
+                                  ↩️ Geri Alındı
+                                </span>
+                              )}
+                              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{cmd.timestamp}</span>
+                            </div>
+
+                            <button
+                              onClick={() => deleteCommand(cmd.id)}
+                              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                              title="Listeden Kaldır"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+
+                          {/* Command Text / Edit Mode */}
+                          {isEditing ? (
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                value={editingCommandText}
+                                onChange={e => setEditingCommandText(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') handleSaveEditCommand(cmd.id);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  background: '#0f172a',
+                                  border: '1px solid #3b82f6',
+                                  borderRadius: 6,
+                                  padding: '6px 10px',
+                                  fontSize: '0.82rem',
+                                  color: '#ffffff'
+                                }}
+                              />
+                              <button
+                                onClick={() => handleSaveEditCommand(cmd.id)}
+                                style={{ background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                              >
+                                Yeniden Uygula
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingCommandId(null);
+                                  setEditingCommandText('');
+                                }}
+                                style={{ background: '#334155', color: '#ffffff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer' }}
+                              >
+                                İptal
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.85rem', color: '#f8fafc', fontWeight: 500 }}>
+                              "{cmd.rawText}"
+                            </div>
+                          )}
+
+                          {/* Parsed Treatments Visual Chips */}
+                          {cmd.treatments && cmd.treatments.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, background: '#0f172a', padding: '6px 10px', borderRadius: 6, border: '1px solid #334155' }}>
+                              {cmd.treatments.map((t, tIdx) => {
+                                const isDelete = t.intent === 'DELETE';
+                                const isUpdate = t.intent === 'UPDATE' || t.intent === 'EDIT';
+                                return (
+                                  <div
+                                    key={tIdx}
+                                    style={{
+                                      background: isDelete ? '#450a0a' : (isUpdate ? '#3b1d06' : '#1e3a8a'),
+                                      border: `1px solid ${isDelete ? '#dc2626' : (isUpdate ? '#f59e0b' : '#3b82f6')}`,
+                                      color: isDelete ? '#fca5a5' : (isUpdate ? '#fed7aa' : '#93c5fd'),
+                                      padding: '4px 8px',
+                                      borderRadius: 4,
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 6
+                                    }}
+                                  >
+                                    <span>{isDelete ? '🗑️ SİLİNDİ' : (isUpdate ? '✏️ GÜNCELLENDİ' : '➕ EKLENDİ')}:</span>
+                                    <span>{t.procedureName || 'Tüm İşlemler'}</span>
+                                    <span style={{ color: '#ffffff' }}>→ Diş: {(t.toothNumbers || []).join(', ') || 'Genel'}</span>
+                                    {t.indication && <span style={{ color: '#fcd34d' }}>({t.indication})</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Action Buttons for Command */}
+                          {!isEditing && (
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                              {cmd.status === 'applied' && (
+                                <>
+                                  <button
+                                    onClick={() => undoCommand(cmd.id)}
+                                    style={{
+                                      background: '#334155',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: 6,
+                                      padding: '5px 12px',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 500,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}
+                                  >
+                                    <RotateCcw size={12} /> Geri Al
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCommandId(cmd.id);
+                                      setEditingCommandText(cmd.rawText);
+                                    }}
+                                    style={{
+                                      background: '#334155',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: 6,
+                                      padding: '5px 10px',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 500,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}
+                                  >
+                                    <Pencil size={12} /> Düzenle
+                                  </button>
+                                </>
+                              )}
+
+                              {cmd.status === 'rejected' && (
+                                <>
+                                  <button
+                                    onClick={() => applyCommand(cmd.id)}
+                                    style={{
+                                      background: '#2563eb',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: 6,
+                                      padding: '4px 10px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 4
+                                    }}
+                                  >
+                                    <RotateCcw size={12} /> Tekrar Uygula
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCommandId(cmd.id);
+                                      setEditingCommandText(cmd.rawText);
+                                    }}
+                                    style={{
+                                      background: '#334155',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: 6,
+                                      padding: '4px 10px',
+                                      fontSize: '0.75rem',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Düzenle
+                                  </button>
+                                </>
+                              )}
+
+                              <button
+                                onClick={() => deleteCommand(cmd.id)}
+                                style={{
+                                  background: 'transparent',
+                                  color: '#ef4444',
+                                  border: 'none',
+                                  borderRadius: 6,
+                                  padding: '4px 8px',
+                                  fontSize: '0.75rem',
+                                  cursor: 'pointer',
+                                  marginLeft: 'auto',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                              >
+                                <Trash2 size={12} /> Sil
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Panel Footer */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #334155', paddingTop: 10 }}>
+                {commandHistory.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setCommandHistory([]);
+                      toast.success('Asistan geçmişi temizlendi.');
+                    }}
+                    style={{ background: '#334155', color: '#cbd5e1', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: '0.78rem', cursor: 'pointer' }}
+                  >
+                    Geçmişi Temizle
+                  </button>
+                )}
+                <button
+                  onClick={() => setAssistantPanelOpen(false)}
+                  style={{ marginLeft: 'auto', background: '#0f172a', border: '1px solid #334155', color: '#ffffff', borderRadius: 6, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Paneli Kapat
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 24, flex: 1, overflow: 'hidden' }}>
