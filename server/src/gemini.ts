@@ -623,16 +623,15 @@ export async function createLiveSession(
     liveConfig.tools = [{ functionDeclarations: toolDeclarations }]
   }
 
+  // setupComplete geldikten sonra içerik gönderilebilir.
+  // sendClientContent erken çağrılırsa buraya buffer'lanır.
+  let setupReady = false
+  const pendingClientContent: LiveSendClientContentParameters[] = []
+
   function buildCallbacks() {
     return {
-      // onReady yalnızca İLK bağlantıda tetiklenir; reconnect'te tekrar
-      // karşılama/greeting tetiklenmesin diye guard'lı.
-      onopen: () => {
-        if (!readyFired) {
-          readyFired = true
-          callbacks.onReady()
-        }
-      },
+      // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
+      onopen: () => {},
       onmessage: async (msg: LiveServerMessage) => {
         // Session resumption handle güncellemesi — kopuşta bununla resume ederiz.
         if (msg.sessionResumptionUpdate) {
@@ -667,9 +666,26 @@ export async function createLiveSession(
           return
         }
 
+        // setupComplete — Gemini artık içerik kabul etmeye hazır.
+        // onReady'yi burada tetikle ve buffer'lanmış içerikleri flush et.
+        if ((msg as any).setupComplete) {
+          setupReady = true
+          if (!readyFired) {
+            readyFired = true
+            console.log('[Gemini] setupComplete — session hazır, onReady tetikleniyor')
+            callbacks.onReady()
+          }
+          // Buffer'lanmış sendClientContent varsa hemen gönder
+          for (const params of pendingClientContent) {
+            try { activeSession?.sendClientContent(params) } catch {}
+          }
+          pendingClientContent.length = 0
+          return
+        }
+
         const content = msg.serverContent
         if (!content) {
-          // DEBUG: içeriksiz mesaj — usage veya bilinmeyen mesaj
+          // DEBUG: içeriksiz mesaj
           const msgKeys = Object.keys(msg).filter(k => k !== 'serverContent')
           if (msgKeys.length > 0 && !msg.usageMetadata && !msg.sessionResumptionUpdate && !msg.goAway) {
             console.log(`[Gemini:DBG] Non-content msg keys: ${msgKeys.join(', ')}`)
@@ -907,7 +923,13 @@ export async function createLiveSession(
       try { activeSession?.sendRealtimeInput(input) } catch {}
     },
     sendClientContent: (input: LiveSendClientContentParameters) => {
-      try { activeSession?.sendClientContent(input) } catch {}
+      // setupComplete henüz gelmediyse buffer'la, geldiğinde flush edilecek.
+      if (!setupReady) {
+        console.log('[Gemini] setupComplete bekleniyor — sendClientContent buffer\'landı')
+        pendingClientContent.push(input)
+      } else {
+        try { activeSession?.sendClientContent(input) } catch {}
+      }
     },
     sendToolResponse: (input: LiveSendToolResponseParameters) => {
       try { activeSession?.sendToolResponse(input) } catch {}
