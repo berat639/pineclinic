@@ -634,17 +634,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
             if (!info.session || !state.micEnabled || state.hangupPending) continue
 
-            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
+            clearSilenceTimers(state)
+            state.micBuffer.push(upsample8to16(ev.pcm))
 
-            if (frames.length > 0) {
-              clearSilenceTimers(state)
-              for (const f8k of frames) {
-                state.micBuffer.push(upsample8to16(f8k))
-              }
-            }
-
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
-            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
+            // 5 frame (100ms) biriktirince Gemini'ye gerçek zamanlı kesintisiz gönder
+            if (state.micBuffer.length >= 5) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
