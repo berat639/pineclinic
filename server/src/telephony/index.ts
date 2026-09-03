@@ -496,8 +496,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   state.hangupPending = true
                 },
                 onTurnComplete: () => {
-                  // AI konuşmasını bitirdi, müşteri cevabını bekliyor.
-                  // Sessizlik timer'ını başlat; müşteri konuşursa data() sıfırlar.
+                  // AI konuşmasını bitirdi — mikrofon yoksa aç (greeting sonrası durum)
+                  if (!state.micEnabled) {
+                    console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
+                    state.micEnabled = true
+                  }
+                  // Müşteri cevabını bekliyor — sessizlik timer'ını başlat.
                   startSilenceWatch(state, socket)
                 },
                 onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
@@ -592,7 +596,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
           }
 
-          // Tek seferde gönder — model yalnızca BİR greeting üretir.
+          // Karşılama mesajını gönder — model GREETİNG sesi ürettiğinde
+          // onAudio callback'i tetiklenir ve orada state.micEnabled = true yapılır.
+          // Ses gelmezse güvenlik olarak 5s sonra mikrofon açılır.
+          console.log(`[${shortId}] Greeting sendClientContent gönderiliyor (${initParts.join('').length} karakter)`)
           session.sendClientContent({
             turns: [
               {
@@ -603,10 +610,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             turnComplete: true,
           })
 
-          // Güvenlik zamanlayıcısı: AI greeting ses üretmese bile max 1.5s sonra mikrofonu aç
+          // Güvenlik zamanlayıcısı: AI greeting ses üretmese bile max 5s sonra mikrofonu aç
           setTimeout(() => {
-            if (!state.closed) state.micEnabled = true
-          }, 1500)
+            if (!state.closed && !state.micEnabled) {
+              console.log(`[${shortId}] Greeting zaman aşımı — mikrofon zorla açılıyor`)
+              state.micEnabled = true
+            }
+          }, 5000)
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
