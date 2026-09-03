@@ -218,6 +218,7 @@ interface CallState {
   silenceCloseMs: number
   voiceName: string
   aiSpeaking: boolean
+  greetingTimeoutTimer?: ReturnType<typeof setTimeout>
 }
 
 // ── Pitch Detection (Erkek Sesini Algılama) ──────────────────────────────────
@@ -469,6 +470,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 onAudio: (pcm) => {
                   if (state.closed) return
                   state.aiSpeaking = true
+                  if (state.greetingTimeoutTimer) {
+                    clearTimeout(state.greetingTimeoutTimer)
+                    state.greetingTimeoutTimer = undefined
+                  }
                   if (state.userSpeechEndTime) {
                     const responseTime = Date.now() - state.userSpeechEndTime
                     console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
@@ -525,6 +530,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
                 onTurnComplete: () => {
                   state.aiSpeaking = false
+                  if (state.greetingTimeoutTimer) {
+                    clearTimeout(state.greetingTimeoutTimer)
+                    state.greetingTimeoutTimer = undefined
+                  }
                   if (!state.micEnabled) {
                     console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
                     state.micEnabled = true
@@ -636,10 +645,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             turnComplete: true,
           })
 
-          // Güvenlik zaman aşımı: Eğer Gemini greeting sesini başlatmazsa mikrofonu otomatik aç
-          setTimeout(() => {
+          // Güvenlik zaman aşımı: Eğer Gemini 8 saniye boyunca ses üretmezse mikrofonu fallback olarak aç
+          state.greetingTimeoutTimer = setTimeout(() => {
             if (!state.closed && !state.micEnabled) {
-              console.log(`[${shortId}] Güvenlik fallback: Mikrofon açılıyor`)
+              console.log(`[${shortId}] Güvenlik fallback: Gemini ses üretmedi, mikrofon açılıyor`)
               state.micEnabled = true
               state.aiSpeaking = false
             }
