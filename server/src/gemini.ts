@@ -595,10 +595,18 @@ export async function createLiveSession(
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
+      languageCode: 'tr-TR',
+    },
+    // generationConfig — gemini-3.1-flash-live-preview için ses üretimi gerekli.
+    generationConfig: {
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
+        },
+        languageCode: 'tr-TR',
+      },
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
-    // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
-    // gibi bilgiler erkenden kırpılıp model baştan sormasın.
     contextWindowCompression: {
       triggerTokens: '25600',
       slidingWindow: { targetTokens: '16000' },
@@ -641,13 +649,6 @@ export async function createLiveSession(
         }
 
         // Tool calls — paralel/non-blocking dispatch.
-        //
-        // Önemli: `await handleTool(...)` ile sırayla çalıştırırsak Gemini WS
-        // onmessage event loop'u kilitlenir; bu sırada Gemini'den gelen audio
-        // chunks işlenmez → Asterisk'e sessizlik gider → müşteri AI'yı
-        // duymaz. Her tool çağrısını ayrı promise olarak başlatıp sonuçları
-        // hazır olunca `sendToolResponse` ile iletiyoruz; arada audio akışı
-        // kesintiye uğramaz.
         if (msg.toolCall?.functionCalls?.length) {
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
@@ -668,7 +669,11 @@ export async function createLiveSession(
 
         const content = msg.serverContent
         if (!content) {
-          // Usage metadata serverContent olmadan da gelebilir
+          // DEBUG: içeriksiz mesaj — usage veya bilinmeyen mesaj
+          const msgKeys = Object.keys(msg).filter(k => k !== 'serverContent')
+          if (msgKeys.length > 0 && !msg.usageMetadata && !msg.sessionResumptionUpdate && !msg.goAway) {
+            console.log(`[Gemini:DBG] Non-content msg keys: ${msgKeys.join(', ')}`)
+          }
           if (msg.usageMetadata) {
             callbacks.onUsage?.(msg.usageMetadata as {
               promptTokenCount?: number
@@ -677,6 +682,16 @@ export async function createLiveSession(
             })
           }
           return
+        }
+
+        // DEBUG: serverContent alındı — içeriği logla
+        const hasParts = !!content.modelTurn?.parts?.length
+        const hasInline = content.modelTurn?.parts?.some((p: any) => p.inlineData?.data)
+        const hasText = content.modelTurn?.parts?.some((p: any) => p.text)
+        const hasInTx = !!content.inputTranscription?.text
+        const hasOutTx = !!content.outputTranscription?.text
+        if (hasParts || content.turnComplete || content.interrupted) {
+          console.log(`[Gemini:DBG] serverContent: parts=${hasParts} inline=${hasInline} text=${hasText} inTx=${hasInTx} outTx=${hasOutTx} turnComplete=${content.turnComplete} interrupted=${content.interrupted}`)
         }
 
         // Barge-in: user interrupted model
