@@ -658,7 +658,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               state.micBuffer = []
               if (!state.firstAudioSent) {
                 state.firstAudioSent = true
-                console.log(`[${shortId}] İlk audio chunk Gemini'ye gönderiliyor`)
+                console.log(`[${state.shortId}] İlk audio chunk Gemini'ye gönderiliyor`)
               }
               info.session.sendRealtimeInput({
                 audio: {
