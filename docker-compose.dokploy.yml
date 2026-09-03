@@ -1,7 +1,6 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: voiceai-postgres
     restart: always
     environment:
       POSTGRES_DB: voiceai
@@ -30,7 +29,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: voiceai-redis
     restart: always
     command: redis-server --appendonly yes
     volumes:
@@ -58,19 +56,48 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    container_name: voiceai-server
     restart: always
-    env_file:
-      - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-voiceai}:${POSTGRES_PASSWORD:-voiceai_secret}@voiceai-postgres:5432/voiceai
-      REDIS_URL: redis://voiceai-redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-voiceai}:${POSTGRES_PASSWORD:-voiceai_secret}@postgres:5432/voiceai}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: "3001"
       NODE_ENV: production
+      APP_URL: ${APP_URL}
+      CLIENT_APP_URL: ${CLIENT_APP_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
       GEMINI_EMBEDDING_DIMENSIONS: ${GEMINI_EMBEDDING_DIMENSIONS:-768}
-      ASTERISK_AMI_HOST: voiceai-asterisk
+      GEMINI_LIVE_MODEL: ${GEMINI_LIVE_MODEL:-gemini-3.1-flash-live-preview}
+      GEMINI_LIVE_VOICE: ${GEMINI_LIVE_VOICE:-Aoede}
+      GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      GOOGLE_VERTEX_LOCATION: ${GOOGLE_VERTEX_LOCATION:-europe-west1}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      TELEPHONY_ENABLED: ${TELEPHONY_ENABLED:-0}
+      AUDIOSOCKET_PORT: ${AUDIOSOCKET_PORT:-12000}
+      ASTERISK_AMI_HOST: ${ASTERISK_AMI_HOST:-asterisk}
+      PHONE_NOISE_GATE_RMS: ${PHONE_NOISE_GATE_RMS:-0}
+      PHONE_NOISE_GATE_TRAILING_MS: ${PHONE_NOISE_GATE_TRAILING_MS:-300}
+      PHONE_NOISE_GATE_PREROLL_MS: ${PHONE_NOISE_GATE_PREROLL_MS:-60}
+      NETGSM_SIP_HOST: ${NETGSM_SIP_HOST:-sip.netgsm.com.tr}
+      NETGSM_SIP_PORT: ${NETGSM_SIP_PORT:-5060}
+      NETGSM_SIP_TRANSPORT: ${NETGSM_SIP_TRANSPORT:-tcp}
+      NETGSM_SIP_USER: ${NETGSM_SIP_USER}
+      NETGSM_SIP_PASSWORD: ${NETGSM_SIP_PASSWORD}
+      NETGSM_PUBLIC_IP: ${NETGSM_PUBLIC_IP}
+      RTP_START: ${RTP_START:-10000}
+      RTP_END: ${RTP_END:-10200}
+      NETGSM_API_BASE: ${NETGSM_API_BASE:-https://api.netgsm.com.tr}
+      NETGSM_API_USERCODE: ${NETGSM_API_USERCODE}
+      NETGSM_API_PASSWORD: ${NETGSM_API_PASSWORD}
+      NETGSM_API_MSGHEADER: ${NETGSM_API_MSGHEADER}
+      ATA_HSYS_BASE_URL: ${ATA_HSYS_BASE_URL}
+      ATA_HSYS_APP_KEY: ${ATA_HSYS_APP_KEY}
+      ATA_HSYS_APP_SECRET: ${ATA_HSYS_APP_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,15 +129,15 @@ services:
       context: .
       dockerfile: client/Dockerfile
       args:
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-wss://api.pinecllinic.thinpine.com/ws}
-        SERVER_URL: http://voiceai-server:3001
-        BACKEND_PROXY_URL: http://voiceai-server:3001
-    container_name: voiceai-client
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL}
+        SERVER_URL: http://server:3001
+        BACKEND_PROXY_URL: http://server:3001
     restart: always
     environment:
       NODE_ENV: production
-      SERVER_URL: http://voiceai-server:3001
-      BACKEND_PROXY_URL: http://voiceai-server:3001
+      SERVER_URL: http://server:3001
+      BACKEND_PROXY_URL: http://server:3001
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     depends_on:
@@ -135,7 +162,7 @@ services:
     networks:
       - dokploy-network
 
-  # Asterisk SIP gateway (Netgsm SIP Trunk → AudioSocket → voiceai-server:12000)
+  # Asterisk SIP gateway (Netgsm SIP Trunk → AudioSocket → server:12000)
   # SIP signaling 5060/tcp + RTP media 10000-10200/udp host portları açık olmalı.
   # Dokploy stack'i kendi bridge ağına sahip; Asterisk RTP NAT geçişi için
   # pjsip.conf'taki external_signaling_address/external_media_address=NETGSM_PUBLIC_IP
@@ -143,14 +170,19 @@ services:
   asterisk:
     build:
       context: ./infra/asterisk
-    container_name: voiceai-asterisk
     restart: always
-    env_file:
-      - .env
     environment:
-      AUDIOSOCKET_HOST: voiceai-server
+      AUDIOSOCKET_HOST: server
       AUDIOSOCKET_PORT: ${AUDIOSOCKET_PORT:-12000}
       BACKEND_HTTP_PORT: "3001"
+      NETGSM_SIP_HOST: ${NETGSM_SIP_HOST:-sip.netgsm.com.tr}
+      NETGSM_SIP_PORT: ${NETGSM_SIP_PORT:-5060}
+      NETGSM_SIP_TRANSPORT: ${NETGSM_SIP_TRANSPORT:-tcp}
+      NETGSM_SIP_USER: ${NETGSM_SIP_USER}
+      NETGSM_SIP_PASSWORD: ${NETGSM_SIP_PASSWORD}
+      NETGSM_PUBLIC_IP: ${NETGSM_PUBLIC_IP}
+      RTP_START: ${RTP_START:-10000}
+      RTP_END: ${RTP_END:-10200}
     ports:
       - "5060:5060/tcp"
       - "5060:5060/udp"

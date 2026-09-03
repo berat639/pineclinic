@@ -361,7 +361,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
         let nextFrameAt = Date.now() + 20
         function scheduleFrame() {
-          const delay = Math.max(0, nextFrameAt - Date.now())
+          const now = Date.now()
+          if (nextFrameAt < now - 60) nextFrameAt = now
+          const delay = Math.max(0, nextFrameAt - now)
           setTimeout(() => {
             if (state.closed) return
             nextFrameAt += 20
@@ -641,7 +643,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (1011 hatasını önlemek için)
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
             if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
@@ -650,13 +652,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   mimeType: 'audio/pcm;rate=16000',
                   data: combined.toString('base64'),
                 },
-              })
-            }
-
-            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
-            if (justClosed) {
-              info.session.sendRealtimeInput({
-                audioStreamEnd: true,
               })
             }
           } else if (ev.type === 'hangup') {

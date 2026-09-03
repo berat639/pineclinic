@@ -595,15 +595,6 @@ export async function createLiveSession(
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
-      languageCode: 'tr-TR',
-    },
-    generationConfig: {
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
-        },
-        languageCode: 'tr-TR',
-      },
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
     // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
