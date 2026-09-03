@@ -652,8 +652,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi gönder
-            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
+            // 3 frame (60ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            if (state.micBuffer.length >= 3 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               if (!state.firstAudioSent) {
@@ -667,7 +667,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
               })
             }
-            // audioStreamEnd gönderilmiyor — Gemini'nin kendi VAD'ı konuşma bitişini algılar.
+
+            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
+            if (justClosed) {
+              state.userSpeechEndTime = Date.now()
+              info.session.sendRealtimeInput({
+                audioStreamEnd: true,
+              })
+            }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch { }
