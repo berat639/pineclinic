@@ -136,8 +136,9 @@ class NoiseGate {
 }
 
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
-  // Default threshold: 180 (telefon hattı dip gürültüsünü filtreler, konuşmada hemen açılır)
-  const threshold = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_RMS || '180', 10) || 180)
+  // Default threshold: 100 (telefon hattı dip gürültüsünü filtreler, konuşmada hemen açılır)
+  const envVal = process.env.PHONE_NOISE_GATE_RMS
+  const threshold = envVal !== undefined && envVal !== '' ? Math.max(0, parseInt(envVal, 10)) : 100
   const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '250', 10) || 250)
   const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
   return {
@@ -634,19 +635,25 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
             if (!info.session || !state.micEnabled || state.hangupPending) continue
 
-            clearSilenceTimers(state)
-            state.micBuffer.push(upsample8to16(ev.pcm))
+            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
 
-            // 5 frame (100ms) biriktirince Gemini'ye gerçek zamanlı kesintisiz gönder
-            if (state.micBuffer.length >= 5) {
+            if (frames.length > 0) {
+              clearSilenceTimers(state)
+              for (const f8k of frames) {
+                state.micBuffer.push(upsample8to16(f8k))
+              }
+            }
+
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
-                media: {
+                audio: {
                   mimeType: 'audio/pcm;rate=16000',
                   data: combined.toString('base64'),
                 },
-              } as any)
+              })
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
