@@ -588,14 +588,18 @@ export async function createLiveSession(
 
   const toolDeclarations = await buildToolDeclarations(options.direction)
 
+  const isMaleVoice = ['Puck', 'Charon', 'Fenrir'].includes(options.voiceName || '')
+  const genderInstruction = isMaleVoice
+    ? 'ÖNEMLİ: Sen bir erkek asistansın. Sesin ve tonlaman her zaman bir erkek sesi olmalıdır.'
+    : 'ÖNEMLİ: Sen bir kadın asistansın. Sesin ve tonlaman her zaman bir kadın sesi olmalıdır. Hiçbir zaman sesini kalınlaştırma veya erkek sesine geçme.'
+
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt + '\n\nÖNEMLİ: Sen bir kadın asistansın. Sesin ve tonlaman her zaman bir kadın sesi olmalıdır. Hiçbir zaman sesini kalınlaştırma veya erkek sesine geçme.',
+    systemInstruction: options.systemPrompt + '\n\n' + genderInstruction,
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
-      languageCode: 'tr-TR',
     },
     // Yazıya çevirme — debug için.
     inputAudioTranscription: {},
@@ -610,7 +614,26 @@ export async function createLiveSession(
   // setupComplete geldikten sonra içerik gönderilebilir.
   // sendClientContent erken çağrılırsa buraya buffer'lanır.
   let setupReady = false
+  let setupResolve: () => void
+  const setupPromise = new Promise<void>((resolve) => {
+    setupResolve = resolve
+  })
   const pendingClientContent: LiveSendClientContentParameters[] = []
+
+  function flushPendingClientContent() {
+    if (!activeSession || !setupReady || pendingClientContent.length === 0) return
+    console.log(`[Gemini] ${pendingClientContent.length} adet buffer'lanmış sendClientContent gönderiliyor`)
+    while (pendingClientContent.length > 0) {
+      const params = pendingClientContent.shift()
+      if (params) {
+        try {
+          activeSession.sendClientContent(params)
+        } catch (err) {
+          console.error('[Gemini] sendClientContent flush hatası:', err)
+        }
+      }
+    }
+  }
 
   function buildCallbacks() {
     return {
@@ -654,16 +677,13 @@ export async function createLiveSession(
         // onReady'yi burada tetikle ve buffer'lanmış içerikleri flush et.
         if ((msg as any).setupComplete) {
           setupReady = true
+          setupResolve?.()
           if (!readyFired) {
             readyFired = true
             console.log('[Gemini] setupComplete — session hazır, onReady tetikleniyor')
             callbacks.onReady()
           }
-          // Buffer'lanmış sendClientContent varsa hemen gönder
-          for (const params of pendingClientContent) {
-            try { activeSession?.sendClientContent(params) } catch {}
-          }
-          pendingClientContent.length = 0
+          flushPendingClientContent()
           return
         }
 
@@ -755,11 +775,13 @@ export async function createLiveSession(
 
   async function connect(handle?: string) {
     const modelName = options.model.startsWith('models/') ? options.model : `models/${options.model}`
-    activeSession = await ai.live.connect({
+    const session = await ai.live.connect({
       model: modelName,
       config: handle ? { ...liveConfig, sessionResumption: { handle } } : liveConfig,
       callbacks: buildCallbacks(),
     })
+    activeSession = session
+    flushPendingClientContent()
   }
 
   let reconnectAttempts = 0
@@ -886,18 +908,28 @@ export async function createLiveSession(
   }
 
   await connect()
+  // setupComplete'in gelmesini bekle (maksimum 4s timeout)
+  await Promise.race([
+    setupPromise,
+    new Promise((resolve) => setTimeout(resolve, 4000)),
+  ])
+  flushPendingClientContent()
 
   return {
     sendRealtimeInput: (input: LiveSendRealtimeInputParameters) => {
       try { activeSession?.sendRealtimeInput(input) } catch {}
     },
     sendClientContent: (input: LiveSendClientContentParameters) => {
-      // setupComplete henüz gelmediyse buffer'la, geldiğinde flush edilecek.
-      if (!setupReady) {
+      // setupComplete henüz gelmediyse veya session henüz atanmadıysa buffer'la
+      if (!setupReady || !activeSession) {
         console.log('[Gemini] setupComplete bekleniyor — sendClientContent buffer\'landı')
         pendingClientContent.push(input)
       } else {
-        try { activeSession?.sendClientContent(input) } catch {}
+        try {
+          activeSession.sendClientContent(input)
+        } catch (err) {
+          console.error('[Gemini] sendClientContent hatası:', err)
+        }
       }
     },
     sendToolResponse: (input: LiveSendToolResponseParameters) => {

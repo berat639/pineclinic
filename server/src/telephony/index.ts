@@ -103,7 +103,8 @@ class NoiseGate {
       if (this.trailingFrames === 0) {
         this.pushPreRoll(frame)
         this.wasOpen = false
-        return { frames: [frame], justClosed: true } // Konuşma bitti (trailing sonu)
+        // Konuşma bitti (trailing sonu) — sessizlik frame'i döndür
+        return { frames: [Buffer.alloc(frame.length, 0)], justClosed: true }
       }
       this.wasOpen = true
       return { frames: [frame], justClosed: false }
@@ -111,7 +112,8 @@ class NoiseGate {
 
     this.pushPreRoll(frame)
     this.wasOpen = false
-    return { frames: [], justClosed: false }
+    // Sessizlik frame'i döndürerek Gemini VAD zamanlamasını kesintisiz koru
+    return { frames: [Buffer.alloc(frame.length, 0)], justClosed: false }
   }
 
   private pushPreRoll(frame: Buffer): void {
@@ -212,6 +214,10 @@ interface CallState {
   firstAudioSent: boolean
   aiVoiceFrames: number
   lowPitchFrames: number
+  silenceWarnMs: number
+  silenceCloseMs: number
+  voiceName: string
+  aiSpeaking: boolean
 }
 
 // ── Pitch Detection (Erkek Sesini Algılama) ──────────────────────────────────
@@ -256,28 +262,31 @@ function clearSilenceTimers(state: CallState) {
 
 /**
  * AI konuşmasını bitirip cevap beklemeye başladığında çağrılır.
- * SILENCE_WARN_MS sonra sesli uyarı verir; SILENCE_CLOSE_MS daha geçerse
+ * silenceWarnMs sonra sesli uyarı verir; silenceCloseMs daha geçerse
  * görüşmeyi kapatır. Müşteri konuşursa timer sıfırlanır.
  */
 function startSilenceWatch(state: CallState, socket: { end: () => void }) {
   clearSilenceTimers(state)
   if (state.closed || state.hangupPending) return
 
+  const warnMs = state.silenceWarnMs || 25_000
+  const closeMs = state.silenceCloseMs || 15_000
+
   state.silenceTimer = setTimeout(() => {
     if (state.closed || state.hangupPending || !state.info.session) return
-    console.log(`[${state.shortId}] Sessizlik uyarısı — müşteriden ses yok`)
+    console.log(`[${state.shortId}] Sessizlik uyarısı — müşteriden ses yok (${Math.round(warnMs / 1000)}s)`)
     // AI üzerinden sesli uyarı gönder.
     try {
       state.info.session.sendClientContent({
         turns: [{
           role: 'user',
-          parts: [{ text: 'Sistem: Müşteriden 30 saniyedir ses alınamıyor. Kısa ve nazikçe "Sizi duyamıyorum, hattınızda bir sorun mu var?" diye sor.' }],
+          parts: [{ text: `Sistem: Müşteriden ${Math.round(warnMs / 1000)} saniyedir ses alınamıyor. Kısa ve nazikçe "Sizi duyamıyorum, hattınızda bir sorun mu var?" diye sor.` }],
         }],
         turnComplete: true,
       })
     } catch { }
 
-    // Uyarıdan sonra SILENCE_CLOSE_MS daha bekle, hâlâ sessizse kapat.
+    // Uyarıdan sonra closeMs daha bekle, hâlâ sessizse kapat.
     state.closeTimer = setTimeout(() => {
       if (state.closed || state.hangupPending || !state.info.session) return
       console.log(`[${state.shortId}] Sessizlik timeout — görüşme sonlandırılıyor`)
@@ -294,8 +303,8 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
       setTimeout(() => {
         if (!state.closed) { state.closed = true; try { socket.end() } catch { } }
       }, 3_000)
-    }, SILENCE_CLOSE_MS)
-  }, SILENCE_WARN_MS)
+    }, closeMs)
+  }, warnMs)
 }
 
 export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () => void }> {
@@ -341,6 +350,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           firstAudioSent: false,
           aiVoiceFrames: 0,
           lowPitchFrames: 0,
+          silenceWarnMs: 30_000,
+          silenceCloseMs: 20_000,
+          voiceName: 'Aoede',
+          aiSpeaking: true,
         }
         socket.data = state
 
@@ -400,7 +413,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           const todayStr = getTodayTurkish()
           const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.`
 
-          const [ragContext, systemPromptBase, model, voiceName, activeGreeting] = await Promise.all([
+          const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, startWaitSec] = await Promise.all([
             (async () => {
               try {
                 const preWarmEmbedding = await getPreWarmEmbedding()
@@ -426,10 +439,22 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
               return (await fetchGreeting(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
             })(),
+            (async () => {
+              const { getSetting } = await import('../db/repositories/settings')
+              return Number(await getSetting('ai.call_silence_timeout')) || 30
+            })(),
+            (async () => {
+              const { getSetting } = await import('../db/repositories/settings')
+              return Number(await getSetting('ai.start_wait_seconds')) || 0.4
+            })(),
           ])
 
+          state.voiceName = voiceName
+          state.silenceWarnMs = Math.max(5000, silenceTimeoutSec * 1000)
+          state.silenceCloseMs = Math.max(5000, Math.round(state.silenceWarnMs * 0.5))
+
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
+          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, silenceWarn: ${state.silenceWarnMs}ms, wait: ${startWaitSec}s`)
 
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
@@ -439,23 +464,20 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               {
                 onReady: () => {
                   console.log(`[${shortId}] Gemini Live ready (phone)`)
-                  // Mic'i hemen aç — Gemini setupComplete'ten sonra hem greeting'e
-                  // hem de kullanıcı sesine aynı anda hazır olacak.
-                  state.micEnabled = true
                 },
 
                 onAudio: (pcm) => {
                   if (state.closed) return
-                  // AI konuşmaya başladığında mikrofonu aç (eğer henüz açılmadıysa)
-                  state.micEnabled = true
+                  state.aiSpeaking = true
                   if (state.userSpeechEndTime) {
                     const responseTime = Date.now() - state.userSpeechEndTime
                     console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
                     state.userSpeechEndTime = undefined
                   }
                   // pcm: 24 kHz signed 16-bit LE
-                  // Basit pitch (frekans) analizi ile sesin erkek sesine kayıp kaymadığını tespit et
-                  if (pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
+                  // Yalnızca kadın sesi seçiliyken ses kalınlaşma kontrolü yap (Erkek sesi seçiliyken uyarı üretme)
+                  const isMale = ['Puck', 'Charon', 'Fenrir'].includes(state.voiceName || '')
+                  if (!isMale && pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
                     const pitch = estimatePitch(pcm, 24000)
                     if (pitch > 0) {
                       state.aiVoiceFrames++
@@ -492,6 +514,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
                 onInterrupted: () => {
                   // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
+                  state.aiSpeaking = false
                   state.audioQueue.length = 0
                   state.outChunker = new FrameChunker()
                 },
@@ -501,7 +524,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   state.hangupPending = true
                 },
                 onTurnComplete: () => {
-                  // AI konuşmasını bitirdi — mikrofon yoksa aç (greeting sonrası durum)
+                  state.aiSpeaking = false
                   if (!state.micEnabled) {
                     console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
                     state.micEnabled = true
@@ -601,9 +624,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
           }
 
-          // Karşılama mesajını gönder — model GREETİNG sesi ürettiğinde
-          // onAudio callback'i tetiklenir ve orada state.micEnabled = true yapılır.
-          // Ses gelmezse güvenlik olarak 5s sonra mikrofon açılır.
+          // Karşılama mesajını gönder
           console.log(`[${shortId}] Greeting sendClientContent gönderiliyor (${initParts.join('').length} karakter)`)
           session.sendClientContent({
             turns: [
@@ -614,7 +635,15 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             ],
             turnComplete: true,
           })
-          // Mic zaten onReady'de açıldı; ek timeout gerekmez.
+
+          // Güvenlik zaman aşımı: Eğer Gemini greeting sesini başlatmazsa mikrofonu otomatik aç
+          setTimeout(() => {
+            if (!state.closed && !state.micEnabled) {
+              console.log(`[${shortId}] Güvenlik fallback: Mikrofon açılıyor`)
+              state.micEnabled = true
+              state.aiSpeaking = false
+            }
+          }, Math.max(3500, Math.round(startWaitSec * 1000 + 2500)))
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -645,15 +674,24 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
             const { frames, justClosed } = state.noiseGate.process(ev.pcm)
 
+            // AI konuşurken: Eğer kullanıcı GERÇEKTEN konuşmuyorsa (NoiseGate kapalı / sadece dip gürültüsü),
+            // Gemini'ye paket gönderme (Gemini'nin kendi sesini veya sessizliği kesinti olarak algılamasını önle).
+            if (state.aiSpeaking && !state.noiseGate.isOpen) {
+              state.micBuffer = []
+              continue
+            }
+
             if (frames.length > 0) {
-              clearSilenceTimers(state)
+              if (state.noiseGate.isOpen) {
+                clearSilenceTimers(state)
+              }
               for (const f8k of frames) {
                 state.micBuffer.push(upsample8to16(f8k))
               }
             }
 
-            // 3 frame (60ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
-            if (state.micBuffer.length >= 3 || (justClosed && state.micBuffer.length > 0)) {
+            // 3 frame (60ms) biriktirince sesi hemen gönder
+            if (state.micBuffer.length >= 3) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               if (!state.firstAudioSent) {
@@ -668,12 +706,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               })
             }
 
-            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
             if (justClosed) {
               state.userSpeechEndTime = Date.now()
-              info.session.sendRealtimeInput({
-                audioStreamEnd: true,
-              })
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
