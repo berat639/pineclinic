@@ -642,11 +642,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               info.session.sendRealtimeInput({
-                audio: {
+                media: {
                   mimeType: 'audio/pcm;rate=16000',
                   data: combined.toString('base64'),
                 },
-              })
+              } as any)
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)

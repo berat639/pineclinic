@@ -681,6 +681,7 @@ export async function createLiveSession(
 
         // Barge-in: user interrupted model
         if (content.interrupted) {
+          console.log(`[${options.dbSessionId}] Gemini: interrupted`)
           callbacks.onInterrupted()
           return
         }
