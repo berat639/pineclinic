@@ -617,29 +617,6 @@ export async function createLiveSession(
       // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
       onopen: () => {},
       onmessage: async (msg: LiveServerMessage) => {
-        // HAM MESAJ LOGU — Gemini'nin gönderdiklerini tam gör 
-        const rawKeys = Object.keys(msg)
-        const rawSummary: Record<string, unknown> = {}
-        for (const k of rawKeys) {
-          const v = (msg as any)[k]
-          if (k === 'serverContent' && v) {
-            rawSummary['serverContent'] = {
-              keys: Object.keys(v),
-              interrupted: v.interrupted,
-              turnComplete: v.turnComplete,
-              hasParts: !!v.modelTurn?.parts?.length,
-              partsTypes: v.modelTurn?.parts?.map((p: any) => Object.keys(p)).flat(),
-              hasInputTx: !!v.inputTranscription?.text,
-              hasOutputTx: !!v.outputTranscription?.text,
-            }
-          } else if (typeof v !== 'object' || v === null) {
-            rawSummary[k] = v
-          } else {
-            rawSummary[k] = Object.keys(v)
-          }
-        }
-        console.log(`[Gemini:RAW] ${JSON.stringify(rawSummary)}`)
-
         // Session resumption handle güncellemesi — kopuşta bununla resume ederiz.
         if (msg.sessionResumptionUpdate) {
           if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.newHandle) {
@@ -692,11 +669,6 @@ export async function createLiveSession(
 
         const content = msg.serverContent
         if (!content) {
-          // DEBUG: içeriksiz mesaj
-          const msgKeys = Object.keys(msg).filter(k => k !== 'serverContent')
-          if (msgKeys.length > 0 && !msg.usageMetadata && !msg.sessionResumptionUpdate && !msg.goAway) {
-            console.log(`[Gemini:DBG] Non-content msg keys: ${msgKeys.join(', ')}`)
-          }
           if (msg.usageMetadata) {
             callbacks.onUsage?.(msg.usageMetadata as {
               promptTokenCount?: number
@@ -705,16 +677,6 @@ export async function createLiveSession(
             })
           }
           return
-        }
-
-        // DEBUG: serverContent alındı — içeriği logla
-        const hasParts = !!content.modelTurn?.parts?.length
-        const hasInline = content.modelTurn?.parts?.some((p: any) => p.inlineData?.data)
-        const hasText = content.modelTurn?.parts?.some((p: any) => p.text)
-        const hasInTx = !!content.inputTranscription?.text
-        const hasOutTx = !!content.outputTranscription?.text
-        if (hasParts || content.turnComplete || content.interrupted) {
-          console.log(`[Gemini:DBG] serverContent: parts=${hasParts} inline=${hasInline} text=${hasText} inTx=${hasInTx} outTx=${hasOutTx} turnComplete=${content.turnComplete} interrupted=${content.interrupted}`)
         }
 
         // Barge-in: user interrupted model
