@@ -579,8 +579,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           // greeting üretmesine neden olur.
           const initParts: string[] = [
             direction === 'outbound'
-              ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-              : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`,
+              ? `Lütfen hemen şu karşılama mesajı ile konuşmaya başla: "${activeGreeting}"`
+              : `Lütfen hemen şu karşılama mesajı ile konuşmaya başla: "${activeGreeting}"`,
           ]
 
           // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
