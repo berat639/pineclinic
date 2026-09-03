@@ -209,6 +209,7 @@ interface CallState {
   micEnabled: boolean
   userSpeechEndTime?: number
   micBuffer: Buffer[]
+  firstAudioSent: boolean
   aiVoiceFrames: number
   lowPitchFrames: number
 }
@@ -337,6 +338,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           noiseGate: new NoiseGate(gateCfg.threshold, gateCfg.trailingFrames, gateCfg.preRollFrames, shortId),
           micEnabled: false,
           micBuffer: [],
+          firstAudioSent: false,
           aiVoiceFrames: 0,
           lowPitchFrames: 0,
         }
@@ -437,6 +439,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               {
                 onReady: () => {
                   console.log(`[${shortId}] Gemini Live ready (phone)`)
+                  // Mic'i hemen aç — Gemini setupComplete'ten sonra hem greeting'e
+                  // hem de kullanıcı sesine aynı anda hazır olacak.
+                  state.micEnabled = true
                 },
 
                 onAudio: (pcm) => {
@@ -609,14 +614,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             ],
             turnComplete: true,
           })
-
-          // Güvenlik zamanlayıcısı: AI greeting ses üretmese bile max 5s sonra mikrofonu aç
-          setTimeout(() => {
-            if (!state.closed && !state.micEnabled) {
-              console.log(`[${shortId}] Greeting zaman aşımı — mikrofon zorla açılıyor`)
-              state.micEnabled = true
-            }
-          }, 5000)
+          // Mic zaten onReady'de açıldı; ek timeout gerekmez.
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -654,10 +652,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi gönder
             if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
+              if (!state.firstAudioSent) {
+                state.firstAudioSent = true
+                console.log(`[${shortId}] İlk audio chunk Gemini'ye gönderiliyor`)
+              }
               info.session.sendRealtimeInput({
                 audio: {
                   mimeType: 'audio/pcm;rate=16000',
@@ -665,11 +667,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
               })
             }
-
-            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver → Gemini anında cevap üretir
-            if (justClosed) {
-              info.session.sendRealtimeInput({ audioStreamEnd: true })
-            }
+            // audioStreamEnd gönderilmiyor — Gemini'nin kendi VAD'ı konuşma bitişini algılar.
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch { }
