@@ -597,25 +597,9 @@ export async function createLiveSession(
       },
       languageCode: 'tr-TR',
     },
-    // generationConfig — gemini-3.1-flash-live-preview için ses üretimi gerekli.
-    generationConfig: {
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
-        },
-        languageCode: 'tr-TR',
-      },
-    },
-    // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
-    contextWindowCompression: {
-      triggerTokens: '25600',
-      slidingWindow: { targetTokens: '16000' },
-    },
-    // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
+    // Yazıya çevirme — debug için.
     inputAudioTranscription: {},
     outputAudioTranscription: {},
-    // Kopuşta resume edebilmek için sunucudan handle iste.
-    sessionResumption: {},
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
   }
 
@@ -633,6 +617,29 @@ export async function createLiveSession(
       // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
       onopen: () => {},
       onmessage: async (msg: LiveServerMessage) => {
+        // HAM MESAJ LOGU — Gemini'nin gönderdiklerini tam gör 
+        const rawKeys = Object.keys(msg)
+        const rawSummary: Record<string, unknown> = {}
+        for (const k of rawKeys) {
+          const v = (msg as any)[k]
+          if (k === 'serverContent' && v) {
+            rawSummary['serverContent'] = {
+              keys: Object.keys(v),
+              interrupted: v.interrupted,
+              turnComplete: v.turnComplete,
+              hasParts: !!v.modelTurn?.parts?.length,
+              partsTypes: v.modelTurn?.parts?.map((p: any) => Object.keys(p)).flat(),
+              hasInputTx: !!v.inputTranscription?.text,
+              hasOutputTx: !!v.outputTranscription?.text,
+            }
+          } else if (typeof v !== 'object' || v === null) {
+            rawSummary[k] = v
+          } else {
+            rawSummary[k] = Object.keys(v)
+          }
+        }
+        console.log(`[Gemini:RAW] ${JSON.stringify(rawSummary)}`)
+
         // Session resumption handle güncellemesi — kopuşta bununla resume ederiz.
         if (msg.sessionResumptionUpdate) {
           if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.newHandle) {
