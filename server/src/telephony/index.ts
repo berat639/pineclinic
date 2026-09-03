@@ -103,8 +103,8 @@ class NoiseGate {
       if (this.trailingFrames === 0) {
         this.pushPreRoll(frame)
         this.wasOpen = false
-        // Konuşma bitti (trailing sonu) — sessizlik frame'i döndür
-        return { frames: [Buffer.alloc(frame.length, 0)], justClosed: true }
+        // Konuşma bitti (trailing sonu)
+        return { frames: [frame], justClosed: true }
       }
       this.wasOpen = true
       return { frames: [frame], justClosed: false }
@@ -112,8 +112,7 @@ class NoiseGate {
 
     this.pushPreRoll(frame)
     this.wasOpen = false
-    // Sessizlik frame'i döndürerek Gemini VAD zamanlamasını kesintisiz koru
-    return { frames: [Buffer.alloc(frame.length, 0)], justClosed: false }
+    return { frames: [], justClosed: false }
   }
 
   private pushPreRoll(frame: Buffer): void {
@@ -707,8 +706,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 3 frame (60ms) biriktirince sesi hemen gönder
-            if (state.micBuffer.length >= 3) {
+            // 3 frame (60ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            if (state.micBuffer.length >= 3 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               if (!state.firstAudioSent) {
