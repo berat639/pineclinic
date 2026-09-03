@@ -40,4 +40,6 @@ for f in pjsip.conf extensions.conf rtp.conf manager.conf; do
     fi
 done
 
+mkdir -p /var/log/asterisk/cdr-csv
+
 exec "$@"
