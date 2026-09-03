@@ -655,6 +655,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 },
               })
             }
+
+            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver → Gemini anında cevap üretir
+            if (justClosed) {
+              info.session.sendRealtimeInput({ audioStreamEnd: true })
+            }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
             try { socket.end() } catch { }
