@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
-import { StartSensitivity, EndSensitivity, type GoogleGenAI } from '@google/genai'
+import { type GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
 import { buildRagPrompt, getPreWarmEmbedding, embedText, PRE_WARM_QUERY } from '../rag'
@@ -556,14 +556,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 systemPrompt,
                 model,
                 voiceName,
-                realtimeInputConfig: {
-                  automaticActivityDetection: {
-                    startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-                    endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-                    prefixPaddingMs: 200,
-                    silenceDurationMs: 600,
-                  },
-                },
                 telephonyChannel: state.callerChannel,
                 direction: direction,
               },
@@ -586,8 +578,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           // greeting üretmesine neden olur.
           const initParts: string[] = [
             direction === 'outbound'
-              ? `Lütfen hemen şu karşılama mesajı ile konuşmaya başla: "${activeGreeting}"`
-              : `Lütfen hemen şu karşılama mesajı ile konuşmaya başla: "${activeGreeting}"`,
+              ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+              : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`,
           ]
 
           // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
@@ -640,7 +632,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
           }
 
-          // Karşılama mesajını gönder
+          // Tek seferde gönder — model yalnızca BİR greeting üretir.
           console.log(`[${shortId}] Greeting sendClientContent gönderiliyor (${initParts.join('').length} karakter)`)
           session.sendClientContent({
             turns: [
@@ -652,14 +644,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             turnComplete: true,
           })
 
-          // Güvenlik zaman aşımı: Eğer Gemini 8 saniye boyunca ses üretmezse mikrofonu fallback olarak aç
-          state.greetingTimeoutTimer = setTimeout(() => {
-            if (!state.closed && !state.micEnabled) {
-              console.log(`[${shortId}] Güvenlik fallback: Gemini ses üretmedi, mikrofon açılıyor`)
-              state.micEnabled = true
-              state.aiSpeaking = false
-            }
-          }, Math.max(3500, Math.round(startWaitSec * 1000 + 2500)))
+          // Güvenlik zamanlayıcısı: AI greeting ses üretmese bile max 1.5s sonra mikrofonu aç
+          setTimeout(() => {
+            if (!state.closed) state.micEnabled = true
+          }, 1500)
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -698,16 +686,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
 
             if (frames.length > 0) {
-              if (state.noiseGate.isOpen) {
-                clearSilenceTimers(state)
-              }
+              clearSilenceTimers(state)
               for (const f8k of frames) {
                 state.micBuffer.push(upsample8to16(f8k))
               }
             }
 
-            // 3 frame (60ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
-            if (state.micBuffer.length >= 3 || (justClosed && state.micBuffer.length > 0)) {
+            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (1011 hatasını önlemek için)
+            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               if (!state.firstAudioSent) {
@@ -722,8 +708,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               })
             }
 
+            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
             if (justClosed) {
               state.userSpeechEndTime = Date.now()
+              info.session.sendRealtimeInput({
+                audioStreamEnd: true,
+              })
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
