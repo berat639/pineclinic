@@ -111,7 +111,13 @@ export async function sendAmiAction(action: Record<string, string>, timeoutMs = 
 export async function transferCall(channel: string, targetNumber: string): Promise<{ success: boolean; message: string }> {
   console.log(`[AMI] Çağrı aktarılıyor: channel=${channel} -> target=${targetNumber}`)
   
-  const cleanNumber = targetNumber.replace(/\D/g, '')
+  let cleanNumber = targetNumber.replace(/\D/g, '')
+  if (cleanNumber.startsWith('90') && cleanNumber.length === 12) {
+    cleanNumber = '0' + cleanNumber.slice(2)
+  }
+  if (!cleanNumber.startsWith('0') && cleanNumber.length === 10) {
+    cleanNumber = '0' + cleanNumber
+  }
   if (!cleanNumber) {
     return { success: false, message: 'Geçersiz hedef telefon numarası' }
   }

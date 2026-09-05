@@ -176,11 +176,11 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     },
     {
       name: 'aramaAktar',
-      description: 'Aramayı yetkili birime (resepsiyon, banko, acil veya ilgili dahili) aktarır.',
+      description: 'Aramayı yetkili birime veya başka bir telefon numarasına aktarır. Berat Bey\'e aktarmak için hedef: "05076652367" veya "berat" olarak kullanılır.',
       parameters: {
         type: Type.OBJECT,
         properties: {
-          hedef: { type: Type.STRING, description: 'Aktarılacak hedef: "resepsiyon", "banko", "acil" veya telefon numarası' },
+          hedef: { type: Type.STRING, description: 'Aktarılacak hedef: Telefon numarası (örn: "05076652367"), "berat", "resepsiyon", "banko", "acil"' },
           sebep: { type: Type.STRING, description: 'Aktarım sebebi' },
         },
         required: ['hedef'],
@@ -310,7 +310,8 @@ export async function createLiveSession(
     }
 
     if (name === 'aramaAktar') {
-      const targetKey = (args.hedef as string | undefined)?.toLowerCase().trim() || 'resepsiyon'
+      const rawTarget = (args.hedef as string | undefined) || 'resepsiyon'
+      const targetKey = rawTarget.toLowerCase().trim()
       console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${args.sebep || 'Belirtilmedi'}`)
 
       try {
@@ -323,42 +324,61 @@ export async function createLiveSession(
 
         // Match from phonebook or default settings
         let targetNumber = ''
-        const found = phonebook.find(p => p.label.toLowerCase().includes(targetKey) || targetKey.includes(p.label.toLowerCase()))
-        if (found) {
-          targetNumber = found.number
-        } else if (/^\+?\d{7,15}$/.test(targetKey)) {
-          targetNumber = targetKey
+        if (targetKey.includes('berat') || targetKey.includes('sahip') || targetKey.includes('patron') || targetKey.includes('yonetici')) {
+          targetNumber = '05076652367'
         } else {
-          const directSetting = await getSetting(`transfer.${targetKey}`)
-          if (directSetting) {
-            targetNumber = directSetting
-          } else if (phonebook.length > 0) {
-            targetNumber = phonebook[0].number
+          const found = phonebook.find(p => p.label.toLowerCase().includes(targetKey) || targetKey.includes(p.label.toLowerCase()))
+          if (found) {
+            targetNumber = found.number
+          } else if (/^\+?\d{7,15}$/.test(targetKey)) {
+            targetNumber = targetKey
+          } else {
+            const directSetting = await getSetting(`transfer.${targetKey}`)
+            if (directSetting) {
+              targetNumber = directSetting
+            } else if (phonebook.length > 0) {
+              targetNumber = phonebook[0].number
+            }
           }
+        }
+
+        if (!targetNumber && targetKey.includes('berat')) {
+          targetNumber = '05076652367'
         }
 
         if (!targetNumber) {
           console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
           return {
             success: false,
-            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp ekibimize iletebilirim.',
+            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp Berat Bey\'e iletebilirim.',
           }
         }
 
         if (options.telephonyChannel) {
+          // AI'ın sesli onay cümlesinin ("Hemen Berat Bey'e aktarıyorum...") hatta net duyulması için 1.5s bekle
+          await new Promise(r => setTimeout(r, 1500))
+
           const { transferCall } = await import('./services/asterisk-ami')
           const result = await transferCall(options.telephonyChannel, targetNumber)
           if (result.success) {
             return {
               success: true,
-              message: 'Aramanız yetkili birimimize aktarılıyor, lütfen hattan ayrılmayın.',
+              message: 'Aramanız başarıyla aktarılıyor, lütfen hattan ayrılmayın.',
             }
+          } else {
+            console.error(`[aramaAktar] transferCall başarısız:`, result.message)
+          }
+        } else {
+          console.log(`[aramaAktar] telephonyChannel yok (web/test oturumu). Hedef: ${targetNumber}`)
+          return {
+            success: true,
+            message: `Arama aktarma talebiniz simüle edildi (${targetNumber} numarasına aktarılıyor).`,
           }
         }
 
         return {
           success: false,
-          message: 'Şu an operatörlerimizin tümü meşgul, çağrınızı aktaramadım. Dilerseniz notunuzu alabilirim, size dönüş yaparlar.',
+          message: 'Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, Berat Bey\'e iletirim.',
         }
       } catch (err) {
         console.error('[aramaAktar] Hata:', err)

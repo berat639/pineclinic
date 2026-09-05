@@ -45,6 +45,7 @@ exten => 100,1,NoOp(Test AudioSocket bridge)
 ; ─────────────────────────────────────────────────────────────────────────────
 [dynamic-forward]
 exten => _X.,1,NoOp(Dinamik Yonlendirme: ${EXTEN})
+ same => n,Set(CALLERID(num)=8503096119)
  same => n,Dial(PJSIP/${EXTEN}@netgsm-endpoint,30)
  same => n,Hangup()
 
