@@ -12,7 +12,8 @@ function decodeJwtPayload(token: string): { sub: string; role: string } | null {
 
 const PROTECTED_PREFIXES = ['/admin', '/yonetici', '/hekim', '/host', '/shift', '/bildirimler', '/profil']
 const ROLE_ROUTES: Record<string, string[]> = {
-  yonetici: ['/admin', '/yonetici', '/shift', '/bildirimler', '/profil'],
+  yonetici: ['/admin', '/yonetici', '/panel', '/shift', '/bildirimler', '/profil'],
+  moderator: ['/admin', '/yonetici', '/panel', '/shift', '/bildirimler', '/profil'],
   hekim: ['/hekim', '/shift', '/bildirimler', '/profil'],
   host: ['/host', '/shift', '/bildirimler', '/profil'],
 }
@@ -24,13 +25,13 @@ export function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // /admin → /yonetici redirect
+  // /admin → /panel redirect
   if (pathname.startsWith('/admin')) {
     const token = req.cookies.get('token')?.value
     if (!token) return NextResponse.redirect(new URL('/login', req.url))
     const payload = decodeJwtPayload(token)
-    if (!payload || payload.role !== 'yonetici') return NextResponse.redirect(new URL('/login', req.url))
-    return NextResponse.redirect(new URL('/yonetici', req.url))
+    if (!payload || (payload.role !== 'yonetici' && payload.role !== 'moderator')) return NextResponse.redirect(new URL('/login', req.url))
+    return NextResponse.redirect(new URL('/panel', req.url))
   }
 
   const isProtected = PROTECTED_PREFIXES.some(p => pathname.startsWith(p))
@@ -48,7 +49,7 @@ export function middleware(req: NextRequest) {
 
   const hasAccess = allowed.some(p => pathname.startsWith(p))
   if (!hasAccess) {
-    const home = role === 'yonetici' ? '/yonetici' : role === 'hekim' ? '/hekim' : '/host'
+    const home = (role === 'yonetici' || role === 'moderator') ? '/panel' : role === 'hekim' ? '/hekim' : '/host'
     return NextResponse.redirect(new URL(home, req.url))
   }
 

@@ -222,6 +222,7 @@ export async function createLiveSession(
     realtimeInputConfig?: RealtimeInputConfig
     telephonyChannel?: string
     direction?: string
+    enableGoogleSearch?: boolean
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -625,8 +626,16 @@ export async function createLiveSession(
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
   }
 
+  const tools: any[] = []
   if (toolDeclarations.length > 0) {
-    liveConfig.tools = [{ functionDeclarations: toolDeclarations }]
+    tools.push({ functionDeclarations: toolDeclarations })
+  }
+  if (options.enableGoogleSearch) {
+    tools.push({ googleSearch: {} })
+    console.log('[Gemini Live] Google Search Grounding aktif edildi 🔍')
+  }
+  if (tools.length > 0) {
+    liveConfig.tools = tools
   }
 
   // setupComplete geldikten sonra içerik gönderilebilir.

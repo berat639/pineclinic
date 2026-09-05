@@ -31,6 +31,12 @@ import {
   findCustomerDocByPhone,
 } from './db/repositories/knowledge'
 import {
+  listVipAssistants,
+  createVipAssistant,
+  updateVipAssistant,
+  deleteVipAssistant,
+} from './db/repositories/vip'
+import {
   getCalendarSettings,
   setCalendarSettings,
   disconnectCalendar,
@@ -1237,6 +1243,45 @@ const app = new Elysia()
       } catch (e) { results.failed++; console.error(`[RAG] "${doc.title}":`, e) }
     }
     return { success: true, results }
+  })
+
+  // ── VIP Personal Assistant Management ─────────────────────────────────────
+  .get('/api/admin/vip-assistants', async () => {
+    const list = await listVipAssistants()
+    return { success: true, list }
+  })
+
+  .post('/api/admin/vip-assistants', async ({ body, set }) => {
+    const { phone, contactName, greeting, customPrompt, groundingEnabled, active } = (body ?? {}) as any
+    if (!phone || typeof phone !== 'string') {
+      set.status = 400
+      return { error: 'Telefon numarası zorunludur' }
+    }
+    try {
+      const item = await createVipAssistant({ phone, contactName, greeting, customPrompt, groundingEnabled, active })
+      return { success: true, item }
+    } catch (e: any) {
+      set.status = 400
+      return { error: e.message || 'Kayıt oluşturulamadı' }
+    }
+  })
+
+  .put('/api/admin/vip-assistants/:id', async ({ params, body, set }) => {
+    const data = (body ?? {}) as any
+    try {
+      const updated = await updateVipAssistant(params.id, data)
+      if (!updated) { set.status = 404; return { error: 'Kayıt bulunamadı' } }
+      return { success: true, item: updated }
+    } catch (e: any) {
+      set.status = 400
+      return { error: e.message || 'Güncelleme başarısız' }
+    }
+  })
+
+  .delete('/api/admin/vip-assistants/:id', async ({ params, set }) => {
+    const deleted = await deleteVipAssistant(params.id)
+    if (!deleted) { set.status = 404; return { error: 'Kayıt bulunamadı' } }
+    return { success: true }
   })
 
   .get('/api/telephony/register', ({ query }) => {

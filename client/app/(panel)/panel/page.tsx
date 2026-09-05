@@ -15,10 +15,11 @@ import IntegrationsTab from '../../admin/components/IntegrationsTab'
 const FinansalTab = dynamic(() => import('./tabs/FinansalTab'), { ssr: false })
 const StokTab = dynamic(() => import('./tabs/StokTab'), { ssr: false })
 const KlinikPersonelTab = dynamic(() => import('./tabs/KlinikPersonelTab'), { ssr: false })
+const VipAssistantTab = dynamic(() => import('./tabs/VipAssistantTab'), { ssr: false })
 
-type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations'
+type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations' | 'vip'
 
-const TABS: { id: Tab; label: string }[] = [
+const BASE_TABS: { id: Tab; label: string }[] = [
   { id: 'calendar', label: 'Takvim' },
   { id: 'patients', label: 'Hastalar' },
   { id: 'payments', label: 'Ödemeler & Finans' },
@@ -34,6 +35,12 @@ export default function YoneticiPage() {
   const [appointments, setAppointments] = useState<any[]>([])
   const [allowedTabs, setAllowedTabs] = useState<Tab[] | null>(null)
 
+  const isModerator = user?.role === 'moderator' || user?.email === 'moderator@klinik.com'
+
+  const tabsList = isModerator
+    ? [{ id: 'vip' as Tab, label: '🌟 Özel Asistan (VIP)' }, ...BASE_TABS]
+    : BASE_TABS
+
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
   const fetchAppts = useCallback(() => {
     fetch(`/api/appointments`).then(r => r.ok ? r.json() : []).then(setAppointments).catch(() => {})
@@ -42,8 +49,11 @@ export default function YoneticiPage() {
 
   useEffect(() => {
     if (!user) return
-    if (user.role === 'yonetici') {
-      setAllowedTabs(TABS.map(t => t.id))
+    if (isModerator) {
+      setAllowedTabs(['vip', 'knowledge', 'calendar'])
+      if (!tab) setTab('vip')
+    } else if (user.role === 'yonetici') {
+      setAllowedTabs(BASE_TABS.map(t => t.id))
       if (!tab) setTab('calendar')
     } else {
       fetch('/api/admin/settings/roles')
@@ -58,9 +68,9 @@ export default function YoneticiPage() {
           if (!tab) setTab('calendar')
         })
     }
-  }, [user, tab])
+  }, [user, tab, isModerator])
 
-  const visibleTabs = TABS.filter(t => allowedTabs?.includes(t.id))
+  const visibleTabs = tabsList.filter(t => allowedTabs?.includes(t.id))
 
   return (
     <div className="admin-content" style={{ minHeight: '100vh', background: 'var(--background)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px clamp(20px, 3.5vw, 56px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
@@ -114,6 +124,7 @@ export default function YoneticiPage() {
           {tab === 'knowledge' && <KnowledgeTab />}
           {tab === 'klinik' && <KlinikPersonelTab />}
           {tab === 'integrations' && <IntegrationsTab apiPrefix="/api/yonetici/integrations" />}
+          {tab === 'vip' && <VipAssistantTab />}
         </div>
       </div>
     </div>

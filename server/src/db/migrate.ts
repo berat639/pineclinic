@@ -253,6 +253,21 @@ async function runMigrations() {
     console.log('[Migration] Varsayılan kategoriler oluşturuldu')
   }
 
+  // ── VIP Assistants & Personal Assistant Numbers ───────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS vip_assistants (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      phone            TEXT NOT NULL UNIQUE,
+      contact_name     TEXT,
+      greeting         TEXT NOT NULL DEFAULT 'Merhaba! Ben Berat Bey''in kişisel asistanı Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?',
+      custom_prompt    TEXT,
+      grounding_enabled BOOLEAN NOT NULL DEFAULT true,
+      active           BOOLEAN NOT NULL DEFAULT true,
+      created_at       TIMESTAMPTZ DEFAULT now(),
+      updated_at       TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
   // ── Dental Clinic Tables ───────────────────────────────────────────────────
   // doctors table removed — hekim users serve as doctors now
 

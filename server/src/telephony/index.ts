@@ -16,6 +16,7 @@ import { createLiveSession } from '../gemini'
 import { buildRagPrompt, getPreWarmEmbedding, embedText, PRE_WARM_QUERY } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
+import { findVipByPhone } from '../db/repositories/vip'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
 
@@ -400,18 +401,36 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         scheduleFrame()
 
         try {
-          // UUID gelmesini bekle (ilk AudioSocket paketiyle gelir, genelde < 50ms)
+          // UUID ve CallerPhone gelmesini bekle (AudioSocket ilk paketinde gelir, genelde < 50ms)
           let waitCount = 0
-          while (!state.callerId && waitCount < 100) {
+          while ((!state.callerId || !state.callerPhone) && waitCount < 100) {
             await new Promise(r => setTimeout(r, 10))
             waitCount++
           }
           const direction = state.callerDirection || 'inbound'
-          console.log(`[${shortId}] Arama yönü: ${direction}`)
+          console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}`)
+
+          // VIP Arayan Kontrolü (Berat Bey'in Kişisel Asistanı Pine Asistan)
+          const vipRecord = state.callerPhone ? await findVipByPhone(state.callerPhone) : null
+          const isVip = Boolean(vipRecord && vipRecord.active)
+          if (isVip && vipRecord) {
+            console.log(`[${shortId}] 🌟 VIP Arayan algılandı: ${state.callerPhone} (${vipRecord.contactName || 'Özel Kişi'})`)
+          }
 
           // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
           const todayStr = getTodayTurkish()
-          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (müşteri AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm talepler tamamlandıktan sonra) cagriySonlandir aracını çağır. Müşteri "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
+          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLIKLE çağırma.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
+
+          const pineAsistanDefaultPrompt = `Sen "Pine Asistan"sın — Berat Bey'in (Berat İnceçam) kişisel, sıcakkanlı, neşeli, esprili ve son derece zeki genel asistanısın.
+
+KİMLİK VE DAVRANIŞ KURALLARI:
+- Sen bir klinik veya diş sağlığı asistanı DEĞİLSİN. Karşıdaki kişiye KESİNLİKLE diş randevusu, klinik tedavisi, muayene veya diş hekimliği konularını dayatma veya sorma.
+- Karşıdaki kişiyi telefon numarası, ad soyad veya kayıt sorma gibi bürokratik işlemlerle ASLA yorma. Numara ve kimlik zaten sistemde bellidir.
+- Berat Bey'in kişisel asistanı olarak konuş: Samimi, sıcacık, pozitif, neşeli ve gerektiğinde kahkaha atabilen bir tarzın olsun.
+- Esprili ve sıcak kanlı ol. Komik bir şey söylendiğinde gül, neşeyle karşılık ver ("Hahaha", "İlahi!", "Çok iyiymiş!").
+- Berat Bey'e iletilmesi gereken bir not, mesaj veya konu varsa dikkatle dinle ve "Berat Bey'e mutlaka ileteceğim" de.
+- Güncel konular, genel kültür, teknoloji, günlük sohbet veya karşı tarafın sormak istediği her konuda serbestçe sohbet et.
+- Canlı web arama (Google Grounding) yeteneğin var. Hava durumu, güncel haberler, maçlar, vizyondaki filmler, kurlar veya internetteki herhangi bir bilgiyi sorarlarsa Google arama aracını kullanarak hemen doğru ve güncel bilgiyle yanıtla.`
 
           const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, startWaitSec] = await Promise.all([
             (async () => {
@@ -429,13 +448,20 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
               return ''
             })(),
-            buildSystemPrompt(direction),
+            isVip
+              ? (async () => {
+                  return vipRecord?.customPrompt?.trim() || pineAsistanDefaultPrompt
+                })()
+              : buildSystemPrompt(direction),
             resolveLiveModel(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
               return (await getSetting('ai.voice_name')) || 'Aoede'
             })(),
             (async () => {
+              if (isVip && vipRecord?.greeting) {
+                return vipRecord.greeting
+              }
               const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
               return (await fetchGreeting(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
             })(),
@@ -454,7 +480,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           state.silenceCloseMs = Math.max(5000, Math.round(state.silenceWarnMs * 0.5))
 
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, silenceWarn: ${state.silenceWarnMs}ms, wait: ${startWaitSec}s`)
+          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, wait: ${startWaitSec}s`)
 
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
@@ -558,6 +584,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 voiceName,
                 telephonyChannel: state.callerChannel,
                 direction: direction,
+                enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
               },
             ),
             new Promise<never>((_, reject) =>
@@ -576,59 +603,67 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
           // Birden fazla turnComplete: true göndermek modelin her birine ayrı
           // greeting üretmesine neden olur.
-          const initParts: string[] = [
-            direction === 'outbound'
-              ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-              : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`,
-          ]
+          const initParts: string[] = []
 
-          // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
-          // session hazır olduğunda callerPhone zaten set olmuş olur.
-          if (state.callerPhone) {
-            try {
-              const customerCtx = await getCustomerByPhone(state.callerPhone)
-              if (customerCtx) {
-                const TYPE_LABELS: Record<string, string> = {
-                  service: 'Tedavi', test_drive: 'Muayene',
-                  gallery_visit: 'Kontrol', other: 'Randevu',
-                }
-                const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
-                const past = customerCtx.appointmentHistory.filter(a => a.isPast)
+          if (isVip) {
+            initParts.push(
+              `Sistem bildirimi: Berat Bey'in özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla diş, klinik, randevu veya telefon numarası sorma. Tamamen samimi, neşeli ve doğal bir şekilde Berat Bey'in kişisel asistanı Pine Asistan olarak konuşmaya başla.`
+            )
+          } else {
+            initParts.push(
+              direction === 'outbound'
+                ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+                : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+            )
 
-                let ctxMsg = `Arayan müşteri sistemde kayıtlı.\n`
-                ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
-                ctxMsg += `Telefon: ${customerCtx.phone}\n`
+            // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
+            // session hazır olduğunda callerPhone zaten set olmuş olur.
+            if (state.callerPhone) {
+              try {
+                const customerCtx = await getCustomerByPhone(state.callerPhone)
+                if (customerCtx) {
+                  const TYPE_LABELS: Record<string, string> = {
+                    service: 'Tedavi', test_drive: 'Muayene',
+                    gallery_visit: 'Kontrol', other: 'Randevu',
+                  }
+                  const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
+                  const past = customerCtx.appointmentHistory.filter(a => a.isPast)
 
-                if (upcoming.length > 0) {
-                  ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
-                  upcoming.slice(0, 3).forEach(a => {
-                    ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}`
-                    if (a.vehicleInfo) ctxMsg += ` (${a.vehicleInfo})`
-                    ctxMsg += '\n'
-                  })
-                }
+                  let ctxMsg = `Arayan müşteri sistemde kayıtlı.\n`
+                  ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
+                  ctxMsg += `Telefon: ${customerCtx.phone}\n`
 
-                if (past.length > 0) {
-                  ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
-                }
+                  if (upcoming.length > 0) {
+                    ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
+                    upcoming.slice(0, 3).forEach(a => {
+                      ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}`
+                      if (a.vehicleInfo) ctxMsg += ` (${a.vehicleInfo})`
+                      ctxMsg += '\n'
+                    })
+                  }
 
-                ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
-                initParts.push(ctxMsg)
-                console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
-              } else {
-                // Bilgi tabanında müşteri kaydı ara (admin panelden eklenen)
-                const knowledgeCustomer = await findCustomerDocByPhone(state.callerPhone)
-                if (knowledgeCustomer) {
-                  let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
-                  ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
-                  ctxMsg += `${knowledgeCustomer.content}\n`
-                  ctxMsg += `\nMüşteriyi ismiyle selamla. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+                  if (past.length > 0) {
+                    ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
+                  }
+
+                  ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
                   initParts.push(ctxMsg)
-                  console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
+                  console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
+                } else {
+                  // Bilgi tabanında müşteri kaydı ara (admin panelden eklenen)
+                  const knowledgeCustomer = await findCustomerDocByPhone(state.callerPhone)
+                  if (knowledgeCustomer) {
+                    let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
+                    ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
+                    ctxMsg += `${knowledgeCustomer.content}\n`
+                    ctxMsg += `\nMüşteriyi ismiyle selamla. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+                    initParts.push(ctxMsg)
+                    console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
+                  }
                 }
+              } catch (e) {
+                console.error(`[${shortId}] Müşteri context hatası:`, e)
               }
-            } catch (e) {
-              console.error(`[${shortId}] Müşteri context hatası:`, e)
             }
           }
 

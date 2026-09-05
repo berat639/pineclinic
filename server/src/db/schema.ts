@@ -540,6 +540,18 @@ export const patientNotes = pgTable('patient_notes', {
   createdAt: timestamp('created_at', { withTimezone: true }).default(sql`now()`),
 })
 
+export const vipAssistants = pgTable('vip_assistants', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  phone: text('phone').notNull().unique(),
+  contactName: text('contact_name'),
+  greeting: text('greeting').notNull().default("Merhaba! Ben Berat Bey'in kişisel asistanı Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?"),
+  customPrompt: text('custom_prompt'),
+  groundingEnabled: boolean('grounding_enabled').notNull().default(true),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Shift = typeof shifts.$inferSelect
@@ -549,6 +561,5 @@ export type PatientDisease = typeof patientDiseases.$inferSelect
 export type NewPatientDisease = typeof patientDiseases.$inferInsert
 export type PatientNote = typeof patientNotes.$inferSelect
 export type NewPatientNote = typeof patientNotes.$inferInsert
-
-
-
+export type VipAssistant = typeof vipAssistants.$inferSelect
+export type NewVipAssistant = typeof vipAssistants.$inferInsert
