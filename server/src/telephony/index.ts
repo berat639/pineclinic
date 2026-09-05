@@ -444,15 +444,11 @@ ${isOwnerCall
 
 BERAT BEY'E AKTARMA VE ACİL DURUM AKIŞI (ÇOK ÖNEMLİ):
 - Berat Bey'in kişisel telefon numarası: 05076652367.
-- Karşıdaki kişi Berat Bey ile doğrudan görüşmek istediğini belirttiğinde (örneğin "Berat Bey'e aktarır mısın?", "Berat ile görüşebilir miyim?", "Berat'a bağlar mısın?", "Beni Berat Bey'e yönlendir", "Aktarabilir misin?" gibi ifadeler):
-  1. Önce hemen sesli olarak: "Tabii ki, hemen Berat Bey'e aktarıyorum, lütfen hatta kalın." de.
-  2. Ardından vakit kaybetmeden aramaAktar(hedef: "05076652367", sebep: "Arayan kişi Berat Bey ile görüşmek istedi") aracını çağır.
-- Karşıdaki kişi aktarma talep etmese bile, acil veya mühim bir durumdan bahsederse:
-  1. Proaktif davranıp: "Durum acilse veya doğrudan görüşmek isterseniz sizi hemen Berat Bey'e aktarabilirim, ister misiniz?" de.
-  2. Karşı taraf "Evet", "Lütfen", "Olur", "Aktar" gibi bir onay verirse:
-     Önce "Hemen Berat Bey'e aktarıyorum, lütfen hattan ayrılmayın." de ve aramaAktar(hedef: "05076652367", sebep: "Acil durum aktarımı") aracını çağır.
+- Karşıdaki kişi Berat Bey ile görüşmek istediğinde ("Berat Bey'e aktarır mısın?", "Berat ile görüşebilir miyim?", "Beni aktar", "Bağlar mısın?") VEYA "aktarmamı ister misiniz?" teklifine "Evet", "Olur", "Lütfen", "Aktar", "Aktar bakalım", "Test et" dediğinde:
+  KESİNLİKLE İKİNCİ BİR TUR VEYA CEVAP BEKLEME! AYNI TUR İÇERİSİNDE HEM sesli olarak "Tabii ki, hemen Berat Bey'e aktarıyorum, lütfen hatta kalın." de, HEM DE AYNI ANDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma") ARACINI ÇAĞIR.
+- Eğer karşıdaki kişi acil veya önemli bir durumdan bahsederse: "Durum acilse veya doğrudan görüşmek isterseniz sizi hemen Berat Bey'e aktarmamı ister misiniz?" diye teklifte bulun. Onay aldığın an aramaAktar aracını çağır.
 ${isOwnerCall
-  ? `- Eğer Berat Bey aktarmayı test etmek amacıyla "beni aktar", "test et", "aktar bakalım" derse: "Hemen aktarma testini başlatıyorum Berat Bey, lütfen bekleyin." de ve aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma testi") aracını çağır.`
+  ? `- Eğer Berat Bey aktarmayı test etmek amacıyla "beni aktar", "test et", "aktar bakalım", "evet aktar" derse: "Hemen aktarma testini başlatıyorum Berat Bey, lütfen bekleyin." de ve AYNI TURDA ANINDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma testi") aracını çağır.`
   : ''
 }
 `

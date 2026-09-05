@@ -86,9 +86,9 @@ export async function sendAmiAction(action: Record<string, string>, timeoutMs = 
         const isSuccess = buffer.includes('Response: Success')
         const messageMatch = buffer.match(/Message:\s*([^\r\n]+)/i)
         const msg = messageMatch ? messageMatch[1] : (isSuccess ? 'İşlem başarılı' : 'İşlem başarısız')
-        
+
         // Logoff nicely
-        try { socket.write('Action: Logoff\r\n\r\n') } catch {}
+        try { socket.write('Action: Logoff\r\n\r\n') } catch { }
         finish({ success: isSuccess, message: msg, raw: buffer })
       }
     })
@@ -110,7 +110,7 @@ export async function sendAmiAction(action: Record<string, string>, timeoutMs = 
  */
 export async function transferCall(channel: string, targetNumber: string): Promise<{ success: boolean; message: string }> {
   console.log(`[AMI] Çağrı aktarılıyor: channel=${channel} -> target=${targetNumber}`)
-  
+
   let cleanNumber = targetNumber.replace(/\D/g, '')
   if (cleanNumber.startsWith('90') && cleanNumber.length === 12) {
     cleanNumber = '0' + cleanNumber.slice(2)
@@ -139,7 +139,7 @@ export async function transferCall(channel: string, targetNumber: string): Promi
  */
 export async function initiateOutboundCall(customerNumber: string, callerId: string): Promise<{ success: boolean; message: string }> {
   console.log(`[AMI] Dış arama başlatılıyor: heden=${customerNumber}, callerId=${callerId}`)
-  
+
   const cleanNumber = customerNumber.replace(/\D/g, '')
   if (!cleanNumber) {
     return { success: false, message: 'Geçersiz müşteri telefon numarası' }
