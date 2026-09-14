@@ -189,6 +189,8 @@ export function flowToPromptText(flow: ConversationFlow): string {
         } else if (act === 'send_wa_message') {
           const message = (node.data as Record<string, unknown>).message || ''
           lines.push(`${prefix}${step}. WHATSAPP YANITI: Kullanıcıya şu mesajı yanıt olarak yaz: ${JSON.stringify(message)}. Bu adımda randevu oluşturma.`)
+        } else if (act === 'send_wa_location') {
+          lines.push(`${prefix}${step}. ARAYANA WHATSAPP KONUMU GÖNDER: Kullanıcı konum, adres veya yol tarifi istediğinde whatsappKonumGonder aracını çağır. Araç başarılı olursa konumun WhatsApp'tan gönderildiğini söyle.`)
         } else if (act === 'save_patient_note' || act === 'notBirak') {
           lines.push(`${prefix}${step}. HASTADAN NOT AL: Karşı tarafın yanıtını / mesajını hastaNotKaydet aracını çağırarak kaydet.`)
         } else if (act === 'end_call') {
@@ -227,6 +229,8 @@ export function flowToPromptText(flow: ConversationFlow): string {
       
       if (act === 'transfer_call') {
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya ima ederse, akışı derhal kesip aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
+      } else if (act === 'send_wa_location') {
+        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya konum/adres/yol tarifi isterse, akışı derhal kesip whatsappKonumGonder aracını çağır. Başarılı sonuçtan sonra konumu WhatsApp'tan gönderdiğini söyle.`)
       } else if (act === 'end_call') {
         const msg = (node.data as Record<string, unknown>).message || ''
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanırsa, akışı derhal kesip cagriySonlandir() aracını çağır. ${msg ? `Öncesinde "${msg}" de.` : ''}`)

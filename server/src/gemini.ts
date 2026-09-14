@@ -61,12 +61,14 @@ export async function createLiveSession(
     voiceName?: string
     realtimeInputConfig?: RealtimeInputConfig
     telephonyChannel?: string
+    callerPhone?: string
     direction?: string
     enableGoogleSearch?: boolean
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
   let lastPhoneUsed: string | null = null
+  let locationSent = false
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
@@ -106,6 +108,19 @@ export async function createLiveSession(
       } catch (err) {
         console.error('[hastaNotKaydet] Hata:', err)
         return { success: false, message: 'Not kaydedilirken bir hata oluştu.' }
+      }
+    }
+
+    if (name === 'whatsappKonumGonder') {
+      if (locationSent) return { success: true, message: 'Konum bu görüşme sırasında daha önce WhatsApp üzerinden gönderildi.' }
+      if (!options.callerPhone) return { success: false, message: 'Arayan numara alınamadı. Kullanıcıdan WhatsApp numarasını istemek gerekiyor.' }
+      try {
+        const { sendLocationToCaller } = await import('./services/voice-whatsapp')
+        await sendLocationToCaller(options.callerPhone)
+        locationSent = true
+        return { success: true, message: 'Konum arayan numaraya WhatsApp üzerinden gönderildi. Kullanıcıya kısa bir sesli onay ver.' }
+      } catch {
+        return { success: false, message: 'Konum WhatsApp üzerinden gönderilemedi. Kullanıcıya bağlantının şu an gönderilemediğini söyle.' }
       }
     }
 

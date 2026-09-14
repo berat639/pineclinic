@@ -125,6 +125,7 @@ function ActionNode({ data }: { data: ActionData }) {
     'webhook': '🔗 Dış Sisteme Gönder (Webhook)',
     'end_call': '👋 Bilgi Ver ve Bitir',
     'transfer_call': '📞 Aramayı Aktar (Akıllı Beklemeli)',
+    'send_wa_location': '📍 Arayana WhatsApp’tan Konum Gönder',
   }
   const displayLabel = labelMap[data.action] || data.label || '⚡ İşlem'
   return (
@@ -620,13 +621,17 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
           {selectedNode?.type === 'actionNode' && (() => {
             const d = selectedNode.data as ActionData;
-            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'send_wa_message', 'save_record', 'transfer', 'randevuOlustur'];
+            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'send_wa_message', 'send_wa_location', 'save_record', 'transfer', 'randevuOlustur'];
             const isCustomAction = d.action && !validActions.includes(d.action);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>İşlem Tipi</label>
-                  <select value={d.action || ''} onChange={e => updateSelectedNode({ action: e.target.value, label: e.target.options[e.target.selectedIndex].text })} style={inputStyle}>
+                  <select value={d.action || ''} onChange={e => {
+                    const action = e.target.value
+                    updateSelectedNode({ action, label: e.target.options[e.target.selectedIndex].text,
+                      ...(action === 'send_wa_location' && !d.triggerKeywords ? { triggerKeywords: 'konum, adres, yol tarifi, nasıl gelebilirim' } : {}) })
+                  }} style={inputStyle}>
                     <option value="">Bir işlem seçin...</option>
                     {isCustomAction && <option value={d.action}>{d.action} (Özel İşlem)</option>}
                     <option value="save_appointment_pending">📝 Randevu Talebi Oluştur (Onay Bekler)</option>
@@ -639,6 +644,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                       <>
                         <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
                         <option value="transfer_call">📞 Aramayı Aktar (Akıllı Beklemeli)</option>
+                        <option value="send_wa_location">📍 Arayana WhatsApp’tan Konum Gönder</option>
                       </>
                     )}
                     
@@ -676,6 +682,17 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   <div>
                     <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Kapanış Mesajı (Yapay Zeka Okur)</label>
                     <textarea value={d.message || ''} onChange={e => updateSelectedNode({ message: e.target.value })} placeholder="Bilgileriniz alındı, teşekkür ederiz." rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+                  </div>
+                )}
+
+                {d.action === 'send_wa_location' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: '#052e16', border: '1px solid #166534', borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: '#bbf7d0', lineHeight: 1.6 }}>
+                      Arayan numaraya kayıtlı klinik konumu Evolution API üzerinden WhatsApp mesajı olarak gönderilir.
+                    </div>
+                    <label style={{ fontSize: 11, color: '#e2e8f0' }}>Tetikleyici ifadeler</label>
+                    <input value={(d.triggerKeywords as string) || ''} onChange={e => updateSelectedNode({ triggerKeywords: e.target.value })}
+                      placeholder="konum, adres, yol tarifi, nasıl gelebilirim" style={inputStyle} />
                   </div>
                 )}
 

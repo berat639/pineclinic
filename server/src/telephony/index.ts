@@ -607,6 +607,7 @@ ${isOwnerCall
                 model,
                 voiceName,
                 telephonyChannel: state.callerChannel,
+                callerPhone: state.callerPhone,
                 direction: direction,
                 enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
               },

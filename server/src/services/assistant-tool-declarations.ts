@@ -141,6 +141,11 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
       },
     },
     {
+      name: 'whatsappKonumGonder',
+      description: 'Telefon görüşmesindeki kişi konumu, adresi veya yol tarifini WhatsApp üzerinden istediğinde çağır. Konumu arayan telefon numarasına gönderir. Başarılı araç sonucundan önce gönderildiğini söyleme.',
+      parameters: { type: Type.OBJECT, properties: {} },
+    },
+    {
       name: 'aramaAktar',
       description: 'Aramayı yetkili birime veya başka bir telefon numarasına aktarır. Berat Bey\'e aktarmak için hedef: "05076652367" veya "berat" olarak kullanılır.',
       parameters: {
