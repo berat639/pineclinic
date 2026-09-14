@@ -185,7 +185,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
         const target = (node.data as Record<string, unknown>).transferNumber || ''
         const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
         if (act === 'transfer_call') {
-          lines.push(`${prefix}${step}. ARAMAYI AKTAR: ${target ? `"${target}" birimine ` : ''}aramaAktar aracını çağır.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
+          lines.push(`${prefix}${step}. ARAMAYI AKTAR: ŞU AN aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
         } else if (act === 'save_patient_note' || act === 'notBirak') {
           lines.push(`${prefix}${step}. HASTADAN NOT AL: Karşı tarafın yanıtını / mesajını hastaNotKaydet aracını çağırarak kaydet.`)
         } else if (act === 'end_call') {
@@ -223,7 +223,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
       const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
       
       if (act === 'transfer_call') {
-        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya ima ederse, akışı derhal kesip aramaAktar(${target ? `hedef: ${target}` : ''}) aracını çağır.`)
+        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya ima ederse, akışı derhal kesip aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
       } else if (act === 'end_call') {
         const msg = (node.data as Record<string, unknown>).message || ''
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanırsa, akışı derhal kesip cagriySonlandir() aracını çağır. ${msg ? `Öncesinde "${msg}" de.` : ''}`)

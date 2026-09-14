@@ -901,8 +901,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             {/* 2. Compact Live Listening Header Bar (Visible when listening and panel is closed) */}
             {isListening && !assistantPanelOpen && (
               <div style={{
-                background: '#0f172a',
-                border: `1px solid ${checkActionTrigger(transcript) ? '#22c55e' : '#ef4444'}`,
+                background: 'var(--background)',
+                border: `1px solid ${checkActionTrigger(transcript) ? '#22c55e' : 'var(--border)'}`,
                 borderRadius: 8,
                 padding: '5px 12px',
                 display: 'flex',
@@ -916,7 +916,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 <span style={{ color: checkActionTrigger(transcript) ? '#4ade80' : '#ef4444', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase' }}>
                   {checkActionTrigger(transcript) ? '⚡ İŞLENİYOR:' : 'DİNLENİYOR:'}
                 </span>
-                <span style={{ color: '#ffffff', fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span style={{ color: 'var(--foreground)', fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {transcript || "Konuşun ('18 dolgu ekle', 'asistanı kapat')..."}
                 </span>
               </div>
@@ -926,9 +926,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             <button
               onClick={() => setAssistantPanelOpen(prev => !prev)}
               style={{
-                background: assistantPanelOpen ? '#1e3a8a' : '#1e293b',
-                border: `1px solid ${assistantPanelOpen ? '#3b82f6' : '#334155'}`,
-                color: assistantPanelOpen ? '#ffffff' : '#cbd5e1',
+                background: assistantPanelOpen ? 'var(--brand, #2563eb)' : 'var(--background)',
+                border: `1px solid ${assistantPanelOpen ? 'var(--brand, #3b82f6)' : 'var(--border)'}`,
+                color: assistantPanelOpen ? '#ffffff' : 'var(--foreground-2)',
                 padding: '7px 14px',
                 borderRadius: 8,
                 cursor: 'pointer',
@@ -945,8 +945,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               <span>{assistantPanelOpen ? '📋 Paneli Gizle' : '📋 Komut Paneli'}</span>
               {commandHistory.length > 0 && (
                 <span style={{
-                  background: assistantPanelOpen ? '#2563eb' : '#334155',
-                  color: '#ffffff',
+                  background: assistantPanelOpen ? 'rgba(255,255,255,0.2)' : 'var(--border)',
+                  color: assistantPanelOpen ? '#ffffff' : 'var(--foreground-2)',
                   fontSize: '0.72rem',
                   fontWeight: 700,
                   padding: '2px 7px',
@@ -967,8 +967,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               top: 'calc(100% + 8px)',
               left: 0,
               right: 0,
-              background: '#0f172a',
-              border: '1px solid #334155',
+              background: 'var(--background)',
+              border: '1px solid var(--border)',
               borderRadius: 12,
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)',
               zIndex: 100010,
@@ -980,14 +980,14 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               overflowY: 'auto'
             }}>
               {/* Panel Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ background: '#2563eb', padding: '6px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: 'var(--brand, #2563eb)', padding: '6px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Bot size={20} color="#ffffff" />
                   </div>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#ffffff' }}>AI Tedavi Asistanı & Sesli Komut Merkezi</h4>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--foreground)' }}>AI Tedavi Asistanı & Sesli Komut Merkezi</h4>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>
                       Sesli komut verin veya yazın; işlemler anında tedavi planına eklenir, düzenlenir veya silinir.
                     </span>
                   </div>
@@ -995,7 +995,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
                     onClick={() => setAssistantPanelOpen(false)}
-                    style={{ background: '#1e293b', border: '1px solid #334155', color: '#cbd5e1', cursor: 'pointer', padding: '5px 10px', borderRadius: 6, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                    style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground-2)', cursor: 'pointer', padding: '5px 10px', borderRadius: 6, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 4 }}
                   >
                     <X size={14} /> Kapat
                   </button>
@@ -1377,21 +1377,21 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               </div>
 
               {/* Panel Footer */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #334155', paddingTop: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
                 {commandHistory.length > 0 && (
                   <button
                     onClick={() => {
                       setCommandHistory([]);
                       toast.success('Asistan geçmişi temizlendi.');
                     }}
-                    style={{ background: '#334155', color: '#cbd5e1', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: '0.78rem', cursor: 'pointer' }}
+                    style={{ background: 'var(--glass-bg)', color: 'var(--foreground-2)', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: '0.78rem', cursor: 'pointer' }}
                   >
                     Geçmişi Temizle
                   </button>
                 )}
                 <button
                   onClick={() => setAssistantPanelOpen(false)}
-                  style={{ marginLeft: 'auto', background: '#0f172a', border: '1px solid #334155', color: '#ffffff', borderRadius: 6, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                  style={{ marginLeft: 'auto', background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', borderRadius: 6, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
                 >
                   Paneli Kapat
                 </button>
@@ -1607,7 +1607,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 </div>
                 <div style={{ padding: 12, background: 'var(--glass-bg)', border: '1px dashed var(--glass-border)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', gap: 12 }}>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, display: 'flex', gap: 8 }}>
                       <select 
                         value={defaultDoctorId || ''} 
                         onChange={e => {
@@ -1624,7 +1624,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           }
                           setDefaultDoctorId(chosenDocId);
                         }} 
-                        style={{ ...inputStyle, width: '100%', padding: '6px', fontSize: '0.8rem' }}
+                        style={{ ...inputStyle, flex: 1, padding: '6px', fontSize: '0.8rem' }}
                       >
                         <option value="">⚠️ Atanmadı</option>
                         {doctors?.map((d: any) => {
@@ -1644,6 +1644,49 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           );
                         })}
                       </select>
+                      <button
+                        title="Seçili doktoru bekleyen tüm işlemlere uygula"
+                        onClick={() => {
+                          if (!defaultDoctorId) {
+                            toast.error("Önce bir doktor seçmelisiniz.");
+                            return;
+                          }
+                          setToothDrafts(prev => {
+                            const next = { ...prev };
+                            let appliedCount = 0;
+                            for (const tooth of Object.keys(next)) {
+                              next[tooth] = next[tooth].map(item => {
+                                if (item.doctorId !== defaultDoctorId) {
+                                  appliedCount++;
+                                  return { ...item, doctorId: defaultDoctorId };
+                                }
+                                return item;
+                              });
+                            }
+                            if (appliedCount > 0) {
+                              toast.success(`Seçilen doktor ${appliedCount} işleme başarıyla uygulandı.`);
+                            } else {
+                              toast("Değiştirilecek işlem bulunamadı.");
+                            }
+                            return next;
+                          });
+                        }}
+                        style={{
+                          background: 'var(--brand, #3b82f6)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 6,
+                          padding: '6px 12px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6
+                        }}
+                      >
+                        <Check size={14} /> Tümüne Uygula
+                      </button>
                     </div>
                   </div>
                 </div>
