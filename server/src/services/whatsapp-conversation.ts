@@ -2,7 +2,8 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { patients, whatsappConversations, whatsappMessages } from '../db/schema'
 import { credentialsFor, getWhatsAppClinic, patientPhoneMatches } from '../db/repositories/whatsapp'
-import { detectOptOut, EvolutionError, sendWhatsAppText } from '../integrations/whatsapp'
+import { getSetting } from '../db/repositories/settings'
+import { detectLocationRequest, detectOptOut, EvolutionError, sendWhatsAppText } from '../integrations/whatsapp'
 import { buildSystemPrompt, resolveLiveModel } from './assistant-config'
 import { buildToolDeclarations } from './assistant-tool-declarations'
 import { executeWhatsAppTool, WHATSAPP_TOOL_NAMES } from './whatsapp-tools'
@@ -54,6 +55,13 @@ export async function processWhatsAppConversation(conversationId: string) {
         if (optOut) {
           replyText = 'WhatsApp bildirim tercihiniz kapatıldı. Dilerseniz destek almak için buradan yazabilirsiniz.'
         } else {
+          const locationUrl = detectLocationRequest(message.text) ? await getSetting('whatsapp.location_url') : null
+          if (locationUrl) {
+            const locationMessage = await getSetting('whatsapp.location_message')
+            replyText = `${locationMessage || 'Kliniğimizin konumuna aşağıdaki bağlantıdan ulaşabilirsiniz:'}\n${locationUrl}`
+          }
+        }
+        if (!replyText) {
           const previous = await db.select().from(whatsappMessages).where(and(eq(whatsappMessages.conversationId, conversationId), sql`${whatsappMessages.sequence} < ${message.sequence}`))
             .orderBy(desc(whatsappMessages.sequence)).limit(25)
           const history = [...(Array.isArray(conversation.history) ? conversation.history.slice(-20) : []), ...previous.reverse().flatMap(m => [

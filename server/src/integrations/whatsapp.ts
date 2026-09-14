@@ -26,6 +26,12 @@ export function detectOptOut(text: string): boolean {
   return ['dur', 'durdur', 'stop', 'unsubscribe', 'bildirim istemiyorum', 'mesaj istemiyorum', 'bildirimleri kapat']
     .includes(text.trim().toLocaleLowerCase('tr-TR').replace(/[.!]+$/, ''))
 }
+export function detectLocationRequest(text: string): boolean {
+  const normalized = text.toLocaleLowerCase('tr-TR').replace(/[?!.,;:]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return /\b(konum|adres|lokasyon)\b/.test(normalized)
+    || /\b(nerede|neredesiniz|neredeyiz)\b/.test(normalized)
+    || /\b(yol tarifi|nasıl gelebilirim|nasıl giderim)\b/.test(normalized)
+}
 export function verifyWebhookSecret(actual: string | null, expected: string): boolean {
   const a = Buffer.from(actual || '')
   const b = Buffer.from(expected)

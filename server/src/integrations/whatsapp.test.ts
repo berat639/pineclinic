@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { detectOptOut, normalizePhone, parseEvolutionMessages, verifyWebhookSecret } from './whatsapp'
+import { detectLocationRequest, detectOptOut, normalizePhone, parseEvolutionMessages, verifyWebhookSecret } from './whatsapp'
 
 const now = Date.now()
 const payload = (overrides: Record<string, unknown> = {}) => ({
@@ -43,6 +43,12 @@ describe('WhatsApp safety helpers', () => {
   test('requires an exact opt-out phrase', () => {
     expect(detectOptOut('DUR!')).toBe(true)
     expect(detectOptOut('Randevuyu iptal etmek istiyorum')).toBe(false)
+  })
+
+  test('recognizes common Turkish location requests', () => {
+    expect(detectLocationRequest('Konum atar mısınız?')).toBe(true)
+    expect(detectLocationRequest('Kliniğiniz nerede')).toBe(true)
+    expect(detectLocationRequest('Yarın için randevu istiyorum')).toBe(false)
   })
 
   test('compares webhook secrets safely and requires 32 bytes', () => {
