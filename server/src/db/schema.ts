@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, integer, bigint, timestamp, date, primaryKey, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, boolean, integer, bigint, timestamp, date, primaryKey, jsonb, uniqueIndex, index, bigserial } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export const accounts = pgTable('accounts', {
@@ -83,10 +83,13 @@ export const clinics = pgTable('clinics', {
   smsSenderId: text('sms_sender_id'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  // WhatsApp Business API
-  whatsappPhoneNumberId: text('whatsapp_phone_number_id'),
-  whatsappAccessToken: text('whatsapp_access_token'),
-  whatsappVerifyToken: text('whatsapp_verify_token'),
+  // Evolution API; secrets use AES-256-GCM.
+  evolutionBaseUrl: text('evolution_base_url'),
+  evolutionApiKey: text('evolution_api_key'),
+  evolutionInstanceName: text('evolution_instance_name'),
+  evolutionWebhookSecret: text('evolution_webhook_secret'),
+  evolutionConnectionState: text('evolution_connection_state').notNull().default('unconfigured'),
+  whatsappAiEnabled: boolean('whatsapp_ai_enabled').notNull().default(false),
   whatsappEnabled: boolean('whatsapp_enabled').notNull().default(false),
 })
 
@@ -96,26 +99,51 @@ export const notificationTemplates = pgTable('notification_templates', {
   type: text('type').notNull(), // 'sms', 'email', 'whatsapp'
   name: text('name').notNull(), // e.g. 'periodic_reminder'
   content: text('content').notNull(),
-  // WhatsApp-specific (Meta approved template info)
-  whatsappTemplateName: text('whatsapp_template_name'),   // Meta'da kayıtlı template adı
-  whatsappTemplateStatus: text('whatsapp_template_status').default('pending'), // pending | approved | rejected
-  whatsappTemplateId: text('whatsapp_template_id'),       // Meta'nın döndürdüğü ID
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
 export const whatsappConversations = pgTable('whatsapp_conversations', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
-  patientPhone: text('patient_phone').notNull(), // E.164 format, e.g. +905xxxxxxxxx
+  patientPhone: text('patient_phone'), // E.164; null for unresolved LID senders
+  instanceName: text('instance_name'),
+  remoteJid: text('remote_jid'),
+  aiPaused: boolean('ai_paused').notNull().default(false),
   patientId: uuid('patient_id').references(() => patients.id),
   // Conversation history stored as JSON array of {role, text} for Gemini chat
   history: jsonb('history').notNull().default([]),
-  // 24-hour window tracking
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow(),
-  windowExpiresAt: timestamp('window_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-})
+}, (t) => [uniqueIndex('wa_conversation_identity').on(t.clinicId, t.instanceName, t.remoteJid)])
+
+export const whatsappMessages = pgTable('whatsapp_messages', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  sequence: bigserial('sequence', { mode: 'number' }).notNull(),
+  conversationId: uuid('conversation_id').notNull().references(() => whatsappConversations.id),
+  externalId: text('external_id').notNull(),
+  direction: text('direction').notNull(),
+  text: text('text').notNull(),
+  status: text('status').notNull().default('pending'),
+  replyText: text('reply_text'),
+  providerMessageId: text('provider_message_id'),
+  deliveryStatus: text('delivery_status'),
+  attempts: integer('attempts').notNull().default(0),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('wa_message_external').on(t.conversationId, t.externalId),
+  index('wa_message_pending').on(t.status, t.availableAt),
+])
+
+export const whatsappToolExecutions = pgTable('whatsapp_tool_executions', {
+  messageId: uuid('message_id').notNull().references(() => whatsappMessages.id),
+  name: text('name').notNull(),
+  arguments: jsonb('arguments').notNull(),
+  result: jsonb('result').notNull(),
+}, (t) => [primaryKey({ columns: [t.messageId, t.name] })])
 
 export const patients = pgTable('patients', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

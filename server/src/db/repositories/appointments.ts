@@ -1,5 +1,6 @@
 import { eq, desc, and, gte, lte } from 'drizzle-orm'
 import { db } from '../client'
+import type { DbTransaction } from './whatsapp'
 import { appointments } from '../schema'
 import { broadcastSSE } from '../../events'
 
@@ -131,6 +132,7 @@ export async function createFlowAppointment(
   fields: Record<string, unknown>,
   sessionId?: string,
   calendarEventId?: string,
+  executor: typeof db | DbTransaction = db,
 ): Promise<Appointment> {
   // Sanitize fields to plain JSON (Gemini might pass non-serializable values)
   const safeFields = JSON.parse(JSON.stringify(fields ?? {}))
@@ -142,7 +144,7 @@ export async function createFlowAppointment(
 
   console.log('[createFlowAppointment]', { name, phone, dateVal, timeVal, typeVal })
 
-  const [inserted] = await db
+  const [inserted] = await executor
     .insert(appointments)
     .values({
       data: safeFields,
@@ -157,7 +159,7 @@ export async function createFlowAppointment(
     .returning()
 
   const result = rowToAppointment(inserted)
-  try { broadcastSSE('new_appointment', result) } catch {}
+  if (executor === db) { try { broadcastSSE('new_appointment', result) } catch {} }
   return result
 }
 

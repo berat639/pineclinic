@@ -1,5 +1,6 @@
 'use client'
 
+import EvolutionWhatsAppCard from './EvolutionWhatsAppCard'
 import { useEffect, useState, type CSSProperties } from 'react'
 
 type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
@@ -31,7 +32,7 @@ function Spinner() {
   return (
     <div style={{
       width: 24, height: 24,
-      border: '2px solid rgba(255,255,255,0.08)',
+      border: '2px solid #334155',
       borderTopColor: '#0369A1',
       borderRadius: '50%',
       animation: 'spin 0.7s linear infinite',
@@ -59,14 +60,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [smtpPass, setSmtpPass] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('none')
 
-  // WhatsApp States
-  const [waPhoneNumberId, setWaPhoneNumberId] = useState('')
-  const [waAccessToken, setWaAccessToken] = useState('')
-  const [waVerifyToken, setWaVerifyToken] = useState('')
-  const [waEnabled, setWaEnabled] = useState(false)
-  const [waShowToken, setWaShowToken] = useState(false)
-  const [waCopied, setWaCopied] = useState(false)
-
   // Branding / Logo State
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('')
   const [uploadingLogo, setUploadingLogo] = useState(false)
@@ -78,10 +71,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
     sekreter: ['calendar', 'patients', 'payments'],
     asistan: ['calendar', 'patients']
   })
-
-  const webhookUrl = typeof window !== 'undefined'
-    ? `${window.location.origin.replace(':3000', ':3001')}/api/whatsapp/webhook`
-    : '/api/whatsapp/webhook'
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -111,11 +100,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         if (data.smsPassword) setSmsPassword(data.smsPassword)
         if (data.smsSenderId) setSmsSenderId(data.smsSenderId)
 
-        // WhatsApp
-        if (data.whatsappPhoneNumberId) setWaPhoneNumberId(data.whatsappPhoneNumberId)
-        if (data.whatsappAccessToken) setWaAccessToken(data.whatsappAccessToken)
-        if (data.whatsappVerifyToken) setWaVerifyToken(data.whatsappVerifyToken)
-        if (data.whatsappEnabled !== undefined) setWaEnabled(!!data.whatsappEnabled)
+
       })
       .catch(() => showToast('error', 'Entegrasyon verileri alınamadı'))
       .finally(() => setLoading(false))
@@ -141,10 +126,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
           smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
           smsUsercode, smsPassword, smsSenderId,
-          whatsappPhoneNumberId: waPhoneNumberId,
-          whatsappAccessToken: waAccessToken,
-          whatsappVerifyToken: waVerifyToken,
-          whatsappEnabled: waEnabled,
         })
       })
       
@@ -194,19 +175,18 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         <div style={{
           position: 'fixed', top: 20, right: 20, zIndex: 999,
           padding: '10px 15px',
-          background: toast.type === 'success' ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.15)',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(22,163,74,0.35)' : 'rgba(220,38,38,0.35)'}`,
+          background: toast.type === 'success' ? '#14532d' : '#7f1d1d',
+          border: `1px solid ${toast.type === 'success' ? '#15803d' : '#b91c1c'}`,
           borderRadius: 10,
           color: toast.type === 'success' ? '#4ade80' : '#f87171',
           fontSize: 13, fontWeight: 500,
-          backdropFilter: 'blur(12px)',
         }}>
           {toast.text}
         </div>
       )}
 
       {/* Marka / Logo Ayarları */}
-      <div className="glass-card" style={{ padding: 24 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
         <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>Marka ve Görünüm</h3>
         <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
           Sistemde (özellikle hasta ekranlarında veya panelde) görünecek kurum logonuz.
@@ -241,7 +221,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </div>
 
       {/* VoIP Card */}
-      <div className="glass-card" style={{ padding: 24 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
         <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>Çağrı Merkezi / Santral (VoIP)</h3>
         <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
           Yapay zeka asistanının aramaları karşılayıp arama yapabilmesi için SIP Trunk ayarları.
@@ -272,7 +252,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </div>
 
       {/* SMS Card */}
-      <div className="glass-card" style={{ padding: 24 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
         <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>SMS Ayarları (NetGSM)</h3>
         <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
           Hastalara randevu hatırlatıcılarını SMS ile göndermek için NetGSM API bilgileri.
@@ -294,7 +274,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </div>
 
       {/* SMTP Card */}
-      <div className="glass-card" style={{ padding: 24 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
         <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>E-Posta (SMTP) Ayarları</h3>
         <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
           Sistem üzerinden hastalarınıza bilgilendirme e-postaları göndermek için SMTP ayarları.
@@ -327,129 +307,12 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         </div>
       </div>
 
-      {/* WhatsApp Business API Card */}
-      <div className="glass-card" style={{ padding: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <h3 style={{ fontSize: 16, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 20 }}>💬</span> WhatsApp Business API
-          </h3>
-          {/* Enable Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--foreground-3)' }}>
-              {waEnabled ? 'Aktif' : 'Pasif'}
-            </span>
-            <div
-              onClick={() => setWaEnabled(!waEnabled)}
-              style={{
-                width: 42, height: 24, borderRadius: 12, cursor: 'pointer', transition: 'background 0.2s',
-                background: waEnabled ? '#16a34a' : 'rgba(255,255,255,0.1)',
-                position: 'relative',
-              }}
-            >
-              <div style={{
-                position: 'absolute', top: 3, transition: 'left 0.2s',
-                left: waEnabled ? 20 : 3,
-                width: 18, height: 18, borderRadius: '50%', background: '#fff',
-              }} />
-            </div>
-          </div>
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20, lineHeight: 1.5 }}>
-          Hastalara proaktif WhatsApp mesajı göndermek ve gelen WhatsApp mesajlarını yapay zeka ile yanıtlamak için Meta Business API bilgileri.
-        </p>
-
-        <div style={voipGridStyle}>
-          <div>
-            <div style={voipLabelStyle}>Phone Number ID</div>
-            <input
-              value={waPhoneNumberId}
-              onChange={e => setWaPhoneNumberId(e.target.value)}
-              placeholder="Örn. 123456789012345"
-              style={voipInputStyle}
-            />
-            <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 4 }}>Meta Developer Console &gt; WhatsApp &gt; API Setup</div>
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Access Token</div>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={waShowToken ? 'text' : 'password'}
-                value={waAccessToken}
-                onChange={e => setWaAccessToken(e.target.value)}
-                placeholder="••••••••••••••••"
-                style={{ ...voipInputStyle, paddingRight: 36 }}
-              />
-              <button
-                type="button"
-                onClick={() => setWaShowToken(!waShowToken)}
-                style={{
-                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: 14,
-                }}
-              >
-                {waShowToken ? '🙈' : '👁️'}
-              </button>
-            </div>
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Verify Token (Kendiniz Belirleyin)</div>
-            <input
-              value={waVerifyToken}
-              onChange={e => setWaVerifyToken(e.target.value)}
-              placeholder="Örn. pineclinic_wa_2024"
-              style={voipInputStyle}
-            />
-            <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 4 }}>Meta webhook kurulumunda bu token'ı kullanın</div>
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Webhook URL (Meta'ya Girin)</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                readOnly
-                value={webhookUrl}
-                style={{ ...voipInputStyle, color: '#60a5fa', cursor: 'text', flex: 1 }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(webhookUrl)
-                  setWaCopied(true)
-                  setTimeout(() => setWaCopied(false), 2000)
-                }}
-                style={{
-                  padding: '0 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                  background: waCopied ? 'rgba(22,163,74,0.15)' : 'rgba(59,130,246,0.12)',
-                  border: `1px solid ${waCopied ? 'rgba(22,163,74,0.3)' : 'rgba(59,130,246,0.25)'}`,
-                  color: waCopied ? '#4ade80' : '#60a5fa',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-              >
-                {waCopied ? '✓ Kopyalandı' : 'Kopyala'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Setup Guide */}
-        <div style={{
-          marginTop: 16, padding: '12px 14px', borderRadius: 8,
-          background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.12)',
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#60a5fa', marginBottom: 6 }}>📋 Kurulum Adımları</div>
-          <ol style={{ fontSize: 12, color: 'var(--foreground-3)', lineHeight: 1.8, margin: 0, paddingLeft: 16 }}>
-            <li>Meta for Developers &gt; Uygulamanız &gt; WhatsApp &gt; Configuration</li>
-            <li>Webhook URL alanına yukarıdaki URL'yi girin</li>
-            <li>Verify Token alanına belirlediğiniz token'ı girin</li>
-            <li>"messages" subscription'ını aktif edin</li>
-            <li>Buradaki bilgileri kaydedin ve WhatsApp entegrasyonu hazır!</li>
-          </ol>
-        </div>
-      </div>
+      <EvolutionWhatsAppCard />
 
       {/* Role-based Tab Permissions */}
-      <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2e1065', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
           </div>
           <div>
@@ -460,7 +323,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {['hekim', 'sekreter', 'asistan'].map(role => (
-            <div key={role} style={{ padding: 16, background: 'rgba(0,0,0,0.2)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+            <div key={role} style={{ padding: 16, background: '#0f172a', borderRadius: 8, border: '1px solid #334155' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', textTransform: 'capitalize', marginBottom: 12 }}>
                 {role} Rolü
               </div>

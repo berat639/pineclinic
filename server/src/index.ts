@@ -1,3 +1,5 @@
+import { whatsappPlugin } from './api/whatsapp'
+import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, resolveLiveModel, buildSystemPrompt } from './services/assistant-config'
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { staticPlugin } from '@elysiajs/static'
@@ -76,19 +78,6 @@ function getTodayTurkish(): string {
   return `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()} ${days[now.getDay()]}`
 }
 
-const ALLOWED_LIVE_MODELS = [
-  'gemini-3.1-flash-live-preview',
-] as const
-const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview'
-
-async function resolveLiveModel(): Promise<string> {
-  const saved = await getAiModel()
-  if (saved && (ALLOWED_LIVE_MODELS as readonly string[]).includes(saved)) return saved
-  const fromEnv = process.env.GEMINI_LIVE_MODEL
-  if (fromEnv && (ALLOWED_LIVE_MODELS as readonly string[]).includes(fromEnv)) return fromEnv
-  return DEFAULT_LIVE_MODEL
-}
-
 // ── GoogleGenAI client ────────────────────────────────────────────────────────
 function createAI(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY
@@ -106,44 +95,6 @@ const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınız�
  * Build system prompt dynamically from DB sections.
  * No cache — always reads fresh from DB for instant updates.
  */
-async function buildSystemPrompt(greeting: string, direction: string = 'inbound'): Promise<string> {
-  let dbSections: Record<string, string> = {}
-  try {
-    const rows = await getAllPromptSections()
-    dbSections = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.value]))
-  } catch {}
-
-  const parts: string[] = []
-  for (const key of PROMPT_SECTION_KEYS) {
-    let value = dbSections[key] ?? getDefaultPromptValue(key) ?? ''
-    if (key === 'prompt.greeting_flow') {
-      if (direction === 'outbound') {
-        value = `GIDEN ARAMA (OUTBOUND) KARŞILAMA VE GÖREV TALİMATI:
-Sen dış arama (outbound call) yapıyorsun. Karşı taraf telefonu açtığında İLK CÜMLE olarak KESİNLİKLE şu giden karşılama mesajını söyle:
-"${greeting}"
-Ardından konuşma akışındaki adımları sırasıyla uygula.`
-      } else {
-        value = value.includes('{{greeting}}')
-          ? value.replace(/\{\{greeting\}\}/g, greeting)
-          : `GELEN ARAMA (INBOUND) KARŞILAMA:\nMüşteri aradığında şu karşılama mesajını söyle: "${greeting}"\nSonra müşterinin ne istediğini dinle ve yardımcı ol.`
-      }
-    }
-    if (value) parts.push(value)
-  }
-
-  // Inject conversation flow as prompt text
-  try {
-    const { getActiveFlow, flowToPromptText } = await import('./db/repositories/flows')
-    const flow = await getActiveFlow(direction)
-    if (flow) {
-      const flowText = flowToPromptText(flow)
-      if (flowText) parts.push(flowText)
-    }
-  } catch {}
-
-  return parts.join('\n\n')
-}
-
 // ── Session tracking ──────────────────────────────────────────────────────────
 interface TimedChunk {
   buffer: Buffer
@@ -359,134 +310,7 @@ const app = new Elysia()
     }
   })
 
-  // ── WhatsApp Webhook ───────────────────────────────────────────────────────
-  // GET: Meta webhook verification (hub.challenge)
-  .get('/api/whatsapp/webhook', async ({ query, set }: any) => {
-    const mode = query['hub.mode']
-    const token = query['hub.verify_token']
-    const challenge = query['hub.challenge']
-
-    if (mode !== 'subscribe' || !token) {
-      set.status = 403
-      return 'Forbidden'
-    }
-
-    const globalToken = process.env.WA_VERIFY_TOKEN
-    if (globalToken && token === globalToken) {
-      console.log('[WA Webhook] Verification success via WA_VERIFY_TOKEN')
-      set.headers['content-type'] = 'text/plain'
-      return challenge
-    }
-
-    try {
-      const { db } = await import('./db/client')
-      const { clinics } = await import('./db/schema')
-      const { eq } = await import('drizzle-orm')
-      const matched = await db.select().from(clinics).where(eq(clinics.whatsappVerifyToken, token)).limit(1)
-      if (matched.length > 0) {
-        console.log(`[WA Webhook] Verification success for clinic: ${matched[0].name}`)
-        set.headers['content-type'] = 'text/plain'
-        return challenge
-      }
-    } catch (e: any) {
-      console.error('[WA Webhook] Verification DB error:', e.message)
-    }
-
-    // If no token is configured anywhere yet or token matches, accept as fallback if verify token is provided
-    if (token) {
-      console.log(`[WA Webhook] Verification accepted with token: ${token}`)
-      set.headers['content-type'] = 'text/plain'
-      return challenge
-    }
-
-    set.status = 403
-    return 'Forbidden'
-  })
-
-  // POST: Incoming messages from Meta
-  .post('/api/whatsapp/webhook', async ({ body, set }: any) => {
-    try {
-      const payload = body as any
-      if (payload?.object !== 'whatsapp_business_account') {
-        set.status = 400
-        return { error: 'Not a WhatsApp event' }
-      }
-
-      // Acknowledge immediately (Meta requires < 5s response)
-      // Process async
-      ;(async () => {
-        try {
-          const { handleIncomingWhatsAppMessage } = await import('./services/whatsapp-conversation')
-          const { db } = await import('./db/client')
-          const { clinics } = await import('./db/schema')
-          const { eq } = await import('drizzle-orm')
-
-          for (const entry of payload.entry ?? []) {
-            for (const change of entry.changes ?? []) {
-              const val = change.value
-              const phoneNumberId = val?.metadata?.phone_number_id
-
-              if (!phoneNumberId) continue
-
-              // Find which clinic this phone number belongs to
-              const clinicRows = await db.select()
-                .from(clinics)
-                .where(eq(clinics.whatsappPhoneNumberId, phoneNumberId))
-                .limit(1)
-              const clinic = clinicRows[0]
-              if (!clinic?.whatsappEnabled) continue
-
-              // Handle status updates (delivery receipts, errors)
-              for (const status of val.statuses ?? []) {
-                if (status.status === 'failed' && status.errors?.[0]?.code === 131026) {
-                  // Patient blocked/opted out
-                  const { patients } = await import('./db/schema')
-                  const { and } = await import('drizzle-orm')
-                  await db.update(patients)
-                    .set({ whatsappOptOut: true })
-                    .where(and(
-                      eq(patients.clinicId, clinic.id),
-                      eq(patients.phone, status.recipient_id)
-                    ))
-                  console.log(`[WA Webhook] Opt-out via failed delivery: ${status.recipient_id}`)
-                }
-              }
-
-              // Handle incoming messages
-              for (const msg of val.messages ?? []) {
-                const from = msg.from  // Sender phone (E.164 without +)
-                let text = ''
-
-                if (msg.type === 'text') {
-                  text = msg.text?.body ?? ''
-                } else if (msg.type === 'interactive') {
-                  text = msg.interactive?.button_reply?.title
-                    ?? msg.interactive?.list_reply?.title
-                    ?? ''
-                } else {
-                  // Unsupported type (image, document etc.) — acknowledge politely
-                  text = '[medya mesajı]'
-                }
-
-                if (text) {
-                  console.log(`[WA Webhook] Message from +${from}: "${text.slice(0, 80)}"`)
-                  await handleIncomingWhatsAppMessage(clinic.id, `+${from}`, text)
-                }
-              }
-            }
-          }
-        } catch (err: any) {
-          console.error('[WA Webhook] Async processing error:', err.message)
-        }
-      })()
-
-      return { status: 'ok' }
-    } catch (err: any) {
-      console.error('[WA Webhook] Parse error:', err.message)
-      set.status = 200  // Always return 200 to Meta
-      return { status: 'ok' }
-    }
-  })
+  .use(whatsappPlugin)
 
   // ── Users API (admin) ──────────────────────────────────────────────────────
   .get('/api/admin/users', async () => {
@@ -2307,6 +2131,8 @@ app.ws('/ws', {
     
     // Start Cron Jobs
     startReminderCron()
+    const { startWhatsAppWorker } = await import('./queue/whatsapp-queue')
+    startWhatsAppWorker()
   })
 
 export type App = typeof app

@@ -2,7 +2,7 @@ import { db } from '../db/client'
 import { treatmentPlans, patients, clinics, notificationTemplates } from '../db/schema'
 import { eq, and, lte } from 'drizzle-orm'
 import { sendSMS } from '../services/netgsm'
-import { sendWhatsAppTemplate, sendWhatsAppText, type WhatsAppCredentials } from '../integrations/whatsapp'
+import { enqueueWhatsAppNotification } from '../db/repositories/whatsapp'
 
 export function startReminderCron() {
   console.log('[CRON] Starting reminder cron job...')
@@ -16,7 +16,7 @@ export function startReminderCron() {
   }, 1000 * 60 * 60)
 
   // Başlangıçta 5 saniye sonra ilk taramayı yap
-  setTimeout(() => processReminders(), 5000)
+  setTimeout(() => { void processReminders().catch(() => console.error('[CRON] İlk tarama tamamlanamadı.')) }, 5000)
 }
 
 async function processReminders() {
@@ -90,59 +90,22 @@ async function processReminders() {
     }
 
     // ── WhatsApp Gönderimi ─────────────────────────────────────────────────────
-    const sendWa = notifType === 'whatsapp' || notifType === 'whatsapp_sms'
+    const sendWa = notifType === 'whatsapp' || notifType === 'whatsapp_sms' || notifType === 'both'
 
-    if (sendWa) {
-      if (patient.whatsappOptOut) {
-        console.log(`[WA CRON] ${patient.name} WA opt-out, atlanıyor.`)
-      } else if (!clinic.whatsappEnabled || !clinic.whatsappPhoneNumberId || !clinic.whatsappAccessToken) {
-        console.log(`[CRON] ${clinic.name} kliniğinin WhatsApp bilgileri eksik, WA atlanıyor.`)
+    if (sendWa && !patient.whatsappOptOut) {
+      if (!clinic.whatsappEnabled || !clinic.evolutionApiKey || !clinic.evolutionInstanceName || !clinic.evolutionBaseUrl) {
+        console.error(`[WA CRON] ${clinic.name} kliniğinin Evolution bağlantısı kapalı veya eksik; WhatsApp bildirimi atlandı.`)
       } else {
-        const creds: WhatsAppCredentials = {
-          phoneNumberId: clinic.whatsappPhoneNumberId,
-          accessToken: clinic.whatsappAccessToken,
-        }
-
-        // WA şablonunu DB'den bul
-        const waTplRows = await db.select()
-          .from(notificationTemplates)
-          .where(and(
-            eq(notificationTemplates.clinicId, clinic.id),
-            eq(notificationTemplates.type, 'whatsapp'),
-            eq(notificationTemplates.name, 'periodic_reminder')
-          ))
-          .limit(1)
-
-        const waTpl = waTplRows[0]
-
-        let waResult
-        if (waTpl?.whatsappTemplateName && waTpl.whatsappTemplateStatus === 'APPROVED') {
-          // Meta-approved template: build components with patient name and procedure
-          const components = [{
-            type: 'body' as const,
-            parameters: [
-              { type: 'text' as const, text: patient.name },
-              { type: 'text' as const, text: treatment.procedureName },
-            ]
-          }]
-          waResult = await sendWhatsAppTemplate(patient.phone, creds, waTpl.whatsappTemplateName, 'tr', components)
-        } else {
-          // Fallback: free text (only works within 24h window — may fail, that's ok)
-          const optOutLink = `\n\nİletişim tercihleri: https://pinecllinic.thinpine.com/optout?p=${patient.id}`
-          const fallbackText = (waTpl?.content
-            ?? `Sayın ${patient.name}, ${treatment.procedureName} işleminiz için kontrol vaktiniz gelmiştir. Randevu almak için lütfen bize yazın.`) + optOutLink
-          waResult = await sendWhatsAppText(patient.phone, creds, fallbackText)
-        }
-
-        if (!waResult.success) {
-          if (waResult.error === 'OPT_OUT') {
-            await db.update(patients).set({ whatsappOptOut: true }).where(eq(patients.id, patient.id))
-            console.log(`[WA CRON] Opt-out detected for ${patient.name}`)
-          } else {
-            console.error(`[WA CRON] Failed for ${patient.name}:`, waResult.error)
-          }
-        } else {
-          console.log(`[WA CRON] Success for ${patient.name}`)
+        const [template] = await db.select().from(notificationTemplates).where(and(
+          eq(notificationTemplates.clinicId, clinic.id), eq(notificationTemplates.type, 'whatsapp'), eq(notificationTemplates.name, 'periodic_reminder'),
+        )).limit(1)
+        const content = (template?.content || `Sayın {{hasta_adi}}, {{islem}} işleminiz için kontrol vaktiniz gelmiştir. Randevu almak için bize yazabilirsiniz.`)
+          .replace(/\{\{hasta_adi\}\}/g, patient.name).replace(/\{\{islem\}\}/g, treatment.procedureName)
+        const message = `${content}\n\nWhatsApp bildirimlerini kapatmak için DUR yazabilirsiniz.`
+        try {
+          await enqueueWhatsAppNotification(clinic, patient.phone, message, `reminder:${treatment.id}:${treatment.nextNotificationDate}`)
+        } catch {
+          console.error('[WA CRON] Bildirim kuyruğa alınamadı.')
         }
       }
     }

@@ -395,11 +395,6 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
       smsUsercode: t.Optional(t.Union([t.String(), t.Null()])),
       smsPassword: t.Optional(t.Union([t.String(), t.Null()])),
       smsSenderId: t.Optional(t.Union([t.String(), t.Null()])),
-      // WhatsApp Business API
-      whatsappPhoneNumberId: t.Optional(t.Union([t.String(), t.Null()])),
-      whatsappAccessToken: t.Optional(t.Union([t.String(), t.Null()])),
-      whatsappVerifyToken: t.Optional(t.Union([t.String(), t.Null()])),
-      whatsappEnabled: t.Optional(t.Union([t.Boolean(), t.Null()])),
     })
   })
 

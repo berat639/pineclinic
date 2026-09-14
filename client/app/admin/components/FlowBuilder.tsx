@@ -84,11 +84,11 @@ function FieldNode({ data }: { data: FieldData }) {
     <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--flow-node-field)', border: isCustomField ? '1px solid #ef4444' : '1px solid var(--flow-node-field-border)', minWidth: 220 }}>
       <Handle type="target" position={Position.Top} style={{ background: 'var(--flow-node-field-border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <code style={{ fontSize: 11, fontWeight: 600, color: isCustomField ? '#ef4444' : '#7dd3fc', background: 'rgba(0,0,0,0.2)', padding: '1px 6px', borderRadius: 4 }}>
+        <code style={{ fontSize: 11, fontWeight: 600, color: isCustomField ? '#ef4444' : '#7dd3fc', background: '#0f172a', padding: '1px 6px', borderRadius: 4 }}>
           {isCustomField ? `⚠️ ${displayLabel}` : displayLabel}
         </code>
-        {data.required && <span style={{ fontSize: 9, padding: '1px 5px', background: 'rgba(251,146,60,0.2)', borderRadius: 8, color: '#fb923c', fontWeight: 600 }}>zorunlu</span>}
-        {data.fieldType !== 'text' && <span style={{ fontSize: 9, padding: '1px 5px', background: 'rgba(139,92,246,0.2)', borderRadius: 8, color: '#a78bfa' }}>{data.fieldType}</span>}
+        {data.required && <span style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', borderRadius: 8, color: '#fb923c', fontWeight: 600 }}>zorunlu</span>}
+        {data.fieldType !== 'text' && <span style={{ fontSize: 9, padding: '1px 5px', background: '#312e81', borderRadius: 8, color: '#a78bfa' }}>{data.fieldType}</span>}
       </div>
       <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', lineHeight: 1.4 }}>{data.description || 'Soru girilmedi...'}</div>
       <Handle type="source" position={Position.Bottom} style={{ background: 'var(--flow-node-field-border)' }} />
@@ -138,7 +138,7 @@ function ActionNode({ data }: { data: ActionData }) {
 
 function EndNode() {
   return (
-    <div style={{ padding: '8px 20px', borderRadius: 20, background: 'var(--card-bg)', color: 'var(--flow-text-muted)', fontSize: 11, fontWeight: 600, textAlign: 'center', minWidth: 120, border: '1px solid var(--glass-border)' }}>
+    <div style={{ padding: '8px 20px', borderRadius: 20, background: 'var(--card-bg)', color: 'var(--flow-text-muted)', fontSize: 11, fontWeight: 600, textAlign: 'center', minWidth: 120, border: '1px solid #334155' }}>
       <Handle type="target" position={Position.Top} style={{ background: '#64748b' }} />
       ✓ Bitti
     </div>
@@ -390,34 +390,34 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
   if (!loaded) return <div style={{ padding: 24, color: 'var(--foreground-3)' }}>Yükleniyor...</div>
 
-  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)', fontSize: 12, outline: 'none' }
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', background: '#020617', border: '1px solid #475569', borderRadius: 6, color: 'var(--foreground)', fontSize: 12, outline: 'none' }
   const selectedNode = nodes.find(n => n.id === selectedNodeId)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Toolbar */}
-      <div className="glass-card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>🔀 Konuşma Akışı</div>
         <div style={{ flex: 1 }} />
-        <button onClick={autoLayout} style={{ padding: '6px 14px', borderRadius: 6, background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+        <button onClick={autoLayout} style={{ padding: '6px 14px', borderRadius: 6, background: '#1e3a8a', border: '1px solid #1d4ed8', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
           📐 Otomatik Hizala
         </button>
-        <button onClick={loadSampleFlow} style={{ padding: '6px 14px', borderRadius: 6, background: 'rgba(236,72,153,0.15)', border: '1px solid rgba(236,72,153,0.3)', color: '#ec4899', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+        <button onClick={loadSampleFlow} style={{ padding: '6px 14px', borderRadius: 6, background: '#500724', border: '1px solid #9d174d', color: '#ec4899', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
           🌟 Örnek Hasta Akışını Yükle
         </button>
-        <button onClick={saveFlow} disabled={saving} style={{ padding: '6px 14px', borderRadius: 6, background: saving ? 'rgba(255,255,255,0.04)' : 'rgba(34,197,94,0.15)', border: `1px solid ${saving ? 'rgba(255,255,255,0.06)' : 'rgba(34,197,94,0.3)'}`, color: saving ? '#475569' : '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+        <button onClick={saveFlow} disabled={saving} style={{ padding: '6px 14px', borderRadius: 6, background: saving ? '#1e293b' : '#14532d', border: `1px solid ${saving ? '#334155' : '#15803d'}`, color: saving ? '#475569' : '#22c55e', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
           {saving ? '⏳ Kaydediliyor...' : '💾 Değişiklikleri Kaydet'}
         </button>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, minHeight: 600 }}>
         {/* Canvas */}
-        <div className="glass-card" style={{ flex: '1 1 300px', minHeight: 400, padding: 0, overflow: 'hidden', borderRadius: 12, position: 'relative' }}>
+        <div style={{ background: '#0f172a', border: '1px solid #334155', flex: '1 1 300px', minHeight: 400, padding: 0, overflow: 'hidden', borderRadius: 12, position: 'relative' }}>
           {/* Quick Add Toolbar */}
-          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 8, background: 'rgba(15,23,42,0.8)', padding: 8, borderRadius: 8, backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <button onClick={() => addNode('field')} style={{ padding: '6px 12px', background: 'rgba(59,130,246,0.2)', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid rgba(59,130,246,0.4)', cursor: 'pointer' }}>+ Alan Düğümü</button>
-            <button onClick={() => addNode('condition')} style={{ padding: '6px 12px', background: 'rgba(245,158,11,0.2)', color: '#fbbf24', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid rgba(245,158,11,0.4)', cursor: 'pointer' }}>+ Koşul Düğümü</button>
-            <button onClick={() => addNode('action')} style={{ padding: '6px 12px', background: 'rgba(168,85,247,0.2)', color: '#c084fc', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid rgba(168,85,247,0.4)', cursor: 'pointer' }}>+ İşlem Düğümü</button>
+          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 8, background: '#0f172a', padding: 8, borderRadius: 8, border: '1px solid #475569' }}>
+            <button onClick={() => addNode('field')} style={{ padding: '6px 12px', background: '#1e3a8a', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #2563eb', cursor: 'pointer' }}>+ Alan Düğümü</button>
+            <button onClick={() => addNode('condition')} style={{ padding: '6px 12px', background: '#78350f', color: '#fbbf24', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #b45309', cursor: 'pointer' }}>+ Koşul Düğümü</button>
+            <button onClick={() => addNode('action')} style={{ padding: '6px 12px', background: '#3b0764', color: '#c084fc', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #7e22ce', cursor: 'pointer' }}>+ İşlem Düğümü</button>
           </div>
           
           <ReactFlow
@@ -443,8 +443,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         </div>
 
         {/* Sidebar */}
-        <div className="glass-card" style={{ flex: '1 1 320px', maxWidth: '100%', padding: 20, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ background: '#0f172a', border: '1px solid #334155', flex: '1 1 320px', maxWidth: '100%', padding: 20, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid #334155' }}>
             Özellikler Paneli
           </h3>
 
@@ -460,7 +460,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
             if (!edge) return null;
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ padding: '12px', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8 }}>
+                <div style={{ padding: '12px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 8 }}>
                   <h4 style={{ fontSize: 12, fontWeight: 600, color: '#ef4444', marginBottom: 8 }}>Bağlantı Çizgisi Seçili</h4>
                   <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 12, lineHeight: 1.5 }}>
                     Seçili olan bağlantıyı silmek için aşağıdaki butonu kullanabilirsiniz.
@@ -471,7 +471,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                       setSelectedEdgeId(null);
                     }}
                     style={{
-                      width: '100%', padding: '8px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
+                      width: '100%', padding: '8px', background: '#7f1d1d', color: '#ef4444', border: '1px solid #991b1b', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s'
                     }}
                   >
                     🗑️ Bağlantıyı Sil
@@ -509,7 +509,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   </select>
                 </div>
                 {isCustomField && (
-                  <div style={{ padding: '10px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, fontSize: 11, color: '#ef4444' }}>
+                  <div style={{ padding: '10px 12px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 8, fontSize: 11, color: '#ef4444' }}>
                     ⚠️ Bu alan (<strong>{d.fieldName}</strong>) eski bir özel alan. Yeni sistemde özel alan kullanımı kısıtlanmıştır. Lütfen listeden geçerli bir alan seçin.
                   </div>
                 )}
@@ -528,7 +528,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   </select>
                 </div>
                 {d.fieldType === 'user' && (
-                  <div style={{ padding: '10px 12px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 8, fontSize: 11, color: 'var(--accent)', lineHeight: 1.5 }}>
+                  <div style={{ padding: '10px 12px', background: '#172554', border: '1px solid #1e3a8a', borderRadius: 8, fontSize: 11, color: 'var(--accent)', lineHeight: 1.5 }}>
                     ℹ️ Bu alan, sistemde kayıtlı olan <strong>kullanıcılarla (personel, uzman vb.)</strong> otomatik olarak eşleştirilir.
                   </div>
                 )}
@@ -538,7 +538,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                     <input value={d.enumValues ? d.enumValues.join(', ') : ''} onChange={e => updateSelectedNode({ enumValues: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} placeholder="seçenek1, seçenek2" style={inputStyle} />
                   </div>
                 )}
-                <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8 }}>
+                <div style={{ padding: '10px 12px', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--foreground)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={d.required} onChange={e => updateSelectedNode({ required: e.target.checked })} style={{ accentColor: '#fb923c', width: 16, height: 16 }} />
                     Bu alan zorunlu mu?
@@ -563,7 +563,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                 </div>
                 
                 {d.conditionField === 'user_intent' ? (
-                  <div style={{ padding: 12, borderRadius: 8, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                  <div style={{ padding: 12, borderRadius: 8, background: '#172554', border: '1px solid #1e3a8a' }}>
                     <label style={{ fontSize: 11, color: '#60a5fa', display: 'block', marginBottom: 6, fontWeight: 600 }}>
                       🧠 Yapay Zeka Neyi Algılasın?
                     </label>
@@ -589,14 +589,14 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                       </select>
                     </div>
                     {d.operator !== 'notEmpty' && (
-                      <div style={{ padding: 12, borderRadius: 8, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      <div style={{ padding: 12, borderRadius: 8, background: '#052e16', border: '1px solid #166534' }}>
                         <label style={{ fontSize: 11, color: '#22c55e', display: 'block', marginBottom: 6, fontWeight: 600 }}>
                           ✅ Hangi durumda "Evet" (Yeşil ok) yönüne gidilsin?
                         </label>
                         <select 
                           value={d.conditionValue === 'true' || d.conditionValue === 'false' ? d.conditionValue : 'custom'}
                           onChange={e => updateSelectedNode({ conditionValue: e.target.value === 'custom' ? '' : e.target.value })}
-                          style={{ ...inputStyle, marginBottom: (d.conditionValue === 'true' || d.conditionValue === 'false') ? 0 : 8, borderColor: 'rgba(34,197,94,0.3)' }}
+                          style={{ ...inputStyle, marginBottom: (d.conditionValue === 'true' || d.conditionValue === 'false') ? 0 : 8, borderColor: '#15803d' }}
                         >
                           <option value="true">Cevap Olumluysa (Evet vb.)</option>
                           <option value="false">Cevap Olumsuzsa (Hayır vb.)</option>
@@ -607,7 +607,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <input value={d.conditionValue} onChange={e => updateSelectedNode({ conditionValue: e.target.value })} placeholder="Örn: kanal tedavisi, onaylıyorum..." style={inputStyle} />
                         )}
 
-                        <div style={{ fontSize: 10, color: '#ef4444', marginTop: 12, borderTop: '1px dashed rgba(239,68,68,0.2)', paddingTop: 8 }}>
+                        <div style={{ fontSize: 10, color: '#ef4444', marginTop: 12, borderTop: '1px dashed #7f1d1d', paddingTop: 8 }}>
                           ❌ <strong>Diğer tüm cevaplarda</strong> otomatik olarak "Hayır" (Kırmızı ok) yönüne gidilir.
                         </div>
                       </div>
@@ -620,7 +620,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
           {selectedNode?.type === 'actionNode' && (() => {
             const d = selectedNode.data as ActionData;
-            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'send_wa_template', 'save_record', 'transfer', 'randevuOlustur'];
+            const validActions = ['save_appointment_pending', 'save_patient_note', 'webhook', 'end_call', 'transfer_call', 'send_wa_message', 'save_record', 'transfer', 'randevuOlustur'];
             const isCustomAction = d.action && !validActions.includes(d.action);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -634,7 +634,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                     <option value="webhook">🔗 Dış Sisteme Gönder (Webhook API)</option>
                     
                     {direction === 'whatsapp' ? (
-                      <option value="send_wa_template">📱 WhatsApp Şablon Mesajı Gönder (24h kuralı)</option>
+                      <option value="send_wa_message">📱 WhatsApp Mesajı Gönder</option>
                     ) : (
                       <>
                         <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
@@ -650,7 +650,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                 </div>
 
                 {(d.action === 'save_appointment_pending' || d.action === 'save_patient_note') && (
-                  <div style={{ fontSize: 11, color: 'var(--foreground-3)', lineHeight: 1.6, background: 'rgba(168,85,247,0.1)', padding: 12, borderRadius: 8, border: '1px solid rgba(168,85,247,0.2)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--foreground-3)', lineHeight: 1.6, background: '#2e1065', padding: 12, borderRadius: 8, border: '1px solid #3b0764' }}>
                     Toplanan tüm bilgiler kliniğin sistemine düşer ve bildirim gönderilir.
                   </div>
                 )}
@@ -662,12 +662,12 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   </div>
                 )}
 
-                {d.action === 'send_wa_template' && (
+                {d.action === 'send_wa_message' && (
                   <div>
-                    <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Gönderilecek WhatsApp Şablon Adı</label>
-                    <input value={(d.waTemplateName as string) || ''} onChange={e => updateSelectedNode({ waTemplateName: e.target.value })} placeholder="örn: randevu_onay_01" style={inputStyle} />
+                    <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Gönderilecek WhatsApp Mesajı</label>
+                    <input value={(d.message as string) || ''} onChange={e => updateSelectedNode({ message: e.target.value })} placeholder="Talebiniz alındı." style={inputStyle} />
                     <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
-                      24 saat kuralı gereği kullanıcı ile yeni bir konuşma başlatmak için Meta onaylı bir şablon kullanmalısınız.
+                      Bu metin konuşma akışında Evolution API üzerinden yanıt olarak gönderilir.
                     </div>
                   </div>
                 )}
@@ -726,7 +726,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
           {selectedNode && selectedNode.type && !['startNode', 'endNode'].includes(selectedNode.type) && (
             <div style={{ marginTop: 'auto', paddingTop: 20 }}>
-              <button onClick={() => deleteNode(selectedNode.id)} style={{ width: '100%', padding: '10px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+              <button onClick={() => deleteNode(selectedNode.id)} style={{ width: '100%', padding: '10px', background: '#450a0a', color: '#ef4444', border: '1px solid #7f1d1d', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
                 Düğümü Sil
               </button>
             </div>
@@ -735,7 +735,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       </div>
       
       {/* Tips */}
-      <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(59,130,246,0.04)', border: '1px solid rgba(59,130,246,0.1)', fontSize: 11, color: 'var(--foreground-3)', lineHeight: 1.7 }}>
+      <div style={{ padding: '10px 14px', borderRadius: 8, background: '#172554', border: '1px solid #172554', fontSize: 11, color: 'var(--foreground-3)', lineHeight: 1.7 }}>
         <strong style={{ color: 'var(--foreground-3)' }}>İpuçları:</strong> Node&apos;ları sürükleyerek taşıyın. Bağlantı noktalarından sürükleyerek ok oluşturun.
         <strong> Düğüm Özelliklerini Düzenlemek</strong> için tuval üzerinde düğüme tıklayın. (Start ve End silinemez).
       </div>

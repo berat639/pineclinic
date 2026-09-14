@@ -3,6 +3,7 @@
  * No generated files needed. Safe to run multiple times.
  */
 import postgres from 'postgres'
+import { readFileSync } from 'node:fs'
 
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
@@ -793,20 +794,12 @@ async function runMigrations() {
   // ── Drop Deprecated ───────────────────────────────────────────────────────
   await sql`DROP TABLE IF EXISTS doctors CASCADE`.catch(() => {})
 
-  // ── WhatsApp Business API ─────────────────────────────────────────────────
-  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT`.catch(() => {})
-  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT`.catch(() => {})
-  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_verify_token TEXT`.catch(() => {})
+  // ── WhatsApp preferences and Evolution API migration ──────────────────────
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_enabled BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
 
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS whatsapp_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS sms_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS email_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
-
-
-  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_name TEXT`.catch(() => {})
-  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status TEXT DEFAULT 'pending'`.catch(() => {})
-  await sql`ALTER TABLE notification_templates ADD COLUMN IF NOT EXISTS whatsapp_template_id TEXT`.catch(() => {})
 
   await sql`
     CREATE TABLE IF NOT EXISTS whatsapp_conversations (
@@ -822,6 +815,10 @@ async function runMigrations() {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_wa_conv_clinic_phone ON whatsapp_conversations(clinic_id, patient_phone)`.catch(() => {})
+
+  await sql.begin(async tx => {
+    await tx.unsafe(readFileSync(new URL('./evolution-migration.sql', import.meta.url), 'utf8'))
+  })
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()

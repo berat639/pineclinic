@@ -186,6 +186,9 @@ export function flowToPromptText(flow: ConversationFlow): string {
         const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
         if (act === 'transfer_call') {
           lines.push(`${prefix}${step}. ARAMAYI AKTAR: ŞU AN aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
+        } else if (act === 'send_wa_message') {
+          const message = (node.data as Record<string, unknown>).message || ''
+          lines.push(`${prefix}${step}. WHATSAPP YANITI: Kullanıcıya şu mesajı yanıt olarak yaz: ${JSON.stringify(message)}. Bu adımda randevu oluşturma.`)
         } else if (act === 'save_patient_note' || act === 'notBirak') {
           lines.push(`${prefix}${step}. HASTADAN NOT AL: Karşı tarafın yanıtını / mesajını hastaNotKaydet aracını çağırarak kaydet.`)
         } else if (act === 'end_call') {
