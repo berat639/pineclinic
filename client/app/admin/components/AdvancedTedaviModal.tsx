@@ -1003,7 +1003,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               </div>
 
               {/* Voice & Manual Input Section */}
-              <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
                   {/* Voice Button */}
                   <button
@@ -1046,12 +1046,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       disabled={isAnalyzing}
                       style={{
                         flex: 1,
-                        background: '#0f172a',
-                        border: '1px solid #334155',
+                        background: 'var(--background)',
+                        border: '1px solid var(--border)',
                         borderRadius: 6,
                         padding: '8px 12px',
                         fontSize: '0.85rem',
-                        color: '#ffffff',
+                        color: 'var(--foreground)',
                         outline: 'none'
                       }}
                     />
@@ -1064,8 +1064,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       }}
                       disabled={!manualInput.trim() || isAnalyzing}
                       style={{
-                        background: manualInput.trim() && !isAnalyzing ? '#2563eb' : '#334155',
-                        color: '#ffffff',
+                        background: manualInput.trim() && !isAnalyzing ? 'var(--brand, #2563eb)' : 'var(--border)',
+                        color: manualInput.trim() && !isAnalyzing ? '#ffffff' : 'var(--foreground-3)',
                         border: 'none',
                         borderRadius: 6,
                         padding: '8px 14px',
@@ -1083,18 +1083,18 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 </div>
 
                 {/* Quick Trigger Keyword Badges */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: '0.73rem', color: '#94a3b8', paddingTop: 2 }}>
-                  <span style={{ fontWeight: 600, color: '#cbd5e1' }}>⚡ Otomatik Tetikleyiciler:</span>
-                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#38bdf8', fontWeight: 500 }}>➕ "ekle" / "yap" / "yaz"</span>
-                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#f87171', fontWeight: 500 }}>🗑️ "sil" / "kaldır" / "iptal"</span>
-                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#fbbf24', fontWeight: 500 }}>✏️ "düzenle" / "güncelle" / "değiştir"</span>
-                  <span style={{ background: '#0f172a', border: '1px solid #334155', padding: '2px 7px', borderRadius: 4, color: '#4ade80', fontWeight: 500 }}>💾 "kaydet" / "onayla"</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: '0.73rem', color: 'var(--foreground-3)', paddingTop: 2 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--foreground-2)' }}>⚡ Otomatik Tetikleyiciler:</span>
+                  <span style={{ background: 'var(--background)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4, color: '#38bdf8', fontWeight: 500 }}>➕ "ekle" / "yap" / "yaz"</span>
+                  <span style={{ background: 'var(--background)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4, color: '#f87171', fontWeight: 500 }}>🗑️ "sil" / "kaldır" / "iptal"</span>
+                  <span style={{ background: 'var(--background)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4, color: '#fbbf24', fontWeight: 500 }}>✏️ "düzenle" / "güncelle" / "değiştir"</span>
+                  <span style={{ background: 'var(--background)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4, color: '#4ade80', fontWeight: 500 }}>💾 "kaydet" / "onayla"</span>
                 </div>
 
                 {/* Real-time speech transcript or AI analyzing indicator */}
                 {isListening && (
                   <div style={{
-                    background: '#0f172a',
+                    background: 'var(--background)',
                     border: `1px solid ${checkActionTrigger(transcript) ? '#22c55e' : '#ef4444'}`,
                     borderRadius: 6,
                     padding: '8px 12px',
@@ -1109,7 +1109,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <span style={{ color: checkActionTrigger(transcript) ? '#4ade80' : '#ef4444', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase' }}>
                         {checkActionTrigger(transcript) ? '⚡ TETİKLENİYOR:' : 'DİNLENİYOR:'}
                       </span>
-                      <span style={{ color: '#ffffff', fontSize: '0.85rem', fontWeight: 500 }}>{transcript || 'Konuşmanız bekleniyor...'}</span>
+                      <span style={{ color: 'var(--foreground)', fontSize: '0.85rem', fontWeight: 500 }}>{transcript || 'Konuşmanız bekleniyor...'}</span>
                     </div>
                     {checkActionTrigger(transcript) && (
                       <span style={{ background: '#16a34a', color: '#ffffff', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
@@ -1120,7 +1120,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 )}
 
                 {isAnalyzing && (
-                  <div style={{ background: '#0f172a', border: '1px solid #3b82f6', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ background: 'var(--background)', border: '1px solid #3b82f6', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600 }}>⚙️ AI komutu analiz ediyor ve tedaviye uyguluyor...</span>
                   </div>
                 )}
@@ -1129,19 +1129,19 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               {/* Command History & CRUD Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#f8fafc' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--foreground)' }}>
                     📋 Uygulanan Komut Geçmişi ({commandHistory.length})
                   </span>
                 </div>
 
                 {commandHistory.length === 0 ? (
                   <div style={{
-                    background: '#1e293b',
-                    border: '1px dashed #334155',
+                    background: 'var(--glass-bg)',
+                    border: '1px dashed var(--border)',
                     borderRadius: 8,
                     padding: '20px 16px',
                     textAlign: 'center',
-                    color: '#94a3b8',
+                    color: 'var(--foreground-3)',
                     fontSize: '0.82rem'
                   }}>
                     Henüz bir komut verilmedi. Konuşmaya başlayarak veya metin kutusuna yazarak komut verebilirsiniz.
@@ -1154,8 +1154,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         <div
                           key={cmd.id}
                           style={{
-                            background: '#1e293b',
-                            border: `1px solid ${cmd.status === 'applied' ? '#16a34a' : '#475569'}`,
+                            background: 'var(--glass-bg)',
+                            border: `1px solid ${cmd.status === 'applied' ? '#16a34a' : 'var(--border)'}`,
                             borderRadius: 8,
                             padding: 10,
                             display: 'flex',
@@ -1172,16 +1172,16 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                 </span>
                               )}
                               {cmd.status === 'rejected' && (
-                                <span style={{ background: '#475569', color: '#ffffff', padding: '2px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700 }}>
+                                <span style={{ background: 'var(--border)', color: 'var(--foreground)', padding: '2px 8px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700 }}>
                                   ↩️ Geri Alındı
                                 </span>
                               )}
-                              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{cmd.timestamp}</span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>{cmd.timestamp}</span>
                             </div>
 
                             <button
                               onClick={() => deleteCommand(cmd.id)}
-                              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
                               title="Listeden Kaldır"
                             >
                               <Trash2 size={14} />
@@ -1200,12 +1200,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                 }}
                                 style={{
                                   flex: 1,
-                                  background: '#0f172a',
-                                  border: '1px solid #3b82f6',
+                                  background: 'var(--background)',
+                                  border: '1px solid var(--border)',
                                   borderRadius: 6,
                                   padding: '6px 10px',
                                   fontSize: '0.82rem',
-                                  color: '#ffffff'
+                                  color: 'var(--foreground)'
                                 }}
                               />
                               <button
@@ -1219,20 +1219,20 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   setEditingCommandId(null);
                                   setEditingCommandText('');
                                 }}
-                                style={{ background: '#334155', color: '#ffffff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer' }}
+                                style={{ background: 'var(--border)', color: 'var(--foreground)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer' }}
                               >
                                 İptal
                               </button>
                             </div>
                           ) : (
-                            <div style={{ fontSize: '0.85rem', color: '#f8fafc', fontWeight: 500 }}>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--foreground)', fontWeight: 500 }}>
                               "{cmd.rawText}"
                             </div>
                           )}
 
                           {/* Parsed Treatments Visual Chips */}
                           {cmd.treatments && cmd.treatments.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, background: '#0f172a', padding: '6px 10px', borderRadius: 6, border: '1px solid #334155' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, background: 'var(--background)', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)' }}>
                               {cmd.treatments.map((t, tIdx) => {
                                 const isDelete = t.intent === 'DELETE';
                                 const isUpdate = t.intent === 'UPDATE' || t.intent === 'EDIT';
@@ -1240,9 +1240,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   <div
                                     key={tIdx}
                                     style={{
-                                      background: isDelete ? '#450a0a' : (isUpdate ? '#3b1d06' : '#1e3a8a'),
-                                      border: `1px solid ${isDelete ? '#dc2626' : (isUpdate ? '#f59e0b' : '#3b82f6')}`,
-                                      color: isDelete ? '#fca5a5' : (isUpdate ? '#fed7aa' : '#93c5fd'),
+                                      background: 'var(--background)',
+                                      border: `1px solid ${isDelete ? '#dc2626' : (isUpdate ? '#f59e0b' : 'var(--brand, #3b82f6)')}`,
+                                      color: isDelete ? '#ef4444' : (isUpdate ? '#f59e0b' : 'var(--brand, #3b82f6)'),
                                       padding: '4px 8px',
                                       borderRadius: 4,
                                       fontSize: '0.75rem',
@@ -1254,8 +1254,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   >
                                     <span>{isDelete ? '🗑️ SİLİNDİ' : (isUpdate ? '✏️ GÜNCELLENDİ' : '➕ EKLENDİ')}:</span>
                                     <span>{t.procedureName || 'Tüm İşlemler'}</span>
-                                    <span style={{ color: '#ffffff' }}>→ Diş: {(t.toothNumbers || []).join(', ') || 'Genel'}</span>
-                                    {t.indication && <span style={{ color: '#fcd34d' }}>({t.indication})</span>}
+                                    <span style={{ color: 'var(--foreground)' }}>→ Diş: {(t.toothNumbers || []).join(', ') || 'Genel'}</span>
+                                    {t.indication && <span style={{ color: '#f59e0b' }}>({t.indication})</span>}
                                   </div>
                                 );
                               })}
@@ -1270,8 +1270,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   <button
                                     onClick={() => undoCommand(cmd.id)}
                                     style={{
-                                      background: '#334155',
-                                      color: '#ffffff',
+                                      background: 'var(--border)',
+                                      color: 'var(--foreground)',
                                       border: 'none',
                                       borderRadius: 6,
                                       padding: '5px 12px',
@@ -1291,8 +1291,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       setEditingCommandText(cmd.rawText);
                                     }}
                                     style={{
-                                      background: '#334155',
-                                      color: '#ffffff',
+                                      background: 'var(--border)',
+                                      color: 'var(--foreground)',
                                       border: 'none',
                                       borderRadius: 6,
                                       padding: '5px 10px',
@@ -1335,8 +1335,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       setEditingCommandText(cmd.rawText);
                                     }}
                                     style={{
-                                      background: '#334155',
-                                      color: '#ffffff',
+                                      background: 'var(--border)',
+                                      color: 'var(--foreground)',
                                       border: 'none',
                                       borderRadius: 6,
                                       padding: '4px 10px',
