@@ -844,6 +844,20 @@ async function runMigrations() {
   await sql`CREATE INDEX IF NOT EXISTS clinic_domains_clinic_idx ON clinic_domains(clinic_id)`
 
   await sql`
+    CREATE TABLE IF NOT EXISTS clinic_phone_numbers (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      phone_number TEXT NOT NULL UNIQUE,
+      label TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      is_primary BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS clinic_phone_numbers_clinic_idx ON clinic_phone_numbers(clinic_id)`
+
+  await sql`
     CREATE TABLE IF NOT EXISTS clinic_settings (
       clinic_id  UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
       key        TEXT NOT NULL,

@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import styles from './IntegrationsTab.module.css'
 
 type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
+type ClinicPhone = { id: string; phoneNumber: string; label: string | null; isActive: boolean; isPrimary: boolean }
 
 const roleTabs = [
   { id: 'calendar', label: 'Takvim' },
@@ -40,6 +41,9 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [voipLabel, setVoipLabel] = useState('Netgsm Bulut Santral')
   const [voipBaseUrl, setVoipBaseUrl] = useState('https://api.netgsm.com.tr/voice/v1/')
   const [voipTrunkHost, setVoipTrunkHost] = useState('')
+  const [clinicPhones, setClinicPhones] = useState<ClinicPhone[]>([])
+  const [newPhone, setNewPhone] = useState('')
+  const [newPhoneLabel, setNewPhoneLabel] = useState('')
 
   // SMS States
   const [smsUsercode, setSmsUsercode] = useState('')
@@ -107,7 +111,32 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       .then(r => r.json())
       .then(data => { if (data.logoUrl) setBrandingLogoUrl(data.logoUrl) })
       .catch(() => {})
+    fetch('/api/yonetici/telephony-numbers')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setClinicPhones(Array.isArray(data) ? data : []))
+      .catch(() => {})
   }, [apiPrefix])
+
+  const addClinicPhone = async () => {
+    if (!newPhone.trim()) return
+    const res = await fetch('/api/yonetici/telephony-numbers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber: newPhone, label: newPhoneLabel, isPrimary: clinicPhones.length === 0 }),
+    })
+    const data = await res.json()
+    if (!res.ok) return showToast('error', data.error || 'Telefon eklenemedi')
+    setClinicPhones(prev => [...prev, data]); setNewPhone(''); setNewPhoneLabel('')
+    showToast('success', 'Telefon numarası kliniğe bağlandı')
+  }
+
+  const toggleClinicPhone = async (phone: ClinicPhone) => {
+    const res = await fetch(`/api/yonetici/telephony-numbers/${phone.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: !phone.isActive }),
+    })
+    if (!res.ok) return showToast('error', 'Telefon durumu güncellenemedi')
+    setClinicPhones(prev => prev.map(x => x.id === phone.id ? { ...x, isActive: !phone.isActive } : x))
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -211,6 +240,20 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           <Field label="API Base URL"><input value={voipBaseUrl} onChange={e => setVoipBaseUrl(e.target.value)} placeholder="https://api.netgsm.com.tr/voice/v1/" /></Field>
           <Field label="SIP Trunk Host"><input value={voipTrunkHost} onChange={e => setVoipTrunkHost(e.target.value)} placeholder="sip.netgsm.com.tr" /></Field>
         </div>
+      </SettingsCard>
+
+      <SettingsCard title="Klinik Telefon Numaraları" description="Bu kliniğe gelen Netgsm numaralarını ekleyin. Gelen çağrının DID bilgisiyle doğru klinik otomatik seçilir.">
+        <div className={styles.grid}>
+          <Field label="Telefon numarası"><input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="08503096119" /></Field>
+          <Field label="Etiket"><input value={newPhoneLabel} onChange={e => setNewPhoneLabel(e.target.value)} placeholder="Ana hat" /></Field>
+          <div style={{ display: 'flex', alignItems: 'end' }}><button type="button" className={styles.saveButton} onClick={addClinicPhone}>Numara Ekle</button></div>
+        </div>
+        {clinicPhones.length > 0 && <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
+          {clinicPhones.map(phone => <div key={phone.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}>
+            <span>{phone.phoneNumber}{phone.label ? ` — ${phone.label}` : ''}{phone.isPrimary ? ' (ana hat)' : ''}</span>
+            <button type="button" className={styles.saveButton} onClick={() => toggleClinicPhone(phone)}>{phone.isActive ? 'Aktif' : 'Pasif'}</button>
+          </div>)}
+        </div>}
       </SettingsCard>
 
       {/* SMS Card */}

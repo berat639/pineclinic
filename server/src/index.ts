@@ -1178,7 +1178,19 @@ const app = new Elysia()
     // Asterisk reaches the backend over the private Docker network, so its
     // Host header is not a public clinic domain. The dialplan supplies the
     // clinic hostname explicitly and we resolve it against clinic_domains.
-    const tenant = (query.hostname ? await findTenantByHostname(String(query.hostname)) : null) ?? currentTenant()
+    let tenant = (query.hostname ? await findTenantByHostname(String(query.hostname)) : null) ?? currentTenant()
+    if (query.did) {
+      const { findClinicByPhoneNumber } = await import('./db/repositories/clinic-phone-numbers')
+      const clinicId = await findClinicByPhoneNumber(String(query.did))
+      if (clinicId) {
+        const { db } = await import('./db/client')
+        const { clinicDomains } = await import('./db/schema')
+        const { eq, and } = await import('drizzle-orm')
+        const [domain] = await db.select({ hostname: clinicDomains.hostname }).from(clinicDomains)
+          .where(and(eq(clinicDomains.clinicId, clinicId), eq(clinicDomains.isPrimary, true), eq(clinicDomains.isActive, true))).limit(1)
+        if (domain) tenant = { clinicId, hostname: domain.hostname }
+      }
+    }
     if (uuid && caller && tenant) {
       callerRegistry.set(uuid, { phone: caller, channel, direction, clinicId: tenant.clinicId, hostname: tenant.hostname })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)

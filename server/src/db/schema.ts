@@ -106,6 +106,20 @@ export const clinicDomains = pgTable('clinic_domains', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => [index('clinic_domains_clinic_idx').on(t.clinicId)])
 
+export const clinicPhoneNumbers = pgTable('clinic_phone_numbers', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  phoneNumber: text('phone_number').notNull(),
+  label: text('label'),
+  isActive: boolean('is_active').notNull().default(true),
+  isPrimary: boolean('is_primary').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => [
+  uniqueIndex('clinic_phone_numbers_phone_unique').on(t.phoneNumber),
+  index('clinic_phone_numbers_clinic_idx').on(t.clinicId),
+])
+
 export const clinicSettings = pgTable('clinic_settings', {
   clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
   key: text('key').notNull(),
