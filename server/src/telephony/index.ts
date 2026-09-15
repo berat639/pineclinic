@@ -189,8 +189,10 @@ export interface TelephonyDeps {
 // bu kadar süre ses vermezse AI uyarır, sonra kapatır.
 const SILENCE_WARN_MS = 30_000   // 30s: "Ses almıyorum..." uyarısı
 const SILENCE_CLOSE_MS = 20_000   // +20s daha bekler, yoksa kapar
-// Çağrı max süresi — uzayan/takılı kalan aramaları kapat.
-const MAX_CALL_MS = 20 * 60_000   // 20 dakika
+// Çağrı max süresi admin panelinden klinik bazında 3–15 dakika seçilir.
+const DEFAULT_MAX_CALL_SECONDS = 10 * 60
+const MIN_MAX_CALL_SECONDS = 3 * 60
+const MAX_MAX_CALL_SECONDS = 15 * 60
 
 /** Tek bir AudioSocket bağlantısı için durum. */
 interface CallState {
@@ -365,22 +367,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         }
         socket.data = state
 
-        // Maksimum çağrı süresi — takılı kalan aramaları zorla kapat.
-        state.maxCallTimer = setTimeout(() => {
-          if (state.closed || state.hangupPending || !state.info.session) return
-          console.log(`[${shortId}] Maksimum çağrı süresi (${MAX_CALL_MS / 60000}dk) — görüşme sonlandırılıyor`)
-          try {
-            state.info.session.sendClientContent({
-              turns: [{
-                role: 'user',
-                parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Kısa bir veda söyle ve cagriySonlandir aracını çağır.' }],
-              }],
-              turnComplete: true,
-            })
-          } catch { }
-          setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 4_000)
-        }, MAX_CALL_MS)
-
         // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
         const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
         let nextFrameAt = Date.now() + 20
@@ -467,7 +453,7 @@ ${isOwnerCall
 }
 `
 
-          const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, startWaitSec] = await Promise.all([
+          const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
             (async () => {
               try {
                 const preWarmEmbedding = await getPreWarmEmbedding()
@@ -506,16 +492,46 @@ ${isOwnerCall
             })(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
+              return Number(await getSetting('ai.call_silence_close_timeout')) || 15
+            })(),
+            (async () => {
+              const { getSetting } = await import('../db/repositories/settings')
+              return Number(await getSetting('ai.call_max_duration')) || DEFAULT_MAX_CALL_SECONDS
+            })(),
+            (async () => {
+              const { getSetting } = await import('../db/repositories/settings')
               return Number(await getSetting('ai.start_wait_seconds')) || 0.4
             })(),
           ])
 
           state.voiceName = voiceName
-          state.silenceWarnMs = Math.max(5000, silenceTimeoutSec * 1000)
-          state.silenceCloseMs = Math.max(5000, Math.round(state.silenceWarnMs * 0.5))
+          const silenceWarnSeconds = Math.min(120, Math.max(5, silenceTimeoutSec))
+          const silenceCloseSeconds = Math.min(120, Math.max(5, silenceCloseSec))
+          state.silenceWarnMs = silenceWarnSeconds * 1000
+          state.silenceCloseMs = silenceCloseSeconds * 1000
+          const maxCallSeconds = Math.min(MAX_MAX_CALL_SECONDS, Math.max(MIN_MAX_CALL_SECONDS, maxCallDurationSec))
+          const maxCallMs = maxCallSeconds * 1000
 
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, wait: ${startWaitSec}s`)
+          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, wait: ${startWaitSec}s`)
+
+          // Maksimum görüşme süresi klinik ayarından gelir ve gelen/giden
+          // aramalarda aynı şekilde uygulanır. Süre dolunca mevcut cümleyi
+          // kesmek yerine modele doğal kapanış talimatı verilir.
+          state.maxCallTimer = setTimeout(() => {
+            if (state.closed || state.hangupPending || !state.info.session) return
+            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — görüşme sonlandırılıyor`)
+            try {
+              state.info.session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Devam eden mevcut randevu veya araç işlemini tamamla; ardından kısa ve nazik bir veda söyle ve cagriySonlandir aracını çağır. Yeni konu başlatma.' }],
+                }],
+                turnComplete: true,
+              })
+            } catch { }
+            setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 6_000)
+          }, maxCallMs)
 
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 

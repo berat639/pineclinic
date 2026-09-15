@@ -1748,13 +1748,30 @@ const app = new Elysia()
       stopBackoffSeconds: Number(await getSetting('ai.stop_backoff_seconds')) || 0.2,
       
       callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
+      callSilenceCloseTimeout: Number(await getSetting('ai.call_silence_close_timeout')) || 15,
       callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
       voiceName: (await getSetting('ai.voice_name')) || 'Aoede',
     }
   })
-  .put('/api/admin/settings/voice', async ({ body }) => {
+  .put('/api/admin/settings/voice', async ({ body, set }) => {
     const { setSetting } = await import('./db/repositories/settings')
     const config = body as any
+    if (config.callMaxDuration !== undefined) {
+      const seconds = Number(config.callMaxDuration)
+      if (!Number.isFinite(seconds) || seconds < 180 || seconds > 900) {
+        set.status = 400
+        return { error: 'Maksimum görüşme süresi 3 ile 15 dakika arasında olmalıdır' }
+      }
+    }
+    for (const key of ['callSilenceTimeout', 'callSilenceCloseTimeout'] as const) {
+      if (config[key] !== undefined) {
+        const seconds = Number(config[key])
+        if (!Number.isFinite(seconds) || seconds < 5 || seconds > 120) {
+          set.status = 400
+          return { error: 'Sessizlik süreleri 5 ile 120 saniye arasında olmalıdır' }
+        }
+      }
+    }
     if (config.googleSearchGrounding !== undefined) await setSetting('ai.google_search_grounding', String(config.googleSearchGrounding))
     if (config.codeExecution !== undefined) await setSetting('ai.code_execution', String(config.codeExecution))
     if (config.urlContext !== undefined) await setSetting('ai.url_context', String(config.urlContext))
@@ -1768,6 +1785,7 @@ const app = new Elysia()
     if (config.stopBackoffSeconds !== undefined) await setSetting('ai.stop_backoff_seconds', String(config.stopBackoffSeconds))
     
     if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
+    if (config.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(config.callSilenceCloseTimeout))
     if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
     if (config.voiceName !== undefined) await setSetting('ai.voice_name', String(config.voiceName))
     

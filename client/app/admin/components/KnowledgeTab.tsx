@@ -343,6 +343,7 @@ export default function KnowledgeTab() {
     stopVoiceSeconds: 0.2,
     stopBackoffSeconds: 0.2,
     callSilenceTimeout: 30,
+    callSilenceCloseTimeout: 15,
     callMaxDuration: 600,
   })
   const [voiceLoading, setVoiceLoading] = useState(true)
@@ -1039,12 +1040,39 @@ export default function KnowledgeTab() {
                     </div>
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Sessizlik Aşımı</label>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Sessizlik uyarısı</label>
                         <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceTimeout}s</span>
                       </div>
                       <input type="range" min="5" max="120" step="1" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                   </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Uyarı sonrası kapanış</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceCloseTimeout ?? 15}s</span>
+                      </div>
+                      <input type="range" min="5" max="60" step="1" value={voiceSettings.callSilenceCloseTimeout ?? 15} onChange={e => setVoiceSettings({...voiceSettings, callSilenceCloseTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Maksimum görüşme</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{Math.round((voiceSettings.callMaxDuration || 600) / 60)} dk</span>
+                      </div>
+                      <select
+                        value={voiceSettings.callMaxDuration || 600}
+                        onChange={e => setVoiceSettings({ ...voiceSettings, callMaxDuration: parseInt(e.target.value) })}
+                        style={{ width: '100%', padding: '6px 8px', fontSize: 11, color: 'var(--foreground)', background: 'var(--card-bg)', border: '1px solid var(--divider, #334155)', borderRadius: 6 }}
+                      >
+                        {Array.from({ length: 13 }, (_, i) => i + 3).map(minutes => (
+                          <option key={minutes} value={minutes * 60}>{minutes} dakika</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: 'var(--foreground-3)', margin: '8px 0 0' }}>
+                    Bu ayarlar gelen ve giden telefon aramalarında klinik bazında uygulanır. Sessizlik uyarısından sonra belirlenen süre içinde yanıt gelmezse görüşme nazikçe sonlandırılır.
+                  </p>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
