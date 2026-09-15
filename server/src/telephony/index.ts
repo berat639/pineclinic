@@ -515,24 +515,6 @@ ${isOwnerCall
           const systemPrompt = systemPromptBase + ragContext + phoneInstructions
           console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, wait: ${startWaitSec}s`)
 
-          // Maksimum görüşme süresi klinik ayarından gelir ve gelen/giden
-          // aramalarda aynı şekilde uygulanır. Süre dolunca mevcut cümleyi
-          // kesmek yerine modele doğal kapanış talimatı verilir.
-          state.maxCallTimer = setTimeout(() => {
-            if (state.closed || state.hangupPending || !state.info.session) return
-            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — görüşme sonlandırılıyor`)
-            try {
-              state.info.session.sendClientContent({
-                turns: [{
-                  role: 'user',
-                  parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Devam eden mevcut randevu veya araç işlemini tamamla; ardından kısa ve nazik bir veda söyle ve cagriySonlandir aracını çağır. Yeni konu başlatma.' }],
-                }],
-                turnComplete: true,
-              })
-            } catch { }
-            setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 6_000)
-          }, maxCallMs)
-
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
           const session = await Promise.race([
@@ -728,6 +710,24 @@ ${isOwnerCall
             ],
             turnComplete: true,
           })
+
+          // Süre karşılama gönderildikten sonra başlar; bağlantı kurulma
+          // gecikmesi klinik yöneticisinin seçtiği konuşma süresinden düşmez.
+          // Gelen ve giden aramalarda aynı klinik ayarı kullanılır.
+          state.maxCallTimer = setTimeout(() => {
+            if (state.closed || state.hangupPending || !state.info.session) return
+            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — görüşme sonlandırılıyor`)
+            try {
+              state.info.session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Devam eden mevcut randevu veya araç işlemini tamamla; ardından kısa ve nazik bir veda söyle ve cagriySonlandir aracını çağır. Yeni konu başlatma.' }],
+                }],
+                turnComplete: true,
+              })
+            } catch { }
+            setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 6_000)
+          }, maxCallMs)
 
           // Güvenlik zamanlayıcısı: Gemini turnComplete göndermese bile çağrı kilitlenmesin.
           // Normal akışta mikrofon yalnızca greeting turnComplete sonrasında açılır;
