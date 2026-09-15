@@ -226,6 +226,7 @@ interface CallState {
   // Zaman aşımı timer'ları
   silenceTimer?: ReturnType<typeof setTimeout>
   closeTimer?: ReturnType<typeof setTimeout>
+  silenceClosePending: boolean
   maxCallTimer?: ReturnType<typeof setTimeout>
   micEnabled: boolean
   userSpeechEndTime?: number
@@ -278,6 +279,7 @@ function estimatePitch(pcm: Buffer, sampleRate: number = 24000): number {
 function clearSilenceTimers(state: CallState) {
   if (state.silenceTimer) { clearTimeout(state.silenceTimer); state.silenceTimer = undefined }
   if (state.closeTimer) { clearTimeout(state.closeTimer); state.closeTimer = undefined }
+  state.silenceClosePending = false
 }
 
 /**
@@ -286,6 +288,10 @@ function clearSilenceTimers(state: CallState) {
  * görüşmeyi kapatır. Müşteri konuşursa timer sıfırlanır.
  */
 function startSilenceWatch(state: CallState, socket: { end: () => void }) {
+  // Uyarı gönderildikten sonra AI'nin turnComplete olayı kapanış sayacını
+  // sıfırlamamalı. Kullanıcı gerçekten konuşursa clearSilenceTimers bunu iptal
+  // eder; aksi halde closeTimer kesintisiz çalışır.
+  if (state.silenceClosePending) return
   clearSilenceTimers(state)
   if (state.closed || state.hangupPending) return
 
@@ -307,7 +313,9 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
     } catch { }
 
     // Uyarıdan sonra closeMs daha bekle, hâlâ sessizse kapat.
+    state.silenceClosePending = true
     state.closeTimer = setTimeout(() => {
+      state.silenceClosePending = false
       if (state.closed || state.hangupPending || !state.info.session) return
       console.log(`[${state.shortId}] Sessizlik timeout — görüşme sonlandırılıyor`)
       try {
@@ -374,6 +382,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           lowPitchFrames: 0,
           silenceWarnMs: 30_000,
           silenceCloseMs: 20_000,
+          silenceClosePending: false,
           voiceName: 'Aoede',
           aiSpeaking: true,
         }
