@@ -22,7 +22,17 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
   } catch {}
 
   const parts: string[] = []
+  let activeFlow: import('../db/repositories/flows').ConversationFlow | null = null
+  let minimalFlow = false
+  try {
+    const flows = await import('../db/repositories/flows')
+    activeFlow = await flows.getActiveFlow(direction)
+    minimalFlow = Boolean(activeFlow && flows.isMinimalGreetingEndFlow(activeFlow))
+  } catch {}
   for (const key of PROMPT_SECTION_KEYS) {
+    // Minimal Flow Builder akışında varsayılan randevu senaryosu devreye
+    // girerse model, akışta olmayan soruları kendiliğinden üretir.
+    if (minimalFlow && key === 'prompt.appointment_rules') continue
     let value = dbSections[key] ?? getDefaultPromptValue(key) ?? ''
     if (key === 'prompt.greeting_flow') {
       if (direction === 'whatsapp') {
@@ -43,10 +53,9 @@ Ardından konuşma akışındaki adımları sırasıyla uygula.`
 
   // Inject conversation flow as prompt text
   try {
-    const { getActiveFlow, flowToPromptText } = await import('../db/repositories/flows')
-    const flow = await getActiveFlow(direction)
-    if (flow) {
-      const flowText = flowToPromptText(flow)
+    const { flowToPromptText } = await import('../db/repositories/flows')
+    if (activeFlow) {
+      const flowText = flowToPromptText(activeFlow)
       if (flowText) parts.push(flowText)
     }
   } catch {}

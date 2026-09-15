@@ -104,6 +104,32 @@ export function getFieldNodes(flow: ConversationFlow): FlowNode[] {
   return flow.nodes.filter(n => n.type === 'FIELD' && n.data.fieldName)
 }
 
+/**
+ * Akış yalnızca karşılama ve bitişten oluşuyorsa modelin randevu akışını
+ * kendiliğinden başlatmasına izin verilmez. Bu, Flow Builder'daki minimal
+ * akışın varsayılan randevu prompt'ları tarafından ezilmesini önler.
+ */
+export function isMinimalGreetingEndFlow(flow: ConversationFlow): boolean {
+  const start = flow.nodes.find(n => n.type === 'START')
+  if (!start) return false
+  const nodeMap = new Map(flow.nodes.map(n => [n.id, n]))
+  const edgeMap = new Map<string, FlowEdge[]>()
+  for (const edge of flow.edges) {
+    const list = edgeMap.get(edge.source) || []
+    list.push(edge)
+    edgeMap.set(edge.source, list)
+  }
+  const visited = new Set<string>()
+  const visit = (id: string) => {
+    if (visited.has(id)) return
+    visited.add(id)
+    for (const edge of edgeMap.get(id) || []) visit(edge.target)
+  }
+  visit(start.id)
+  const reachable = [...visited].map(id => nodeMap.get(id)).filter(Boolean) as FlowNode[]
+  return reachable.length > 0 && reachable.every(n => n.type === 'START' || n.type === 'END')
+}
+
 export function flowToToolFields(flow: ConversationFlow): {
   properties: Record<string, { type: string; description: string; enum?: string[] }>
   required: string[]
@@ -250,7 +276,11 @@ export function flowToPromptText(flow: ConversationFlow): string {
     }
   }
 
+  // Minimal karşılama → bitiş akışı, varsayılan randevu sorularını başlatmaz.
+  if (isMinimalGreetingEndFlow(flow)) {
+    lines.push(`\nMİNİMAL AKIŞ KURALI:\nKarşılama mesajını yalnızca bir kez söyle. Sonra karşı tarafın konuşmasını bekle; kendiliğinden randevu, şikayet, tarih, saat veya başka soru sorma. Karşı taraf bir soru sorarsa yalnızca o soruya kısa cevap ver ve yeni konu başlatma. Akışta başka adım olmadığı için görüşmeyi kendi kendine uzatma.`)
   // Eğer akışta sadece START düğümü varsa veya akış bittikten sonra:
+  } else {
   const outgoing = edgeMap.get(startNode.id) || []
   if (outgoing.length === 0) {
     lines.push(`\nGENEL VE DOĞAL SOHBET TALİMATI:
@@ -258,6 +288,7 @@ Karşılama mesajını söyledikten sonra karşı tarafın (müşterinin/hastan�
   } else {
     lines.push(`\nGENEL İLETİŞİM KURALI:
 Akış adımlarını takip ederken karşı taraf farklı bir şey söyler veya soru sorarsa, önce samimi ve net bir şekilde cevabını ver, ardından akışa devam et. Asla cevapsız bırakma.`)
+  }
   }
 
   return lines.join('\n')

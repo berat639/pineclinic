@@ -92,9 +92,10 @@ class NoiseGate {
 
     if (isHigh) {
       this.highStreak++
-      // Tekil hat parazitlerini konuşma kabul etme. 3 ardışık 20 ms
-      // karesi (yaklaşık 60 ms) gerçek ses başlangıcı için yeterlidir.
-      if (!this.wasOpen && this.highStreak < 3) {
+      // Tekil hat parazitlerini konuşma kabul etme. 10 ardışık 20 ms
+      // karesi (yaklaşık 200 ms) gerçek ses başlangıcı için gerekir.
+      // Böylece kısa hat darbeleri sessizlik zamanlayıcısını sıfırlamaz.
+      if (!this.wasOpen && this.highStreak < 10) {
         this.pushPreRoll(frame)
         return { frames: [], justClosed: false, speechStarted: false }
       }
@@ -689,7 +690,7 @@ ${isOwnerCall
                     ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
                   }
 
-                  ctxMsg += `\nMüşteriyi ismiyle selamla ve uygunsa yaklaşan randevusunu belirt. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+                  ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden randevu, şikayet, tarih veya saat sorusu başlatma; aktif konuşma akışının dışına çıkma.`
                   initParts.push(ctxMsg)
                   console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
                 } else {
@@ -699,7 +700,7 @@ ${isOwnerCall
                     let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
                     ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
                     ctxMsg += `${knowledgeCustomer.content}\n`
-                    ctxMsg += `\nMüşteriyi ismiyle selamla. (Bu bilgiler sistem tarafından sağlanmıştır, müşteri söylememiştir.)`
+                    ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden yeni soru başlatma; aktif konuşma akışının dışına çıkma.`
                     initParts.push(ctxMsg)
                     console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
                   }
