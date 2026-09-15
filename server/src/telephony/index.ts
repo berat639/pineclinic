@@ -479,11 +479,14 @@ ${isOwnerCall
               try {
                 const preWarmEmbedding = await getPreWarmEmbedding()
                 const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
-                if (topDocs.length > 0) {
+                // Telefon görüşmesinde akış dışı/eğlence belgeleri Flow Builder
+                // kuralını gevşetmemeli. Klinik bilgi belgeleri korunur.
+                const flowSafeDocs = topDocs.filter(d => !/akış dışı|eğlence|fıkra|asistan kişilik|sohbet/i.test(d.title))
+                if (flowSafeDocs.length > 0) {
                   console.log(
-                    `[${shortId}] RAG (${direction}): ${topDocs.length} belge → ${topDocs.map((d) => d.title).join(', ')}`,
+                    `[${shortId}] RAG (${direction}): ${flowSafeDocs.length} belge → ${flowSafeDocs.map((d) => d.title).join(', ')}`,
                   )
-                  return await buildRagPrompt(topDocs)
+                  return await buildRagPrompt(flowSafeDocs)
                 }
               } catch (e) {
                 console.error(`[${shortId}] RAG hatası:`, e)
