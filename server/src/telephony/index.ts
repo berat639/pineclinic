@@ -823,6 +823,15 @@ ${isOwnerCall
               info.session.sendRealtimeInput({
                 audioStreamEnd: true,
               })
+
+              // Gate kısa süreli hat parazitini konuşma sanıp sessizlik
+              // sayacını temizlediyse, gate kapandığında sayacı yeniden kur.
+              // Aksi halde gerçek bir kullanıcı yanıtı gelmeden uyarı hiç
+              // çalışmayabilir. Gemini turnComplete gelirse timer zaten
+              // güvenli şekilde temizlenip yeniden başlatılır.
+              if (!state.hangupPending) {
+                startSilenceWatch(state, socket)
+              }
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
