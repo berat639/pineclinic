@@ -1196,7 +1196,8 @@ const app = new Elysia()
     if (tenant) {
       const { getSetting } = await import('./db/repositories/settings')
       await runWithTenantContext(tenant, async () => {
-        const configured = Number(await getSetting('ai.max_active_phone_calls'))
+        const rawConfigured = await getSetting('ai.max_active_phone_calls')
+        const configured = rawConfigured === null ? Number.NaN : Number(rawConfigured)
         maxActiveCalls = Number.isFinite(configured) ? Math.min(5, Math.max(2, configured)) : 3
       })
       queueGroup = `clinic_${tenant.clinicId.replace(/[^a-zA-Z0-9_]/g, '')}`
