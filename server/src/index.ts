@@ -62,7 +62,7 @@ import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './d
 const PUBLIC_DIR = resolve(import.meta.dir, '../public')
 // Ensure public/uploads/dcm directory exists at startup
 mkdirSync(resolve(PUBLIC_DIR, 'uploads/dcm'), { recursive: true })
-import { listCategories, createCategory, updateCategory, deleteCategory, seedCategories } from './db/repositories/categories'
+import { listCategories, createCategory, updateCategory, deleteCategory, seedCategoriesForClinic } from './db/repositories/categories'
 import { authPlugin } from './api/auth'
 import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
@@ -2179,8 +2179,15 @@ app.ws('/ws', {
     console.log(`   Model: ${await resolveLiveModel()}`)
     console.log(`   RAG: pgvector + HNSW (${getEmbeddingModel()}, dim=${getEmbeddingDimensions()})`)
 
-    // Seed default categories if not present
-    try { await seedCategories() } catch (e) { console.error('[Categories] Seed hatası:', e) }
+    // Seed default categories for every active clinic. Startup has no HTTP
+    // tenant context, so the request-scoped seedCategories() helper cannot be
+    // used here.
+    try {
+      const { db } = await import('./db/client')
+      const { clinics } = await import('./db/schema')
+      const activeClinics = await db.select({ id: clinics.id }).from(clinics).where(eq(clinics.isActive, true))
+      for (const clinic of activeClinics) await seedCategoriesForClinic(clinic.id)
+    } catch (e) { console.error('[Categories] Seed hatası:', e) }
 
     // Stale session temizliği — zombi/takılı session'ları periyodik olarak kapat
     setInterval(() => {

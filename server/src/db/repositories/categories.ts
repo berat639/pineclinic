@@ -114,9 +114,8 @@ export async function deleteCategory(id: string): Promise<{ success: boolean; mo
   return { success: true, moved: movedCount }
 }
 
-/** Seed default categories if table is empty */
-export async function seedCategories(): Promise<void> {
-  const clinicId = requireClinicId()
+/** Seed default categories for a specific clinic if its table is empty. */
+export async function seedCategoriesForClinic(clinicId: string): Promise<void> {
   const existing = await db.select({ id: knowledgeCategories.id }).from(knowledgeCategories).where(eq(knowledgeCategories.clinicId, clinicId)).limit(1)
   if (existing.length > 0) return
 
@@ -124,4 +123,9 @@ export async function seedCategories(): Promise<void> {
     await db.insert(knowledgeCategories).values({ ...cat, clinicId }).onConflictDoNothing()
   }
   console.log('[Categories] Varsayılan kategoriler oluşturuldu')
+}
+
+/** Seed default categories for the current request tenant. */
+export async function seedCategories(): Promise<void> {
+  await seedCategoriesForClinic(requireClinicId())
 }
