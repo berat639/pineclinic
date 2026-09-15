@@ -13,7 +13,23 @@ UUID="${1:-}"
 CALLER="${2:-}"
 CHANNEL="${3:-}"
 DIRECTION="${4:-inbound}"
+DID="${5:-}"
+DNID="${6:-}"
 TENANT_HOSTNAME="${TELEPHONY_CLINIC_HOSTNAME:-pineclinic.thinpine.com}"
+
+# Comma-separated mapping: 8503096119=pineclinic.thinpine.com,85031234567=guneyagizvedissagligi.com
+# The first matching DID wins. This keeps clinic routing in deployment config,
+# without putting clinic decisions in the application code.
+LOOKUP_NUMBER="${DNID:-$DID}"
+IFS=',' read -r -a DID_ENTRIES <<< "${TELEPHONY_DID_MAP:-}"
+for entry in "${DID_ENTRIES[@]}"; do
+  key="${entry%%=*}"
+  value="${entry#*=}"
+  if [ -n "$key" ] && [ "$key" = "$LOOKUP_NUMBER" ] && [ -n "$value" ] && [ "$value" != "$entry" ]; then
+    TENANT_HOSTNAME="$value"
+    break
+  fi
+done
 
 if [ -n "$UUID" ] && [ -n "$CALLER" ]; then
   HOST="${AUDIOSOCKET_HOST:-voiceai-server}"
