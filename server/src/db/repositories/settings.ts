@@ -130,12 +130,12 @@ export async function setAiModel(model: string): Promise<{ model: string; update
 const AI_GREETING = 'ai.greeting'
 const AI_GREETING_OUTBOUND = 'ai.greeting_outbound'
 
-export async function getGreeting(direction: string = 'inbound'): Promise<string | null> {
+export async function getGreeting(direction: string = 'inbound', explicitClinicId?: string): Promise<string | null> {
   if (direction === 'outbound') {
-    const val = (await getSetting(AI_GREETING_OUTBOUND)) || (await getSetting('greeting_message_outbound'))
+    const val = (await getSetting(AI_GREETING_OUTBOUND, explicitClinicId)) || (await getSetting('greeting_message_outbound', explicitClinicId))
     return val || null
   }
-  const val = (await getSetting(AI_GREETING)) || (await getSetting('greeting_message'))
+  const val = (await getSetting(AI_GREETING, explicitClinicId)) || (await getSetting('greeting_message', explicitClinicId))
   return val || null
 }
 

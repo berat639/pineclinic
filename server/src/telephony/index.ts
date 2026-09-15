@@ -426,7 +426,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           info.hostname = state.hostname
           await runWithTenantContext({ clinicId: state.clinicId, hostname: state.hostname }, async () => {
           const direction = state.callerDirection || 'inbound'
-          console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}`)
+          console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}, clinicId: ${state.clinicId}, hostname: ${state.hostname}`)
 
           // VIP Arayan Kontrolü (Berat Bey'in Kişisel Asistanı Pine Asistan)
           const vipRecord = state.callerPhone ? await findVipByPhone(state.callerPhone) : null
@@ -498,30 +498,30 @@ ${isOwnerCall
             resolveLiveModel(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
-              return (await getSetting('ai.voice_name')) || 'Aoede'
+              return (await getSetting('ai.voice_name', state.clinicId)) || 'Aoede'
             })(),
             (async () => {
               if (isVip && vipRecord?.greeting) {
                 return vipRecord.greeting
               }
               const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
-              return (await fetchGreeting(direction)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
+              return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
             })(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_silence_timeout')) || 30
+              return Number(await getSetting('ai.call_silence_timeout', state.clinicId)) || 30
             })(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_silence_close_timeout')) || 15
+              return Number(await getSetting('ai.call_silence_close_timeout', state.clinicId)) || 15
             })(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_max_duration')) || DEFAULT_MAX_CALL_SECONDS
+              return Number(await getSetting('ai.call_max_duration', state.clinicId)) || DEFAULT_MAX_CALL_SECONDS
             })(),
             (async () => {
               const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.start_wait_seconds')) || 0.4
+              return Number(await getSetting('ai.start_wait_seconds', state.clinicId)) || 0.4
             })(),
           ])
 
