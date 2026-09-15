@@ -1,8 +1,16 @@
-import { sql as drizzleSql, inArray } from 'drizzle-orm'
+import { and, eq, sql as drizzleSql, inArray } from 'drizzle-orm'
 import { db } from '../client'
-import { businessSettings } from '../schema'
+import { businessSettings, clinicSettings } from '../schema'
+import { currentClinicId } from '../../tenancy/context'
 
-export async function getSetting(key: string): Promise<string | null> {
+export async function getSetting(key: string, explicitClinicId?: string): Promise<string | null> {
+  const clinicId = explicitClinicId ?? currentClinicId()
+  if (clinicId) {
+    const rows = await db.select({ value: clinicSettings.value }).from(clinicSettings)
+      .where(drizzleSql`${clinicSettings.clinicId} = ${clinicId} AND ${clinicSettings.key} = ${key}`)
+      .limit(1)
+    return rows[0]?.value ?? null
+  }
   const result = await db.execute(drizzleSql`
     SELECT value FROM business_settings WHERE key = ${key} LIMIT 1
   `)
@@ -11,7 +19,16 @@ export async function getSetting(key: string): Promise<string | null> {
   return rows[0]?.value ?? null
 }
 
-export async function setSetting(key: string, value: string): Promise<void> {
+export async function setSetting(key: string, value: string, explicitClinicId?: string): Promise<void> {
+  const clinicId = explicitClinicId ?? currentClinicId()
+  if (clinicId) {
+    await db.insert(clinicSettings).values({ clinicId, key, value, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [clinicSettings.clinicId, clinicSettings.key],
+        set: { value, updatedAt: new Date() },
+      })
+    return
+  }
   await db.execute(drizzleSql`
     INSERT INTO business_settings (key, value, updated_at)
     VALUES (${key}, ${value}, now())
@@ -19,16 +36,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
   `)
 }
 
-export async function deleteSetting(key: string): Promise<void> {
+export async function deleteSetting(key: string, explicitClinicId?: string): Promise<void> {
+  const clinicId = explicitClinicId ?? currentClinicId()
+  if (clinicId) {
+    await db.execute(drizzleSql`DELETE FROM clinic_settings WHERE clinic_id = ${clinicId} AND key = ${key}`)
+    return
+  }
   await db.execute(drizzleSql`DELETE FROM business_settings WHERE key = ${key}`)
 }
 
 async function getMany(keys: string[]): Promise<Record<string, string>> {
   if (keys.length === 0) return {}
-  const rows = await db
-    .select({ key: businessSettings.key, value: businessSettings.value })
-    .from(businessSettings)
-    .where(inArray(businessSettings.key, keys))
+  const clinicId = currentClinicId()
+  const rows = clinicId
+    ? await db.select({ key: clinicSettings.key, value: clinicSettings.value })
+      .from(clinicSettings)
+      .where(and(eq(clinicSettings.clinicId, clinicId), inArray(clinicSettings.key, keys)))
+    : await db.select({ key: businessSettings.key, value: businessSettings.value })
+      .from(businessSettings)
+      .where(inArray(businessSettings.key, keys))
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   return map

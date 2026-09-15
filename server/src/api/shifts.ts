@@ -3,6 +3,7 @@ import { eq, and, sql, gte, lte, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { shifts, shiftSwapRequests, users } from '../db/schema'
 import { authenticateRequest } from '../middleware/auth'
+import { requireClinicId } from '../tenancy/context'
 
 export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
@@ -16,7 +17,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const endDate = query.endDate as string | undefined
     const month = query.month as string | undefined // e.g. "2026-08"
 
-    const conditions = []
+    const conditions = [eq(shifts.clinicId, requireClinicId())]
     if (startDate && endDate) {
       conditions.push(gte(shifts.date, startDate), lte(shifts.date, endDate))
     } else if (month) {
@@ -74,7 +75,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
       if (!s.userId || !s.date || !s.startTime || !s.endTime) continue
 
       const existing = await db.select().from(shifts)
-        .where(and(eq(shifts.userId, s.userId), eq(shifts.date, s.date)))
+        .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, s.userId), eq(shifts.date, s.date)))
 
       if (existing.length > 0) {
         if (b.overwrite) {
@@ -83,11 +84,12 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
             endTime: s.endTime,
             shiftType: s.shiftType || 'tam',
             notes: s.notes || null,
-          }).where(eq(shifts.id, existing[0].id)).returning()
+          }).where(and(eq(shifts.id, existing[0].id), eq(shifts.clinicId, requireClinicId()))).returning()
           if (updated) insertedOrUpdated.push(updated)
         }
       } else {
         const [created] = await db.insert(shifts).values({
+          clinicId: requireClinicId(),
           userId: s.userId,
           date: s.date,
           startTime: s.startTime,
@@ -121,6 +123,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     }
 
     const conditions = [
+      eq(shifts.clinicId, requireClinicId()),
       gte(shifts.date, b.startDate),
       lte(shifts.date, b.endDate),
     ]
@@ -148,12 +151,13 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
     // Conflict check
     const existing = await db.select().from(shifts)
-      .where(and(eq(shifts.userId, b.userId), eq(shifts.date, b.date)))
+      .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, b.userId), eq(shifts.date, b.date)))
     if (existing.length > 0) {
       set.status = 409; return { error: 'Bu kullanıcının aynı güne zaten vardiyası var' }
     }
 
     const [created] = await db.insert(shifts).values({
+      clinicId: requireClinicId(),
       userId: b.userId,
       date: b.date,
       startTime: b.startTime,
@@ -172,7 +176,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
 
-    await db.delete(shifts).where(eq(shifts.id, params.id))
+    await db.delete(shifts).where(and(eq(shifts.id, params.id), eq(shifts.clinicId, requireClinicId())))
     return { ok: true }
   })
 
@@ -181,7 +185,9 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
-    const rows = await db.select().from(shiftSwapRequests).orderBy(shiftSwapRequests.createdAt)
+    const rows = await db.select().from(shiftSwapRequests)
+      .where(eq(shiftSwapRequests.clinicId, requireClinicId()))
+      .orderBy(shiftSwapRequests.createdAt)
     return rows
   })
 
@@ -195,6 +201,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     }
 
     const [created] = await db.insert(shiftSwapRequests).values({
+      clinicId: requireClinicId(),
       requesterId: user.id,
       targetId: b.targetId,
       shiftId: b.shiftId,
@@ -215,16 +222,17 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
       set.status = 400; return { error: 'status: approved veya rejected' }
     }
 
-    const [request] = await db.select().from(shiftSwapRequests).where(eq(shiftSwapRequests.id, params.id))
+    const clinicId = requireClinicId()
+    const [request] = await db.select().from(shiftSwapRequests).where(and(eq(shiftSwapRequests.id, params.id), eq(shiftSwapRequests.clinicId, clinicId)))
     if (!request) { set.status = 404; return { error: 'Talep bulunamadı' } }
 
     if (b.status === 'approved' && request.targetShiftId) {
       // Swap the shifts: update userId on each
-      const [shift1] = await db.select().from(shifts).where(eq(shifts.id, request.shiftId))
-      const [shift2] = await db.select().from(shifts).where(eq(shifts.id, request.targetShiftId))
+      const [shift1] = await db.select().from(shifts).where(and(eq(shifts.id, request.shiftId), eq(shifts.clinicId, clinicId)))
+      const [shift2] = await db.select().from(shifts).where(and(eq(shifts.id, request.targetShiftId), eq(shifts.clinicId, clinicId)))
       if (shift1 && shift2) {
-        await db.update(shifts).set({ userId: shift2.userId }).where(eq(shifts.id, shift1.id))
-        await db.update(shifts).set({ userId: shift1.userId }).where(eq(shifts.id, shift2.id))
+        await db.update(shifts).set({ userId: shift2.userId }).where(and(eq(shifts.id, shift1.id), eq(shifts.clinicId, clinicId)))
+        await db.update(shifts).set({ userId: shift1.userId }).where(and(eq(shifts.id, shift2.id), eq(shifts.clinicId, clinicId)))
       }
     }
 
@@ -232,7 +240,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
       status: b.status,
       reviewedBy: user.id,
       reviewedAt: new Date(),
-    }).where(eq(shiftSwapRequests.id, params.id)).returning()
+    }).where(and(eq(shiftSwapRequests.id, params.id), eq(shiftSwapRequests.clinicId, clinicId))).returning()
 
     return updated
   })

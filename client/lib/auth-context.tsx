@@ -8,6 +8,9 @@ interface AuthUser {
   email: string
   name: string
   role: string
+  clinicId: string
+  hostname: string
+  isPlatformAdmin: boolean
 }
 
 interface AuthContextType {

@@ -32,6 +32,8 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
   const targetUrl = `${backendUrl}${path}${search}`
 
   const headers = new Headers(req.headers)
+  headers.set('x-forwarded-host', req.headers.get('host') || req.nextUrl.host)
+  headers.set('x-forwarded-proto', req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', ''))
   headers.delete('host')
   headers.delete('connection')
 

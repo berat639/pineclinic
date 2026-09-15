@@ -10,7 +10,7 @@ function decodeJwtPayload(token: string): { sub: string; role: string } | null {
   } catch { return null }
 }
 
-const PROTECTED_PREFIXES = ['/admin', '/yonetici', '/hekim', '/host', '/shift', '/bildirimler', '/profil']
+const PROTECTED_PREFIXES = ['/admin', '/panel', '/yonetici', '/hekim', '/host', '/shift', '/bildirimler', '/profil']
 const ROLE_ROUTES: Record<string, string[]> = {
   yonetici: ['/admin', '/yonetici', '/panel', '/shift', '/bildirimler', '/profil'],
   moderator: ['/admin', '/yonetici', '/panel', '/shift', '/bildirimler', '/profil'],
@@ -57,5 +57,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/yonetici/:path*', '/hekim/:path*', '/host/:path*', '/shift/:path*', '/bildirimler/:path*', '/profil/:path*', '/login'],
+  matcher: ['/admin/:path*', '/panel/:path*', '/yonetici/:path*', '/hekim/:path*', '/host/:path*', '/shift/:path*', '/bildirimler/:path*', '/profil/:path*', '/login'],
 }

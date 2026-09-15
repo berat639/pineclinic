@@ -2,6 +2,8 @@ import { Elysia } from 'elysia'
 import { randomUUID } from 'crypto'
 import { getUserByEmail, createUser, createSession, deleteSessionByJti, updateUser } from '../db/repositories/users'
 import { signToken, authenticateRequest } from '../middleware/auth'
+import { ensurePlatformAdminMembership, getActiveMembership, provisionClinicForPlatformAdmin } from '../db/repositories/tenancy'
+import { hostnameFromRequest, resolveTenantFromRequest } from '../tenancy/context'
 
 export const authPlugin = new Elysia({ prefix: '/api/auth' })
 
@@ -15,6 +17,25 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
     const valid = await Bun.password.verify(password, user.passwordHash)
     if (!valid) { set.status = 401; return { error: 'Geçersiz kimlik bilgileri' } }
 
+    let tenant = await resolveTenantFromRequest(request)
+    if (!tenant) {
+      if (!user.isPlatformAdmin) {
+        set.status = 404; return { error: 'Bu domain için aktif klinik bulunamadı' }
+      }
+      try {
+        tenant = await provisionClinicForPlatformAdmin(hostnameFromRequest(request), user.id)
+      } catch (error) {
+        set.status = 400
+        return { error: error instanceof Error ? error.message : 'Klinik oluşturulamadı' }
+      }
+    }
+
+    const existingMembership = await getActiveMembership(user.id, tenant.clinicId)
+    const membership = existingMembership ?? (user.isPlatformAdmin
+      ? await ensurePlatformAdminMembership(user.id, tenant.clinicId)
+      : null)
+    if (!membership) { set.status = 403; return { error: 'Bu klinik için erişim yetkiniz yok' } }
+
     const jti = randomUUID()
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000)
 
@@ -22,7 +43,7 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
     const ua = request.headers.get('user-agent') || undefined
 
     await createSession({ userId: user.id, tokenJti: jti, ipAddress: ip, userAgent: ua, expiresAt })
-    const token = await signToken(user, jti)
+    const token = await signToken({ id: user.id, role: membership.role, clinicId: tenant.clinicId }, jti)
 
     await updateUser(user.id, { lastLoginAt: new Date() })
 
@@ -35,7 +56,7 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
       path: '/',
     })
 
-    return { id: user.id, name: user.name, email: user.email, role: user.role }
+    return { id: user.id, name: user.name, email: user.email, role: membership.role, clinicId: tenant.clinicId, hostname: tenant.hostname, isPlatformAdmin: user.isPlatformAdmin }
   })
 
   .post('/logout', async ({ cookie, set }) => {
@@ -50,14 +71,14 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
     return { ok: true }
   })
 
-  .get('/me', async ({ cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+  .get('/me', async ({ cookie, set, request }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined), request)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
     return user
   })
 
-  .put('/password', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+  .put('/password', async ({ body, cookie, set, request }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined), request)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
 
     const { currentPassword, newPassword } = body as { currentPassword: string; newPassword: string }

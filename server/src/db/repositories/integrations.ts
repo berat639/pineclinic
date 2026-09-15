@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '../client'
 import { clinics } from '../schema'
 import { getSetting, setSetting } from './settings'
+import { requireClinicId } from '../../tenancy/context'
 
 export interface IntegrationsSettings {
   // VoIP
@@ -37,6 +38,7 @@ const KEYS = {
 }
 
 export async function getIntegrations(): Promise<IntegrationsSettings> {
+  const clinicId = requireClinicId()
   const [
     voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
     smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure
@@ -52,8 +54,7 @@ export async function getIntegrations(): Promise<IntegrationsSettings> {
     getSetting(KEYS.SMTP_SECURE)
   ])
 
-  // Get clinic settings (assume the first clinic for now)
-  const clinicList = await db.select().from(clinics).limit(1)
+  const clinicList = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
   const clinic = clinicList[0]
 
   return {
@@ -73,6 +74,7 @@ export async function getIntegrations(): Promise<IntegrationsSettings> {
 }
 
 export async function updateIntegrations(patch: IntegrationsSettings): Promise<void> {
+  const clinicId = requireClinicId()
   const updates: Promise<any>[] = []
 
   // VoIP updates
@@ -90,13 +92,13 @@ export async function updateIntegrations(patch: IntegrationsSettings): Promise<v
 
   await Promise.all(updates)
 
-  // SMS updates (update the first clinic if exists)
+  // SMS credentials belong to the active clinic.
   const hasClinicUpdate = [
     patch.smsUsercode, patch.smsPassword, patch.smsSenderId,
   ].some(v => v !== undefined)
 
   if (hasClinicUpdate) {
-    const clinicList = await db.select().from(clinics).limit(1)
+    const clinicList = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
     if (clinicList.length > 0) {
       const clinic = clinicList[0]
       const toUpdate: any = {}

@@ -1,6 +1,7 @@
-import { sql as drizzleSql, eq } from 'drizzle-orm'
+import { and, sql as drizzleSql, eq } from 'drizzle-orm'
 import { db } from '../client'
 import { knowledgeDocuments } from '../schema'
+import { requireClinicId } from '../../tenancy/context'
 
 export type KnowledgeCategory = string
 
@@ -29,6 +30,7 @@ function vectorLiteral(vec: number[]): string {
 }
 
 export async function listDocs(): Promise<KnowledgeDoc[]> {
+  const clinicId = requireClinicId()
   const rows = await db
     .select({
       id: knowledgeDocuments.id,
@@ -42,6 +44,7 @@ export async function listDocs(): Promise<KnowledgeDoc[]> {
       updatedAt: knowledgeDocuments.updatedAt,
     })
     .from(knowledgeDocuments)
+    .where(eq(knowledgeDocuments.clinicId, clinicId))
     .orderBy(knowledgeDocuments.createdAt)
   return rows.map(r => ({
     id: r.id,
@@ -57,11 +60,12 @@ export async function listDocs(): Promise<KnowledgeDoc[]> {
 }
 
 export async function countEmbedded(): Promise<{ total: number; embedded: number }> {
+  const clinicId = requireClinicId()
   const result = await db.execute(drizzleSql`
     SELECT
       COUNT(*)::int AS total,
       COUNT(embedding)::int AS embedded
-    FROM knowledge_documents
+    FROM knowledge_documents WHERE clinic_id = ${clinicId}
   `)
   const row = (result as unknown as { rows?: Array<{ total: number; embedded: number }> }).rows?.[0]
     ?? (Array.isArray(result) ? (result[0] as { total: number; embedded: number }) : { total: 0, embedded: 0 })
@@ -72,11 +76,13 @@ export async function createDoc(
   data: Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'callDirection' | 'active'>,
   embedding: number[],
 ): Promise<KnowledgeDoc> {
+  const clinicId = requireClinicId()
   const nowIso = new Date().toISOString()
   const hasEmbedding = embedding.length > 0
   const insertResult = await db.execute(drizzleSql`
-    INSERT INTO knowledge_documents (category, title, content, call_direction, active, embedding, embedded_at, created_at, updated_at)
+    INSERT INTO knowledge_documents (clinic_id, category, title, content, call_direction, active, embedding, embedded_at, created_at, updated_at)
     VALUES (
+      ${clinicId},
       ${data.category},
       ${data.title},
       ${data.content},
@@ -109,6 +115,7 @@ export async function updateDoc(
   data: Partial<Pick<KnowledgeDoc, 'category' | 'title' | 'content' | 'callDirection' | 'active'>>,
   newEmbedding?: number[],
 ): Promise<KnowledgeDoc | null> {
+  const clinicId = requireClinicId()
   const nowIso = new Date().toISOString()
 
   // Build SET clause dynamically using template literals
@@ -138,7 +145,7 @@ export async function updateDoc(
   const result = await db.execute(drizzleSql`
     UPDATE knowledge_documents
     SET ${setClause}
-    WHERE id = ${id}
+    WHERE id = ${id} AND clinic_id = ${clinicId}
     RETURNING id, category, title, content, call_direction, active, embedded_at, created_at, updated_at
   `)
   const row = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
@@ -158,8 +165,9 @@ export async function updateDoc(
 }
 
 export async function deleteDoc(id: string): Promise<boolean> {
+  const clinicId = requireClinicId()
   try {
-    const rows = await db.delete(knowledgeDocuments).where(eq(knowledgeDocuments.id, id)).returning({ id: knowledgeDocuments.id })
+    const rows = await db.delete(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, id), eq(knowledgeDocuments.clinicId, clinicId))).returning({ id: knowledgeDocuments.id })
     return rows.length > 0
   } catch {
     return false
@@ -167,13 +175,15 @@ export async function deleteDoc(id: string): Promise<boolean> {
 }
 
 export async function toggleDoc(id: string): Promise<KnowledgeDoc | null> {
-  const [existing] = await db.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(eq(knowledgeDocuments.id, id));
+  const clinicId = requireClinicId()
+  const condition = and(eq(knowledgeDocuments.id, id), eq(knowledgeDocuments.clinicId, clinicId))
+  const [existing] = await db.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(condition);
   if (!existing) return null;
 
   const [doc] = await db
     .update(knowledgeDocuments)
     .set({ active: !existing.active, updatedAt: new Date() })
-    .where(eq(knowledgeDocuments.id, id))
+    .where(condition)
     .returning();
 
   if (!doc) return null;
@@ -191,13 +201,14 @@ export async function toggleDoc(id: string): Promise<KnowledgeDoc | null> {
 }
 
 export async function updateDocEmbedding(id: string, embedding: number[]): Promise<boolean> {
+  const clinicId = requireClinicId()
   if (embedding.length === 0) return false
   const result = await db.execute(drizzleSql`
     UPDATE knowledge_documents
     SET embedding = ${vectorLiteral(embedding)}::vector,
         embedded_at = now(),
         updated_at = now()
-    WHERE id = ${id}
+    WHERE id = ${id} AND clinic_id = ${clinicId}
     RETURNING id
   `)
   const rows = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
@@ -214,12 +225,13 @@ export interface RankedDoc {
 }
 
 export async function retrieveTopK(queryEmbedding: number[], k = 5, direction: string = 'inbound'): Promise<RankedDoc[]> {
+  const clinicId = requireClinicId()
   if (queryEmbedding.length === 0) return []
   const result = await db.execute(drizzleSql`
     SELECT id, category, title, content,
            1 - (embedding <=> ${vectorLiteral(queryEmbedding)}::vector) AS score
     FROM knowledge_documents
-    WHERE active = true AND embedding IS NOT NULL
+    WHERE clinic_id = ${clinicId} AND active = true AND embedding IS NOT NULL
       AND (call_direction = 'both' OR call_direction = ${direction})
     ORDER BY embedding <=> ${vectorLiteral(queryEmbedding)}::vector
     LIMIT ${k}
@@ -241,6 +253,7 @@ export async function retrieveTopK(queryEmbedding: number[], k = 5, direction: s
  * üzerinde ILIKE arar.
  */
 export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
+  const clinicId = requireClinicId()
   const words = query
     .toLowerCase()
     .split(/\s+/)
@@ -257,7 +270,7 @@ export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
   const result = await db.execute(drizzleSql`
     SELECT id, category, title, content, 0.5 AS score
     FROM knowledge_documents
-    WHERE active = true AND (${whereClause})
+    WHERE clinic_id = ${clinicId} AND active = true AND (${whereClause})
     LIMIT ${k}
   `)
   const rows = ((result as unknown as { rows?: Array<Record<string, unknown>> }).rows
@@ -276,6 +289,7 @@ export async function searchByText(query: string, k = 5): Promise<RankedDoc[]> {
  * Admin panelden eklenen müşteri tanıma kayıtları için kullanılır.
  */
 export async function findCustomerDocByPhone(phone: string): Promise<{ name: string; content: string } | null> {
+  const clinicId = requireClinicId()
   const normalized = phone.replace(/\D/g, '')
   if (normalized.length < 10) return null
   const last10 = normalized.slice(-10)
@@ -283,7 +297,7 @@ export async function findCustomerDocByPhone(phone: string): Promise<{ name: str
   const result = await db.execute(drizzleSql`
     SELECT title, content
     FROM knowledge_documents
-    WHERE active = true
+    WHERE clinic_id = ${clinicId} AND active = true
       AND category = 'musteri'
       AND content LIKE ${'%' + last10 + '%'}
     LIMIT 1

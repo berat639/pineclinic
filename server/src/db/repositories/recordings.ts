@@ -1,8 +1,9 @@
 import { resolve } from 'path'
 import { existsSync, unlinkSync } from 'fs'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../client'
 import { recordings } from '../schema'
+import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
 export const RECORDINGS_DIR = resolve(import.meta.dir, '../../../../data/recordings')
 
@@ -29,8 +30,16 @@ function rowToMeta(r: typeof recordings.$inferSelect): RecordingMeta {
 }
 
 export async function listRecordings(): Promise<RecordingMeta[]> {
-  const rows = await db.select().from(recordings).orderBy(desc(recordings.startedAt))
+  const rows = await db.select().from(recordings).where(eq(recordings.clinicId, requireClinicId())).orderBy(desc(recordings.startedAt))
   return rows.map(rowToMeta)
+}
+
+export async function getRecordingByFilename(filename: string): Promise<RecordingMeta | null> {
+  const [row] = await db.select().from(recordings).where(and(
+    eq(recordings.clinicId, requireClinicId()),
+    eq(recordings.filename, filename),
+  )).limit(1)
+  return row ? rowToMeta(row) : null
 }
 
 export async function saveRecording(meta: {
@@ -41,12 +50,16 @@ export async function saveRecording(meta: {
   endedAt: string
   durationMs: number
   sizeBytes: number
+  clinicId?: string
 }): Promise<RecordingMeta> {
+  const clinicId = meta.clinicId ?? currentClinicId()
   const started = new Date(meta.startedAt)
   const ended = new Date(meta.endedAt)
   // Upsert by id if provided (UUID); otherwise insert new
   if (meta.id) {
-    const existing = await db.select().from(recordings).where(eq(recordings.id, meta.id)).limit(1)
+    const existing = clinicId
+      ? await db.select().from(recordings).where(and(eq(recordings.id, meta.id), eq(recordings.clinicId, clinicId))).limit(1)
+      : await db.select().from(recordings).where(eq(recordings.id, meta.id)).limit(1)
     if (existing.length > 0) {
       const [updated] = await db
         .update(recordings)
@@ -66,6 +79,7 @@ export async function saveRecording(meta: {
   const [inserted] = await db
     .insert(recordings)
     .values({
+      clinicId,
       ...(meta.id ? { id: meta.id } : {}),
       sessionId: meta.sessionId ?? null,
       filename: meta.filename,
@@ -79,9 +93,10 @@ export async function saveRecording(meta: {
 }
 
 export async function deleteRecording(id: string): Promise<boolean> {
+  const clinicId = requireClinicId()
   const rows = await db
     .delete(recordings)
-    .where(eq(recordings.id, id))
+    .where(and(eq(recordings.id, id), eq(recordings.clinicId, clinicId)))
     .returning({ filename: recordings.filename })
   if (rows.length === 0) return false
   const filePath = resolve(RECORDINGS_DIR, rows[0].filename)

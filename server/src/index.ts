@@ -3,10 +3,11 @@ import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, resolveLiveModel, buildSystemP
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { staticPlugin } from '@elysiajs/static'
-import { randomUUID } from 'crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { createReadStream, writeFileSync, mkdirSync } from 'fs'
 import { resolve } from 'path'
 import { GoogleGenAI } from '@google/genai'
+import { eq } from 'drizzle-orm'
 import { createLiveSession, validateLiveCustomerIdentity } from './gemini'
 import {
   readAppointments,
@@ -17,6 +18,7 @@ import {
 } from './db/repositories/appointments'
 import {
   listRecordings,
+  getRecordingByFilename,
   saveRecording,
   deleteRecording,
   RECORDINGS_DIR,
@@ -66,8 +68,10 @@ import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
 import { startReminderCron } from './cron/reminders'
+import { currentClinicId, currentTenant, enterTenantContext, requireClinicId, resolveTenantFromRequest, runWithTenantContext } from './tenancy/context'
+import { authenticateRequest } from './middleware/auth'
 
-const callerRegistry = new Map<string, { phone: string; channel?: string; direction?: string }>()
+const callerRegistry = new Map<string, { phone: string; channel?: string; direction?: string; clinicId: string; hostname: string }>()
 
 const PORT = Number(process.env.PORT) || 3001
 
@@ -91,6 +95,26 @@ const ai = createAI()
 // ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
 const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
 
+function signOAuthState(payload: { clinicId: string; hostname: string; returnOrigin: string }): string {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  const signature = createHmac('sha256', process.env.JWT_SECRET || 'voiceai-dev-secret-change-me').update(encoded).digest('base64url')
+  return `${encoded}.${signature}`
+}
+
+function verifyOAuthState(state: string | undefined): { clinicId: string; hostname: string; returnOrigin: string } | null {
+  if (!state) return null
+  const [encoded, signature] = state.split('.')
+  if (!encoded || !signature) return null
+  const expected = createHmac('sha256', process.env.JWT_SECRET || 'voiceai-dev-secret-change-me').update(encoded).digest('base64url')
+  const actualBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return null
+  try {
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString())
+    return typeof parsed.clinicId === 'string' && typeof parsed.hostname === 'string' && typeof parsed.returnOrigin === 'string' ? parsed : null
+  } catch { return null }
+}
+
 /**
  * Build system prompt dynamically from DB sections.
  * No cache — always reads fresh from DB for instant updates.
@@ -108,18 +132,23 @@ interface SessionInfo {
   audioChunks: TimedChunk[]      // AI (24 kHz)
   userAudioChunks: TimedChunk[]  // User (16 kHz)
   shortId: string
+  clinicId: string
+  hostname: string
 }
 
 const sessions = new Map<string, SessionInfo>()
 
 // ── SSE: Admin real-time notifications ───────────────────────────────────────
 import { sseClients as sharedSseClients } from './events'
-type SseClient = { id: string; send: (data: string) => void }
+type SseClient = { id: string; clinicId: string; send: (data: string) => void }
 const sseClients = new Set<SseClient>()
 
 function notifyAdmins(event: string, payload: unknown) {
+  const clinicId = currentClinicId()
+  if (!clinicId) return
   const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
   for (const client of sseClients) {
+    if (client.clinicId !== clinicId) continue
     try { client.send(data) } catch { sseClients.delete(client) }
   }
 }
@@ -212,6 +241,27 @@ const corsFromEnv = process.env.CORS_ORIGIN?.split(/[\s,]+/).map(s => s.trim()).
 const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
+  .onRequest(async ({ request }) => {
+    enterTenantContext(await resolveTenantFromRequest(request))
+  })
+  .onBeforeHandle(async ({ request, cookie, set }) => {
+    const pathname = new URL(request.url).pathname
+    const protectedPrefixes = [
+      '/api/admin', '/api/dental', '/api/yonetici', '/api/shifts',
+      '/api/notifications', '/api/recordings', '/api/patient-notes',
+    ]
+    if (!protectedPrefixes.some(prefix => pathname.startsWith(prefix))) return
+    if (pathname === '/api/admin/settings/calendar/callback') return
+    if (!currentTenant()) {
+      set.status = 404
+      return { error: 'Bu domain için aktif klinik bulunamadı' }
+    }
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user) {
+      set.status = 401
+      return { error: 'Oturum geçersiz' }
+    }
+  })
   .use(cors({ origin: corsOrigins }))
   .use(staticPlugin({ assets: PUBLIC_DIR, prefix: '/' }))
   .get('/uploads/*', async ({ params, set }) => {
@@ -266,11 +316,11 @@ const app = new Elysia()
     try {
       const { db } = await import('./db/client')
       const { patients } = await import('./db/schema')
-      const { eq } = await import('drizzle-orm')
+      const { eq, and } = await import('drizzle-orm')
       
       const patientId = params.id
       const patient = await db.query.patients.findFirst({
-        where: eq(patients.id, patientId)
+        where: and(eq(patients.id, patientId), eq(patients.clinicId, requireClinicId()))
       })
       if (!patient) {
         set.status = 404
@@ -292,7 +342,7 @@ const app = new Elysia()
     try {
       const { db } = await import('./db/client')
       const { patients } = await import('./db/schema')
-      const { eq } = await import('drizzle-orm')
+      const { eq, and } = await import('drizzle-orm')
       
       const patientId = params.id
       const b = body as any
@@ -301,7 +351,7 @@ const app = new Elysia()
         smsOptOut: !!b.smsOptOut,
         emailOptOut: !!b.emailOptOut,
         whatsappOptOut: !!b.whatsappOptOut
-      }).where(eq(patients.id, patientId))
+      }).where(and(eq(patients.id, patientId), eq(patients.clinicId, requireClinicId())))
       
       return { success: true }
     } catch (e: any) {
@@ -320,23 +370,14 @@ const app = new Elysia()
 
   // ── Dental Calendar API ────────────────────────────────────────────────────
   .get('/api/dental/doctors', async () => {
-    const { db } = await import('./db/client')
-    const { users } = await import('./db/schema')
-    const { eq } = await import('drizzle-orm')
-    return db.select({ id: users.id, name: users.name, specialty: users.specialty, color: users.color, active: users.active })
-      .from(users).where(eq(users.role, 'hekim'))
+    const { listDoctors } = await import('./db/repositories/dental')
+    return listDoctors()
   })
   .post('/api/dental/doctors', async ({ body, set }) => {
-    const { createUser } = await import('./db/repositories/users')
+    const { createDoctor } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.name || !b.specialty) { set.status = 400; return { error: 'Name and specialty required' } }
-    const hash = await Bun.password.hash('Hekim123!')
-    const user = await createUser({ email: `hekim.${Date.now()}@klinik.com`, passwordHash: hash, name: b.name, role: 'hekim' })
-    const { db } = await import('./db/client')
-    const { users } = await import('./db/schema')
-    const { eq } = await import('drizzle-orm')
-    await db.update(users).set({ specialty: b.specialty, color: b.color || '#60a5fa' }).where(eq(users.id, user.id))
-    return { id: user.id, name: user.name, specialty: b.specialty, color: b.color || '#60a5fa', active: true }
+    return createDoctor({ name: b.name, specialty: b.specialty, color: b.color })
   })
   .get('/api/dental/appointments', async ({ query }) => {
     const { listDentalAppointments } = await import('./db/repositories/dental')
@@ -467,7 +508,7 @@ const app = new Elysia()
   .put('/api/dental/patients/:id', async ({ params, body, set }) => {
     const { db } = await import('./db/client')
     const { patients } = await import('./db/schema')
-    const { eq } = await import('drizzle-orm')
+    const { and, eq } = await import('drizzle-orm')
     const b = body as any
     const updateData: any = {}
     if (b.name !== undefined && b.name.trim() !== '') updateData.name = b.name.trim()
@@ -484,7 +525,7 @@ const app = new Elysia()
     
     if (Object.keys(updateData).length === 0) return { success: true }
     
-    await db.update(patients).set(updateData).where(eq(patients.id, params.id))
+    await db.update(patients).set(updateData).where(and(eq(patients.id, params.id), eq(patients.clinicId, requireClinicId())))
     return { success: true }
   })
   .get('/api/dental/patients/:id/treatment-groups', async ({ params }) => {
@@ -549,7 +590,8 @@ const app = new Elysia()
     
     const { db } = await import('./db/client')
     const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
-    const { eq, sql } = await import('drizzle-orm')
+    const { and, eq, sql } = await import('drizzle-orm')
+    const clinicId = requireClinicId()
     
     for (const t of b.treatments) {
       const treatmentResult = await createTreatmentPlan({
@@ -561,7 +603,7 @@ const app = new Elysia()
         cost: t.cost,
         status: t.status || 'planned',
         dcmUrl: t.dcmUrl,
-        clinicId: t.clinicId || b.clinicId,
+        clinicId,
         groupId: group.id,
         isPeriodic: t.isPeriodic,
         periodDays: t.periodDays,
@@ -578,19 +620,21 @@ const app = new Elysia()
             if (!mat.inventoryItemId || !mat.quantity) continue
             await db.update(inventoryItems)
               .set({ quantity: sql`quantity - ${mat.quantity}` })
-              .where(eq(inventoryItems.id, mat.inventoryItemId))
+              .where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId)))
             
             await db.insert(inventoryMovements).values({
+              clinicId,
               itemId: mat.inventoryItemId,
               type: 'cikis',
               quantity: mat.quantity,
               notes: `Tedavi (Toplu): ${t.procedureName}`,
             })
             
-            const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, mat.inventoryItemId)).limit(1)
+            const [item] = await db.select().from(inventoryItems).where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId))).limit(1)
             if (item) {
               if (t.doctorId || b.doctorId) {
                 await db.insert(materialUsages).values({
+                  clinicId,
                   doctorId: t.doctorId || b.doctorId,
                   patientId: params.id,
                   inventoryItemId: mat.inventoryItemId,
@@ -599,6 +643,7 @@ const app = new Elysia()
                 })
               }
               await db.insert(expenses).values({
+                clinicId,
                 category: 'malzeme',
                 itemName: item.name,
                 quantity: mat.quantity,
@@ -640,7 +685,7 @@ const app = new Elysia()
       cost: b.cost, 
       status: b.status,
       dcmUrl: b.dcmUrl,
-      clinicId: b.clinicId,
+      clinicId: requireClinicId(),
       groupId: b.groupId,
       isPeriodic: b.isPeriodic,
       periodDays: b.periodDays,
@@ -654,7 +699,8 @@ const app = new Elysia()
       try {
         const { db } = await import('./db/client')
         const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
-        const { eq, sql } = await import('drizzle-orm')
+        const { and, eq, sql } = await import('drizzle-orm')
+        const clinicId = requireClinicId()
         
         for (const mat of b.materials) {
           if (!mat.inventoryItemId || !mat.quantity) continue
@@ -662,10 +708,11 @@ const app = new Elysia()
           // Deduct stock
           await db.update(inventoryItems)
             .set({ quantity: sql`quantity - ${mat.quantity}` })
-            .where(eq(inventoryItems.id, mat.inventoryItemId))
+            .where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId)))
             
           // Record movement
           await db.insert(inventoryMovements).values({
+            clinicId,
             itemId: mat.inventoryItemId,
             type: 'cikis',
             quantity: mat.quantity,
@@ -673,12 +720,13 @@ const app = new Elysia()
           })
           
           // Fetch item to get cost
-          const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, mat.inventoryItemId)).limit(1)
+          const [item] = await db.select().from(inventoryItems).where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId))).limit(1)
           
           if (item) {
             // Record usage
             if (b.doctorId) {
               await db.insert(materialUsages).values({
+                clinicId,
                 doctorId: b.doctorId,
                 patientId: params.id,
                 inventoryItemId: mat.inventoryItemId,
@@ -689,6 +737,7 @@ const app = new Elysia()
             
             // Record expense
             await db.insert(expenses).values({
+              clinicId,
               category: 'malzeme',
               itemName: item.name,
               quantity: mat.quantity,
@@ -709,7 +758,7 @@ const app = new Elysia()
   .get('/api/dental/inventory', async () => {
     const { db } = await import('./db/client')
     const { inventoryItems } = await import('./db/schema')
-    return db.select().from(inventoryItems).orderBy(inventoryItems.name)
+    return db.select().from(inventoryItems).where(eq(inventoryItems.clinicId, requireClinicId())).orderBy(inventoryItems.name)
   })
   .get('/api/dental/patients/:id/consultations', async ({ params }) => {
     const { getPatientConsultations } = await import('./db/repositories/dental')
@@ -721,7 +770,7 @@ const app = new Elysia()
     if (!b.consultationNote && !b.diseaseNote) { set.status = 400; return { error: 'Missing fields' } }
     return await createConsultation({
       patientId: params.id,
-      clinicId: b.clinicId || undefined,
+      clinicId: requireClinicId(),
       doctorId: b.doctorId || undefined,
       consultationNote: b.consultationNote || "",
       diseaseNote: b.diseaseNote || undefined
@@ -730,13 +779,13 @@ const app = new Elysia()
   .put('/api/dental/consultations/:id', async ({ params, body }) => {
     const { db } = await import('./db/client')
     const { consultations } = await import('./db/schema')
-    const { eq } = await import('drizzle-orm')
+    const { and, eq } = await import('drizzle-orm')
     const b = body as any
     const updateData: any = {}
     if (b.consultationNote !== undefined) updateData.consultationNote = b.consultationNote || ""
     if (b.diseaseNote !== undefined) updateData.diseaseNote = b.diseaseNote
     if (Object.keys(updateData).length === 0) return { success: true }
-    await db.update(consultations).set(updateData).where(eq(consultations.id, params.id))
+    await db.update(consultations).set(updateData).where(and(eq(consultations.id, params.id), eq(consultations.clinicId, requireClinicId())))
     return { success: true }
   })
   .get('/api/dental/clinics/:id/consultations/autocomplete', async ({ params }) => {
@@ -762,7 +811,9 @@ const app = new Elysia()
     
     const uuid = crypto.randomUUID();
     const fileName = `${uuid}_${file.name}.gz`;
-    const filePath = resolve(PUBLIC_DIR, 'uploads/dcm', fileName);
+    const clinicDirectory = resolve(PUBLIC_DIR, 'uploads/dcm', requireClinicId());
+    mkdirSync(clinicDirectory, { recursive: true });
+    const filePath = resolve(clinicDirectory, fileName);
     
     const raw = new Uint8Array(await file.arrayBuffer());
     const compressed = Bun.gzipSync(raw);
@@ -773,7 +824,12 @@ const app = new Elysia()
   })
   .get('/api/dental/dcm/:filename', async ({ params, set }) => {
     const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '');
-    const filePath = resolve(PUBLIC_DIR, 'uploads/dcm', safeName);
+    const clinicDirectory = resolve(PUBLIC_DIR, 'uploads/dcm', requireClinicId());
+    const filePath = resolve(clinicDirectory, safeName);
+    if (!filePath.startsWith(`${clinicDirectory}/`)) {
+      set.status = 403;
+      return { error: 'Forbidden' };
+    }
     const file = Bun.file(filePath);
     if (!(await file.exists())) {
       set.status = 404;
@@ -802,7 +858,7 @@ const app = new Elysia()
         })
         .from(appointmentTreatments)
         .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-        .where(eq(appointmentTreatments.treatmentPlanId, params.id))
+        .where(and(eq(appointmentTreatments.treatmentPlanId, params.id), eq(dentalAppointments.clinicId, requireClinicId())))
 
       for (const appt of linkedAppts) {
         if (appt.startTime) {
@@ -810,7 +866,7 @@ const app = new Elysia()
           const docShifts = await db
             .select()
             .from(shifts)
-            .where(and(eq(shifts.userId, b.doctorId), eq(shifts.date, apptDateStr)))
+            .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, b.doctorId), eq(shifts.date, apptDateStr)))
 
           if (docShifts.length === 0) {
             set.status = 400
@@ -872,7 +928,7 @@ const app = new Elysia()
     return await createConsultation({ 
       patientId: params.id, 
       doctorId: b.doctorId || undefined,
-      clinicId: b.clinicId || undefined,
+      clinicId: requireClinicId(),
       consultationNote: b.consultationNote || "",
       diseaseNote: b.diseaseNote || undefined
     })
@@ -1113,11 +1169,12 @@ const app = new Elysia()
     const caller = query.caller as string | undefined
     const channel = query.channel as string | undefined
     const direction = (query.direction as string) || 'inbound'
-    if (uuid && caller) {
-      callerRegistry.set(uuid, { phone: caller, channel, direction })
+    const tenant = currentTenant()
+    if (uuid && caller && tenant) {
+      callerRegistry.set(uuid, { phone: caller, channel, direction, clinicId: tenant.clinicId, hostname: tenant.hostname })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
     }
-    return { ok: true }
+    return tenant ? { ok: true } : { ok: false, error: 'Klinik domaini tanımlı değil' }
   })
 
   // ── Outbound Calls ─────────────────────────────────────────────────────────
@@ -1135,6 +1192,7 @@ const app = new Elysia()
 
   .get('/api/events', ({ set }) => {
     const clientId = randomUUID().slice(0, 8)
+    const clinicId = requireClinicId()
     set.headers['Content-Type'] = 'text/event-stream'
     set.headers['Cache-Control'] = 'no-cache'
     set.headers['Connection'] = 'keep-alive'
@@ -1143,7 +1201,7 @@ const app = new Elysia()
       start(controller) {
         const enc = new TextEncoder()
         const send = (data: string) => controller.enqueue(enc.encode(data))
-        const client: SseClient = { id: clientId, send }
+        const client: SseClient = { id: clientId, clinicId, send }
         sseClients.add(client)
         send(`: connected ${clientId}\n\n`)
         const hb = setInterval(() => {
@@ -1187,8 +1245,10 @@ const app = new Elysia()
 
   .get('/api/recordings', async () => await listRecordings())
 
-  .get('/api/recordings/:filename', ({ params, set }) => {
+  .get('/api/recordings/:filename', async ({ params, set }) => {
     try {
+      const recording = await getRecordingByFilename(params.filename)
+      if (!recording) { set.status = 404; return 'Not found' }
       const filePath = resolve(RECORDINGS_DIR, params.filename)
       if (!filePath.startsWith(RECORDINGS_DIR)) { set.status = 403; return 'Forbidden' }
       set.headers['Content-Type'] = 'audio/wav'
@@ -1278,7 +1338,8 @@ const app = new Elysia()
     const referer = request.headers.get('referer') || request.headers.get('origin') || ''
     let returnOrigin = process.env.CLIENT_APP_URL || 'http://localhost:3000'
     try { if (referer) returnOrigin = new URL(referer).origin } catch {}
-    const state = Buffer.from(JSON.stringify({ returnOrigin })).toString('base64url')
+    const tenant = currentTenant()!
+    const state = signOAuthState({ clinicId: tenant.clinicId, hostname: tenant.hostname, returnOrigin })
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -1304,12 +1365,12 @@ const app = new Elysia()
 
     // state'ten dönüş orijinini çöz, fallback olarak env'i kullan
     let clientUrl = process.env.CLIENT_APP_URL || 'http://localhost:3000'
-    if (stateRaw) {
-      try {
-        const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString())
-        if (typeof parsed.returnOrigin === 'string') clientUrl = parsed.returnOrigin
-      } catch {}
+    const oauthState = verifyOAuthState(stateRaw)
+    if (!oauthState) {
+      set.status = 400
+      return { error: 'Geçersiz veya süresi geçmiş OAuth state' }
     }
+    clientUrl = oauthState.returnOrigin
 
     const redirectUri =
       process.env.OAUTH_REDIRECT_URI
@@ -1339,7 +1400,7 @@ const app = new Elysia()
         const userInfo = await userRes.json() as { email?: string }
         if (userInfo.email) patch.email = userInfo.email
       } catch {}
-      await setCalendarSettings(patch)
+      await runWithTenantContext({ clinicId: oauthState.clinicId, hostname: oauthState.hostname }, () => setCalendarSettings(patch))
       console.log('[Calendar] OAuth bağlantısı kuruldu:', patch.email)
       return redirect(`${clientUrl}/admin?calendar=connected`)
     } catch (e) {
@@ -1927,6 +1988,12 @@ app.ws('/ws', {
     idleTimeout: 120, // Elysia seviyesi idle (saniye) — ek güvenlik ağı
 
     async open(ws) {
+      const tenant = currentTenant()
+      if (!tenant) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Bu domain için klinik tanımlanmamış.' }))
+        ws.close()
+        return
+      }
       const shortId = randomUUID().slice(0, 8)
       console.log(`[${shortId}] Client connected`)
       const startedAt = new Date()
@@ -1938,6 +2005,8 @@ app.ws('/ws', {
         audioChunks: [],
         userAudioChunks: [],
         shortId,
+        clinicId: tenant.clinicId,
+        hostname: tenant.hostname,
       }
       // ── Idle + max session timer'ları ──
       let lastActivityAt = Date.now()
@@ -2053,7 +2122,7 @@ app.ws('/ws', {
       clearInterval((ws.data as any).pingTimer)
       const shortId = (ws.data as any).sessionId as string
       const info = sessions.get(shortId)
-      if (info) {
+      if (info) await runWithTenantContext({ clinicId: info.clinicId, hostname: info.hostname }, async () => {
         const hasAudio = info.audioChunks.length > 0 || info.userAudioChunks.length > 0
         if (hasAudio) {
           const endedAt = new Date()
@@ -2065,6 +2134,7 @@ app.ws('/ws', {
             const wavBuf = buildStereoWav(info.audioChunks, info.userAudioChunks, durationMs)
             writeFileSync(filePath, wavBuf)
             await saveRecording({
+              clinicId: info.clinicId,
               filename,
               startedAt: info.startedAt.toISOString(),
               endedAt: endedAt.toISOString(),
@@ -2076,7 +2146,7 @@ app.ws('/ws', {
         }
         try { info.session?.close() } catch {}
         sessions.delete(shortId)
-      }
+      })
       console.log(`[${shortId}] Disconnected`)
     },
   })

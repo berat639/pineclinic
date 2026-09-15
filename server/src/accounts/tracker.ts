@@ -11,6 +11,7 @@ import { sql, eq } from 'drizzle-orm'
 import { db } from '../db/client'
 import { redisClient } from '../db/redis'
 import { sessions } from '../db/schema'
+import { requireClinicId } from '../tenancy/context'
 
 // Distributed lock for flush operations
 const redlock = new Redlock([redisClient], {
@@ -34,6 +35,7 @@ let flushInterval: ReturnType<typeof setInterval> | null = null
 
 export async function startSession(wsSessionId: string, accountId: string): Promise<string> {
   const [row] = await db.insert(sessions).values({
+    clinicId: requireClinicId(),
     accountId,
     status: 'active',
   }).returning({ id: sessions.id })

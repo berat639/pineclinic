@@ -11,6 +11,7 @@ export async function POST(req: NextRequest) {
       'x-forwarded-for': req.headers.get('x-forwarded-for') || (req as any).ip || '',
       'user-agent': req.headers.get('user-agent') || '',
       'x-forwarded-proto': req.headers.get('x-forwarded-proto') || 'http',
+      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
     },
     body: JSON.stringify(body),
   })

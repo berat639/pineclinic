@@ -17,6 +17,7 @@ import { buildRagPrompt, getPreWarmEmbedding, embedText, PRE_WARM_QUERY } from '
 import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
 import { findVipByPhone } from '../db/repositories/vip'
+import { runWithTenantContext } from '../tenancy/context'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
 
@@ -170,6 +171,8 @@ interface SharedSessionInfo {
   audioChunks: TimedChunk[]
   userAudioChunks: TimedChunk[]
   shortId: string
+  clinicId: string
+  hostname: string
 }
 
 export interface TelephonyDeps {
@@ -179,7 +182,7 @@ export interface TelephonyDeps {
   resolveLiveModel: () => Promise<string>
   sessions: Map<string, SharedSessionInfo>
   notifyAdmins: (event: string, payload: unknown) => void
-  callerRegistry: Map<string, { phone: string; channel?: string; direction?: string }>
+  callerRegistry: Map<string, { phone: string; channel?: string; direction?: string; clinicId: string; hostname: string }>
 }
 
 // Müşteri sessizlik timeout'u — AI soru sorup cevap beklerken müşteri
@@ -202,6 +205,8 @@ interface CallState {
   callerPhone?: string
   callerChannel?: string
   callerDirection?: string
+  clinicId?: string
+  hostname?: string
   audioQueue: Buffer[]
   noiseGate: NoiseGate
   // Zaman aşımı timer'ları
@@ -334,6 +339,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           audioChunks: [],
           userAudioChunks: [],
           shortId,
+          clinicId: '',
+          hostname: '',
         }
 
         const state: CallState = {
@@ -407,6 +414,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             await new Promise(r => setTimeout(r, 10))
             waitCount++
           }
+          if (!state.clinicId || !state.hostname) throw new Error('Çağrı için klinik domaini eşleştirilemedi')
+          info.clinicId = state.clinicId
+          info.hostname = state.hostname
+          await runWithTenantContext({ clinicId: state.clinicId, hostname: state.hostname }, async () => {
           const direction = state.callerDirection || 'inbound'
           console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}`)
 
@@ -708,6 +719,7 @@ ${isOwnerCall
           setTimeout(() => {
             if (!state.closed) state.micEnabled = true
           }, 1500)
+          })
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
           state.closed = true
@@ -728,6 +740,8 @@ ${isOwnerCall
               state.callerPhone = reg.phone
               state.callerChannel = reg.channel
               state.callerDirection = reg.direction || 'inbound'
+              state.clinicId = reg.clinicId
+              state.hostname = reg.hostname
               callerRegistry.delete(channelUuid)
             }
             console.log(`[${state.shortId}] Asterisk UUID: ${ev.uuid}${state.callerPhone ? `, arayan: ${state.callerPhone}` : ''}${state.callerChannel ? `, kanal: ${state.callerChannel}` : ''}${state.callerDirection ? `, yon: ${state.callerDirection}` : ''}`)

@@ -7,7 +7,11 @@ export async function GET(req: NextRequest) {
   if (!token) return NextResponse.json({ error: 'Oturum yok' }, { status: 401 })
 
   const res = await fetch(`${SERVER_URL}/api/auth/me`, {
-    headers: { cookie: `token=${token}` },
+    headers: {
+      cookie: `token=${token}`,
+      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+      'x-forwarded-proto': req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', ''),
+    },
   })
 
   let data

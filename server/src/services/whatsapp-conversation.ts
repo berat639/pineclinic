@@ -8,6 +8,7 @@ import { buildSystemPrompt, resolveLiveModel } from './assistant-config'
 import { buildToolDeclarations } from './assistant-tool-declarations'
 import { executeWhatsAppTool, WHATSAPP_TOOL_NAMES } from './whatsapp-tools'
 import { generateWhatsAppReply, handoffDeclaration } from './whatsapp-live'
+import { runWithTenantContext } from '../tenancy/context'
 
 export type StoredWhatsAppMessage = typeof whatsappMessages.$inferSelect
 const actionable = sql`${whatsappMessages.status} IN ('pending', 'processing', 'reply_ready', 'sending')`
@@ -21,6 +22,16 @@ async function pauseConversation(id: string) {
 
 /** Caller owns the PostgreSQL session advisory lock for this conversation. */
 export async function processWhatsAppConversation(conversationId: string) {
+  const [conversation] = await db.select({ clinicId: whatsappConversations.clinicId })
+    .from(whatsappConversations).where(eq(whatsappConversations.id, conversationId)).limit(1)
+  if (!conversation) return
+  return runWithTenantContext(
+    { clinicId: conversation.clinicId, hostname: `whatsapp:${conversation.clinicId}` },
+    () => processWhatsAppConversationInTenant(conversationId),
+  )
+}
+
+async function processWhatsAppConversationInTenant(conversationId: string) {
   for (let processed = 0; processed < 20; processed++) {
     const [conversation] = await db.select().from(whatsappConversations).where(eq(whatsappConversations.id, conversationId))
     if (!conversation) return

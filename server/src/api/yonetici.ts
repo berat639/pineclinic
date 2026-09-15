@@ -7,6 +7,7 @@ import {
   auditLog, users, sessions, revenueTargets, treatmentPlans, inventoryMovements,
 } from '../db/schema'
 import { authenticateRequest } from '../middleware/auth'
+import { requireClinicId } from '../tenancy/context'
 
 function requireYonetici(user: any, set: any) {
   if (!user) { set.status = 401; return false }
@@ -45,7 +46,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       total: sql<number>`sum(amount)::int`,
     })
       .from(patientPayments)
-      .where(gte(patientPayments.date, startDate))
+      .where(and(eq(patientPayments.clinicId, requireClinicId()), gte(patientPayments.date, startDate)))
       .groupBy(patientPayments.date)
       .orderBy(patientPayments.date)
 
@@ -73,7 +74,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       total: sql<number>`coalesce(sum(amount), 0)::int`,
     })
       .from(patientPayments)
-      .where(gte(patientPayments.date, startDate))
+      .where(and(eq(patientPayments.clinicId, requireClinicId()), gte(patientPayments.date, startDate)))
       .groupBy(patientPayments.date)
       .orderBy(patientPayments.date)
 
@@ -82,7 +83,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       total: sql<number>`coalesce(sum(total_cost), 0)::int`,
     })
       .from(expenses)
-      .where(gte(expenses.date, startDate))
+      .where(and(eq(expenses.clinicId, requireClinicId()), gte(expenses.date, startDate)))
       .groupBy(expenses.date)
       .orderBy(expenses.date)
 
@@ -108,7 +109,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
-    return db.select().from(expenses).orderBy(desc(expenses.createdAt)).limit(100)
+    return db.select().from(expenses).where(eq(expenses.clinicId, requireClinicId())).orderBy(desc(expenses.createdAt)).limit(100)
   })
 
   .post('/finance/expenses', async ({ body, cookie, set }) => {
@@ -120,6 +121,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const totalCost = (b.quantity || 1) * (b.unitCost || 0)
     const [created] = await db.insert(expenses).values({
+      clinicId: requireClinicId(),
       itemName: b.itemName,
       quantity: b.quantity || 1,
       unitCost: b.unitCost || 0,
@@ -142,11 +144,11 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const [revenue] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)::int` })
       .from(patientPayments)
-      .where(and(gte(patientPayments.date, startDate), lte(patientPayments.date, endDate)))
+      .where(and(eq(patientPayments.clinicId, requireClinicId()), gte(patientPayments.date, startDate), lte(patientPayments.date, endDate)))
 
     const [expense] = await db.select({ total: sql<number>`coalesce(sum(total_cost), 0)::int` })
       .from(expenses)
-      .where(and(gte(expenses.date, startDate), lte(expenses.date, endDate)))
+      .where(and(eq(expenses.clinicId, requireClinicId()), gte(expenses.date, startDate), lte(expenses.date, endDate)))
 
     return { revenue: revenue?.total ?? 0, expenses: expense?.total ?? 0, net: (revenue?.total ?? 0) - (expense?.total ?? 0) }
   })
@@ -154,7 +156,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   .get('/finance/targets', async ({ cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    return db.select().from(revenueTargets).orderBy(desc(revenueTargets.year), desc(revenueTargets.month))
+    return db.select().from(revenueTargets).where(eq(revenueTargets.clinicId, requireClinicId())).orderBy(desc(revenueTargets.year), desc(revenueTargets.month))
   })
 
   .post('/finance/targets', async ({ body, cookie, set }) => {
@@ -163,7 +165,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const b = body as any
     const [created] = await db.insert(revenueTargets).values({
-      month: b.month, year: b.year, targetAmount: b.targetAmount,
+      clinicId: requireClinicId(), month: b.month, year: b.year, targetAmount: b.targetAmount,
     }).returning()
     return created
   })
@@ -172,7 +174,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
-    return db.select().from(patients).where(sql`balance < 0`).orderBy(patients.balance)
+    return db.select().from(patients).where(and(eq(patients.clinicId, requireClinicId()), sql`balance < 0`)).orderBy(patients.balance)
   })
 
   // ── Attendance ─────────────────────────────────────────────────────────────
@@ -191,6 +193,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     })
       .from(attendance)
       .leftJoin(users, eq(attendance.userId, users.id))
+      .where(eq(attendance.clinicId, requireClinicId()))
       .orderBy(desc(attendance.date))
       .limit(100)
 
@@ -203,7 +206,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const today = new Date().toISOString().split('T')[0]!
     const [created] = await db.insert(attendance).values({
-      userId: user.id, date: today, clockIn: new Date(),
+      clinicId: user.clinicId, userId: user.id, date: today, clockIn: new Date(),
     }).returning()
     return created
   })
@@ -214,7 +217,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const today = new Date().toISOString().split('T')[0]!
     const [existing] = await db.select().from(attendance)
-      .where(and(eq(attendance.userId, user.id), eq(attendance.date, today)))
+      .where(and(eq(attendance.clinicId, user.clinicId), eq(attendance.userId, user.id), eq(attendance.date, today)))
       .limit(1)
 
     if (!existing) { set.status = 404; return { error: 'Bugün giriş kaydı yok' } }
@@ -238,7 +241,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const rows = await db.select({
       hour: sql<number>`extract(hour from started_at)::int`,
       count: sql<number>`count(*)::int`,
-    }).from(sessions).groupBy(sql`extract(hour from started_at)`).orderBy(sql`extract(hour from started_at)`)
+    }).from(sessions).where(eq(sessions.clinicId, requireClinicId())).groupBy(sql`extract(hour from started_at)`).orderBy(sql`extract(hour from started_at)`)
 
     return rows
   })
@@ -250,15 +253,15 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     return db.select({
       procedureName: treatmentPlans.procedureName,
       count: sql<number>`count(*)::int`,
-    }).from(treatmentPlans).groupBy(treatmentPlans.procedureName).orderBy(sql`count(*) desc`).limit(20)
+    }).from(treatmentPlans).where(eq(treatmentPlans.clinicId, requireClinicId())).groupBy(treatmentPlans.procedureName).orderBy(sql`count(*) desc`).limit(20)
   })
 
   .get('/analytics/no-shows', async ({ cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
-    const [total] = await db.select({ count: sql<number>`count(*)::int` }).from(dentalAppointments)
-    const [noShows] = await db.select({ count: sql<number>`count(*)::int` }).from(dentalAppointments).where(eq(dentalAppointments.status, 'no_show'))
+    const [total] = await db.select({ count: sql<number>`count(*)::int` }).from(dentalAppointments).where(eq(dentalAppointments.clinicId, requireClinicId()))
+    const [noShows] = await db.select({ count: sql<number>`count(*)::int` }).from(dentalAppointments).where(and(eq(dentalAppointments.clinicId, requireClinicId()), eq(dentalAppointments.status, 'no_show')))
 
     const rate = total?.count ? Math.round((noShows?.count ?? 0) / total.count * 100) : 0
     return { total: total?.count ?? 0, noShows: noShows?.count ?? 0, rate }
@@ -271,7 +274,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const rows = await db.select({
       doctorId: dentalAppointments.doctorId,
       count: sql<number>`count(*)::int`,
-    }).from(dentalAppointments).groupBy(dentalAppointments.doctorId)
+    }).from(dentalAppointments).where(eq(dentalAppointments.clinicId, requireClinicId())).groupBy(dentalAppointments.doctorId)
 
     return rows
   })
@@ -280,7 +283,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   .get('/inventory', async ({ cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    return db.select().from(inventoryItems).orderBy(inventoryItems.name)
+    return db.select().from(inventoryItems).where(eq(inventoryItems.clinicId, requireClinicId())).orderBy(inventoryItems.name)
   })
 
   .post('/inventory', async ({ body, cookie, set }) => {
@@ -296,6 +299,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const isRefund = Boolean(b.isRefund)
 
     const [created] = await db.insert(inventoryItems).values({
+      clinicId: requireClinicId(),
       name: b.name, category: b.category || 'genel', quantity: b.quantity || 0,
       minThreshold: b.minThreshold || 5, unit: b.unit || 'adet', costPerUnit: unitCost,
       brand: b.brand || null, expiryDate: b.expiryDate || null, supplierName: b.supplierName || null,
@@ -303,6 +307,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     if (totalCost > 0) {
       await db.insert(expenses).values({
+        clinicId: requireClinicId(),
         category: b.category === 'cihaz' ? 'cihaz_alim' : 'malzeme_alim',
         itemName: created.name,
         quantity: Math.max(1, quantity || 1),
@@ -326,6 +331,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       type: inventoryMovements.type, quantity: inventoryMovements.quantity,
       notes: inventoryMovements.notes, userName: u.name, createdAt: inventoryMovements.createdAt,
     }).from(inventoryMovements).leftJoin(u, eq(inventoryMovements.userId, u.id))
+      .where(eq(inventoryMovements.clinicId, requireClinicId()))
       .orderBy(desc(inventoryMovements.createdAt)).limit(50)
   })
 
@@ -348,7 +354,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const { inventoryMovements } = await import('../db/schema')
     const [mov] = await db.insert(inventoryMovements).values({
-      itemId: b.itemId, type: b.type, quantity, notes: b.notes || null, userId: user!.id,
+      clinicId: requireClinicId(), itemId: b.itemId, type: b.type, quantity, notes: b.notes || null, userId: user!.id,
     }).returning()
 
     const deltaByType: Record<string, number> = {
@@ -364,7 +370,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (delta < 0) {
       const [currentItem] = await db.select({
         quantity: inventoryItems.quantity,
-      }).from(inventoryItems).where(eq(inventoryItems.id, b.itemId)).limit(1)
+      }).from(inventoryItems).where(and(eq(inventoryItems.id, b.itemId), eq(inventoryItems.clinicId, requireClinicId()))).limit(1)
 
       if (!currentItem) {
         set.status = 404
@@ -377,15 +383,16 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       }
     }
 
-    await db.update(inventoryItems).set({ quantity: sql`quantity + ${delta}` }).where(eq(inventoryItems.id, b.itemId))
-    if (b.type === 'giris') await db.update(inventoryItems).set({ lastRestockedAt: new Date() }).where(eq(inventoryItems.id, b.itemId))
+    await db.update(inventoryItems).set({ quantity: sql`quantity + ${delta}` }).where(and(eq(inventoryItems.id, b.itemId), eq(inventoryItems.clinicId, requireClinicId())))
+    if (b.type === 'giris') await db.update(inventoryItems).set({ lastRestockedAt: new Date() }).where(and(eq(inventoryItems.id, b.itemId), eq(inventoryItems.clinicId, requireClinicId())))
 
     const unitCost = Number(b.unitCost || 0)
     const totalCost = Number(b.totalCost || (unitCost * Number(b.quantity || 0)))
 
     if (totalCost > 0 && b.type === 'iade') {
-      const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, b.itemId)).limit(1)
+      const [item] = await db.select().from(inventoryItems).where(and(eq(inventoryItems.id, b.itemId), eq(inventoryItems.clinicId, requireClinicId()))).limit(1)
       await db.insert(expenses).values({
+        clinicId: requireClinicId(),
         category: 'stok_iade',
         itemName: item?.name || 'Stok iadesi',
         quantity: Number(b.quantity || 1),
@@ -411,7 +418,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       ...(b.minThreshold !== undefined && { minThreshold: b.minThreshold }),
       ...(b.costPerUnit !== undefined && { costPerUnit: b.costPerUnit }),
       ...(b.quantity !== undefined && { lastRestockedAt: new Date() }),
-    }).where(eq(inventoryItems.id, params.id)).returning()
+    }).where(and(eq(inventoryItems.id, params.id), eq(inventoryItems.clinicId, requireClinicId()))).returning()
     return updated
   })
 
@@ -419,7 +426,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   .get('/device-maintenance', async ({ cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    return db.select().from(deviceMaintenances).orderBy(deviceMaintenances.scheduledDate)
+    return db.select().from(deviceMaintenances).where(eq(deviceMaintenances.clinicId, requireClinicId())).orderBy(deviceMaintenances.scheduledDate)
   })
 
   .post('/device-maintenance', async ({ body, cookie, set }) => {
@@ -438,6 +445,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       : null
 
     const [created] = await db.insert(deviceMaintenances).values({
+      clinicId: requireClinicId(),
       deviceName: b.deviceName,
       maintenanceType: b.maintenanceType,
       isPeriodic,
@@ -452,11 +460,12 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     // Bakım işlemi stok üzerinden takip edilsin: cihaz stokta yoksa oluştur, sonra hareket yaz.
     let [deviceItem] = await db.select().from(inventoryItems)
-      .where(and(eq(inventoryItems.name, b.deviceName), eq(inventoryItems.category, 'cihaz')))
+      .where(and(eq(inventoryItems.clinicId, requireClinicId()), eq(inventoryItems.name, b.deviceName), eq(inventoryItems.category, 'cihaz')))
       .limit(1)
 
     if (!deviceItem) {
       const [createdItem] = await db.insert(inventoryItems).values({
+        clinicId: requireClinicId(),
         name: b.deviceName,
         category: 'cihaz',
         quantity: 1,
@@ -470,6 +479,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     }
 
     await db.insert(inventoryMovements).values({
+      clinicId: requireClinicId(),
       itemId: deviceItem.id,
       type: 'bakim',
       quantity: 1,
@@ -481,6 +491,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const isRefund = Boolean(b.isRefund)
     if (amount > 0) {
       await db.insert(expenses).values({
+        clinicId: requireClinicId(),
         category: 'bakim',
         itemName: `${b.deviceName} bakımı`,
         quantity: 1,
@@ -504,7 +515,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       ...(b.status && { status: b.status }),
       ...(b.completedDate && { completedDate: b.completedDate }),
       ...(b.notes !== undefined && { notes: b.notes }),
-    }).where(eq(deviceMaintenances.id, params.id)).returning()
+    }).where(and(eq(deviceMaintenances.id, params.id), eq(deviceMaintenances.clinicId, requireClinicId()))).returning()
     return updated
   })
 
@@ -516,10 +527,10 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     await db.update(patients).set({
       name: 'Anonim Hasta',
       phone: null,
-    }).where(eq(patients.id, params.patientId))
+    }).where(and(eq(patients.id, params.patientId), eq(patients.clinicId, requireClinicId())))
 
     await db.insert(auditLog).values({
-      userId: user!.id, action: 'gdpr.anonymize', targetType: 'patient', targetId: params.patientId,
+      clinicId: requireClinicId(), userId: user!.id, action: 'gdpr.anonymize', targetType: 'patient', targetId: params.patientId,
     })
 
     return { ok: true }
@@ -541,6 +552,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     })
       .from(auditLog)
       .leftJoin(users, eq(auditLog.userId, users.id))
+      .where(eq(auditLog.clinicId, requireClinicId()))
       .orderBy(desc(auditLog.createdAt))
       .limit(limit)
   })
@@ -551,9 +563,9 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { db: dbClient } = await import('../db/client')
-    const { businessSettings } = await import('../db/schema')
-    const rows = await dbClient.select().from(businessSettings)
-      .where(sql`key LIKE 'automation.%'`)
+    const { clinicSettings } = await import('../db/schema')
+    const rows = await dbClient.select().from(clinicSettings)
+      .where(and(eq(clinicSettings.clinicId, requireClinicId()), sql`key LIKE 'automation.%'`))
 
     const result: Record<string, string> = {}
     for (const row of rows) result[row.key] = row.value
@@ -565,13 +577,13 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { db: dbClient } = await import('../db/client')
-    const { businessSettings } = await import('../db/schema')
+    const { clinicSettings } = await import('../db/schema')
     const entries = Object.entries(body as Record<string, string>)
 
     for (const [key, value] of entries) {
       if (!key.startsWith('automation.')) continue
-      await dbClient.insert(businessSettings).values({ key, value }).onConflictDoUpdate({
-        target: businessSettings.key, set: { value, updatedAt: new Date() },
+      await dbClient.insert(clinicSettings).values({ clinicId: requireClinicId(), key, value }).onConflictDoUpdate({
+        target: [clinicSettings.clinicId, clinicSettings.key], set: { value, updatedAt: new Date() },
       })
     }
     return { ok: true }

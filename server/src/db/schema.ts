@@ -29,6 +29,7 @@ export const accountUsage = pgTable('account_usage', {
 
 export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
   accountId: uuid('account_id').references(() => accounts.id),
   startedAt: timestamp('started_at', { withTimezone: true }).default(sql`now()`),
   endedAt: timestamp('ended_at', { withTimezone: true }),
@@ -38,6 +39,7 @@ export const sessions = pgTable('sessions', {
 
 export const appointments = pgTable('appointments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   createdAt: timestamp('created_at', { withTimezone: true }).default(sql`now()`),
   sessionId: text('session_id'),
   calendarEventId: text('calendar_event_id'),
@@ -58,6 +60,7 @@ export const appointments = pgTable('appointments', {
 
 export const conversationFlows = pgTable('conversation_flows', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   name: text('name').notNull().default('main'),
   direction: text('direction').notNull().default('inbound'),
   nodes: jsonb('nodes').notNull().default([]),
@@ -92,6 +95,23 @@ export const clinics = pgTable('clinics', {
   whatsappAiEnabled: boolean('whatsapp_ai_enabled').notNull().default(false),
   whatsappEnabled: boolean('whatsapp_enabled').notNull().default(false),
 })
+
+export const clinicDomains = pgTable('clinic_domains', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  hostname: text('hostname').notNull().unique(),
+  isPrimary: boolean('is_primary').notNull().default(true),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => [index('clinic_domains_clinic_idx').on(t.clinicId)])
+
+export const clinicSettings = pgTable('clinic_settings', {
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => [primaryKey({ columns: [t.clinicId, t.key] })])
 
 export const notificationTemplates = pgTable('notification_templates', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -163,6 +183,7 @@ export const patients = pgTable('patients', {
 
 export const dentalAppointments = pgTable('dental_appointments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   doctorId: uuid('doctor_id').references(() => users.id),
   title: text('title').notNull(),
@@ -178,6 +199,7 @@ export const dentalAppointments = pgTable('dental_appointments', {
 
 export const treatmentGroups = pgTable('treatment_groups', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   name: text('name').notNull(),
   description: text('description'),
@@ -225,6 +247,7 @@ export const appointmentTreatments = pgTable('appointment_treatments', {
 
 export const patientPayments = pgTable('patient_payments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   treatmentPlanId: uuid('treatment_plan_id').references(() => treatmentPlans.id),
   date: text('date').notNull(),
@@ -238,6 +261,7 @@ export const patientPayments = pgTable('patient_payments', {
 
 export const completedWorks = pgTable('completed_works', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   doctorId: uuid('doctor_id').notNull().references(() => users.id),
   date: text('date').notNull(),
@@ -248,6 +272,7 @@ export const completedWorks = pgTable('completed_works', {
 // Single-doc + single-embedding model (admin UI uses category/title/content/active)
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   category: text('category').notNull().default('genel'),
   title: text('title').notNull(),
   content: text('content').notNull(),
@@ -261,6 +286,7 @@ export const knowledgeDocuments = pgTable('knowledge_documents', {
 
 export const recordings = pgTable('recordings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   sessionId: text('session_id'),
   filename: text('filename').notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
@@ -272,13 +298,14 @@ export const recordings = pgTable('recordings', {
 
 export const knowledgeCategories = pgTable('knowledge_categories', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  slug: text('slug').notNull().unique(),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
+  slug: text('slug').notNull(),
   label: text('label').notNull(),
   icon: text('icon').notNull().default('📁'),
   color: text('color').notNull().default('#60a5fa'),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-})
+}, (t) => [uniqueIndex('knowledge_categories_clinic_slug_unique').on(t.clinicId, t.slug)])
 
 export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect
 export type NewKnowledgeDocument = typeof knowledgeDocuments.$inferInsert
@@ -308,10 +335,23 @@ export const users = pgTable('users', {
   specialty: text('specialty'),
   color: text('color'),
   active: boolean('active').notNull().default(true),
+  isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
+
+export const clinicMemberships = pgTable('clinic_memberships', {
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('host'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.clinicId, t.userId] }),
+  index('clinic_memberships_user_idx').on(t.userId),
+])
 
 export const userSessions = pgTable('user_sessions', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -325,6 +365,7 @@ export const userSessions = pgTable('user_sessions', {
 
 export const shifts = pgTable('shifts', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   userId: uuid('user_id').notNull().references(() => users.id),
   date: text('date').notNull(),
   startTime: text('start_time').notNull(),
@@ -337,6 +378,7 @@ export const shifts = pgTable('shifts', {
 
 export const shiftSwapRequests = pgTable('shift_swap_requests', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   requesterId: uuid('requester_id').notNull().references(() => users.id),
   targetId: uuid('target_id').notNull().references(() => users.id),
   shiftId: uuid('shift_id').notNull().references(() => shifts.id),
@@ -350,6 +392,7 @@ export const shiftSwapRequests = pgTable('shift_swap_requests', {
 
 export const notifications = pgTable('notifications', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   userId: uuid('user_id').notNull().references(() => users.id),
   type: text('type').notNull(),
   title: text('title').notNull(),
@@ -361,6 +404,7 @@ export const notifications = pgTable('notifications', {
 
 export const auditLog = pgTable('audit_log', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   userId: uuid('user_id').references(() => users.id),
   action: text('action').notNull(),
   targetType: text('target_type'),
@@ -372,6 +416,7 @@ export const auditLog = pgTable('audit_log', {
 
 export const expenses = pgTable('expenses', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   category: text('category').notNull().default('malzeme'),
   itemName: text('item_name').notNull(),
   quantity: integer('quantity').notNull().default(1),
@@ -385,6 +430,7 @@ export const expenses = pgTable('expenses', {
 
 export const inventoryItems = pgTable('inventory_items', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   name: text('name').notNull(),
   category: text('category').notNull().default('genel'),
   brand: text('brand'),
@@ -400,6 +446,7 @@ export const inventoryItems = pgTable('inventory_items', {
 
 export const deviceMaintenances = pgTable('device_maintenances', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   deviceName: text('device_name').notNull(),
   maintenanceType: text('maintenance_type').notNull(),
   isPeriodic: boolean('is_periodic').notNull().default(false),
@@ -418,6 +465,7 @@ export const deviceMaintenances = pgTable('device_maintenances', {
 
 export const inventoryMovements = pgTable('inventory_movements', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   itemId: uuid('item_id').notNull().references(() => inventoryItems.id),
   type: text('type').notNull(),
   quantity: integer('quantity').notNull(),
@@ -428,6 +476,7 @@ export const inventoryMovements = pgTable('inventory_movements', {
 
 export const waitingList = pgTable('waiting_list', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   preferredDoctorId: uuid('preferred_doctor_id').references(() => users.id),
   preferredDate: text('preferred_date'),
@@ -440,6 +489,7 @@ export const waitingList = pgTable('waiting_list', {
 
 export const attendance = pgTable('attendance', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   userId: uuid('user_id').notNull().references(() => users.id),
   date: text('date').notNull(),
   clockIn: timestamp('clock_in', { withTimezone: true }),
@@ -451,6 +501,7 @@ export const attendance = pgTable('attendance', {
 
 export const toothRecords = pgTable('tooth_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   toothNumber: integer('tooth_number').notNull(),
   surface: text('surface'),
@@ -464,6 +515,7 @@ export const toothRecords = pgTable('tooth_records', {
 
 export const procedureTemplates = pgTable('procedure_templates', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   doctorId: uuid('doctor_id').references(() => users.id),
   name: text('name').notNull(),
   defaultDurationMin: integer('default_duration_min').notNull().default(30),
@@ -485,6 +537,7 @@ export const consultations = pgTable('consultations', {
 
 export const doctorNotes = pgTable('doctor_notes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   doctorId: uuid('doctor_id').notNull().references(() => users.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   content: text('content').notNull(),
@@ -494,6 +547,7 @@ export const doctorNotes = pgTable('doctor_notes', {
 
 export const patientAnamnesis = pgTable('patient_anamnesis', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   formData: jsonb('form_data').notNull().default({}),
   filledBy: uuid('filled_by').references(() => users.id),
@@ -502,6 +556,7 @@ export const patientAnamnesis = pgTable('patient_anamnesis', {
 
 export const patientDiseases = pgTable('patient_diseases', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   name: text('name').notNull(),
   notes: text('notes'),
@@ -511,6 +566,7 @@ export const patientDiseases = pgTable('patient_diseases', {
 
 export const doctorAvailability = pgTable('doctor_availability', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   doctorId: uuid('doctor_id').notNull().references(() => users.id),
   dayOfWeek: integer('day_of_week').notNull(),
   startTime: text('start_time').notNull(),
@@ -520,6 +576,7 @@ export const doctorAvailability = pgTable('doctor_availability', {
 
 export const calendarBlocks = pgTable('calendar_blocks', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   doctorId: uuid('doctor_id').notNull().references(() => users.id),
   date: text('date').notNull(),
   startTime: text('start_time').notNull(),
@@ -530,6 +587,7 @@ export const calendarBlocks = pgTable('calendar_blocks', {
 
 export const materialUsages = pgTable('material_usages', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   doctorId: uuid('doctor_id').notNull().references(() => users.id),
   patientId: uuid('patient_id').references(() => patients.id),
   appointmentId: uuid('appointment_id').references(() => dentalAppointments.id),
@@ -541,6 +599,7 @@ export const materialUsages = pgTable('material_usages', {
 
 export const installmentPlans = pgTable('installment_plans', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').notNull().references(() => patients.id),
   totalAmount: integer('total_amount').notNull(),
   installmentCount: integer('installment_count').notNull(),
@@ -552,6 +611,7 @@ export const installmentPlans = pgTable('installment_plans', {
 
 export const revenueTargets = pgTable('revenue_targets', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   month: integer('month').notNull(),
   year: integer('year').notNull(),
   targetAmount: integer('target_amount').notNull(),
@@ -560,6 +620,7 @@ export const revenueTargets = pgTable('revenue_targets', {
 
 export const patientNotes = pgTable('patient_notes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
   patientId: uuid('patient_id').references(() => patients.id),
   phone: text('phone'),
   content: text('content').notNull(),
@@ -570,7 +631,8 @@ export const patientNotes = pgTable('patient_notes', {
 
 export const vipAssistants = pgTable('vip_assistants', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  phone: text('phone').notNull().unique(),
+  clinicId: uuid('clinic_id').references(() => clinics.id),
+  phone: text('phone').notNull(),
   contactName: text('contact_name'),
   greeting: text('greeting').notNull().default("Merhaba! Ben Berat Bey'in kişisel asistanı Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?"),
   customPrompt: text('custom_prompt'),
@@ -578,7 +640,7 @@ export const vipAssistants = pgTable('vip_assistants', {
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-})
+}, (t) => [uniqueIndex('vip_assistants_clinic_phone_unique').on(t.clinicId, t.phone)])
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert

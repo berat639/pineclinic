@@ -6,7 +6,10 @@ export async function POST(req: NextRequest) {
   const token = req.cookies.get('token')?.value || ''
   const res = await fetch(`${SERVER_URL}/api/auth/logout`, {
     method: 'POST',
-    headers: { cookie: `token=${token}` },
+    headers: {
+      cookie: `token=${token}`,
+      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+    },
   })
 
   const response = NextResponse.json({ ok: true })

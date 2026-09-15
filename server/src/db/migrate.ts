@@ -789,7 +789,6 @@ async function runMigrations() {
   // ── Unique Constraints ────────────────────────────────────────────────────
   await sql`ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email)`.catch(() => {})
   await sql`ALTER TABLE user_sessions ADD CONSTRAINT user_sessions_token_jti_unique UNIQUE (token_jti)`.catch(() => {})
-  await sql`ALTER TABLE knowledge_categories ADD CONSTRAINT knowledge_categories_slug_unique UNIQUE (slug)`.catch(() => {})
 
   // ── Drop Deprecated ───────────────────────────────────────────────────────
   await sql`DROP TABLE IF EXISTS doctors CASCADE`.catch(() => {})
@@ -819,6 +818,111 @@ async function runMigrations() {
   await sql.begin(async tx => {
     await tx.unsafe(readFileSync(new URL('./evolution-migration.sql', import.meta.url), 'utf8'))
   })
+
+  // ── Multi-tenant clinics and hostname routing ────────────────────────────
+  // Existing installations are backfilled into one default clinic. New
+  // clinics are provisioned from a verified platform-admin login on a hostname
+  // that was already routed to this application by Dokploy.
+  const existingClinic = await sql`SELECT id FROM clinics ORDER BY created_at LIMIT 1`
+  const defaultClinicId = existingClinic[0]?.id ?? (await sql`
+    INSERT INTO clinics (name, is_active)
+    VALUES (${process.env.DEFAULT_CLINIC_NAME || 'Varsayılan Klinik'}, true)
+    RETURNING id
+  `)[0]!.id
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS clinic_domains (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id   UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      hostname    TEXT NOT NULL UNIQUE,
+      is_primary  BOOLEAN NOT NULL DEFAULT true,
+      is_active   BOOLEAN NOT NULL DEFAULT true,
+      created_at  TIMESTAMPTZ DEFAULT now(),
+      updated_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS clinic_domains_clinic_idx ON clinic_domains(clinic_id)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS clinic_settings (
+      clinic_id  UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      key        TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (clinic_id, key)
+    )
+  `
+
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT false`
+  await sql`
+    CREATE TABLE IF NOT EXISTS clinic_memberships (
+      clinic_id  UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role       TEXT NOT NULL DEFAULT 'host',
+      active     BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (clinic_id, user_id)
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS clinic_memberships_user_idx ON clinic_memberships(user_id)`
+  await sql`
+    INSERT INTO clinic_memberships (clinic_id, user_id, role, active)
+    SELECT ${defaultClinicId}, id, role, active FROM users
+    ON CONFLICT (clinic_id, user_id) DO NOTHING
+  `
+
+  const tenantTables = [
+    'sessions', 'appointments', 'conversation_flows', 'knowledge_documents', 'recordings',
+    'knowledge_categories', 'dental_appointments', 'treatment_groups',
+    'patient_payments', 'completed_works', 'shifts', 'shift_swap_requests',
+    'notifications', 'audit_log', 'expenses', 'inventory_items',
+    'device_maintenances', 'inventory_movements', 'waiting_list', 'attendance',
+    'tooth_records', 'procedure_templates', 'doctor_notes', 'patient_anamnesis',
+    'patient_diseases', 'doctor_availability', 'calendar_blocks',
+    'material_usages', 'installment_plans', 'revenue_targets', 'patient_notes',
+    'vip_assistants'
+  ]
+  for (const table of tenantTables) {
+    await sql.unsafe(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`)
+    await sql.unsafe(`UPDATE "${table}" SET clinic_id = $1 WHERE clinic_id IS NULL`, [defaultClinicId])
+    await sql.unsafe(`CREATE INDEX IF NOT EXISTS "${table}_clinic_idx" ON "${table}" (clinic_id)`)
+  }
+  await sql`ALTER TABLE sessions ALTER COLUMN clinic_id SET NOT NULL`
+  await sql`UPDATE patients SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
+  await sql`UPDATE treatment_plans SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
+  await sql`UPDATE consultations SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
+  await sql`UPDATE notification_templates SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
+
+  // Values that only need to be unique inside a clinic must not remain global.
+  await sql`ALTER TABLE knowledge_categories DROP CONSTRAINT IF EXISTS knowledge_categories_slug_unique`
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_categories_clinic_slug_unique ON knowledge_categories (clinic_id, slug)`
+  await sql`ALTER TABLE vip_assistants DROP CONSTRAINT IF EXISTS vip_assistants_phone_unique`
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS vip_assistants_clinic_phone_unique ON vip_assistants (clinic_id, phone)`
+
+  // Copy legacy global settings into the default clinic without removing the
+  // old table yet; this keeps rollback and mixed-version deployments safe.
+  await sql`
+    INSERT INTO clinic_settings (clinic_id, key, value, updated_at)
+    SELECT ${defaultClinicId}, key, value, updated_at FROM business_settings
+    ON CONFLICT (clinic_id, key) DO NOTHING
+  `
+
+  const configuredHosts = new Set<string>()
+  for (const raw of (process.env.DEFAULT_CLINIC_HOSTS || '').split(',')) {
+    const host = raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0]?.split(':')[0]
+    if (host) configuredHosts.add(host)
+  }
+  try {
+    if (process.env.CLIENT_APP_URL) configuredHosts.add(new URL(process.env.CLIENT_APP_URL).hostname.toLowerCase())
+  } catch {}
+  for (const hostname of configuredHosts) {
+    await sql`
+      INSERT INTO clinic_domains (clinic_id, hostname, is_primary, is_active)
+      VALUES (${defaultClinicId}, ${hostname}, true, true)
+      ON CONFLICT (hostname) DO NOTHING
+    `
+  }
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()

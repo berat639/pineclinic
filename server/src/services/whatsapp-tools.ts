@@ -23,8 +23,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       const end = new Date(appointmentTime(to, '00:00').getTime() + 86400_000)
       if (end <= start || end.getTime() - start.getTime() > 31 * 86400_000) throw new Error('En fazla 31 günlük bir tarih aralığı belirtin.')
       const slots = await db.select({ start: dentalAppointments.startTime, end: dentalAppointments.endTime }).from(dentalAppointments)
-        .innerJoin(patients, eq(dentalAppointments.patientId, patients.id))
-        .where(and(eq(patients.clinicId, context.clinicId), gte(dentalAppointments.startTime, start), lt(dentalAppointments.startTime, end), sql`${dentalAppointments.status} <> 'cancelled'`)).limit(300)
+        .where(and(eq(dentalAppointments.clinicId, context.clinicId), gte(dentalAppointments.startTime, start), lt(dentalAppointments.startTime, end), sql`${dentalAppointments.status} <> 'cancelled'`)).limit(300)
       return { dolu_araliklar: slots, message: 'Yalnızca kayıtlı dolu aralıklar gösterilir; kesin saat için klinik onayı gerekir.' }
     }
     if (name !== 'insanaAktar') {
@@ -36,9 +35,9 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
         .where(and(eq(patients.clinicId, context.clinicId), patientPhoneMatches(context.phone!))).limit(1)
       if (!patient) return { kayitli: false, sonuc: 'Bu klinikte kayıtlı hasta bulunamadı.' }
       const history = await db.select({ id: appointments.id, tarih: appointments.date, saat: appointments.time }).from(appointments)
-        .where(and(eq(appointments.phone, context.phone!), sql`${appointments.data}->>'_clinicId' = ${context.clinicId}`)).orderBy(desc(appointments.date)).limit(10)
+        .where(and(eq(appointments.clinicId, context.clinicId), eq(appointments.phone, context.phone!))).orderBy(desc(appointments.date)).limit(10)
       const calendar = await db.select({ tarih: dentalAppointments.startTime, durum: dentalAppointments.status }).from(dentalAppointments)
-        .where(eq(dentalAppointments.patientId, patient.id)).orderBy(desc(dentalAppointments.startTime)).limit(10)
+        .where(and(eq(dentalAppointments.clinicId, context.clinicId), eq(dentalAppointments.patientId, patient.id))).orderBy(desc(dentalAppointments.startTime)).limit(10)
       return { kayitli: true, musteri_adi: patient.name, randevular: history, takvim: calendar }
     }
     // Mutation + result commit in one transaction. A restarted AI turn reuses the recorded result.
@@ -57,7 +56,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
         if (!note || note.length > 4000) throw new Error('1–4000 karakterlik bir not gerekli.')
         const [patient] = await tx.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, context.clinicId), patientPhoneMatches(context.phone!))).limit(1)
         if (!patient) throw new Error('Hasta kaydı bulunamadı; personele aktarın.')
-        await tx.insert(patientNotes).values({ patientId: patient.id, phone: context.phone, content: note, source: 'whatsapp' })
+        await tx.insert(patientNotes).values({ clinicId: context.clinicId, patientId: patient.id, phone: context.phone, content: note, source: 'whatsapp' })
         result = { success: true, message: 'Not kliniğe iletildi.' }
       } else {
         await tx.update(whatsappConversations).set({ aiPaused: true }).where(and(eq(whatsappConversations.id, context.conversationId), eq(whatsappConversations.clinicId, context.clinicId)))

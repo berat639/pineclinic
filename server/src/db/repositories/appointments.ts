@@ -3,6 +3,7 @@ import { db } from '../client'
 import type { DbTransaction } from './whatsapp'
 import { appointments } from '../schema'
 import { broadcastSSE } from '../../events'
+import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
 export interface Appointment {
   id: string
@@ -55,7 +56,8 @@ function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
 }
 
 export async function readAppointments(): Promise<Appointment[]> {
-  const rows = await db.select().from(appointments).orderBy(desc(appointments.createdAt))
+  const clinicId = requireClinicId()
+  const rows = await db.select().from(appointments).where(eq(appointments.clinicId, clinicId)).orderBy(desc(appointments.createdAt))
   return rows.map(rowToAppointment)
 }
 
@@ -73,12 +75,13 @@ export async function createAppointment(data: {
   notes?: string
   extraFields?: Record<string, string>
 }): Promise<Appointment> {
+  const clinicId = requireClinicId()
   // sessionId varsa: aynı session için upsert
   if (data.sessionId) {
     const existing = await db
       .select()
       .from(appointments)
-      .where(and(eq(appointments.sessionId, data.sessionId), eq(appointments.type, data.type)))
+      .where(and(eq(appointments.clinicId, clinicId), eq(appointments.sessionId, data.sessionId), eq(appointments.type, data.type)))
       .limit(1)
     if (existing.length > 0) {
       const [updated] = await db
@@ -107,6 +110,7 @@ export async function createAppointment(data: {
   const [inserted] = await db
     .insert(appointments)
     .values({
+      clinicId,
       customerName: data.customerName,
       phone: data.phone,
       type: data.type,
@@ -141,12 +145,15 @@ export async function createFlowAppointment(
   const dateVal = String(safeFields.tarih ?? safeFields.date ?? '')
   const timeVal = String(safeFields.saat ?? safeFields.time ?? '')
   const typeVal = String(safeFields.randevu_turu ?? safeFields.islem_turu ?? safeFields.tur ?? '')
+  const clinicId = String(safeFields._clinicId ?? currentClinicId() ?? '')
+  if (!clinicId) throw new Error('Randevu için klinik bağlamı gerekli')
 
   console.log('[createFlowAppointment]', { name, phone, dateVal, timeVal, typeVal })
 
   const [inserted] = await executor
     .insert(appointments)
     .values({
+      clinicId,
       data: safeFields,
       customerName: name,
       phone,
@@ -167,6 +174,7 @@ export async function updateAppointment(
   id: string,
   data: Partial<Omit<Appointment, 'id' | 'createdAt'>>,
 ): Promise<Appointment | null> {
+  const clinicId = requireClinicId()
   const update: Record<string, unknown> = {}
   if (data.customerName !== undefined) update.customerName = data.customerName
   if (data.phone !== undefined) update.phone = data.phone
@@ -182,14 +190,14 @@ export async function updateAppointment(
   if (data.notes !== undefined) update.notes = data.notes
 
   if (Object.keys(update).length === 0) {
-    const rows = await db.select().from(appointments).where(eq(appointments.id, id)).limit(1)
+    const rows = await db.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.clinicId, clinicId))).limit(1)
     return rows[0] ? rowToAppointment(rows[0]) : null
   }
 
   const [row] = await db
     .update(appointments)
     .set(update as never)
-    .where(eq(appointments.id, id))
+    .where(and(eq(appointments.id, id), eq(appointments.clinicId, clinicId)))
     .returning()
   if (!row) return null
   const result = rowToAppointment(row)
@@ -198,7 +206,8 @@ export async function updateAppointment(
 }
 
 export async function deleteAppointment(id: string): Promise<boolean> {
-  const rows = await db.delete(appointments).where(eq(appointments.id, id)).returning({ id: appointments.id })
+  const clinicId = requireClinicId()
+  const rows = await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.clinicId, clinicId))).returning({ id: appointments.id })
   return rows.length > 0
 }
 
@@ -218,11 +227,12 @@ export interface CustomerContext {
   appointmentHistory: AppointmentSummary[]
 }
 
-export async function getCustomerByPhone(phone: string): Promise<CustomerContext | null> {
+export async function getCustomerByPhone(phone: string, explicitClinicId?: string): Promise<CustomerContext | null> {
+  const clinicId = explicitClinicId ?? requireClinicId()
   const normalizedPhone = phone.replace(/\D/g, '')
   if (normalizedPhone.length < 10) return null
 
-  const rows = await db.select().from(appointments).orderBy(desc(appointments.date))
+  const rows = await db.select().from(appointments).where(eq(appointments.clinicId, clinicId)).orderBy(desc(appointments.date))
   const matches = rows.filter(r => r.phone.replace(/\D/g, '').endsWith(normalizedPhone.slice(-10)))
   if (matches.length === 0) return null
 
@@ -248,7 +258,7 @@ export async function getAppointmentsByDateRange(params: {
   from?: string
   to?: string
 }): Promise<Appointment[]> {
-  const conditions = []
+  const conditions = [eq(appointments.clinicId, requireClinicId())]
   if (params.date) {
     conditions.push(eq(appointments.date, params.date))
   } else {

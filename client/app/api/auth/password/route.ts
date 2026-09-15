@@ -7,7 +7,11 @@ export async function PUT(req: NextRequest) {
   const body = await req.json()
   const res = await fetch(`${SERVER_URL}/api/auth/password`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', cookie: `token=${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      cookie: `token=${token}`,
+      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+    },
     body: JSON.stringify(body),
   })
   let data

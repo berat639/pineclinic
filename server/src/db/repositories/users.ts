@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '../client'
-import { users, userSessions } from '../schema'
+import { clinicMemberships, users, userSessions } from '../schema'
+import { currentClinicId } from '../../tenancy/context'
 
 export async function createUser(data: {
   email: string
@@ -10,9 +11,23 @@ export async function createUser(data: {
   phone?: string
   specialty?: string
   color?: string
+  clinicId?: string
 }) {
-  const [user] = await db.insert(users).values(data).returning()
-  return user!
+  const clinicId = data.clinicId ?? currentClinicId()
+  const { clinicId: _clinicId, ...userData } = data
+  return db.transaction(async tx => {
+    const [user] = await tx.insert(users).values(userData).returning()
+    if (!user) throw new Error('Kullanıcı oluşturulamadı')
+    if (clinicId) {
+      await tx.insert(clinicMemberships).values({
+        clinicId,
+        userId: user.id,
+        role: user.role,
+        active: user.active,
+      })
+    }
+    return user
+  })
 }
 
 export async function getUserByEmail(email: string) {
@@ -26,18 +41,22 @@ export async function getUserById(id: string) {
 }
 
 export async function listUsers() {
+  const clinicId = currentClinicId()
+  if (!clinicId) return []
   return db.select({
     id: users.id,
     email: users.email,
     phone: users.phone,
     name: users.name,
-    role: users.role,
+    role: clinicMemberships.role,
     specialty: users.specialty,
     color: users.color,
     active: users.active,
     lastLoginAt: users.lastLoginAt,
     createdAt: users.createdAt,
   }).from(users)
+    .innerJoin(clinicMemberships, eq(clinicMemberships.userId, users.id))
+    .where(and(eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.active, true)))
 }
 
 export async function updateUser(id: string, data: Partial<{
@@ -51,10 +70,23 @@ export async function updateUser(id: string, data: Partial<{
   passwordHash: string
   lastLoginAt: Date
 }>) {
+  const clinicId = currentClinicId()
+  if (clinicId) {
+    const [membership] = await db.select({ userId: clinicMemberships.userId })
+      .from(clinicMemberships).where(and(
+        eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
+      )).limit(1)
+    if (!membership) return null
+  }
   const [updated] = await db.update(users)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(users.id, id))
     .returning()
+  if (updated && clinicId && data.role) {
+    await db.update(clinicMemberships).set({ role: data.role, updatedAt: new Date() }).where(and(
+      eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
+    ))
+  }
   return updated ?? null
 }
 
@@ -83,6 +115,13 @@ export async function deleteAllUserSessions(userId: string) {
 }
 
 export async function deleteUser(id: string) {
+  const clinicId = currentClinicId()
+  if (clinicId) {
+    const rows = await db.delete(clinicMemberships).where(and(
+      eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
+    )).returning({ userId: clinicMemberships.userId })
+    return rows.length > 0
+  }
   await deleteAllUserSessions(id)
   const rows = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id })
   return rows.length > 0

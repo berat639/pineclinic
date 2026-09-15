@@ -1,6 +1,7 @@
-import { eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '../client'
 import { conversationFlows } from '../schema'
+import { requireClinicId } from '../../tenancy/context'
 
 export interface FlowNode {
   id: string
@@ -46,10 +47,11 @@ function toIso(d: Date | null | undefined): string {
 }
 
 export async function getActiveFlow(direction: string = 'inbound'): Promise<ConversationFlow | null> {
+  const clinicId = requireClinicId()
   const rows = await db
     .select()
     .from(conversationFlows)
-    .where(drizzleSql`${conversationFlows.isActive} = true AND ${conversationFlows.direction} = ${direction}`)
+    .where(and(eq(conversationFlows.clinicId, clinicId), eq(conversationFlows.isActive, true), eq(conversationFlows.direction, direction)))
     .limit(1)
   if (rows.length === 0) return null
   const r = rows[0]
@@ -65,6 +67,7 @@ export async function getActiveFlow(direction: string = 'inbound'): Promise<Conv
 }
 
 export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: string = 'inbound'): Promise<ConversationFlow> {
+  const clinicId = requireClinicId()
   const existing = await getActiveFlow(direction)
   if (existing) {
     const [updated] = await db
@@ -84,7 +87,7 @@ export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: 
   }
   const [inserted] = await db
     .insert(conversationFlows)
-    .values({ nodes, edges, direction })
+    .values({ clinicId, nodes, edges, direction })
     .returning()
   return {
     id: inserted.id,

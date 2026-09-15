@@ -22,6 +22,12 @@ if (!DATABASE_URL) {
 
 const sql = postgres(DATABASE_URL, { max: 1 })
 
+async function getDefaultClinicId(): Promise<string> {
+  const rows = await sql`SELECT id FROM clinics WHERE is_active = true ORDER BY created_at LIMIT 1`
+  if (!rows[0]?.id) throw new Error('Seed için aktif klinik bulunamadı; önce migration çalıştırılmalı')
+  return rows[0].id
+}
+
 function vectorLiteral(vec: number[]): string {
   return `[${vec.join(',')}]`
 }
@@ -51,6 +57,7 @@ async function seedDefaultAccount() {
 }
 
 async function seedKnowledgePrompts() {
+  const clinicId = await getDefaultClinicId()
   // Vertex embedding gerektirir; creds yoksa atla (belge embedding'siz
   // eklenirse retrieveTopK 'embedding IS NOT NULL' filtresinden geçmez).
   if (!process.env.GOOGLE_CREDENTIALS_JSON) {
@@ -65,7 +72,7 @@ async function seedKnowledgePrompts() {
 
   for (const doc of RAG_PROMPT_DOCS) {
     // Idempotent: aynı başlık varsa atla (her redeploy'da duplicate olmasın).
-    const existing = await sql`SELECT 1 FROM knowledge_documents WHERE title = ${doc.title} LIMIT 1`
+    const existing = await sql`SELECT 1 FROM knowledge_documents WHERE clinic_id = ${clinicId} AND title = ${doc.title} LIMIT 1`
     if (existing.length > 0) {
       skipped++
       continue
@@ -75,8 +82,9 @@ async function seedKnowledgePrompts() {
       // Title + content embed → kullanıcı sorusu (title) ile retrieval recall'i artar.
       const embedding = await embedText(`${doc.title}\n${doc.content}`)
       await sql`
-        INSERT INTO knowledge_documents (category, title, content, active, embedding, embedded_at, created_at, updated_at)
+        INSERT INTO knowledge_documents (clinic_id, category, title, content, active, embedding, embedded_at, created_at, updated_at)
         VALUES (
+          ${clinicId},
           ${doc.category},
           ${doc.title},
           ${doc.content},
@@ -98,6 +106,7 @@ async function seedKnowledgePrompts() {
 }
 
 async function seedSystemSettings() {
+  const clinicId = await getDefaultClinicId()
   const settings = [
     { key: 'greeting_message', value: 'Merhaba, Pine Klinik asistanınızım. Size nasıl yardımcı olabilirim?' },
     { key: 'greeting_message_outbound', value: 'Merhaba, ben Pine Klinik asistanıyım. Sizi arıyorum çünkü...' },
@@ -109,25 +118,31 @@ async function seedSystemSettings() {
       VALUES (${s.key}, ${s.value}, ${new Date().toISOString()})
       ON CONFLICT (key) DO NOTHING
     `
+    await sql`
+      INSERT INTO clinic_settings (clinic_id, key, value, updated_at)
+      VALUES (${clinicId}, ${s.key}, ${s.value}, ${new Date().toISOString()})
+      ON CONFLICT (clinic_id, key) DO NOTHING
+    `
   }
   console.log('[Seed] Sistem ayarları eklendi')
 }
 
 async function seedDefaultFlows() {
-  const existingInbound = await sql`SELECT 1 FROM conversation_flows WHERE direction = 'inbound' LIMIT 1`
+  const clinicId = await getDefaultClinicId()
+  const existingInbound = await sql`SELECT 1 FROM conversation_flows WHERE clinic_id = ${clinicId} AND direction = 'inbound' LIMIT 1`
   if (existingInbound.length === 0) {
     const inboundNodes = [
       { id: 'start', type: 'START', position: { x: 400, y: 0 }, data: { label: 'Karşılama' } },
       { id: 'end', type: 'END', position: { x: 400, y: 200 }, data: { label: 'Son' } }
     ]
     await sql`
-      INSERT INTO conversation_flows (name, direction, is_active, nodes, edges)
-      VALUES ('Varsayılan Gelen Arama Akışı', 'inbound', true, ${JSON.stringify(inboundNodes)}, '[]')
+      INSERT INTO conversation_flows (clinic_id, name, direction, is_active, nodes, edges)
+      VALUES (${clinicId}, 'Varsayılan Gelen Arama Akışı', 'inbound', true, ${JSON.stringify(inboundNodes)}, '[]')
     `
     console.log('[Seed] Gelen arama akışı eklendi')
   }
 
-  const existingOutbound = await sql`SELECT 1 FROM conversation_flows WHERE direction = 'outbound' LIMIT 1`
+  const existingOutbound = await sql`SELECT 1 FROM conversation_flows WHERE clinic_id = ${clinicId} AND direction = 'outbound' LIMIT 1`
   if (existingOutbound.length === 0) {
     const outboundNodes = [
       { id: 'start', type: 'START', position: { x: 400, y: 0 }, data: { label: 'Arama Başladı' } },
@@ -143,8 +158,8 @@ async function seedDefaultFlows() {
       { id: 'e4', source: 'action', target: 'end' }
     ]
     await sql`
-      INSERT INTO conversation_flows (name, direction, is_active, nodes, edges)
-      VALUES ('Anket Akışı (Giden Arama)', 'outbound', true, ${JSON.stringify(outboundNodes)}, ${JSON.stringify(outboundEdges)})
+      INSERT INTO conversation_flows (clinic_id, name, direction, is_active, nodes, edges)
+      VALUES (${clinicId}, 'Anket Akışı (Giden Arama)', 'outbound', true, ${JSON.stringify(outboundNodes)}, ${JSON.stringify(outboundEdges)})
     `
     console.log('[Seed] Anket Akışı (Giden) eklendi')
   }
