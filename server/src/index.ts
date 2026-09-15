@@ -68,7 +68,7 @@ import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
 import { startReminderCron } from './cron/reminders'
-import { currentClinicId, currentTenant, enterTenantContext, requireClinicId, resolveTenantFromRequest, runWithTenantContext } from './tenancy/context'
+import { currentClinicId, currentTenant, enterTenantContext, findTenantByHostname, requireClinicId, resolveTenantFromRequest, runWithTenantContext } from './tenancy/context'
 import { authenticateRequest } from './middleware/auth'
 
 const callerRegistry = new Map<string, { phone: string; channel?: string; direction?: string; clinicId: string; hostname: string }>()
@@ -245,6 +245,11 @@ const app = new Elysia()
     enterTenantContext(await resolveTenantFromRequest(request))
   })
   .onBeforeHandle(async ({ request, cookie, set }) => {
+    // Elysia may resume a lifecycle hook on a different async resource after
+    // the database lookup in onRequest. Resolve and enter the tenant again at
+    // the last lifecycle boundary so route handlers and repositories always
+    // see the request's clinic context.
+    enterTenantContext(await resolveTenantFromRequest(request))
     const pathname = new URL(request.url).pathname
     const protectedPrefixes = [
       '/api/admin', '/api/dental', '/api/yonetici', '/api/shifts',
@@ -1164,12 +1169,15 @@ const app = new Elysia()
     return { success: true }
   })
 
-  .get('/api/telephony/register', ({ query }) => {
+  .get('/api/telephony/register', async ({ query }) => {
     const uuid = query.uuid as string | undefined
     const caller = query.caller as string | undefined
     const channel = query.channel as string | undefined
     const direction = (query.direction as string) || 'inbound'
-    const tenant = currentTenant()
+    // Asterisk reaches the backend over the private Docker network, so its
+    // Host header is not a public clinic domain. The dialplan supplies the
+    // clinic hostname explicitly and we resolve it against clinic_domains.
+    const tenant = (query.hostname ? await findTenantByHostname(String(query.hostname)) : null) ?? currentTenant()
     if (uuid && caller && tenant) {
       callerRegistry.set(uuid, { phone: caller, channel, direction, clinicId: tenant.clinicId, hostname: tenant.hostname })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
