@@ -533,8 +533,24 @@ ${isOwnerCall
           const maxCallSeconds = Math.min(MAX_MAX_CALL_SECONDS, Math.max(MIN_MAX_CALL_SECONDS, maxCallDurationSec))
           const maxCallMs = maxCallSeconds * 1000
 
-          const systemPrompt = systemPromptBase + ragContext + phoneInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, wait: ${startWaitSec}s`)
+          // Flow Builder'da yalnızca Karşılama → Bitti varsa bu minimal akış
+          // maksimum görüşme süresine tabi değildir. Sessizlik koruması yine
+          // aktif kalır; böylece sessiz hat sonsuza kadar açık kalmaz.
+          let minimalGreetingEndFlow = false
+          try {
+            const { getActiveFlow, isMinimalGreetingEndFlow } = await import('../db/repositories/flows')
+            const activeFlow = await getActiveFlow(direction)
+            minimalGreetingEndFlow = Boolean(activeFlow && isMinimalGreetingEndFlow(activeFlow))
+          } catch (e) {
+            console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
+          }
+
+          const flowPriorityInstructions = `\n\nAKTİF FLOW BUILDER KURALI: Klinik için aktif bir konuşma akışı varsa yalnızca o akışın düğümlerini ve sırasını uygula. Varsayılan randevu senaryosundan soru ekleme. Kullanıcı konu dışına çıkarsa kısa ve nazikçe aktif akıştaki adıma geri yönlendir; kullanıcı akışa dönerse uyarı/kapanış niyetini iptal edip kaldığın adımdan devam et. Akışta yalnızca karşılama ve bitiş varsa karşılama sonrası bekle, kendiliğinden soru veya yeni konu başlatma.`
+          const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
+          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
+          if (minimalGreetingEndFlow) {
+            console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
+          }
 
           const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
@@ -735,7 +751,7 @@ ${isOwnerCall
           // Süre karşılama gönderildikten sonra başlar; bağlantı kurulma
           // gecikmesi klinik yöneticisinin seçtiği konuşma süresinden düşmez.
           // Gelen ve giden aramalarda aynı klinik ayarı kullanılır.
-          state.maxCallTimer = setTimeout(() => {
+          if (!minimalGreetingEndFlow) state.maxCallTimer = setTimeout(() => {
             if (state.closed || state.hangupPending || !state.info.session) return
             console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — görüşme sonlandırılıyor`)
             try {
