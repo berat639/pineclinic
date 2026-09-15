@@ -601,6 +601,11 @@ ${isOwnerCall
                   const trimmed = text.trim()
                   if (!trimmed) return
                   const label = role === 'user' ? 'USER' : 'AI'
+                  // Sessizlik sayacı yalnızca Gemini'nin gerçek kullanıcı
+                  // konuşmasını metne çevirdiği anda sıfırlanır. NoiseGate'in
+                  // açılması tek başına yeterli değildir; hat paraziti veya
+                  // AI sesinin mikrofona sızması sayaç davranışını değiştiremez.
+                  if (role === 'user') clearSilenceTimers(state)
                   if (role === 'model' && state.userSpeechEndTime) {
                     const responseTime = Date.now() - state.userSpeechEndTime
                     console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
@@ -808,7 +813,7 @@ ${isOwnerCall
             // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
             if (!info.session || !state.micEnabled || state.hangupPending) continue
 
-            const { frames, justClosed, speechStarted } = state.noiseGate.process(ev.pcm)
+            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
 
             // AI konuşurken: Eğer kullanıcı GERÇEKTEN konuşmuyorsa (NoiseGate kapalı / sadece dip gürültüsü),
             // Gemini'ye paket gönderme (Gemini'nin kendi sesini veya sessizliği kesinti olarak algılamasını önle).
@@ -817,9 +822,6 @@ ${isOwnerCall
               continue
             }
 
-            if (speechStarted) {
-              clearSilenceTimers(state)
-            }
             if (frames.length > 0) {
               for (const f8k of frames) {
                 state.micBuffer.push(upsample8to16(f8k))
@@ -849,14 +851,6 @@ ${isOwnerCall
                 audioStreamEnd: true,
               })
 
-              // Gate kısa süreli hat parazitini konuşma sanıp sessizlik
-              // sayacını temizlediyse, gate kapandığında sayacı yeniden kur.
-              // Aksi halde gerçek bir kullanıcı yanıtı gelmeden uyarı hiç
-              // çalışmayabilir. Gemini turnComplete gelirse timer zaten
-              // güvenli şekilde temizlenip yeniden başlatılır.
-              if (!state.hangupPending) {
-                startSilenceWatch(state, socket)
-              }
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
