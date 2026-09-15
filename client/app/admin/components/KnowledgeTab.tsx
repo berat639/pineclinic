@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import FlowBuilder from './FlowBuilder'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 function Spinner() {
   return (
@@ -51,6 +52,7 @@ interface ModalProps {
 }
 
 function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const isEdit = !!doc?.id
   const [category, setCategory] = useState<Category>((doc?.category as Category) || 'genel')
   const [title, setTitle] = useState(doc?.title || '')
@@ -70,7 +72,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
       background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '1rem',
-    }} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+    }} {...backdropDismiss}>
       <div style={{
         background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 800,
@@ -237,12 +239,13 @@ export default function KnowledgeTab() {
   const [callerIdSaving, setCallerIdSaving] = useState(false)
 
   // Flow Builder Direction State
-  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound'>('inbound')
 
   // Outbound Call Modal state
   const [callModalOpen, setCallModalOpen] = useState(false)
   const [callPhone, setCallPhone] = useState('')
   const [calling, setCalling] = useState(false)
+  const callModalBackdropDismiss = useBackdropDismiss(() => setCallModalOpen(false))
 
   const handleOutboundCall = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1057,7 +1060,7 @@ export default function KnowledgeTab() {
 
       {/* Alt Satır: Konuşma Akışı (Flow Builder - Gelen ve Giden Tabları) */}
       <div className="glass-card" style={{ width: '100%', padding: '1.25rem', marginTop: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--flow-panel-border)', paddingBottom: '1rem' }}>
           <div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               🔀 Konuşma Akışı Senaryoları (Flow Builder)
@@ -1068,12 +1071,12 @@ export default function KnowledgeTab() {
           </div>
 
           {/* Flow Direction Selector Switcher */}
-          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ display: 'flex', background: 'var(--flow-panel-bg)', padding: 4, borderRadius: 10, border: '1px solid var(--flow-panel-border)' }}>
             <button
               onClick={() => setFlowDirection('inbound')}
               style={{
                 padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
-                background: flowDirection === 'inbound' ? '#3b82f6' : 'transparent',
+                background: flowDirection === 'inbound' ? '#2563eb' : 'var(--flow-panel-bg)',
                 color: flowDirection === 'inbound' ? '#fff' : 'var(--foreground-3)',
                 boxShadow: flowDirection === 'inbound' ? '0 2px 8px rgba(59,130,246,0.4)' : 'none',
               }}
@@ -1084,23 +1087,12 @@ export default function KnowledgeTab() {
               onClick={() => setFlowDirection('outbound')}
               style={{
                 padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
-                background: flowDirection === 'outbound' ? '#10b981' : 'transparent',
+                background: flowDirection === 'outbound' ? '#047857' : 'var(--flow-panel-bg)',
                 color: flowDirection === 'outbound' ? '#fff' : 'var(--foreground-3)',
                 boxShadow: flowDirection === 'outbound' ? '0 2px 8px rgba(16,185,129,0.4)' : 'none',
               }}
             >
               📤 Giden Arama Akışı (Anket & Takip)
-            </button>
-            <button
-              onClick={() => setFlowDirection('whatsapp')}
-              style={{
-                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
-                background: flowDirection === 'whatsapp' ? '#22c55e' : 'transparent',
-                color: flowDirection === 'whatsapp' ? '#fff' : 'var(--foreground-3)',
-                boxShadow: flowDirection === 'whatsapp' ? '0 2px 8px rgba(34,197,94,0.4)' : 'none',
-              }}
-            >
-              💬 WhatsApp
             </button>
           </div>
         </div>
@@ -1108,16 +1100,14 @@ export default function KnowledgeTab() {
         {/* Current Flow Notice */}
         <div style={{
           padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: '0.8rem',
-          background: flowDirection === 'inbound' ? 'rgba(59,130,246,0.1)' : flowDirection === 'whatsapp' ? 'rgba(34,197,94,0.1)' : 'rgba(16,185,129,0.1)',
-          border: `1px solid ${flowDirection === 'inbound' ? 'rgba(59,130,246,0.2)' : flowDirection === 'whatsapp' ? 'rgba(34,197,94,0.2)' : 'rgba(16,185,129,0.2)'}`,
-          color: flowDirection === 'inbound' ? '#93c5fd' : flowDirection === 'whatsapp' ? '#86efac' : '#6ee7b7',
+          background: 'var(--flow-info-bg)',
+          border: '1px solid var(--flow-info-border)',
+          color: 'var(--flow-info-text)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <span>
             {flowDirection === 'inbound' 
               ? '📥 Şu an **Gelen Arama Akışı** düzenleniyor. Kliniği arayan hastaların görüşme akışıdır.' 
-              : flowDirection === 'whatsapp'
-              ? '💬 Şu an **WhatsApp Akışı** düzenleniyor. Hastalarla WhatsApp üzerinden yapılan konuşmaların akışıdır.'
               : '📤 Şu an **Giden Arama Akışı** düzenleniyor. Robotun dışarıya yaptığı anket ve takip aramalarının akışıdır.'}
           </span>
           <span style={{ fontSize: '0.72rem', opacity: 0.8 }}>Yön: {flowDirection}</span>
@@ -1145,7 +1135,7 @@ export default function KnowledgeTab() {
           background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: '1rem',
-        }} onClick={e => { if (e.target === e.currentTarget) setCallModalOpen(false) }}>
+        }} {...callModalBackdropDismiss}>
           <div style={{
             background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420,

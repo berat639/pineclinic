@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react'
 import { X, Calendar, CalendarDays, Zap, Users, Check, AlertCircle, Sparkles, Clock, RefreshCw } from 'lucide-react'
 import { WeeklyShiftTemplate, MonthlyShiftTemplate, DailyShiftTemplate, DAY_SHORT_TR } from '../types/shiftTemplates'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 interface User {
   id: string
@@ -56,6 +57,7 @@ export default function ShiftBatchApplyModal({
   onClose,
   onSuccess
 }: Props) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const [mode, setMode] = useState<'weekly' | 'monthly' | 'daily'>(initialMode)
 
   // Target Personnel: 'all' | 'hekim' | 'selected'
@@ -360,7 +362,7 @@ export default function ShiftBatchApplyModal({
         zIndex: 999999,
         padding: 16
       }}
-      onClick={onClose}
+      {...backdropDismiss}
     >
       <div
         onClick={e => e.stopPropagation()}

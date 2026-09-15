@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { X, CalendarDays, Layers, Sliders, Check } from 'lucide-react'
 import { MonthlyShiftTemplate, WeeklyShiftTemplate, DailyShiftTemplate } from '../types/shiftTemplates'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 interface Props {
   isOpen: boolean
@@ -27,6 +28,7 @@ const inputStyle: React.CSSProperties = {
 }
 
 export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates, dailyTemplates, onSave, onClose }: Props) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const [name, setName] = useState(template?.name || '')
   const [description, setDescription] = useState(template?.description || '')
   const [mode, setMode] = useState<'weekly_rotation' | 'rule_based'>(template?.mode || 'weekly_rotation')
@@ -93,7 +95,7 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
         zIndex: 999999,
         padding: 16
       }}
-      onClick={onClose}
+      {...backdropDismiss}
     >
       <div
         onClick={e => e.stopPropagation()}

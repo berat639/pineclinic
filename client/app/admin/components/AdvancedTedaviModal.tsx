@@ -4,6 +4,7 @@ import { BriefcaseMedical, X, Pencil, Trash2, Plus, Mic, MicOff, Check, RotateCc
 import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
 import ConfirmModal from './ConfirmModal';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 
 export interface AssistantCommand {
   id: string;
@@ -20,6 +21,8 @@ export interface AssistantCommand {
 }
 
 export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, shifts = [], onClose, onSaved, editingGroup }: any) {
+  const toothDetailsBackdropDismiss = useBackdropDismiss(() => setSelectedToothForDetails(null));
+  const contextMenuBackdropDismiss = useBackdropDismiss(() => setContextMenu(null));
   const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[], color?: string }[]>>({})
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([])
 
@@ -2223,7 +2226,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const drafts = toothDrafts[tooth];
 
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100005 }} onClick={() => setSelectedToothForDetails(null)}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100005 }} {...toothDetailsBackdropDismiss}>
             <div style={{ background: 'var(--background)', width: 1400, maxWidth: '98vw', height: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, border: '1px solid var(--glass-border)', boxShadow: '0 24px 48px rgba(0,0,0,0.4)', overflow: 'hidden', position: 'relative' }} onClick={e => e.stopPropagation()}>
               
               <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--glass-bg)' }}>
@@ -2371,7 +2374,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       {contextMenu && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
-          onClick={() => setContextMenu(null)}
+          {...contextMenuBackdropDismiss}
           onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
         >
           <div

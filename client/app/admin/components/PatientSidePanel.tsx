@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import Pagination from './Pagination'
 import PatientListItem from './PatientListItem'
 import PatientProfileCard from './PatientProfileCard'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 interface PatientSidePanelProps {
   isOpen: boolean
@@ -10,6 +11,7 @@ interface PatientSidePanelProps {
 }
 
 export default function PatientSidePanel({ isOpen, onClose, patients }: PatientSidePanelProps) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const [searchTerm, setSearchTerm] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(15)
@@ -53,7 +55,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients }: PatientS
     <>
       {/* Backdrop */}
       <div 
-        onClick={onClose}
+        {...backdropDismiss}
         style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.6)', opacity: isOpen ? 1 : 0, pointerEvents: isOpen ? 'auto' : 'none', transition: 'opacity 0.3s' }}
       />
       

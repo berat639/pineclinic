@@ -4,6 +4,7 @@ import 'react-day-picker/dist/style.css';
 import { tr } from 'date-fns/locale';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon, Clock, X, User, Check } from 'lucide-react';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 
 interface FastScheduleModalProps {
   treatment: any;
@@ -32,6 +33,7 @@ export default function FastScheduleModal({
   onClose,
   onSuccess
 }: FastScheduleModalProps) {
+  const backdropDismiss = useBackdropDismiss(onClose);
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     const sessionTime = treatment?.sessions?.[0]?.startTime;
     if (sessionTime) return new Date(sessionTime);
@@ -176,7 +178,7 @@ export default function FastScheduleModal({
         justifyContent: 'center',
         padding: '16px'
       }}
-      onClick={onClose}
+      {...backdropDismiss}
     >
       <div
         style={{

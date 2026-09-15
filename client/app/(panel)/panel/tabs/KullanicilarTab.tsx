@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
 import { Pencil, Trash2, User as UserIcon, Lock, Check, X } from 'lucide-react'
+import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
@@ -12,6 +13,7 @@ const inputStyle: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, 
 const btnStyle: React.CSSProperties = { padding: '8px 14px', borderRadius: 6, background: 'var(--accent)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }
 
 export default function KullanicilarTab() {
+  const editUserBackdropDismiss = useBackdropDismiss(() => setEditingUser(null))
   const [users, setUsers] = useState<User[]>([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' })
@@ -216,7 +218,7 @@ export default function KullanicilarTab() {
             zIndex: 999999,
             padding: 16
           }}
-          onClick={() => setEditingUser(null)}
+          {...editUserBackdropDismiss}
         >
           <div
             onClick={e => e.stopPropagation()}

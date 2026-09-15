@@ -644,7 +644,7 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const { top, height } = eventPosition(e.startTime, e.endTime, 0);
             
             return (
-              <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: 'rgba(245, 158, 11, 0.16)', border: '1.5px dashed #f59e0b', borderLeft: '4px solid #f59e0b', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }} 
+              <div id={`cal-event-${e.id}`} key={e.id} className="rc-event rc-event-unassigned" style={{ top, height, left, width, maxWidth: `calc(100% - 56px - 4px - ((100% - 56px - 4px) / ${maxCol}) * ${col})`, minWidth: 0, background: 'rgba(245, 158, 11, 0.16)', border: '1.5px dashed #f59e0b', borderLeft: '4px solid #f59e0b', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }}
                    onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                    onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
                    title={`${e.title} — Doktor Atanmadı`}
@@ -659,8 +659,8 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
                    }}
               >
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', 0)} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                  <span style={{ fontSize: '0.6rem', padding: '1px 5px', borderRadius: 4, background: '#f59e0b', color: '#181c24', fontWeight: 800, letterSpacing: '0.3px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, minWidth: 0, overflow: 'hidden' }}>
+                  <span style={{ fontSize: '0.6rem', padding: '1px 5px', borderRadius: 4, background: '#f59e0b', color: '#181c24', fontWeight: 800, letterSpacing: '0.3px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     ⚠️ DOKTOR ATANMADI
                   </span>
                 </div>

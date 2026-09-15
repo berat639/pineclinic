@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trash2, CheckCircle2, X } from 'lucide-react';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export default function ConfirmModal({
   onConfirm,
   onClose
 }: ConfirmModalProps) {
+  const backdropDismiss = useBackdropDismiss(onClose);
   if (!isOpen) return null;
 
   const getVariantStyles = () => {
@@ -74,7 +76,7 @@ export default function ConfirmModal({
         padding: '16px',
         animation: 'fadeIn 0.15s ease-out'
       }}
-      onClick={onClose}
+      {...backdropDismiss}
     >
       <div
         onClick={e => e.stopPropagation()}

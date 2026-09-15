@@ -41,6 +41,16 @@
   --flow-node-action-border: #8b5cf6;
   --flow-text: #f0f4ff;
   --flow-text-muted: #94a3b8;
+  --flow-panel-bg: #0f172a;
+  --flow-panel-border: #334155;
+  --flow-input-bg: #020617;
+  --flow-info-bg: #172554;
+  --flow-info-border: #1e3a8a;
+  --flow-info-text: #bfdbfe;
+  --flow-toolbar-button-bg: #172554;
+  --flow-danger-bg: #450a0a;
+  --flow-success-bg: #052e16;
+  --calendar-checkbox-bg: #0a1220;
   --card-bg: #1e293b;
 }
 
@@ -84,6 +94,16 @@
   --flow-node-action-border: #8b5cf6;
   --flow-text: #0f172a;
   --flow-text-muted: #475569;
+  --flow-panel-bg: #ffffff;
+  --flow-panel-border: #cbd5e1;
+  --flow-input-bg: #ffffff;
+  --flow-info-bg: #dbeafe;
+  --flow-info-border: #93c5fd;
+  --flow-info-text: #1e3a8a;
+  --flow-toolbar-button-bg: #dbeafe;
+  --flow-danger-bg: #fee2e2;
+  --flow-success-bg: #dcfce7;
+  --calendar-checkbox-bg: #e2e8f0;
   --card-bg: #ffffff;
 }
 
@@ -121,6 +141,7 @@
 .rc-cell:hover { background: var(--glass-bg-hover); }
 .rc-event { position: absolute; padding: 4px 8px; border-radius: 7px; border-left: 3px solid #3b82f6; cursor: pointer; overflow: hidden; transition: transform 0.1s, box-shadow 0.1s; z-index: 5; user-select: none; }
 .rc-event:hover { transform: scale(1.015); box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 10; }
+.rc-event-unassigned:hover { transform: none; }
 .rc-ev-title { display: block; font-size: 0.78rem; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-ev-time { display: block; font-size: 0.68rem; color: var(--foreground-2); font-weight: 500; }
 .rc-ev-doc { display: block; font-size: 0.65rem; color: var(--foreground-3); font-style: italic; }
@@ -1182,5 +1203,3 @@ body {
 #_react-hot-toast > div {
   z-index: 99999999 !important;
 }
-
-

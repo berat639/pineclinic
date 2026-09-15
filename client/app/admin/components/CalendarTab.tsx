@@ -11,6 +11,7 @@ import MiniCalendar from './MiniCalendar';
 import PatientProfileCard from './PatientProfileCard';
 import FastScheduleModal from './FastScheduleModal';
 import ConfirmModal from './ConfirmModal';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 import DicomViewer from './DicomViewer'
 
@@ -121,6 +122,8 @@ interface Patient {
 }
 
 export default function CalendarTab() {
+  const panelBackdropDismiss = useBackdropDismiss(() => { setPanelOpen(false); setPatientProfileId(null) })
+  const unassignedBackdropDismiss = useBackdropDismiss(() => setUnassignedListMenu(null))
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [selectedDoctorIds, setSelectedDoctorIds] = useState<string[]>([])
   const initializedDocsRef = React.useRef(false)
@@ -1175,7 +1178,7 @@ export default function CalendarTab() {
                     height: 18,
                     borderRadius: 4,
                     border: `2px solid ${doc.color || 'var(--brand, #3b82f6)'}`,
-                    background: isSelected ? (doc.color || 'var(--brand, #3b82f6)') : 'transparent',
+                    background: isSelected ? (doc.color || 'var(--brand, #3b82f6)') : 'var(--calendar-checkbox-bg)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1341,7 +1344,7 @@ export default function CalendarTab() {
       {/* Backdrop for click outside (shared) */}
       {(panelOpen || patientProfileId) && (
           <div
-            onClick={() => { setPanelOpen(false); setPatientProfileId(null); }}
+            {...panelBackdropDismiss}
             style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.6)', display: showTedaviForm ? 'none' : 'block' }}
           />
       )}
@@ -2665,7 +2668,7 @@ export default function CalendarTab() {
 
         {unassignedListMenu && (
           <div
-            onClick={() => setUnassignedListMenu(null)}
+            {...unassignedBackdropDismiss}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }}
           >
             <div

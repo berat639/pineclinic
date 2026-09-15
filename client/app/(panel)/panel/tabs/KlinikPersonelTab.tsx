@@ -7,6 +7,7 @@ import ConfirmModal from '../../../admin/components/ConfirmModal'
 import WeeklyTemplateModal from '../../../admin/components/WeeklyTemplateModal'
 import MonthlyTemplateModal from '../../../admin/components/MonthlyTemplateModal'
 import ShiftBatchApplyModal from '../../../admin/components/ShiftBatchApplyModal'
+import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
 import {
   DailyShiftTemplate,
   WeeklyShiftTemplate,
@@ -102,6 +103,7 @@ const ROLE_META: Record<string, { label: string; color: string; bg: string }> = 
 }
 
 export default function KlinikPersonelTab() {
+  const editUserBackdropDismiss = useBackdropDismiss(() => setEditingUser(null))
   const { user } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [shifts, setShifts] = useState<ShiftItem[]>([])
@@ -683,7 +685,7 @@ export default function KlinikPersonelTab() {
             zIndex: 999999,
             padding: 16
           }}
-          onClick={() => setEditingUser(null)}
+          {...editUserBackdropDismiss}
         >
           <div
             onClick={e => e.stopPropagation()}

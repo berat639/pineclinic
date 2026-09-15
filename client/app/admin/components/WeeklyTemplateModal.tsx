@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { X, Copy, Check, Sparkles, Clock, Calendar } from 'lucide-react'
 import { WeeklyShiftTemplate, WeeklyDayPlan, DailyShiftTemplate, DAY_NAMES_TR, DAY_SHORT_TR } from '../types/shiftTemplates'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 interface Props {
   isOpen: boolean
@@ -26,6 +27,7 @@ const inputStyle: React.CSSProperties = {
 }
 
 export default function WeeklyTemplateModal({ isOpen, template, dailyTemplates, onSave, onClose }: Props) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const [name, setName] = useState(template?.name || '')
   const [description, setDescription] = useState(template?.description || '')
   const [days, setDays] = useState<Record<number, WeeklyDayPlan>>(() => {
@@ -118,7 +120,7 @@ export default function WeeklyTemplateModal({ isOpen, template, dailyTemplates, 
         zIndex: 999999,
         padding: 16
       }}
-      onClick={onClose}
+      {...backdropDismiss}
     >
       <div
         onClick={e => e.stopPropagation()}

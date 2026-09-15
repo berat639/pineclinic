@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ChevronRight } from 'lucide-react';
 import FancyHourPicker from './FancyHourPicker';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 
 interface Props {
   x: number;
@@ -32,6 +33,7 @@ export default function QuickCreatePopover({
   events = [], 
   isCentered = false 
 }: Props) {
+  const backdropDismiss = useBackdropDismiss(onClose);
   const [tab, setTab] = useState<'patient' | 'payment'>('patient');
   
   // patient selection vs creation
@@ -293,7 +295,7 @@ export default function QuickCreatePopover({
           zIndex: 100004, 
           background: 'rgba(0, 0, 0, 0.6)' 
         }} 
-        onClick={onClose} 
+        {...backdropDismiss}
       />
       <div 
         ref={popoverRef}
