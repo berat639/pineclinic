@@ -1,44 +1,37 @@
 'use client'
 
 import EvolutionWhatsAppCard from './EvolutionWhatsAppCard'
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import styles from './IntegrationsTab.module.css'
 
 type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
 
-const voipLabelStyle: CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: 'var(--foreground-3)',
-  letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6,
+const roleTabs = [
+  { id: 'calendar', label: 'Takvim' },
+  { id: 'patients', label: 'Hastalar' },
+  { id: 'payments', label: 'Ödemeler & Finans' },
+  { id: 'stok', label: 'Stok & Bakım' },
+  { id: 'knowledge', label: 'Bilgi Tabanı' },
+  { id: 'klinik', label: 'Klinik Personeli' },
+]
+
+function SettingsCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return <section className={styles.card}>
+    <h3 className={styles.cardTitle}>{title}</h3>
+    <p className={styles.cardDescription}>{description}</p>
+    {children}
+  </section>
 }
 
-const voipInputStyle: CSSProperties = {
-  width: '100%',
-  padding: '9px 12px',
-  background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)',
-  borderRadius: 8,
-  color: 'var(--foreground)',
-  fontSize: 13,
-  outline: 'none',
-  fontFamily: 'inherit',
-}
-
-const voipGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
-  gap: 12,
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <label className={styles.field}>
+    <span className={styles.fieldLabel}>{label}</span>
+    {children}
+  </label>
 }
 
 function Spinner() {
-  return (
-    <div style={{
-      width: 24, height: 24,
-      border: '2px solid #334155',
-      borderTopColor: '#0369A1',
-      borderRadius: '50%',
-      animation: 'spin 0.7s linear infinite',
-      flexShrink: 0,
-    }} />
-  )
+  return <div className={styles.spinner} aria-label="Yükleniyor" />
 }
 
 export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' }: { apiPrefix?: string }) {
@@ -114,7 +107,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       .then(r => r.json())
       .then(data => { if (data.logoUrl) setBrandingLogoUrl(data.logoUrl) })
       .catch(() => {})
-  }, [])
+  }, [apiPrefix])
 
   const handleSave = async () => {
     setSaving(true)
@@ -167,178 +160,108 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
     }
   }
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div>
+  if (loading) return <div className={styles.loading}><Spinner /></div>
 
   return (
-    <div style={{ maxWidth: 1100, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className={styles.page}>
       {toast && (
-        <div style={{
-          position: 'fixed', top: 20, right: 20, zIndex: 999,
-          padding: '10px 15px',
-          background: toast.type === 'success' ? '#14532d' : '#7f1d1d',
-          border: `1px solid ${toast.type === 'success' ? '#15803d' : '#b91c1c'}`,
-          borderRadius: 10,
-          color: toast.type === 'success' ? '#4ade80' : '#f87171',
-          fontSize: 13, fontWeight: 500,
-        }}>
+        <div className={`${styles.toast} ${toast.type === 'success' ? styles.toastSuccess : styles.toastError}`} role="status">
           {toast.text}
         </div>
       )}
 
       {/* Marka / Logo Ayarları */}
-      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
-        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>Marka ve Görünüm</h3>
-        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
-          Sistemde (özellikle hasta ekranlarında veya panelde) görünecek kurum logonuz.
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <div style={{
-            width: 80, height: 80, borderRadius: 12, background: 'var(--input-bg)',
-            border: '1px solid var(--input-border)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', overflow: 'hidden'
-          }}>
+      <SettingsCard title="Marka ve Görünüm" description="Sistemde, özellikle hasta ekranlarında ve panelde görünecek kurum logonuz.">
+        <div className={styles.logoRow}>
+          <div className={styles.logoPreview}>
             {brandingLogoUrl && !logoPreviewError ? (
               <img
                 src={brandingLogoUrl}
                 alt="Logo"
                 onError={() => setLogoPreviewError(true)}
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
               />
             ) : (
-              <span style={{ fontSize: 24, color: 'var(--foreground-3)' }}>🖼️</span>
+              <span className={styles.logoPlaceholder}>🖼️</span>
             )}
           </div>
-          <div style={{ flex: 1 }}>
-            <label className="btn btn-primary" style={{ cursor: 'pointer', padding: '8px 16px', fontSize: 13, display: 'inline-block' }}>
+          <div className={styles.logoActions}>
+            <label className={styles.uploadButton}>
               {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
-              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} disabled={uploadingLogo} />
+              <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} />
             </label>
-            <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginTop: 8 }}>
+            <p className={styles.helperText}>
               PNG, JPG veya SVG formatlarında, maksimum 2MB boyutunda görsel yükleyebilirsiniz.
             </p>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* VoIP Card */}
-      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
-        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>Çağrı Merkezi / Santral (VoIP)</h3>
-        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
-          Yapay zeka asistanının aramaları karşılayıp arama yapabilmesi için SIP Trunk ayarları.
-        </p>
-        <div style={voipGridStyle}>
-          <div>
-            <div style={voipLabelStyle}>Sağlayıcı</div>
-            <select value={voipProvider} onChange={e => setVoipProvider(e.target.value as CloudProvider)} style={voipInputStyle}>
+      <SettingsCard title="Çağrı Merkezi / Santral (VoIP)" description="Yapay zeka asistanının aramaları karşılayıp arama yapabilmesi için SIP Trunk ayarları.">
+        <div className={styles.grid}>
+          <Field label="Sağlayıcı">
+            <select value={voipProvider} onChange={e => setVoipProvider(e.target.value as CloudProvider)}>
               <option value="netgsm">NetGSM</option>
               <option value="twilio">Twilio</option>
               <option value="vonage">Vonage</option>
               <option value="custom">Diğer (Özel)</option>
             </select>
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Görünen Ad</div>
-            <input value={voipLabel} onChange={e => setVoipLabel(e.target.value)} placeholder="Örn. NetGSM Santral" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>API Base URL</div>
-            <input value={voipBaseUrl} onChange={e => setVoipBaseUrl(e.target.value)} placeholder="https://api.netgsm.com.tr/voice/v1/" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>SIP Trunk Host</div>
-            <input value={voipTrunkHost} onChange={e => setVoipTrunkHost(e.target.value)} placeholder="sip.netgsm.com.tr" style={voipInputStyle} />
-          </div>
+          </Field>
+          <Field label="Görünen Ad"><input value={voipLabel} onChange={e => setVoipLabel(e.target.value)} placeholder="Örn. NetGSM Santral" /></Field>
+          <Field label="API Base URL"><input value={voipBaseUrl} onChange={e => setVoipBaseUrl(e.target.value)} placeholder="https://api.netgsm.com.tr/voice/v1/" /></Field>
+          <Field label="SIP Trunk Host"><input value={voipTrunkHost} onChange={e => setVoipTrunkHost(e.target.value)} placeholder="sip.netgsm.com.tr" /></Field>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* SMS Card */}
-      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
-        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>SMS Ayarları (NetGSM)</h3>
-        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
-          Hastalara randevu hatırlatıcılarını SMS ile göndermek için NetGSM API bilgileri.
-        </p>
-        <div style={voipGridStyle}>
-          <div>
-            <div style={voipLabelStyle}>NetGSM Kullanıcı Kodu</div>
-            <input value={smsUsercode} onChange={e => setSmsUsercode(e.target.value)} placeholder="850xxxxxxx veya 53xxxxxxxx" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>NetGSM API Şifresi</div>
-            <input type="password" value={smsPassword} onChange={e => setSmsPassword(e.target.value)} placeholder="••••••••" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Onaylı Mesaj Başlığı (Sender ID)</div>
-            <input value={smsSenderId} onChange={e => setSmsSenderId(e.target.value)} placeholder="Örn. CLINIC" style={voipInputStyle} />
-          </div>
+      <SettingsCard title="SMS Ayarları (NetGSM)" description="Hastalara randevu hatırlatıcılarını SMS ile göndermek için NetGSM API bilgileri.">
+        <div className={styles.grid}>
+          <Field label="NetGSM Kullanıcı Kodu"><input value={smsUsercode} onChange={e => setSmsUsercode(e.target.value)} placeholder="850xxxxxxx veya 53xxxxxxxx" /></Field>
+          <Field label="NetGSM API Şifresi"><input type="password" value={smsPassword} onChange={e => setSmsPassword(e.target.value)} placeholder="••••••••" /></Field>
+          <Field label="Onaylı Mesaj Başlığı (Sender ID)"><input value={smsSenderId} onChange={e => setSmsSenderId(e.target.value)} placeholder="Örn. CLINIC" /></Field>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* SMTP Card */}
-      <div style={{ background: '#0f172a', border: '1px solid #334155', padding: 24 }}>
-        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--foreground)' }}>E-Posta (SMTP) Ayarları</h3>
-        <p style={{ fontSize: 13, color: 'var(--foreground-3)', marginBottom: 20 }}>
-          Sistem üzerinden hastalarınıza bilgilendirme e-postaları göndermek için SMTP ayarları.
-        </p>
-        <div style={voipGridStyle}>
-          <div>
-            <div style={voipLabelStyle}>SMTP Sunucu (Host)</div>
-            <input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>SMTP Port</div>
-            <input value={smtpPort} onChange={e => setSmtpPort(e.target.value)} placeholder="587 veya 465" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Kullanıcı Adı (Email)</div>
-            <input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="ornek@firma.com" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Şifre</div>
-            <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="••••••••" style={voipInputStyle} />
-          </div>
-          <div>
-            <div style={voipLabelStyle}>Şifreleme Türü</div>
-            <select value={smtpSecure} onChange={e => setSmtpSecure(e.target.value)} style={voipInputStyle}>
+      <SettingsCard title="E-Posta (SMTP) Ayarları" description="Sistem üzerinden hastalarınıza bilgilendirme e-postaları göndermek için SMTP ayarları.">
+        <div className={styles.grid}>
+          <Field label="SMTP Sunucu (Host)"><input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" /></Field>
+          <Field label="SMTP Port"><input value={smtpPort} onChange={e => setSmtpPort(e.target.value)} placeholder="587 veya 465" /></Field>
+          <Field label="Kullanıcı Adı (Email)"><input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="ornek@firma.com" /></Field>
+          <Field label="Şifre"><input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="••••••••" /></Field>
+          <Field label="Şifreleme Türü">
+            <select value={smtpSecure} onChange={e => setSmtpSecure(e.target.value)}>
               <option value="none">Yok (veya Otomatik)</option>
               <option value="ssl">SSL (Port 465)</option>
               <option value="tls">TLS / STARTTLS (Port 587)</option>
             </select>
-          </div>
+          </Field>
         </div>
-      </div>
+      </SettingsCard>
 
       <EvolutionWhatsAppCard />
 
       {/* Role-based Tab Permissions */}
-      <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2e1065', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <section className={styles.card}>
+        <div className={styles.roleHeading}>
+          <div className={styles.roleIcon}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
           </div>
           <div>
-            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--foreground)' }}>Rol Bazlı Sekme İzinleri</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--foreground-3)' }}>Alt kullanıcıların görebileceği sekmeleri belirleyin.</p>
+            <h3 className={styles.cardTitle}>Rol Bazlı Sekme İzinleri</h3>
+            <p className={styles.cardDescription}>Alt kullanıcıların görebileceği sekmeleri belirleyin.</p>
           </div>
         </div>
         
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className={styles.roleList}>
           {['hekim', 'sekreter', 'asistan'].map(role => (
-            <div key={role} style={{ padding: 16, background: '#0f172a', borderRadius: 8, border: '1px solid #334155' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--foreground)', textTransform: 'capitalize', marginBottom: 12 }}>
-                {role} Rolü
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                {[
-                  { id: 'calendar', label: 'Takvim' },
-                  { id: 'patients', label: 'Hastalar' },
-                  { id: 'payments', label: 'Ödemeler & Finans' },
-                  { id: 'stok', label: 'Stok & Bakım' },
-                  { id: 'knowledge', label: 'Bilgi Tabanı' },
-                  { id: 'klinik', label: 'Klinik Personeli' },
-                ].map(tab => {
+            <div key={role} className={styles.roleGroup}>
+              <div className={styles.roleName}>{role} Rolü</div>
+              <div className={styles.permissionList}>
+                {roleTabs.map(tab => {
                   const isChecked = rolePermissions[role]?.includes(tab.id) || false
                   return (
-                    <label key={tab.id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--foreground-2)' }}>
+                    <label key={tab.id} className={styles.permission}>
                       <input 
                         type="checkbox" 
                         checked={isChecked}
@@ -351,7 +274,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
                             }
                           })
                         }}
-                        style={{ accentColor: 'var(--primary)' }}
                       />
                       {tab.label}
                     </label>
@@ -361,14 +283,13 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+      <div className={styles.footer}>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="btn btn-primary"
-          style={{ fontSize: 14, padding: '10px 24px' }}
+          className={styles.saveButton}
         >
           {saving ? 'Kaydediliyor...' : 'Tümünü Kaydet'}
         </button>

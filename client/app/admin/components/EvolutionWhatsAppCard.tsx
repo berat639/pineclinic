@@ -82,11 +82,18 @@ export default function EvolutionWhatsAppCard() {
 
   const selectedConversation = conversations.find(c => c.id === selected)
   const patch = (change: Partial<Config>) => setForm(current => current ? { ...current, ...change } : current)
+  const connectionClass = form?.connectionState === 'open'
+    ? styles.connected
+    : form?.connectionState === 'connecting'
+      ? styles.connecting
+      : form?.connectionState === 'close'
+        ? styles.disconnected
+        : ''
 
   return <section className={styles.card} aria-labelledby="evolution-heading">
     <div className={styles.heading}>
-      <div><h3 id="evolution-heading">WhatsApp · Evolution API</h3><p>Gemini 3.1 ile mesajları yanıtlayın ve randevu taleplerini yönetin.</p></div>
-      {form && <span className={styles.badge}>{states[form.connectionState] || 'Durum bilinmiyor'}</span>}
+      <div><h3 id="evolution-heading">WhatsApp · Evolution API</h3><p className={styles.description}>Gemini 3.1 ile mesajları yanıtlayın ve randevu taleplerini yönetin.</p></div>
+      {form && <span className={`${styles.badge} ${connectionClass}`}>{states[form.connectionState] || 'Durum bilinmiyor'}</span>}
     </div>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
