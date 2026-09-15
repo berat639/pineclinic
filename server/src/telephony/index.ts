@@ -530,10 +530,6 @@ ${isOwnerCall
                 onAudio: (pcm) => {
                   if (state.closed) return
                   state.aiSpeaking = true
-                  if (state.greetingTimeoutTimer) {
-                    clearTimeout(state.greetingTimeoutTimer)
-                    state.greetingTimeoutTimer = undefined
-                  }
                   if (state.userSpeechEndTime) {
                     const responseTime = Date.now() - state.userSpeechEndTime
                     console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
@@ -835,6 +831,7 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
 
   // Tüm timeout timer'larını temizle — bellek sızıntısı / geç tetiklenme olmasın.
   clearSilenceTimers(state)
+  if (state.greetingTimeoutTimer) { clearTimeout(state.greetingTimeoutTimer); state.greetingTimeoutTimer = undefined }
   if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
 
   try { info.session?.close() } catch { }
