@@ -18,6 +18,7 @@ import { createCalendarEvent, updateCalendarEvent } from './integrations/google-
 import { searchKnowledge } from './services/knowledge'
 import { findCustomerDocByPhone } from './db/repositories/knowledge'
 import { getToolDescriptions } from './db/repositories/settings'
+import { runWithTenantContext } from './tenancy/context'
 import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription } from './data/default-tools'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
@@ -63,6 +64,8 @@ export async function createLiveSession(
     telephonyChannel?: string
     callerPhone?: string
     direction?: string
+    clinicId?: string
+    hostname?: string
     enableGoogleSearch?: boolean
   }
 ) {
@@ -553,7 +556,11 @@ export async function createLiveSession(
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
             const start = Date.now()
-            handleTool(fcName, fc.args as Record<string, unknown>)
+            const invokeTool = () => handleTool(fcName, fc.args as Record<string, unknown>)
+            const toolPromise = options.clinicId && options.hostname
+              ? runWithTenantContext({ clinicId: options.clinicId, hostname: options.hostname }, invokeTool)
+              : invokeTool()
+            Promise.resolve(toolPromise)
               .then((result) => {
                 const ms = Date.now() - start
                 if (ms > 200) console.log(`[Tool ${fcName}] ${ms}ms`)
