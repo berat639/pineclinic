@@ -228,6 +228,8 @@ interface CallState {
   closeTimer?: ReturnType<typeof setTimeout>
   silenceClosePending: boolean
   maxCallTimer?: ReturnType<typeof setTimeout>
+  maxCloseTimer?: ReturnType<typeof setTimeout>
+  maxLimitReached: boolean
   micEnabled: boolean
   userSpeechEndTime?: number
   micBuffer: Buffer[]
@@ -383,6 +385,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           silenceWarnMs: 30_000,
           silenceCloseMs: 20_000,
           silenceClosePending: false,
+          maxLimitReached: false,
           voiceName: 'Aoede',
           aiSpeaking: true,
         }
@@ -425,24 +428,24 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           info.clinicId = state.clinicId
           info.hostname = state.hostname
           await runWithTenantContext({ clinicId: state.clinicId, hostname: state.hostname }, async () => {
-          const direction = state.callerDirection || 'inbound'
-          console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}, clinicId: ${state.clinicId}, hostname: ${state.hostname}`)
+            const direction = state.callerDirection || 'inbound'
+            console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}, clinicId: ${state.clinicId}, hostname: ${state.hostname}`)
 
-          // VIP Arayan Kontrolü (Berat Bey'in Kişisel Asistanı Pine Asistan)
-          const vipRecord = state.callerPhone ? await findVipByPhone(state.callerPhone) : null
-          const isVip = Boolean(vipRecord && vipRecord.active)
-          if (isVip && vipRecord) {
-            console.log(`[${shortId}] 🌟 VIP Arayan algılandı: ${state.callerPhone} (${vipRecord.contactName || 'Özel Kişi'})`)
-          }
+            // VIP Arayan Kontrolü (Berat Bey'in Kişisel Asistanı Pine Asistan)
+            const vipRecord = state.callerPhone ? await findVipByPhone(state.callerPhone) : null
+            const isVip = Boolean(vipRecord && vipRecord.active)
+            if (isVip && vipRecord) {
+              console.log(`[${shortId}] 🌟 VIP Arayan algılandı: ${state.callerPhone} (${vipRecord.contactName || 'Özel Kişi'})`)
+            }
 
-          // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
-          const todayStr = getTodayTurkish()
-          const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLİKLE çağırma.\n\nDİYALOG SIRASI: Her turda yalnızca tek bir kısa soru veya tek bir talep yönelt. Karşı taraf cevap vermeden yeni bir soru sorma, peş peşe soru/araç çağrısı üretme ve karşı taraf konuşurken araya girme. Cevabı aldıktan sonra kısa bir onay verip sıradaki tek soruya geç.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
+            // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
+            const todayStr = getTodayTurkish()
+            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLİKLE çağırma.\n\nDİYALOG SIRASI: Her turda yalnızca tek bir kısa soru veya tek bir talep yönelt. Karşı taraf cevap vermeden yeni bir soru sorma, peş peşe soru/araç çağrısı üretme ve karşı taraf konuşurken araya girme. Cevabı aldıktan sonra kısa bir onay verip sıradaki tek soruya geç.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
 
-          const callerName = vipRecord?.contactName || 'Misafirimiz'
-          const isOwnerCall = state.callerPhone?.replace(/\D/g, '').endsWith('5076652367')
+            const callerName = vipRecord?.contactName || 'Misafirimiz'
+            const isOwnerCall = state.callerPhone?.replace(/\D/g, '').endsWith('5076652367')
 
-          const pineAsistanDefaultPrompt = `Sen "Pine Asistan"sın — Berat Bey'in (Berat İnceçam) kişisel, samimi, sıcakkanlı, neşeli, esprili ve son derece zeki genel asistanısın.
+            const pineAsistanDefaultPrompt = `Sen "Pine Asistan"sın — Berat Bey'in (Berat İnceçam) kişisel, samimi, sıcakkanlı, neşeli, esprili ve son derece zeki genel asistanısın.
 
 KİMLİK VE DAVRANIŞ KURALLARI:
 - Sen bir klinik veya diş sağlığı asistanı DEĞİLSİN. Karşıdaki kişiye KESİNLİKLE diş randevusu, klinik tedavisi, muayene veya diş hekimliği konularını dayatma veya sorma.
@@ -459,9 +462,9 @@ HATTINDAKİ KİŞİ HAKKINDA BİLGİ:
 - Arayan Kişi: ${callerName}
 - Telefon Numarası: ${state.callerPhone || 'Bilinmiyor'}
 ${isOwnerCall
-  ? `- DİKKAT: Şu anda seninle konuşan kişi bizzat Berat Bey'in ta kendisidir (senin yöneticin/sahibin). Kendisine "Berat Bey" diye hitap et.`
-  : `- Kendisine ismiyle (${callerName}) hitap et. Kendisini tanıdığını ve Berat Bey'in yakın çevresinden olduğunu hissettir.`
-}
+                ? `- DİKKAT: Şu anda seninle konuşan kişi bizzat Berat Bey'in ta kendisidir (senin yöneticin/sahibin). Kendisine "Berat Bey" diye hitap et.`
+                : `- Kendisine ismiyle (${callerName}) hitap et. Kendisini tanıdığını ve Berat Bey'in yakın çevresinden olduğunu hissettir.`
+              }
 
 BERAT BEY'E AKTARMA VE ACİL DURUM AKIŞI (ÇOK ÖNEMLİ):
 - Berat Bey'in kişisel telefon numarası: 05076652367.
@@ -469,322 +472,349 @@ BERAT BEY'E AKTARMA VE ACİL DURUM AKIŞI (ÇOK ÖNEMLİ):
   KESİNLİKLE İKİNCİ BİR TUR VEYA CEVAP BEKLEME! AYNI TUR İÇERİSİNDE HEM sesli olarak "Tabii ki, hemen Berat Bey'e aktarıyorum, lütfen hatta kalın." de, HEM DE AYNI ANDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma") ARACINI ÇAĞIR.
 - Eğer karşıdaki kişi acil veya önemli bir durumdan bahsederse: "Durum acilse veya doğrudan görüşmek isterseniz sizi hemen Berat Bey'e aktarmamı ister misiniz?" diye teklifte bulun. Onay aldığın an aramaAktar aracını çağır.
 ${isOwnerCall
-  ? `- Eğer Berat Bey aktarmayı test etmek amacıyla "beni aktar", "test et", "aktar bakalım", "evet aktar" derse: "Hemen aktarma testini başlatıyorum Berat Bey, lütfen bekleyin." de ve AYNI TURDA ANINDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma testi") aracını çağır.`
-  : ''
-}
+                ? `- Eğer Berat Bey aktarmayı test etmek amacıyla "beni aktar", "test et", "aktar bakalım", "evet aktar" derse: "Hemen aktarma testini başlatıyorum Berat Bey, lütfen bekleyin." de ve AYNI TURDA ANINDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma testi") aracını çağır.`
+                : ''
+              }
 `
 
-          const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
-            (async () => {
-              try {
-                const preWarmEmbedding = await getPreWarmEmbedding()
-                const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
-                // Telefon görüşmesinde akış dışı/eğlence belgeleri Flow Builder
-                // kuralını gevşetmemeli. Klinik bilgi belgeleri korunur.
-                const flowSafeDocs = topDocs.filter(d => !/akış dışı|eğlence|fıkra|asistan kişilik|sohbet/i.test(d.title))
-                if (flowSafeDocs.length > 0) {
-                  console.log(
-                    `[${shortId}] RAG (${direction}): ${flowSafeDocs.length} belge → ${flowSafeDocs.map((d) => d.title).join(', ')}`,
-                  )
-                  return await buildRagPrompt(flowSafeDocs)
+            const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
+              (async () => {
+                try {
+                  const preWarmEmbedding = await getPreWarmEmbedding()
+                  const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
+                  // Telefon görüşmesinde akış dışı/eğlence belgeleri Flow Builder
+                  // kuralını gevşetmemeli. Klinik bilgi belgeleri korunur.
+                  const flowSafeDocs = topDocs.filter(d => !/akış dışı|eğlence|fıkra|asistan kişilik|sohbet/i.test(d.title))
+                  if (flowSafeDocs.length > 0) {
+                    console.log(
+                      `[${shortId}] RAG (${direction}): ${flowSafeDocs.length} belge → ${flowSafeDocs.map((d) => d.title).join(', ')}`,
+                    )
+                    return await buildRagPrompt(flowSafeDocs)
+                  }
+                } catch (e) {
+                  console.error(`[${shortId}] RAG hatası:`, e)
                 }
-              } catch (e) {
-                console.error(`[${shortId}] RAG hatası:`, e)
-              }
-              return ''
-            })(),
-            isVip
-              ? (async () => {
+                return ''
+              })(),
+              isVip
+                ? (async () => {
                   return vipRecord?.customPrompt?.trim() || pineAsistanDefaultPrompt
                 })()
-              : buildSystemPrompt(direction),
-            resolveLiveModel(),
-            (async () => {
-              const { getSetting } = await import('../db/repositories/settings')
-              return (await getSetting('ai.voice_name', state.clinicId)) || 'Aoede'
-            })(),
-            (async () => {
-              if (isVip && vipRecord?.greeting) {
-                return vipRecord.greeting
-              }
-              const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
-              return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
-            })(),
-            (async () => {
-              const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_silence_timeout', state.clinicId)) || 30
-            })(),
-            (async () => {
-              const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_silence_close_timeout', state.clinicId)) || 15
-            })(),
-            (async () => {
-              const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.call_max_duration', state.clinicId)) || DEFAULT_MAX_CALL_SECONDS
-            })(),
-            (async () => {
-              const { getSetting } = await import('../db/repositories/settings')
-              return Number(await getSetting('ai.start_wait_seconds', state.clinicId)) || 0.4
-            })(),
-          ])
+                : buildSystemPrompt(direction),
+              resolveLiveModel(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return (await getSetting('ai.voice_name', state.clinicId)) || 'Aoede'
+              })(),
+              (async () => {
+                if (isVip && vipRecord?.greeting) {
+                  return vipRecord.greeting
+                }
+                const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
+                return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
+              })(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return Number(await getSetting('ai.call_silence_timeout', state.clinicId)) || 30
+              })(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return Number(await getSetting('ai.call_silence_close_timeout', state.clinicId)) || 15
+              })(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return Number(await getSetting('ai.call_max_duration', state.clinicId)) || DEFAULT_MAX_CALL_SECONDS
+              })(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return Number(await getSetting('ai.start_wait_seconds', state.clinicId)) || 0.4
+              })(),
+            ])
 
-          state.voiceName = voiceName
-          const silenceWarnSeconds = Math.min(120, Math.max(5, silenceTimeoutSec))
-          const silenceCloseSeconds = Math.min(120, Math.max(5, silenceCloseSec))
-          state.silenceWarnMs = silenceWarnSeconds * 1000
-          state.silenceCloseMs = silenceCloseSeconds * 1000
-          const maxCallSeconds = Math.min(MAX_MAX_CALL_SECONDS, Math.max(MIN_MAX_CALL_SECONDS, maxCallDurationSec))
-          const maxCallMs = maxCallSeconds * 1000
+            state.voiceName = voiceName
+            const silenceWarnSeconds = Math.min(120, Math.max(5, silenceTimeoutSec))
+            const silenceCloseSeconds = Math.min(120, Math.max(5, silenceCloseSec))
+            state.silenceWarnMs = silenceWarnSeconds * 1000
+            state.silenceCloseMs = silenceCloseSeconds * 1000
+            const maxCallSeconds = Math.min(MAX_MAX_CALL_SECONDS, Math.max(MIN_MAX_CALL_SECONDS, maxCallDurationSec))
+            const maxCallMs = maxCallSeconds * 1000
 
-          // Flow Builder'da yalnızca Karşılama → Bitti varsa bu minimal akış
-          // maksimum görüşme süresine tabi değildir. Sessizlik koruması yine
-          // aktif kalır; böylece sessiz hat sonsuza kadar açık kalmaz.
-          let minimalGreetingEndFlow = false
-          try {
-            const { getActiveFlow, isMinimalGreetingEndFlow } = await import('../db/repositories/flows')
-            const activeFlow = await getActiveFlow(direction)
-            minimalGreetingEndFlow = Boolean(activeFlow && isMinimalGreetingEndFlow(activeFlow))
-          } catch (e) {
-            console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
-          }
+            // Flow Builder'da yalnızca Karşılama → Bitti varsa bu minimal akış
+            // maksimum görüşme süresine tabi değildir. Sessizlik koruması yine
+            // aktif kalır; böylece sessiz hat sonsuza kadar açık kalmaz.
+            let minimalGreetingEndFlow = false
+            try {
+              const { getActiveFlow, isMinimalGreetingEndFlow } = await import('../db/repositories/flows')
+              const activeFlow = await getActiveFlow(direction)
+              minimalGreetingEndFlow = Boolean(activeFlow && isMinimalGreetingEndFlow(activeFlow))
+            } catch (e) {
+              console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
+            }
 
-          const flowPriorityInstructions = `\n\nAKTİF FLOW BUILDER KURALI (EN YÜKSEK ÖNCELİK): Klinik için aktif bir konuşma akışı varsa yalnızca o akışın düğümlerini ve sırasını uygula. Varsayılan randevu, kişilik, eğlence veya sohbet talimatları bu akışı geçersiz kılamaz. Kullanıcı meditasyon, resim, hava durumu, günlük hayat, fıkra veya başka klinik dışı bir konu açarsa bu konuyu açıklama, sohbeti sürdürme ve yeni soru sorma. Yalnızca tek cümleyle aktif akışa dön: "Bu görüşmeyi klinik ve randevu işlemleriyle sürdürebilirim; akışımıza dönelim." Kullanıcı akışa dönerse kaldığın adımdan devam et. Kullanıcı dönmezse ikinci kez aynı kısa yönlendirmeyi yap ve görüşmeyi sonlandırmaya yönel. Maksimum süre uyarısı geldiğinde yeni konu açma; mevcut adımı tamamla, kısa veda et ve cagriySonlandir aracını çağır.`
-          const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
-          console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
-          if (minimalGreetingEndFlow) {
-            console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
-          }
+            const flowPriorityInstructions = `\n\nAKTİF FLOW BUILDER KURALI (EN YÜKSEK ÖNCELİK): Klinik için aktif bir konuşma akışı varsa yalnızca o akışın düğümlerini ve sırasını uygula. Varsayılan randevu, kişilik, eğlence veya sohbet talimatları bu akışı geçersiz kılamaz. Kullanıcı meditasyon, resim, hava durumu, günlük hayat, fıkra veya başka klinik dışı bir konu açarsa bu konuyu açıklama, sohbeti sürdürme ve yeni soru sorma. Yalnızca tek cümleyle aktif akışa dön: "Bu görüşmeyi klinik ve randevu işlemleriyle sürdürebilirim; akışımıza dönelim." Kullanıcı akışa dönerse kaldığın adımdan devam et. Kullanıcı dönmezse ikinci kez aynı kısa yönlendirmeyi yap ve görüşmeyi sonlandırmaya yönel. Maksimum süre uyarısı geldiğinde yeni konu açma; mevcut adımı tamamla, kısa veda et ve cagriySonlandir aracını çağır.`
+            const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
+            console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
+            if (minimalGreetingEndFlow) {
+              console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
+            }
 
-          const SESSION_CONNECT_TIMEOUT_MS = 10_000
+            const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
-          const session = await Promise.race([
-            createLiveSession(
-              ai,
-              {
-                onReady: () => {
-                  console.log(`[${shortId}] Gemini Live ready (phone)`)
-                },
+            const session = await Promise.race([
+              createLiveSession(
+                ai,
+                {
+                  onReady: () => {
+                    console.log(`[${shortId}] Gemini Live ready (phone)`)
+                  },
 
-                onAudio: (pcm) => {
-                  if (state.closed) return
-                  state.aiSpeaking = true
-                  if (state.userSpeechEndTime) {
-                    const responseTime = Date.now() - state.userSpeechEndTime
-                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
-                    state.userSpeechEndTime = undefined
-                  }
-                  // pcm: 24 kHz signed 16-bit LE
-                  // Yalnızca kadın sesi seçiliyken ses kalınlaşma kontrolü yap (Erkek sesi seçiliyken uyarı üretme)
-                  const isMale = ['Puck', 'Charon', 'Fenrir'].includes(state.voiceName || '')
-                  if (!isMale && pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
-                    const pitch = estimatePitch(pcm, 24000)
-                    if (pitch > 0) {
-                      state.aiVoiceFrames++
-                      // 145 Hz altı genellikle erkek sesidir (veya pitch düşmüştür)
-                      if (pitch < 145) state.lowPitchFrames++
-                      
-                      // Her 10 sesli frame'de bir kontrol et
-                      if (state.aiVoiceFrames >= 10) {
-                        const lowPitchRatio = state.lowPitchFrames / state.aiVoiceFrames
-                        if (lowPitchRatio > 0.6) {
-                          console.warn(`[${shortId}] 🚨 UYARI: AI sesi kalınlaştı (Erkek sesi algılandı)! Ortalama Pitch < 145 Hz. (Olası Gemini Persona hatası)`)
+                  onAudio: (pcm) => {
+                    if (state.closed) return
+                    state.aiSpeaking = true
+                    if (state.userSpeechEndTime) {
+                      const responseTime = Date.now() - state.userSpeechEndTime
+                      console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
+                      state.userSpeechEndTime = undefined
+                    }
+                    // pcm: 24 kHz signed 16-bit LE
+                    // Yalnızca kadın sesi seçiliyken ses kalınlaşma kontrolü yap (Erkek sesi seçiliyken uyarı üretme)
+                    const isMale = ['Puck', 'Charon', 'Fenrir'].includes(state.voiceName || '')
+                    if (!isMale && pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
+                      const pitch = estimatePitch(pcm, 24000)
+                      if (pitch > 0) {
+                        state.aiVoiceFrames++
+                        // 145 Hz altı genellikle erkek sesidir (veya pitch düşmüştür)
+                        if (pitch < 145) state.lowPitchFrames++
+
+                        // Her 10 sesli frame'de bir kontrol et
+                        if (state.aiVoiceFrames >= 10) {
+                          const lowPitchRatio = state.lowPitchFrames / state.aiVoiceFrames
+                          if (lowPitchRatio > 0.6) {
+                            console.warn(`[${shortId}] 🚨 UYARI: AI sesi kalınlaştı (Erkek sesi algılandı)! Ortalama Pitch < 145 Hz. (Olası Gemini Persona hatası)`)
+                          }
+                          state.aiVoiceFrames = 0
+                          state.lowPitchFrames = 0
                         }
-                        state.aiVoiceFrames = 0
-                        state.lowPitchFrames = 0
                       }
                     }
-                  }
 
-                  const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
-                  state.downsampleState = nextState
-                  const frames = state.outChunker.chunk(pcm8)
-                  for (const f of frames) state.audioQueue.push(f)
-                },
-                onTranscript: (role, text) => {
-                  const trimmed = text.trim()
-                  if (!trimmed) return
-                  const label = role === 'user' ? 'USER' : 'AI'
-                  // Sessizlik sayacı yalnızca Gemini'nin gerçek kullanıcı
-                  // konuşmasını metne çevirdiği anda sıfırlanır. NoiseGate'in
-                  // açılması tek başına yeterli değildir; hat paraziti veya
-                  // AI sesinin mikrofona sızması sayaç davranışını değiştiremez.
-                  if (role === 'user') clearSilenceTimers(state)
-                  if (role === 'model' && state.userSpeechEndTime) {
-                    const responseTime = Date.now() - state.userSpeechEndTime
-                    console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
-                    state.userSpeechEndTime = undefined
-                  }
-                  console.log(`[${shortId}] ${label}: ${trimmed}`)
-                },
-                onInterrupted: () => {
-                  // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
-                  state.aiSpeaking = false
-                  state.audioQueue.length = 0
-                  state.outChunker = new FrameChunker()
-                },
-                onHangup: () => {
-                  console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
-                  if (state.closed || state.hangupPending) return
-                  state.hangupPending = true
-                },
-                onTurnComplete: () => {
-                  state.aiSpeaking = false
-                  if (state.greetingTimeoutTimer) {
-                    clearTimeout(state.greetingTimeoutTimer)
-                    state.greetingTimeoutTimer = undefined
-                  }
-                  if (!state.micEnabled) {
-                    console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
-                    state.micEnabled = true
-                  }
-                  // Müşteri cevabını bekliyor — sessizlik timer'ını başlat.
-                  startSilenceWatch(state, socket)
-                },
-                onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
-                onClose: () => {
-                  console.log(`[${shortId}] Gemini session closed (phone)`)
-                  sessions.delete(shortId)
-                  notifyAdmins('session_end', {
-                    id: shortId,
-                    channel: 'phone',
-                    activeSessions: sessions.size,
-                  })
-                },
-              },
-              {
-                dbSessionId: shortId,
-                systemPrompt,
-                model,
-                voiceName,
-                clinicId: state.clinicId,
-                hostname: state.hostname,
-                telephonyChannel: state.callerChannel,
-                callerPhone: state.callerPhone,
-                direction: direction,
-                enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
-              },
-            ),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)), SESSION_CONNECT_TIMEOUT_MS)
-            ),
-          ])
-
-          info.session = session
-          sessions.set(shortId, info)
-          notifyAdmins('session_start', {
-            id: shortId,
-            channel: 'phone',
-            activeSessions: sessions.size,
-          })
-
-          // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
-          // Birden fazla turnComplete: true göndermek modelin her birine ayrı
-          // greeting üretmesine neden olur.
-          const initParts: string[] = []
-
-          if (isVip) {
-            initParts.push(
-              `Sistem bildirimi: Berat Bey'in özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla diş, klinik, randevu veya telefon numarası sorma. Tamamen samimi, neşeli ve doğal bir şekilde Berat Bey'in kişisel asistanı Pine Asistan olarak konuşmaya başla.`
-            )
-          } else {
-            initParts.push(
-              direction === 'outbound'
-                ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-                : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-            )
-
-            // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
-            // session hazır olduğunda callerPhone zaten set olmuş olur.
-            if (state.callerPhone) {
-              try {
-                const customerCtx = await getCustomerByPhone(state.callerPhone)
-                if (customerCtx) {
-                  const TYPE_LABELS: Record<string, string> = {
-                    service: 'Tedavi', test_drive: 'Muayene',
-                    gallery_visit: 'Kontrol', other: 'Randevu',
-                  }
-                  const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
-                  const past = customerCtx.appointmentHistory.filter(a => a.isPast)
-
-                  let ctxMsg = `Arayan müşteri sistemde kayıtlı.\n`
-                  ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
-                  ctxMsg += `Telefon: ${customerCtx.phone}\n`
-
-                  if (upcoming.length > 0) {
-                    ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
-                    upcoming.slice(0, 3).forEach(a => {
-                      ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}`
-                      if (a.vehicleInfo) ctxMsg += ` (${a.vehicleInfo})`
-                      ctxMsg += '\n'
+                    const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
+                    state.downsampleState = nextState
+                    const frames = state.outChunker.chunk(pcm8)
+                    for (const f of frames) state.audioQueue.push(f)
+                  },
+                  onTranscript: (role, text) => {
+                    const trimmed = text.trim()
+                    if (!trimmed) return
+                    const label = role === 'user' ? 'USER' : 'AI'
+                    // Sessizlik sayacı yalnızca Gemini'nin gerçek kullanıcı
+                    // konuşmasını metne çevirdiği anda sıfırlanır. NoiseGate'in
+                    // açılması tek başına yeterli değildir; hat paraziti veya
+                    // AI sesinin mikrofona sızması sayaç davranışını değiştiremez.
+                    if (role === 'user') clearSilenceTimers(state)
+                    if (role === 'model' && state.userSpeechEndTime) {
+                      const responseTime = Date.now() - state.userSpeechEndTime
+                      console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
+                      state.userSpeechEndTime = undefined
+                    }
+                    console.log(`[${shortId}] ${label}: ${trimmed}`)
+                  },
+                  onInterrupted: () => {
+                    // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
+                    state.aiSpeaking = false
+                    state.audioQueue.length = 0
+                    state.outChunker = new FrameChunker()
+                  },
+                  onHangup: () => {
+                    console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
+                    if (state.closed || state.hangupPending) return
+                    state.hangupPending = true
+                  },
+                  onTurnComplete: () => {
+                    state.aiSpeaking = false
+                    if (state.greetingTimeoutTimer) {
+                      clearTimeout(state.greetingTimeoutTimer)
+                      state.greetingTimeoutTimer = undefined
+                    }
+                    if (!state.micEnabled) {
+                      console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
+                      state.micEnabled = true
+                    }
+                    // Müşteri cevabını bekliyor — sessizlik timer'ını başlat.
+                    startSilenceWatch(state, socket)
+                  },
+                  onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
+                  onClose: () => {
+                    console.log(`[${shortId}] Gemini session closed (phone)`)
+                    sessions.delete(shortId)
+                    notifyAdmins('session_end', {
+                      id: shortId,
+                      channel: 'phone',
+                      activeSessions: sessions.size,
                     })
-                  }
+                  },
+                },
+                {
+                  dbSessionId: shortId,
+                  systemPrompt,
+                  model,
+                  voiceName,
+                  clinicId: state.clinicId,
+                  hostname: state.hostname,
+                  telephonyChannel: state.callerChannel,
+                  callerPhone: state.callerPhone,
+                  direction: direction,
+                  enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
+                },
+              ),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)), SESSION_CONNECT_TIMEOUT_MS)
+              ),
+            ])
 
-                  if (past.length > 0) {
-                    ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
-                  }
+            info.session = session
+            sessions.set(shortId, info)
+            notifyAdmins('session_start', {
+              id: shortId,
+              channel: 'phone',
+              activeSessions: sessions.size,
+            })
 
-                  ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden randevu, şikayet, tarih veya saat sorusu başlatma; aktif konuşma akışının dışına çıkma.`
-                  initParts.push(ctxMsg)
-                  console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
-                } else {
-                  // Bilgi tabanında müşteri kaydı ara (admin panelden eklenen)
-                  const knowledgeCustomer = await findCustomerDocByPhone(state.callerPhone)
-                  if (knowledgeCustomer) {
-                    let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
-                    ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
-                    ctxMsg += `${knowledgeCustomer.content}\n`
-                    ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden yeni soru başlatma; aktif konuşma akışının dışına çıkma.`
+            // Tüm başlangıç context'ini TEK bir sendClientContent'te birleştir.
+            // Birden fazla turnComplete: true göndermek modelin her birine ayrı
+            // greeting üretmesine neden olur.
+            const initParts: string[] = []
+
+            if (isVip) {
+              initParts.push(
+                `Sistem bildirimi: Berat Bey'in özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla diş, klinik, randevu veya telefon numarası sorma. Tamamen samimi, neşeli ve doğal bir şekilde Berat Bey'in kişisel asistanı Pine Asistan olarak konuşmaya başla.`
+              )
+            } else {
+              initParts.push(
+                direction === 'outbound'
+                  ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+                  : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+              )
+
+              // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
+              // session hazır olduğunda callerPhone zaten set olmuş olur.
+              if (state.callerPhone) {
+                try {
+                  const customerCtx = await getCustomerByPhone(state.callerPhone)
+                  if (customerCtx) {
+                    const TYPE_LABELS: Record<string, string> = {
+                      service: 'Tedavi', test_drive: 'Muayene',
+                      gallery_visit: 'Kontrol', other: 'Randevu',
+                    }
+                    const upcoming = customerCtx.appointmentHistory.filter(a => !a.isPast)
+                    const past = customerCtx.appointmentHistory.filter(a => a.isPast)
+
+                    let ctxMsg = `Arayan müşteri sistemde kayıtlı.\n`
+                    ctxMsg += `Müşteri Adı: ${customerCtx.name}\n`
+                    ctxMsg += `Telefon: ${customerCtx.phone}\n`
+
+                    if (upcoming.length > 0) {
+                      ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
+                      upcoming.slice(0, 3).forEach(a => {
+                        ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}`
+                        if (a.vehicleInfo) ctxMsg += ` (${a.vehicleInfo})`
+                        ctxMsg += '\n'
+                      })
+                    }
+
+                    if (past.length > 0) {
+                      ctxMsg += `\nGeçmiş Randevu Sayısı: ${past.length}\n`
+                    }
+
+                    ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden randevu, şikayet, tarih veya saat sorusu başlatma; aktif konuşma akışının dışına çıkma.`
                     initParts.push(ctxMsg)
-                    console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
+                    console.log(`[${shortId}] Müşteri tanındı: ${customerCtx.name} (yaklaşan: ${upcoming.length}, geçmiş: ${past.length})`)
+                  } else {
+                    // Bilgi tabanında müşteri kaydı ara (admin panelden eklenen)
+                    const knowledgeCustomer = await findCustomerDocByPhone(state.callerPhone)
+                    if (knowledgeCustomer) {
+                      let ctxMsg = `Arayan müşteri bilgi tabanında kayıtlı.\n`
+                      ctxMsg += `Müşteri Adı: ${knowledgeCustomer.name}\n`
+                      ctxMsg += `${knowledgeCustomer.content}\n`
+                      ctxMsg += `\nBu bilgiyi yalnızca müşteri kimliğini doğrular veya randevusunu sorarsa kullan. Kendiliğinden yeni soru başlatma; aktif konuşma akışının dışına çıkma.`
+                      initParts.push(ctxMsg)
+                      console.log(`[${shortId}] Müşteri bilgi tabanından tanındı: ${knowledgeCustomer.name}`)
+                    }
                   }
+                } catch (e) {
+                  console.error(`[${shortId}] Müşteri context hatası:`, e)
                 }
-              } catch (e) {
-                console.error(`[${shortId}] Müşteri context hatası:`, e)
               }
             }
-          }
 
-          // Tek seferde gönder — model yalnızca BİR greeting üretir.
-          console.log(`[${shortId}] Greeting sendClientContent gönderiliyor (${initParts.join('').length} karakter)`)
-          session.sendClientContent({
-            turns: [
-              {
-                role: 'user',
-                parts: [{ text: initParts.join('\n\n') }],
-              },
-            ],
-            turnComplete: true,
-          })
+            // Tek seferde gönder — model yalnızca BİR greeting üretir.
+            console.log(`[${shortId}] Greeting sendClientContent gönderiliyor (${initParts.join('').length} karakter)`)
+            session.sendClientContent({
+              turns: [
+                {
+                  role: 'user',
+                  parts: [{ text: initParts.join('\n\n') }],
+                },
+              ],
+              turnComplete: true,
+            })
 
-          // Süre karşılama gönderildikten sonra başlar; bağlantı kurulma
-          // gecikmesi klinik yöneticisinin seçtiği konuşma süresinden düşmez.
-          // Gelen ve giden aramalarda aynı klinik ayarı kullanılır.
+            // Süre karşılama gönderildikten sonra başlar; bağlantı kurulma
+            // gecikmesi klinik yöneticisinin seçtiği konuşma süresinden düşmez.
+            // Gelen ve giden aramalarda aynı klinik ayarı kullanılır.
           if (!minimalGreetingEndFlow) state.maxCallTimer = setTimeout(() => {
             if (state.closed || state.hangupPending || !state.info.session) return
-            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — görüşme sonlandırılıyor`)
+            state.maxLimitReached = true
+            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — kapanış uyarısı veriliyor`)
             try {
               state.info.session.sendClientContent({
                 turns: [{
                   role: 'user',
-                  parts: [{ text: 'Sistem: Maksimum görüşme süresi doldu. Devam eden mevcut randevu veya araç işlemini tamamla; ardından kısa ve nazik bir veda söyle ve cagriySonlandir aracını çağır. Yeni konu başlatma.' }],
+                  parts: [{ text: 'Sistem: Maksimum görüşme süresine ulaşıldı. Kullanıcıya aynen şu anlamda kısa bir uyarı ver: "Görüşme süremiz dolmak üzere. Lütfen mevcut randevu adımına dönelim; konu dışı devam ederseniz görüşmeyi sonlandıracağım." Yeni konu başlatma ve kullanıcıya cevap vermesi için fırsat tanı.' }],
                 }],
                 turnComplete: true,
               })
             } catch { }
-            setTimeout(() => { if (!state.closed) { state.closed = true; try { socket.end() } catch { } } }, 6_000)
+            // Uyarıdan sonra kullanıcıya mevcut akışa dönmesi için tolerans ver.
+            state.maxCloseTimer = setTimeout(() => {
+              if (state.closed || state.hangupPending || !state.info.session) return
+              try {
+                state.info.session.sendClientContent({
+                  turns: [{
+                    role: 'user',
+                    parts: [{ text: 'Sistem: Kullanıcı akışa dönmedi veya konu dışına devam etti. Şimdi "Üzgünüm, görüşme süremiz doldu. Görüşmeyi sonlandırıyorum, iyi günler." de; cümleyi tamamen söyle, yeni soru sorma ve cagriySonlandir aracını çağır.' }],
+                  }],
+                  turnComplete: true,
+                })
+              } catch { }
+
+              // AI cümlesini ve ses kuyruğunu tamamlamadan hattı kapatma.
+              const notBefore = Date.now() + 6_000
+              const deadline = Date.now() + 30_000
+              const closeWhenQuiet = () => {
+                if (state.closed) return
+                if ((Date.now() < notBefore || state.aiSpeaking || state.audioQueue.length > 0) && Date.now() < deadline) {
+                  setTimeout(closeWhenQuiet, 250)
+                  return
+                }
+                state.closed = true
+                try { socket.end() } catch { }
+              }
+              setTimeout(closeWhenQuiet, 1_000)
+            }, 20_000)
           }, maxCallMs)
 
-          // Güvenlik zamanlayıcısı: Gemini turnComplete göndermese bile çağrı kilitlenmesin.
-          // Normal akışta mikrofon yalnızca greeting turnComplete sonrasında açılır;
-          // bu uzun geri dönüş süresi AI'ın kendi sesini müşteri sesi sanıp peş peşe
-          // sorular üretmesini ve barge-in döngüsünü önler.
-          const greetingFallbackMs = Math.max(8_000, Math.round((startWaitSec + 5) * 1_000))
-          state.greetingTimeoutTimer = setTimeout(() => {
-            if (state.closed || state.micEnabled) return
-            console.warn(`[${shortId}] Greeting turnComplete zaman aşımı (${greetingFallbackMs}ms) — mikrofon güvenli şekilde açılıyor`)
-            state.micEnabled = true
-            startSilenceWatch(state, socket)
-          }, greetingFallbackMs)
+            // Güvenlik zamanlayıcısı: Gemini turnComplete göndermese bile çağrı kilitlenmesin.
+            // Normal akışta mikrofon yalnızca greeting turnComplete sonrasında açılır;
+            // bu uzun geri dönüş süresi AI'ın kendi sesini müşteri sesi sanıp peş peşe
+            // sorular üretmesini ve barge-in döngüsünü önler.
+            const greetingFallbackMs = Math.max(8_000, Math.round((startWaitSec + 5) * 1_000))
+            state.greetingTimeoutTimer = setTimeout(() => {
+              if (state.closed || state.micEnabled) return
+              console.warn(`[${shortId}] Greeting turnComplete zaman aşımı (${greetingFallbackMs}ms) — mikrofon güvenli şekilde açılıyor`)
+              state.micEnabled = true
+              startSilenceWatch(state, socket)
+            }, greetingFallbackMs)
           })
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
@@ -894,6 +924,7 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
   clearSilenceTimers(state)
   if (state.greetingTimeoutTimer) { clearTimeout(state.greetingTimeoutTimer); state.greetingTimeoutTimer = undefined }
   if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
+  if (state.maxCloseTimer) { clearTimeout(state.maxCloseTimer); state.maxCloseTimer = undefined }
 
   try { info.session?.close() } catch { }
   sessions.delete(shortId)
