@@ -54,6 +54,7 @@ class NoiseGate {
   private preRoll: Buffer[] = []
   private trailingFrames = 0
   private wasOpen = false
+  private highStreak = 0
   private totalFrames = 0
   private highFrames = 0
   private rmsSum = 0
@@ -72,7 +73,7 @@ class NoiseGate {
   get isOpen(): boolean { return this.wasOpen }
 
   /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; konuşma varsa frame'leri ve kapanış bilgisini döndür. */
-  process(frame: Buffer): { frames: Buffer[]; justClosed: boolean } {
+  process(frame: Buffer): { frames: Buffer[]; justClosed: boolean; speechStarted: boolean } {
     this.totalFrames++
     const rms = computeRmsInt16(frame)
     this.rmsSum += rms
@@ -84,37 +85,46 @@ class NoiseGate {
     this.maybeLog()
 
     if (this.threshold === 0) {
+      const speechStarted = !this.wasOpen
       this.wasOpen = true
-      return { frames: [frame], justClosed: false }
+      return { frames: [frame], justClosed: false, speechStarted }
     }
 
     if (isHigh) {
+      this.highStreak++
+      // Tekil hat parazitlerini konuşma kabul etme. 3 ardışık 20 ms
+      // karesi (yaklaşık 60 ms) gerçek ses başlangıcı için yeterlidir.
+      if (!this.wasOpen && this.highStreak < 3) {
+        this.pushPreRoll(frame)
+        return { frames: [], justClosed: false, speechStarted: false }
+      }
       this.trailingFrames = this.trailingFramesMax
       if (!this.wasOpen) {
         const flushed = this.preRoll
         this.preRoll = []
         this.wasOpen = true
-        return { frames: [...flushed, frame], justClosed: false }
+        return { frames: [...flushed, frame], justClosed: false, speechStarted: true }
       }
       this.wasOpen = true
-      return { frames: [frame], justClosed: false }
+      return { frames: [frame], justClosed: false, speechStarted: false }
     }
 
+    this.highStreak = 0
     if (this.trailingFrames > 0) {
       this.trailingFrames--
       if (this.trailingFrames === 0) {
         this.pushPreRoll(frame)
         this.wasOpen = false
         // Konuşma bitti (trailing sonu)
-        return { frames: [frame], justClosed: true }
+        return { frames: [frame], justClosed: true, speechStarted: false }
       }
       this.wasOpen = true
-      return { frames: [frame], justClosed: false }
+      return { frames: [frame], justClosed: false, speechStarted: false }
     }
 
     this.pushPreRoll(frame)
     this.wasOpen = false
-    return { frames: [], justClosed: false }
+    return { frames: [], justClosed: false, speechStarted: false }
   }
 
   private pushPreRoll(frame: Buffer): void {
@@ -139,9 +149,10 @@ class NoiseGate {
 }
 
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
-  // Default threshold: 100 (telefon hattı dip gürültüsünü filtreler, konuşmada hemen açılır)
+  // Default threshold: 250 (telefon hattı dip gürültüsünü filtreler, normal
+  // konuşmayı yakalar). Ayrıca NoiseGate 3 ardışık kare şartı uygular.
   const envVal = process.env.PHONE_NOISE_GATE_RMS
-  const threshold = envVal !== undefined && envVal !== '' ? Math.max(0, parseInt(envVal, 10)) : 100
+  const threshold = envVal !== undefined && envVal !== '' ? Math.max(0, parseInt(envVal, 10)) : 250
   const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '250', 10) || 250)
   const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
   return {
@@ -771,7 +782,7 @@ ${isOwnerCall
             // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
             if (!info.session || !state.micEnabled || state.hangupPending) continue
 
-            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
+            const { frames, justClosed, speechStarted } = state.noiseGate.process(ev.pcm)
 
             // AI konuşurken: Eğer kullanıcı GERÇEKTEN konuşmuyorsa (NoiseGate kapalı / sadece dip gürültüsü),
             // Gemini'ye paket gönderme (Gemini'nin kendi sesini veya sessizliği kesinti olarak algılamasını önle).
@@ -780,8 +791,10 @@ ${isOwnerCall
               continue
             }
 
-            if (frames.length > 0) {
+            if (speechStarted) {
               clearSilenceTimers(state)
+            }
+            if (frames.length > 0) {
               for (const f8k of frames) {
                 state.micBuffer.push(upsample8to16(f8k))
               }
