@@ -34,9 +34,21 @@ done
 if [ -n "$UUID" ] && [ -n "$CALLER" ]; then
   HOST="${AUDIOSOCKET_HOST:-voiceai-server}"
   PORT="${BACKEND_HTTP_PORT:-3001}"
-  curl -sf --max-time 2 \
+  RESPONSE=$(curl -sf --max-time 2 \
     "http://${HOST}:${PORT}/api/telephony/register?uuid=${UUID}&caller=${CALLER}&channel=${CHANNEL}&direction=${DIRECTION}&hostname=${TENANT_HOSTNAME}&did=${LOOKUP_NUMBER}" \
-    >/dev/null 2>&1 || true
+    2>/dev/null || true)
+
+  # Klinik bazlı telefon kapasitesini Asterisk dialplan'ına aktar.
+  # Backend yanıt veremezse güvenli varsayılan 3 aktif çağrıdır.
+  MAX_ACTIVE=$(printf '%s' "$RESPONSE" | sed -n 's/.*"maxActiveCalls":\([0-9][0-9]*\).*/\1/p')
+  QUEUE_GROUP=$(printf '%s' "$RESPONSE" | sed -n 's/.*"queueGroup":"\([^"]*\)".*/\1/p')
+  case "$MAX_ACTIVE" in
+    2|3|4|5) ;;
+    *) MAX_ACTIVE=3 ;;
+  esac
+  [ -n "$QUEUE_GROUP" ] || QUEUE_GROUP="clinic_default"
+  echo "SET VARIABLE AI_MAX_ACTIVE ${MAX_ACTIVE}"
+  echo "SET VARIABLE AI_QUEUE_GROUP ${QUEUE_GROUP}"
 fi
 
 # AGI başarı yanıtı (zorunlu)

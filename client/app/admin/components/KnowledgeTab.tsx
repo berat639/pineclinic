@@ -345,6 +345,7 @@ export default function KnowledgeTab() {
     callSilenceTimeout: 30,
     callSilenceCloseTimeout: 15,
     callMaxDuration: 600,
+    maxActivePhoneCalls: 3,
   })
   const [voiceLoading, setVoiceLoading] = useState(true)
   const [voiceSaving, setVoiceSaving] = useState(false)
@@ -1046,7 +1047,7 @@ export default function KnowledgeTab() {
                       <input type="range" min="5" max="120" step="1" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 12 }}>
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Uyarı sonrası kapanış</label>
@@ -1069,9 +1070,22 @@ export default function KnowledgeTab() {
                         ))}
                       </select>
                     </div>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Telefon AI kapasitesi</label>
+                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.maxActivePhoneCalls ?? 3} çağrı</span>
+                      </div>
+                      <select
+                        value={voiceSettings.maxActivePhoneCalls || 3}
+                        onChange={e => setVoiceSettings({ ...voiceSettings, maxActivePhoneCalls: parseInt(e.target.value) })}
+                        style={{ width: '100%', padding: '6px 8px', fontSize: 11, color: 'var(--foreground)', background: 'var(--card-bg)', border: '1px solid var(--divider, #334155)', borderRadius: 6 }}
+                      >
+                        {[2, 3, 4, 5].map(count => <option key={count} value={count}>{count} aktif çağrı</option>)}
+                      </select>
+                    </div>
                   </div>
                   <p style={{ fontSize: 10, color: 'var(--foreground-3)', margin: '8px 0 0' }}>
-                    Bu ayarlar gelen ve giden telefon aramalarında klinik bazında uygulanır. Sessizlik uyarısından sonra belirlenen süre içinde yanıt gelmezse görüşme nazikçe sonlandırılır.
+                    Bu ayarlar klinik bazında gelen ve giden telefon aramalarında uygulanır. Aktif telefon kapasitesi dolunca yeni çağrılar Asterisk bekleme kuyruğunda tutulur; web görüşmeleri bu sınırdan etkilenmez.
                   </p>
                 </div>
 

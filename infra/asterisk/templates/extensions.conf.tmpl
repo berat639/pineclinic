@@ -20,6 +20,7 @@ exten => _X.,1,NoOp(Netgsm inbound: ${CALLERID(num)} -> ${EXTEN})
  same => n,Set(DENOISE(rx)=on)
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound,${EXTEN},${CALLERID(dnid)})
+ same => n,Gosub(ai-admission,s,1)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
@@ -28,6 +29,7 @@ exten => s,1,NoOp(Netgsm inbound (s/default): ${CALLERID(num)})
  same => n,Set(DENOISE(rx)=on)
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound,s,${CALLERID(dnid)})
+ same => n,Gosub(ai-admission,s,1)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
@@ -37,12 +39,32 @@ exten => 100,1,NoOp(Test AudioSocket bridge)
  same => n,Set(DENOISE(rx)=on)
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CALLERID(num)},${CHANNEL},inbound,${EXTEN},${CALLERID(dnid)})
+ same => n,Gosub(ai-admission,s,1)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()
 
 ; ─────────────────────────────────────────────────────────────────────────────
 ; Dinamik Transfer Context: AMI Redirect ile buraya aktarılır
 ; ─────────────────────────────────────────────────────────────────────────────
+[ai-admission]
+; Telefon AI kapasitesi klinik ayarından gelir (2–5). Slot doluysa çağrı
+; burada tutulur; bir görüşme kapanınca sıradaki çağrı AudioSocket'e geçer.
+exten => s,1,NoOp(AI admission: max=${AI_MAX_ACTIVE}, group=${AI_QUEUE_GROUP})
+ same => n,ExecIf($["${AI_MAX_ACTIVE}" = ""]?Set(AI_MAX_ACTIVE=3))
+ same => n,ExecIf($["${AI_QUEUE_GROUP}" = ""]?Set(AI_QUEUE_GROUP=clinic_default))
+ same => n(loop),Set(LOCK_RESULT=${LOCK(ai_admission_lock)})
+ same => n,Set(AI_ACTIVE=${GROUP_COUNT(${AI_QUEUE_GROUP}@ai)})
+ same => n,GotoIf($[${AI_ACTIVE} < ${AI_MAX_ACTIVE}]?admit:wait)
+ same => n(wait),Set(UNLOCK_RESULT=${UNLOCK(ai_admission_lock)})
+ same => n,NoOp(AI kapasitesi dolu (${AI_ACTIVE}/${AI_MAX_ACTIVE}) — kuyrukta bekliyor)
+ same => n,MusicOnHold(default,5)
+ same => n,Wait(1)
+ same => n,Goto(loop)
+ same => n(admit),Set(GROUP(ai)=${AI_QUEUE_GROUP})
+ same => n,Set(UNLOCK_RESULT=${UNLOCK(ai_admission_lock)})
+ same => n,NoOp(AI slot ayrıldı (${AI_ACTIVE}/${AI_MAX_ACTIVE}) — AudioSocket'e bağlanıyor)
+ same => n,Return()
+
 [dynamic-forward]
 exten => _X.,1,NoOp(Dinamik Yonlendirme: ${EXTEN})
  same => n,Set(CALLERID(num)=8503096119)
@@ -61,5 +83,6 @@ exten => s,1,NoOp(Outbound call answered by ${CUSTOMER_NUMBER})
  same => n,Set(DENOISE(rx)=on)
  same => n,Set(AUDIOSOCKET_UUID=${UUID()})
  same => n,AGI(callerid_notify.sh,${AUDIOSOCKET_UUID},${CUSTOMER_NUMBER},${CHANNEL},outbound,s,${CALLERID(dnid)})
+ same => n,Gosub(ai-admission,s,1)
  same => n,AudioSocket(${AUDIOSOCKET_UUID},${AUDIOSOCKET_HOST}:${AUDIOSOCKET_PORT})
  same => n,Hangup()

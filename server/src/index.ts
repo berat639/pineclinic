@@ -1191,11 +1191,23 @@ const app = new Elysia()
         if (domain) tenant = { clinicId, hostname: domain.hostname }
       }
     }
+    let maxActiveCalls = 3
+    let queueGroup = 'clinic_default'
+    if (tenant) {
+      const { getSetting } = await import('./db/repositories/settings')
+      await runWithTenantContext(tenant, async () => {
+        const configured = Number(await getSetting('ai.max_active_phone_calls'))
+        maxActiveCalls = Number.isFinite(configured) ? Math.min(5, Math.max(2, configured)) : 3
+      })
+      queueGroup = `clinic_${tenant.clinicId.replace(/[^a-zA-Z0-9_]/g, '')}`
+    }
     if (uuid && caller && tenant) {
       callerRegistry.set(uuid, { phone: caller, channel, direction, clinicId: tenant.clinicId, hostname: tenant.hostname })
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
     }
-    return tenant ? { ok: true } : { ok: false, error: 'Klinik domaini tanımlı değil' }
+    return tenant
+      ? { ok: true, maxActiveCalls, queueGroup }
+      : { ok: false, error: 'Klinik domaini tanımlı değil', maxActiveCalls: 3, queueGroup }
   })
 
   // ── Outbound Calls ─────────────────────────────────────────────────────────
@@ -1750,6 +1762,7 @@ const app = new Elysia()
       callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
       callSilenceCloseTimeout: Number(await getSetting('ai.call_silence_close_timeout')) || 15,
       callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
+      maxActivePhoneCalls: Math.min(5, Math.max(2, Number(await getSetting('ai.max_active_phone_calls')) || 3)),
       voiceName: (await getSetting('ai.voice_name')) || 'Aoede',
     }
   })
@@ -1761,6 +1774,13 @@ const app = new Elysia()
       if (!Number.isFinite(seconds) || seconds < 180 || seconds > 900) {
         set.status = 400
         return { error: 'Maksimum görüşme süresi 3 ile 15 dakika arasında olmalıdır' }
+      }
+    }
+    if (config.maxActivePhoneCalls !== undefined) {
+      const maxActive = Number(config.maxActivePhoneCalls)
+      if (!Number.isInteger(maxActive) || maxActive < 2 || maxActive > 5) {
+        set.status = 400
+        return { error: 'Aktif telefon çağrısı kapasitesi 2 ile 5 arasında olmalıdır' }
       }
     }
     for (const key of ['callSilenceTimeout', 'callSilenceCloseTimeout'] as const) {
@@ -1787,6 +1807,10 @@ const app = new Elysia()
     if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
     if (config.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(config.callSilenceCloseTimeout))
     if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
+    if (config.maxActivePhoneCalls !== undefined) {
+      const maxActive = Number(config.maxActivePhoneCalls)
+      await setSetting('ai.max_active_phone_calls', String(maxActive))
+    }
     if (config.voiceName !== undefined) await setSetting('ai.voice_name', String(config.voiceName))
     
     return { success: true }
