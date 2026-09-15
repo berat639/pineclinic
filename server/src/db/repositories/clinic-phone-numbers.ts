@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../client'
 import { clinicPhoneNumbers } from '../schema'
 import { requireClinicId } from '../../tenancy/context'
@@ -56,9 +56,13 @@ export async function deleteClinicPhoneNumber(id: string) {
 
 export async function findClinicByPhoneNumber(phone: string) {
   const normalized = normalizePhone(phone)
+  const digits = normalized.replace(/\D/g, '')
+  const candidates = new Set([normalized, digits])
+  if (digits.startsWith('0')) candidates.add(digits.slice(1))
+  else if (digits.length >= 10) candidates.add(`0${digits}`)
   const [row] = await db.select({ clinicId: clinicPhoneNumbers.clinicId })
     .from(clinicPhoneNumbers)
-    .where(and(eq(clinicPhoneNumbers.phoneNumber, normalized), eq(clinicPhoneNumbers.isActive, true)))
+    .where(and(inArray(clinicPhoneNumbers.phoneNumber, [...candidates]), eq(clinicPhoneNumbers.isActive, true)))
     .limit(1)
   return row?.clinicId ?? null
 }
