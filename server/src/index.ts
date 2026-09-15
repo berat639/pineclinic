@@ -68,7 +68,7 @@ import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
 import { startReminderCron } from './cron/reminders'
-import { currentClinicId, currentTenant, enterTenantContext, findTenantByHostname, requireClinicId, resolveTenantFromRequest, runWithTenantContext } from './tenancy/context'
+import { bindRequestContext, currentClinicId, currentTenant, enterTenantContext, findTenantByHostname, requireClinicId, resolveTenantFromRequest, runWithTenantContext, setRequestTenant } from './tenancy/context'
 import { authenticateRequest } from './middleware/auth'
 
 const callerRegistry = new Map<string, { phone: string; channel?: string; direction?: string; clinicId: string; hostname: string }>()
@@ -242,14 +242,15 @@ const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 
 const app = new Elysia()
   .onRequest(async ({ request }) => {
-    enterTenantContext(await resolveTenantFromRequest(request))
+    bindRequestContext(request)
+    setRequestTenant(request, await resolveTenantFromRequest(request))
   })
   .onBeforeHandle(async ({ request, cookie, set }) => {
     // Elysia may resume a lifecycle hook on a different async resource after
     // the database lookup in onRequest. Resolve and enter the tenant again at
     // the last lifecycle boundary so route handlers and repositories always
     // see the request's clinic context.
-    enterTenantContext(await resolveTenantFromRequest(request))
+    setRequestTenant(request, await resolveTenantFromRequest(request))
     const pathname = new URL(request.url).pathname
     const protectedPrefixes = [
       '/api/admin', '/api/dental', '/api/yonetici', '/api/shifts',

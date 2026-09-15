@@ -9,6 +9,8 @@ export interface TenantContext {
 }
 
 const storage = new AsyncLocalStorage<TenantContext>()
+const requestStorage = new AsyncLocalStorage<Request>()
+const requestTenants = new WeakMap<Request, TenantContext | null>()
 const cache = new Map<string, { value: TenantContext | null; expiresAt: number }>()
 const CACHE_TTL_MS = 30_000
 
@@ -69,12 +71,27 @@ export function enterTenantContext(tenant: TenantContext | null): void {
   if (tenant) storage.enterWith(tenant)
 }
 
+/** Bind the request before any awaited lifecycle work. Elysia can resume an
+ * async hook on a different resource; the request object itself remains a
+ * stable, concurrency-safe key for the resolved tenant. */
+export function bindRequestContext(request: Request): void {
+  requestStorage.enterWith(request)
+}
+
+export function setRequestTenant(request: Request, tenant: TenantContext | null): void {
+  requestTenants.set(request, tenant)
+  if (tenant) storage.enterWith(tenant)
+}
+
 export function runWithTenantContext<T>(tenant: TenantContext, operation: () => T): T {
   return storage.run(tenant, operation)
 }
 
 export function currentTenant(): TenantContext | null {
-  return storage.getStore() ?? null
+  const stored = storage.getStore()
+  if (stored) return stored
+  const request = requestStorage.getStore()
+  return request ? (requestTenants.get(request) ?? null) : null
 }
 
 export function currentClinicId(): string | null {
