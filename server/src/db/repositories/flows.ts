@@ -1,4 +1,4 @@
-import { and, eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '../client'
 import { conversationFlows } from '../schema'
 import { requireClinicId } from '../../tenancy/context'
@@ -52,6 +52,7 @@ export async function getActiveFlow(direction: string = 'inbound'): Promise<Conv
     .select()
     .from(conversationFlows)
     .where(and(eq(conversationFlows.clinicId, clinicId), eq(conversationFlows.isActive, true), eq(conversationFlows.direction, direction)))
+    .orderBy(desc(conversationFlows.updatedAt))
     .limit(1)
   if (rows.length === 0) return null
   const r = rows[0]
@@ -69,10 +70,21 @@ export async function getActiveFlow(direction: string = 'inbound'): Promise<Conv
 export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: string = 'inbound'): Promise<ConversationFlow> {
   const clinicId = requireClinicId()
   const existing = await getActiveFlow(direction)
+  // Eski sürümlerde aynı klinik/yön için birden fazla aktif kayıt oluşabiliyordu.
+  // Kaydetme sırasında yalnızca bu akışı aktif bırak; çalışma zamanı da en son
+  // güncellenen kaydı seçsin.
+  await db
+    .update(conversationFlows)
+    .set({ isActive: false })
+    .where(and(
+      eq(conversationFlows.clinicId, clinicId),
+      eq(conversationFlows.direction, direction),
+      eq(conversationFlows.isActive, true),
+    ))
   if (existing) {
     const [updated] = await db
       .update(conversationFlows)
-      .set({ nodes, edges, updatedAt: new Date() })
+      .set({ nodes, edges, isActive: true, updatedAt: new Date() })
       .where(eq(conversationFlows.id, existing.id))
       .returning()
     return {
