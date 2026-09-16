@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
-import { credentialsFor, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, saveWhatsAppConfig } from '../db/repositories/whatsapp'
+import { credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, saveWhatsAppConfig } from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
 import { evolutionRequest, EvolutionError, parseEvolutionMessages, verifyWebhookSecret } from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
@@ -31,7 +31,7 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
       apiKey: t.Optional(t.String({ maxLength: 512 })), enabled: t.Boolean(), aiEnabled: t.Boolean() }),
   })
   .get('/:clinicId/status', async ({ params }) => {
-    const clinic = await getWhatsAppClinic(params.clinicId)
+    const clinic = await ensureEvolutionInstance(params.clinicId)
     const creds = credentialsFor(clinic)
     const state = await evolutionRequest<{ instance?: { state?: string } }>(creds, `/instance/connectionState/${encodeURIComponent(creds.instanceName)}`)
     const connectionState = state.instance?.state || 'unknown'
@@ -39,27 +39,8 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
     return { connectionState }
   }, { params: clinicParams })
   .post('/:clinicId/connect', async ({ params }) => {
-    const clinic = await getWhatsAppClinic(params.clinicId)
+    const clinic = await ensureEvolutionInstance(params.clinicId)
     const creds = credentialsFor(clinic)
-    if (!clinic.evolutionWebhookSecret) throw new Error('Önce Evolution ayarlarını kaydedin.')
-    const base = process.env.EVOLUTION_WEBHOOK_BASE_URL || process.env.APP_URL
-    if (!base) throw new Error('Sunucuda EVOLUTION_WEBHOOK_BASE_URL tanımlanmalı.')
-    const webhook = { enabled: true, url: `${base.replace(/\/$/, '')}/api/whatsapp/evolution/${clinic.id}`,
-      byEvents: false, base64: false,
-      headers: { 'x-voiceai-webhook-secret': openSecret(clinic.evolutionWebhookSecret) },
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'] }
-    try { await evolutionRequest(creds, `/instance/connectionState/${encodeURIComponent(creds.instanceName)}`) }
-    catch (error) {
-      if (!(error instanceof EvolutionError) || error.status !== 404) throw error
-      await evolutionRequest(creds, '/instance/create', { instanceName: creds.instanceName, integration: 'WHATSAPP-BAILEYS', qrcode: true, webhook,
-        groupsIgnore: true, readMessages: false, readStatus: false, syncFullHistory: false })
-    }
-    // v2 releases expose /webhook; newer releases also mount the events router under /event.
-    try { await evolutionRequest(creds, `/webhook/set/${encodeURIComponent(creds.instanceName)}`, { webhook }) }
-    catch (error) {
-      if (!(error instanceof EvolutionError) || error.status !== 404) throw error
-      await evolutionRequest(creds, `/event/webhook/set/${encodeURIComponent(creds.instanceName)}`, { webhook })
-    }
     const result = await evolutionRequest<{ base64?: string; qrcode?: { base64?: string }; instance?: { state?: string } }>(creds,
       `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
     const qr = result.base64 || result.qrcode?.base64

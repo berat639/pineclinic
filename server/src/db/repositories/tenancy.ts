@@ -2,6 +2,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { db } from '../client'
 import { clinicDomains, clinicMemberships, clinics, users } from '../schema'
 import { invalidateTenantCache, normalizeHostname } from '../../tenancy/context'
+import { ensureEvolutionInstance } from './whatsapp'
 
 function clinicNameFromHostname(hostname: string): string {
   const label = hostname.split('.')[0] || hostname
@@ -24,7 +25,7 @@ export async function provisionClinicForPlatformAdmin(hostnameValue: string, use
     .limit(1)
   if (!platformAdmin) throw new Error('Sadece platform yöneticisi klinik oluşturabilir')
 
-  return db.transaction(async tx => {
+  const provisioned = await db.transaction(async tx => {
     // Serialize provisioning for the same hostname so concurrent first-login
     // requests cannot create orphan clinics before the UNIQUE check wins.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${hostname}, 0))`)
@@ -33,7 +34,7 @@ export async function provisionClinicForPlatformAdmin(hostnameValue: string, use
       hostname: clinicDomains.hostname,
     }).from(clinicDomains).where(eq(clinicDomains.hostname, hostname)).limit(1)
 
-    if (existing) return existing
+    if (existing) return { ...existing, created: false }
 
     const [clinic] = await tx.insert(clinics).values({
       name: clinicNameFromHostname(hostname),
@@ -55,8 +56,17 @@ export async function provisionClinicForPlatformAdmin(hostnameValue: string, use
     })
 
     invalidateTenantCache(hostname)
-    return { clinicId: clinic.id, hostname }
+    return { clinicId: clinic.id, hostname, created: true }
   })
+
+  if (provisioned.created && process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY) {
+    // An external WhatsApp outage must not block the clinic's first login. The
+    // QR endpoint runs this same idempotent operation again when necessary.
+    void ensureEvolutionInstance(provisioned.clinicId).catch(error => {
+      console.error(`[Evolution] Klinik instance otomatik oluşturulamadı (${provisioned.clinicId}):`, error instanceof Error ? error.message : 'Bilinmeyen hata')
+    })
+  }
+  return { clinicId: provisioned.clinicId, hostname: provisioned.hostname }
 }
 
 export async function getActiveMembership(userId: string, clinicId: string) {
