@@ -45,6 +45,7 @@ const DEFAULT_OUTPUT_BUFFER_MS = 1_200
 const MIN_OUTPUT_BUFFER_MS = 200
 const MAX_OUTPUT_BUFFER_MS = 4_000
 const GREETING_HARD_TIMEOUT_MS = 30_000
+const GREETING_TRANSCRIPT_IDLE_COMPLETE_MS = 1_800
 
 function readOutputBufferFrames(): number {
   const configured = Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10)
@@ -273,6 +274,8 @@ interface CallState {
   outputTurnComplete: boolean
   playbackReady: boolean
   outputUnderruns: number
+  outputTranscript: string
+  lastAiAudioAt: number
   greetingAudioStarted: boolean
   startWaitMs: number
   micOpenTimer?: ReturnType<typeof setTimeout>
@@ -430,6 +433,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           outputTurnComplete: false,
           playbackReady: false,
           outputUnderruns: 0,
+          outputTranscript: '',
+          lastAiAudioAt: 0,
           greetingAudioStarted: false,
           startWaitMs: 400,
         }
@@ -463,6 +468,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           state.outputTurnComplete = false
           state.playbackReady = false
           state.aiSpeaking = false
+          state.outputTranscript = ''
+          state.lastAiAudioAt = 0
           if (!state.micEnabled) {
             openMicrophoneAfterGreeting('Greeting sesi tamamen oynatıldı')
           } else {
@@ -482,6 +489,19 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           setTimeout(() => {
             if (state.closed) return
             nextFrameAt += 20
+
+            // Gemini bazen son ses paketinden sonra turnComplete olayını
+            // geciktirebiliyor. Yalnızca ilk greeting'de, tamamlanmış cümle ve
+            // gerçek ses sessizliği birlikte varsa turu güvenle tamamla.
+            const greetingSentenceComplete = /[.!?…]["')\]]?\s*$/u.test(state.outputTranscript)
+            if (!state.micEnabled && state.outputTurnActive && !state.outputTurnComplete &&
+                state.audioQueue.length === 0 && greetingSentenceComplete && state.lastAiAudioAt > 0 &&
+                Date.now() - state.lastAiAudioAt >= GREETING_TRANSCRIPT_IDLE_COMPLETE_MS) {
+              state.outputTurnComplete = true
+              console.warn(
+                `[${shortId}] Greeting turnComplete gecikti — ${GREETING_TRANSCRIPT_IDLE_COMPLETE_MS}ms ses sessizliği sonrası tamamlandı`,
+              )
+            }
 
             if (!state.playbackReady && state.audioQueue.length > 0 &&
                 (state.outputTurnComplete || state.audioQueue.length >= outputBufferFrames)) {
@@ -666,8 +686,7 @@ ${isOwnerCall
               console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
             }
 
-            const session = await Promise.race([
-              createLiveSession(
+            const pendingSession = createLiveSession(
                 ai,
                 {
                   onReady: () => {
@@ -682,8 +701,10 @@ ${isOwnerCall
                       state.outputTurnComplete = false
                       state.playbackReady = false
                       state.outputUnderruns = 0
+                      state.outputTranscript = ''
                     }
                     state.aiSpeaking = true
+                    state.lastAiAudioAt = Date.now()
                     if (!state.micEnabled) state.greetingAudioStarted = true
                     if (state.userSpeechEndTime) {
                       const responseTime = Date.now() - state.userSpeechEndTime
@@ -731,6 +752,9 @@ ${isOwnerCall
                       console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
                       state.userSpeechEndTime = undefined
                     }
+                    if (role === 'model') {
+                      state.outputTranscript = `${state.outputTranscript}${text}`.slice(-1_000)
+                    }
                     console.log(`[${shortId}] ${label}: ${trimmed}`)
                   },
                   onInterrupted: () => {
@@ -739,6 +763,8 @@ ${isOwnerCall
                     state.outputTurnActive = false
                     state.outputTurnComplete = false
                     state.playbackReady = false
+                    state.outputTranscript = ''
+                    state.lastAiAudioAt = 0
                     state.audioQueue.length = 0
                     state.outChunker = new FrameChunker()
                   },
@@ -786,11 +812,30 @@ ${isOwnerCall
                   enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
                   automaticTransferRules,
                 },
-              ),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)), SESSION_CONNECT_TIMEOUT_MS)
-              ),
-            ])
+              )
+            let sessionConnectTimer: ReturnType<typeof setTimeout> | undefined
+            let session: Awaited<ReturnType<typeof createLiveSession>>
+            try {
+              session = await Promise.race([
+                pendingSession,
+                new Promise<never>((_, reject) => {
+                  sessionConnectTimer = setTimeout(
+                    () => reject(new Error(`Gemini session timeout (${SESSION_CONNECT_TIMEOUT_MS}ms)`)),
+                    SESSION_CONNECT_TIMEOUT_MS,
+                  )
+                }),
+              ])
+            } catch (error) {
+              // Timeout'tan sonra geç kurulan bağlantıyı sahipsiz bırakma;
+              // aksi halde eşzamanlı Live session kotasını tüketmeye devam eder.
+              void pendingSession.then((lateSession) => {
+                console.warn(`[${shortId}] Geç kurulan Gemini session kapatılıyor`)
+                lateSession.close()
+              }).catch(() => {})
+              throw error
+            } finally {
+              if (sessionConnectTimer) clearTimeout(sessionConnectTimer)
+            }
 
             info.session = session
             sessions.set(shortId, info)
