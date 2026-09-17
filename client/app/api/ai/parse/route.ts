@@ -18,11 +18,42 @@ export async function POST(req: Request) {
     const activeProcs = procNames.length > 0 ? procNames : defaultProcs
     const activeInds = indNames.length > 0 ? indNames : defaultInds
 
-const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli veya yazılı olarak söylediği komutlardan tedavi işlemlerini, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
+const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli veya yazılı olarak söylediği komutlardan tedavi işlemlerini, diş seçim komutlarını, anatomik yüzey ve bölümleri, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
 Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesnesi döndür. Asla markdown \`\`\`json ekleme, SADECE JSON nesnesi döndür.
 
 ÖNEMLİ KURALLAR:
-1. İŞLEM EŞLEŞTİRME:
+1. SEÇİM NİYETLERİ (selectIntent):
+   Eğer kullanıcı tedavi işleminden ziyade veya işlemle birlikte diş veya bölge seçimi söylüyorsa:
+   - "tüm ağız", "tüm dişler", "bütün dişler", "tüm ağzı seç" -> "selectIntent": "SELECT_ALL"
+   - "tüm üst", "tüm üst çene", "üst çeneyi seç", "üst dişler" -> "selectIntent": "SELECT_MAXILLA"
+   - "tüm alt", "tüm alt çene", "alt çeneyi seç", "alt dişler" -> "selectIntent": "SELECT_MANDIBLE"
+   - "1. kadran", "birinci kadran", "sağ üst kadran" -> "selectIntent": "SELECT_Q1"
+   - "2. kadran", "ikinci kadran", "sol üst kadran" -> "selectIntent": "SELECT_Q2"
+   - "3. kadran", "üçüncü kadran", "sol alt kadran" -> "selectIntent": "SELECT_Q3"
+   - "4. kadran", "dördüncü kadran", "sağ alt kadran" -> "selectIntent": "SELECT_Q4"
+   - "ön dişler", "kesici dişler", "anterior", "önleri seç" -> "selectIntent": "SELECT_ANTERIOR"
+   - "arka dişler", "azı dişleri", "posterior", "arkaları seç" -> "selectIntent": "SELECT_POSTERIOR"
+   - "seçimi temizle", "seçimleri kaldır", "seçimleri sıfırla", "seçimi bırak" -> "selectIntent": "CLEAR_SELECTION"
+   - Sadece diş seçimi belirtildiyse (örn: "21'i seç", "16 ve 26 numarayı işaretle") -> "selectIntent": "SELECT_TEETH"
+   - Eğer seçim odaklı bir cümle değilse -> "selectIntent": "NONE"
+
+2. YÜZEY VE ANATOMİK BÖLÜM ÇIKARMA:
+   Kullanıcı işlem söylerken yüzey veya bölüm belirtiyorsa treatments içine ekle:
+   - Yüzeyler (surfaces):
+     * "oklüzal", "çiğneme" -> ["O"]
+     * "mezyal", "ön arayüz" -> ["M"]
+     * "distal", "arka arayüz" -> ["D"]
+     * "bukkal", "vestibüler", "yanak", "dudak" -> ["B"]
+     * "lingual", "palatinal", "dil", "damak" -> ["L"]
+     * "MOD", "mezyo-oklüzo-distal" -> ["M", "O", "D"]
+     * "MO", "mezyo-oklüzal" -> ["M", "O"]
+     * "DO", "disto-oklüzal" -> ["D", "O"]
+   - Anatomik Bölüm (section):
+     * "kuron", "kron", "taç" -> "crown"
+     * "kole", "boyun", "diş boynu", "sement" -> "cervical"
+     * "kök", "kök ucu", "apeks" -> "root"
+
+3. İŞLEM EŞLEŞTİRME:
    Kullanıcının söylediği işlemleri aşağıdaki "Sık Kullanılan İşlemler" listesi ile eşleştir ve listedeki TAM ADINI kullan.
    - Kullanıcı "dolgu" veya "dolgu ekle" dediyse -> listedeki en uygun dolgu işleminin ("Kompozit Dolgu (Tek Yüzey)" vb.) tam adını seç.
    - Kullanıcı "kanal" veya "kanal tedavisi" dediyse -> listedeki "Kanal Tedavisi (Tek Kanal)" vb. tam adını seç.
@@ -31,15 +62,18 @@ Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesn
    - Kullanıcı "zirkonyum" veya "kaplama" dediyse -> listedeki "Zirkonyum Kuron" tam adını seç.
    - Kullanıcı açıkça bir işlem adı söylemediyse (örneğin sadece "18'i sil" veya "18 çürük"), procedureName alanını null bırakabilirsin.
 
-2. İNTENT (EYLEM TÜRÜ):
+4. İNTENT (EYLEM TÜRÜ):
    - "ekle", "eklensin", "yap", "yapılsın", "yaz", "koy", "olsun" veya doğrudan işlem belirtildiyse -> "intent": "ADD"
    - "sil", "silinsin", "çıkar", "iptal", "kaldır", "yapılmadı", "yanlış", "vazgeçtim", "temizle" -> "intent": "DELETE"
    - "düzenle", "düzenlensin", "değiştir", "değiştirilsin", "yerine ... yap", "güncelle", "olarak ayarla", "çevir" -> "intent": "UPDATE"
    - "onayla", "kaydet", "işlemleri kaydet", "bitir", "tamamla" -> "globalIntent": "CONFIRM"
 
-3. DİŞ NUMARALARI (FDI Standart):
-   - "18", "18-17 16", "18 17 16", "18, 17 ve 16", "on sekiz", "18 ve 19", "alt 36", "sağ üst 16", "11 den 15 e kadar" gibi ifadeleri her zaman string dizi olarak ["18", "17", "16"], ["18", "19"] şeklinde tekil diş numaraları olarak çıkar.
+5. DİŞ NUMARALARI (FDI Standart):
+   - "18", "18-17 16", "18 17 16", "18, 17 ve 16", "on sekiz", "alt 36", "sağ üst 16", "11 den 15 e kadar" gibi ifadeleri her zaman string dizi olarak ["18", "17", "16"] şeklinde çıkar.
    - Eğer aralık belirtildiyse (örn: "11-14 arası") aralıktaki tüm dişleri tek tek ["11", "12", "13", "14"] şeklinde ekle.
+   - Çene belirtildiyse (örn: "tüm üst çene dolgu"):
+     * Üst çene: ["11","12","13","14","15","16","17","18","21","22","23","24","25","26","27","28"]
+     * Alt çene: ["31","32","33","34","35","36","37","38","41","42","43","44","45","46","47","48"]
    - Diş numarası belirtilmediyse "toothNumbers": ["general"] yap.
 
 Sık Kullanılan İşlemler: ${activeProcs.map((p: string) => `"${p}"`).join(', ')}
@@ -50,11 +84,14 @@ Kabul Edilen Konsültasyonlar: ${consultationNames.length > 0 ? consultationName
 Format:
 {
   "globalIntent": "NONE", // veya "CONFIRM"
+  "selectIntent": "NONE", // "SELECT_ALL", "SELECT_MAXILLA", "SELECT_MANDIBLE", "SELECT_Q1", "SELECT_Q2", "SELECT_Q3", "SELECT_Q4", "SELECT_ANTERIOR", "SELECT_POSTERIOR", "CLEAR_SELECTION", "SELECT_TEETH" veya "NONE"
   "treatments": [
     {
       "procedureName": "İşlem Tam Adı", // veya null
-      "toothNumbers": ["18"],
+      "toothNumbers": ["36"],
       "indication": "Endikasyon", // veya null
+      "surfaces": ["M", "O", "D"], // veya []
+      "section": "crown", // "crown", "cervical", "root" veya null
       "cost": 1500,
       "intent": "ADD" // "ADD", "DELETE" veya "UPDATE"
     }
@@ -73,17 +110,17 @@ Format:
   ]
 }
 
-Örnek 1: "18-17 16 kompozit dolgu ekle"
-{"globalIntent":"NONE","treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["18","17","16"],"intent":"ADD"}]}
+Örnek 1: "36 MOD kompozit dolgu ekle"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"surfaces":["M","O","D"],"section":"crown","intent":"ADD"}]}
 
-Örnek 2: "18i sil" veya "18 ve 28 numarayı iptal et"
-{"globalIntent":"NONE","treatments":[{"procedureName":null,"toothNumbers":["18","28"],"intent":"DELETE"}]}
+Örnek 2: "tüm üst çeneyi seç"
+{"globalIntent":"NONE","selectIntent":"SELECT_MAXILLA","treatments":[]}
 
-Örnek 3: "18 dolguyu kanal tedavisi olarak değiştir" veya "18'i kanal tedavisi olarak düzenle"
-{"globalIntent":"NONE","treatments":[{"procedureName":"Kanal Tedavisi (Tek Kanal)","toothNumbers":["18"],"intent":"UPDATE"}]}
+Örnek 3: "21 kuron zirkonyum kaplama"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["21"],"section":"crown","surfaces":[],"intent":"ADD"}]}
 
-Örnek 4: "işlemleri kaydet"
-{"globalIntent":"CONFIRM"}`
+Örnek 4: "seçimleri temizle"
+{"globalIntent":"NONE","selectIntent":"CLEAR_SELECTION","treatments":[]}`
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
     let data: any

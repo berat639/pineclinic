@@ -53,7 +53,7 @@ export default function EvolutionWhatsAppCard() {
 
   useEffect(() => {
     if (!qr) return
-    const timer = setInterval(() => { void checkStatus().catch(() => {}) }, 5000)
+    const timer = setInterval(() => { void checkStatus().catch(() => { }) }, 5000)
     return () => clearInterval(timer)
   }, [qr, checkStatus])
 
@@ -68,7 +68,7 @@ export default function EvolutionWhatsAppCard() {
 
   return <section className={styles.card} aria-labelledby="evolution-heading">
     <div className={styles.heading}>
-      <div><h3 id="evolution-heading">WhatsApp · Evolution API</h3><p className={styles.description}>Gemini 3.1 ile mesajları yanıtlayın ve randevu taleplerini yönetin.</p></div>
+      <div><h3 id="evolution-heading">WhatsApp · API</h3><p className={styles.description}>AI ile mesajları yanıtlayın ve randevu taleplerini yönetin.</p></div>
       {form && <span className={`${styles.badge} ${connectionClass}`}>{states[form.connectionState] || 'Durum bilinmiyor'}</span>}
     </div>
     {error && <p className={styles.error} role="alert">{error}</p>}
@@ -78,16 +78,16 @@ export default function EvolutionWhatsAppCard() {
         setForm(configs.find(c => c.clinicId === e.target.value) || null); setApiKey(''); setQr(null)
       }}>{configs.map(c => <option key={c.clinicId} value={c.clinicId}>{c.clinicName}</option>)}</select></label>}
       <div className={styles.grid}>
-        <label className={styles.field}>Evolution sunucu adresi<input type="url" placeholder="https://whatsapp.ornek.com" value={form.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} /></label>
+        <label className={styles.field}>Whatsapp sunucu adresi<input type="url" placeholder="https://whatsapp.ornek.com" value={form.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} /></label>
         <label className={styles.field}>Bağlantı adı (instance)<input placeholder="klinik-whatsapp" value={form.instanceName} onChange={e => patch({ instanceName: e.target.value })} /></label>
-        <label className={styles.field}>Evolution API anahtarı<input type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={form.hasApiKey ? 'Kayıtlı. Değiştirmek için yeni anahtarı girin.' : 'Evolution sunucunuzun API anahtarı'} /><small>Anahtar kaydedildikten sonra ekranda gösterilmez.</small></label>
+        <label className={styles.field}> Whatsapp API anahtarı<input type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={form.hasApiKey ? 'Kayıtlı. Değiştirmek için yeni anahtarı girin.' : ' Whatsapp sunucunuzun API anahtarı'} /><small>Anahtar kaydedildikten sonra ekranda gösterilmez.</small></label>
         <div className={styles.checks}>
           <label><input type="checkbox" checked={form.enabled} onChange={e => patch({ enabled: e.target.checked })} /> WhatsApp gönderimleri açık</label>
-          <label><input type="checkbox" checked={form.aiEnabled} onChange={e => patch({ aiEnabled: e.target.checked })} /> Gemini 3.1 otomatik yanıtları açık</label>
+          <label><input type="checkbox" checked={form.aiEnabled} onChange={e => patch({ aiEnabled: e.target.checked })} /> AI otomatik yanıtları açık</label>
         </div>
       </div>
       <div className={styles.actions}>
-        <button disabled={busy} onClick={() => run(async () => { await save(); setNotice('Evolution ayarları kaydedildi.') })}>Ayarları kaydet</button>
+        <button disabled={busy} onClick={() => run(async () => { await save(); setNotice(' ayarları kaydedildi.') })}>Ayarları kaydet</button>
         <button disabled={busy} onClick={() => run(async () => {
           const saved = await save(); if (!saved) return
           const result = await api<{ qrcode: string | null; connectionState: string }>(`/${saved.clinicId}/connect`, 'POST')
@@ -97,7 +97,7 @@ export default function EvolutionWhatsAppCard() {
         <button className={styles.secondary} disabled={busy || !form.hasApiKey} onClick={() => run(checkStatus)}>Durumu kontrol et</button>
       </div>
       {qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt="WhatsApp bağlantısı için QR kodu" /><p>Telefonunda WhatsApp → Bağlı cihazlar → Cihaz bağla yolunu açıp kodu okut.</p></div>}
-      <details className={styles.guide}><summary>API anahtarını nasıl alırım?</summary><p>Kendi Evolution sunucunu kullanıyorsan anahtar, kurulum sırasında belirlenen <code>AUTHENTICATION_API_KEY</code> değeridir. Bir hizmet sağlayıcı kullanıyorsan anahtarı sağlayıcının panelinden edin. Sunucu adresi ve bağlantı adıyla birlikte yukarıya girip kaydet; ardından QR kodunu okut.</p></details>
+      <details className={styles.guide}><summary>API anahtarını nasıl alırım?</summary><p>Kendi  sunucunu kullanıyorsan anahtar, kurulum sırasında belirlenen <code>AUTHENTICATION_API_KEY</code> değeridir. Bir hizmet sağlayıcı kullanıyorsan anahtarı sağlayıcının panelinden edin. Sunucu adresi ve bağlantı adıyla birlikte yukarıya girip kaydet; ardından QR kodunu okut.</p></details>
     </>}
   </section>
 }
