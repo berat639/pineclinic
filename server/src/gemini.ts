@@ -20,7 +20,13 @@ import { findCustomerDocByPhone } from './db/repositories/knowledge'
 import { getToolDescriptions } from './db/repositories/settings'
 import { runWithTenantContext } from './tenancy/context'
 import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription } from './data/default-tools'
-import { findAutomaticTransferRule, type AutomaticTransferRule } from './services/transfer-triggers'
+import {
+  classifyTransferConfirmation,
+  findAutomaticTransferRule,
+  findHealthTransferConfirmationRule,
+  normalizeTransferText,
+  type AutomaticTransferRule,
+} from './services/transfer-triggers'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -69,7 +75,6 @@ export async function createLiveSession(
     hostname?: string
     enableGoogleSearch?: boolean
     automaticTransferRules?: readonly AutomaticTransferRule[]
-    waitForTransferAnnouncement?: () => Promise<void>
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -78,6 +83,9 @@ export async function createLiveSession(
   let transferAttempted = false
   let automaticTransferStarted = false
   let automaticTransferTranscript = ''
+  let transferConfirmationTranscript = ''
+  let healthTransferConfirmed = false
+  let pendingTransferConfirmation: { target: string; reason: string } | null = null
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
@@ -137,10 +145,31 @@ export async function createLiveSession(
       if (transferAttempted) {
         return { success: true, message: 'Arama aktarımı zaten başlatıldı.' }
       }
-      transferAttempted = true
+
       const rawTarget = (args.hedef as string | undefined) || 'resepsiyon'
+      const reason = String(args.sebep || 'Belirtilmedi')
+      const transferText = normalizeTransferText(`${rawTarget} ${reason}`)
+
+      if (transferText.includes('saglik') && !healthTransferConfirmed) {
+        pendingTransferConfirmation = {
+          target: rawTarget,
+          reason,
+        }
+        transferConfirmationTranscript = ''
+        automaticTransferStarted = true
+        console.log(`[aramaAktar] İl Sağlık aktarımı açık onay bekliyor -> ${rawTarget}`)
+        return {
+          success: false,
+          confirmationRequired: true,
+          message: 'Aktarım henüz yapılmadı. Kullanıcıya yalnızca "İl Sağlık mı dediniz?" diye sor ve cevabını bekle. Açıkça evet demeden aramaAktar aracını tekrar çağırma.',
+        }
+      }
+
+      transferAttempted = true
+      healthTransferConfirmed = false
+      pendingTransferConfirmation = null
       const targetKey = rawTarget.toLowerCase().trim()
-      console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${args.sebep || 'Belirtilmedi'}`)
+      console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${reason}`)
 
       try {
         const { getSetting } = await import('./db/repositories/settings')
@@ -183,11 +212,7 @@ export async function createLiveSession(
         }
 
         if (options.telephonyChannel) {
-          // Sabit bir süre tahmin etmek yerine telefon köprüsündeki gerçek ses
-          // kuyruğunun bitmesini bekle. Böylece kısa cümlede gereksiz gecikme,
-          // uzun cümlede ise yarıda kesilme olmaz.
-          await options.waitForTransferAnnouncement?.()
-
+          // Açık kullanıcı onayından sonra doğrudan AMI yönlendirmesini başlat.
           const { transferCall } = await import('./services/asterisk-ami')
           const result = await transferCall(options.telephonyChannel, targetNumber)
           if (result.success) {
@@ -630,17 +655,58 @@ export async function createLiveSession(
           const transcript = content.inputTranscription.text
           callbacks.onTranscript('user', transcript)
 
-          if (!automaticTransferStarted && options.automaticTransferRules?.length) {
+          let confirmationHandled = false
+          if (pendingTransferConfirmation) {
+            transferConfirmationTranscript = `${transferConfirmationTranscript} ${transcript}`.trim().slice(-200)
+            const confirmation = classifyTransferConfirmation(transferConfirmationTranscript)
+
+            if (confirmation === 'affirmative') {
+              const pending = pendingTransferConfirmation
+              pendingTransferConfirmation = null
+              transferConfirmationTranscript = ''
+              healthTransferConfirmed = true
+              confirmationHandled = true
+              console.log(`[aramaAktar] İl Sağlık aktarımı kullanıcı tarafından onaylandı -> ${pending.target}`)
+
+              const invokeTransfer = () => handleTool('aramaAktar', {
+                hedef: pending.target,
+                sebep: `${pending.reason} (kullanıcı onayladı)`,
+              })
+              const transfer = options.clinicId && options.hostname
+                ? runWithTenantContext({ clinicId: options.clinicId, hostname: options.hostname }, invokeTransfer)
+                : invokeTransfer()
+              void Promise.resolve(transfer).then(result => {
+                if (!result.success) console.error('[aramaAktar] Onaylı aktarım başarısız:', result.message)
+              }).catch(err => console.error('[aramaAktar] Onaylı aktarım hatası:', err))
+            } else if (confirmation === 'negative') {
+              console.log('[aramaAktar] İl Sağlık aktarımı kullanıcı tarafından reddedildi')
+              pendingTransferConfirmation = null
+              transferConfirmationTranscript = ''
+              automaticTransferTranscript = ''
+              automaticTransferStarted = false
+              confirmationHandled = true
+            } else {
+              // Bekleyen onay varken başka bir aktarım eşleşmesi başlatma.
+              confirmationHandled = true
+            }
+          }
+
+          if (!confirmationHandled && !automaticTransferStarted && options.automaticTransferRules?.length) {
             automaticTransferTranscript = `${automaticTransferTranscript} ${transcript}`.trim().slice(-500)
-            const rule = findAutomaticTransferRule(automaticTransferTranscript, options.automaticTransferRules)
+            const exactRule = findAutomaticTransferRule(automaticTransferTranscript, options.automaticTransferRules)
+            const healthRule = findHealthTransferConfirmationRule(automaticTransferTranscript, options.automaticTransferRules)
+            const rule = exactRule ?? healthRule
             if (rule) {
               automaticTransferStarted = true
-              console.log(`[aramaAktar] Otomatik anahtar kelime eşleşti: "${rule.keyword}" -> ${rule.target}`)
-              // Modele aynı tur içinde kısa sesli onay + tool çağrısı üretmesi
-              // için küçük bir fırsat ver. Model çağırmazsa deterministik kural
-              // devreye girer; transfer hiçbir zaman yalnızca modele bağlı kalmaz.
-              setTimeout(() => {
-                if (closedByUser || transferAttempted) return
+              if (rule.normalizedKeyword.includes('saglik')) {
+                pendingTransferConfirmation = {
+                  target: rule.target,
+                  reason: `Otomatik anahtar kelime: ${rule.keyword}`,
+                }
+                transferConfirmationTranscript = ''
+                console.log(`[aramaAktar] İl Sağlık adayı algılandı: "${transcript.trim()}" — kullanıcı onayı bekleniyor`)
+              } else {
+                console.log(`[aramaAktar] Otomatik anahtar kelime eşleşti: "${rule.keyword}" -> ${rule.target}`)
                 const invokeTransfer = () => handleTool('aramaAktar', {
                   hedef: rule.target,
                   sebep: `Otomatik anahtar kelime: ${rule.keyword}`,
@@ -651,7 +717,7 @@ export async function createLiveSession(
                 void Promise.resolve(transfer).then(result => {
                   if (!result.success) console.error('[aramaAktar] Otomatik aktarım başarısız:', result.message)
                 }).catch(err => console.error('[aramaAktar] Otomatik aktarım hatası:', err))
-              }, 350)
+              }
             }
           }
         }

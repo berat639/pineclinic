@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { buildAutomaticTransferRules, findAutomaticTransferRule, normalizeTransferText } from './transfer-triggers'
+import {
+  buildAutomaticTransferRules,
+  classifyTransferConfirmation,
+  findAutomaticTransferRule,
+  findHealthTransferConfirmationRule,
+  normalizeTransferText,
+} from './transfer-triggers'
 
 describe('automatic transfer triggers', () => {
   const rules = buildAutomaticTransferRules([
@@ -25,5 +31,16 @@ describe('automatic transfer triggers', () => {
 
   test('does not match unrelated health phrases', () => {
     expect(findAutomaticTransferRule('Diş sağlığım için randevu istiyorum.', rules)).toBeNull()
+  })
+
+  test('treats a standalone health transcript as a confirmation candidate', () => {
+    expect(findHealthTransferConfirmationRule('sağlık', rules)?.keyword).toBe('il sağlık')
+    expect(findHealthTransferConfirmationRule('diş sağlığım ağrıyor', rules)).toBeNull()
+  })
+
+  test('classifies explicit confirmation without accepting negative answers', () => {
+    expect(classifyTransferConfirmation('Evet, doğru.')).toBe('affirmative')
+    expect(classifyTransferConfirmation('Hayır, doğru değil.')).toBe('negative')
+    expect(classifyTransferConfirmation('Bir daha söyler misiniz?')).toBe('unknown')
   })
 })

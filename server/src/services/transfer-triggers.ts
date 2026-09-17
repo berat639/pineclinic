@@ -57,3 +57,25 @@ export function findAutomaticTransferRule(
   const haystack = ` ${normalizedTranscript} `
   return rules.find(rule => haystack.includes(` ${rule.normalizedKeyword} `)) ?? null
 }
+
+/** "sağlık" gibi eksik ASR çıktısını İl Sağlık kuralına yönlendirir; aktarımı başlatmaz. */
+export function findHealthTransferConfirmationRule(
+  transcript: string,
+  rules: readonly AutomaticTransferRule[],
+): AutomaticTransferRule | null {
+  const normalizedTranscript = normalizeTransferText(transcript)
+  const exact = findAutomaticTransferRule(transcript, rules)
+  if (exact?.normalizedKeyword.includes('saglik')) return exact
+  if (normalizedTranscript !== 'saglik') return null
+  return rules.find(rule => /^(?:il|iyi) saglik$/.test(rule.normalizedKeyword)) ?? null
+}
+
+export type TransferConfirmation = 'affirmative' | 'negative' | 'unknown'
+
+/** Bekleyen aktarım için kısa Türkçe onay/red cevaplarını sınıflandırır. */
+export function classifyTransferConfirmation(text: string): TransferConfirmation {
+  const normalized = normalizeTransferText(text)
+  if (/\b(?:hayir|degil|yanlis|vazgectim|istemiyorum)\b/.test(normalized)) return 'negative'
+  if (/\b(?:evet|dogru|aynen|olur|tamam|onayliyorum)\b/.test(normalized)) return 'affirmative'
+  return 'unknown'
+}
