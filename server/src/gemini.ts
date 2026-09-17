@@ -69,7 +69,6 @@ export async function createLiveSession(
     hostname?: string
     enableGoogleSearch?: boolean
     automaticTransferRules?: readonly AutomaticTransferRule[]
-    waitForTransferAnnouncement?: () => Promise<void>
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -183,11 +182,7 @@ export async function createLiveSession(
         }
 
         if (options.telephonyChannel) {
-          // Sabit bir süre tahmin etmek yerine telefon köprüsündeki gerçek ses
-          // kuyruğunun bitmesini bekle. Böylece kısa cümlede gereksiz gecikme,
-          // uzun cümlede ise yarıda kesilme olmaz.
-          await options.waitForTransferAnnouncement?.()
-
+          // Aktarım talebi geldiği anda AMI yönlendirmesini başlat.
           const { transferCall } = await import('./services/asterisk-ami')
           const result = await transferCall(options.telephonyChannel, targetNumber)
           if (result.success) {
@@ -636,22 +631,16 @@ export async function createLiveSession(
             if (rule) {
               automaticTransferStarted = true
               console.log(`[aramaAktar] Otomatik anahtar kelime eşleşti: "${rule.keyword}" -> ${rule.target}`)
-              // Modele aynı tur içinde kısa sesli onay + tool çağrısı üretmesi
-              // için küçük bir fırsat ver. Model çağırmazsa deterministik kural
-              // devreye girer; transfer hiçbir zaman yalnızca modele bağlı kalmaz.
-              setTimeout(() => {
-                if (closedByUser || transferAttempted) return
-                const invokeTransfer = () => handleTool('aramaAktar', {
-                  hedef: rule.target,
-                  sebep: `Otomatik anahtar kelime: ${rule.keyword}`,
-                })
-                const transfer = options.clinicId && options.hostname
-                  ? runWithTenantContext({ clinicId: options.clinicId, hostname: options.hostname }, invokeTransfer)
-                  : invokeTransfer()
-                void Promise.resolve(transfer).then(result => {
-                  if (!result.success) console.error('[aramaAktar] Otomatik aktarım başarısız:', result.message)
-                }).catch(err => console.error('[aramaAktar] Otomatik aktarım hatası:', err))
-              }, 350)
+              const invokeTransfer = () => handleTool('aramaAktar', {
+                hedef: rule.target,
+                sebep: `Otomatik anahtar kelime: ${rule.keyword}`,
+              })
+              const transfer = options.clinicId && options.hostname
+                ? runWithTenantContext({ clinicId: options.clinicId, hostname: options.hostname }, invokeTransfer)
+                : invokeTransfer()
+              void Promise.resolve(transfer).then(result => {
+                if (!result.success) console.error('[aramaAktar] Otomatik aktarım başarısız:', result.message)
+              }).catch(err => console.error('[aramaAktar] Otomatik aktarım hatası:', err))
             }
           }
         }
