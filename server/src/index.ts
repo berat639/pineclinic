@@ -2288,7 +2288,11 @@ app.ws('/ws', {
     console.log(`   ws://localhost:${PORT}/ws`)
     // Startup has no tenant context. Clinic-specific model resolution happens
     // inside request/call contexts; the boot log must stay tenant-independent.
-    console.log(`   Model: ${process.env.GEMINI_LIVE_MODEL || DEFAULT_LIVE_MODEL}`)
+    const configuredLiveModel = process.env.GEMINI_LIVE_MODEL
+    const startupLiveModel = configuredLiveModel && (ALLOWED_LIVE_MODELS as readonly string[]).includes(configuredLiveModel)
+      ? configuredLiveModel
+      : DEFAULT_LIVE_MODEL
+    console.log(`   Model: ${startupLiveModel}`)
     console.log(`   RAG: pgvector + HNSW (${getEmbeddingModel()}, dim=${getEmbeddingDimensions()})`)
 
     // Seed default categories for every active clinic. Startup has no HTTP

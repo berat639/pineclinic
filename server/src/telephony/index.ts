@@ -41,6 +41,18 @@ import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../serv
 const PHONE_FRAME_MS = 20
 const RAG_BOOTSTRAP_TIMEOUT_MS = 2_500
 const SESSION_CONNECT_TIMEOUT_MS = 20_000
+const DEFAULT_OUTPUT_BUFFER_MS = 1_200
+const MIN_OUTPUT_BUFFER_MS = 200
+const MAX_OUTPUT_BUFFER_MS = 4_000
+const GREETING_HARD_TIMEOUT_MS = 30_000
+
+function readOutputBufferFrames(): number {
+  const configured = Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10)
+  const bufferMs = Number.isFinite(configured)
+    ? Math.min(MAX_OUTPUT_BUFFER_MS, Math.max(MIN_OUTPUT_BUFFER_MS, configured))
+    : DEFAULT_OUTPUT_BUFFER_MS
+  return Math.ceil(bufferMs / PHONE_FRAME_MS)
+}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -257,6 +269,13 @@ interface CallState {
   silenceCloseMs: number
   voiceName: string
   aiSpeaking: boolean
+  outputTurnActive: boolean
+  outputTurnComplete: boolean
+  playbackReady: boolean
+  outputUnderruns: number
+  greetingAudioStarted: boolean
+  startWaitMs: number
+  micOpenTimer?: ReturnType<typeof setTimeout>
   greetingTimeoutTimer?: ReturnType<typeof setTimeout>
 }
 
@@ -358,9 +377,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
   const { ai, port, buildSystemPrompt, resolveLiveModel, sessions, notifyAdmins, callerRegistry } = deps
 
   const gateCfg = readGateConfig()
+  const outputBufferFrames = readOutputBufferFrames()
   console.log(
     `   NoiseGate: thresh=${gateCfg.threshold} trailing=${gateCfg.trailingFrames}fr preRoll=${gateCfg.preRollFrames}fr`,
   )
+  console.log(`   Telefon ses tamponu: ${outputBufferFrames * PHONE_FRAME_MS}ms`)
 
   const server = Bun.listen<CallState>({
     hostname: '0.0.0.0',
@@ -404,11 +425,54 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           silenceClosePending: false,
           maxLimitReached: false,
           voiceName: 'Aoede',
-          aiSpeaking: true,
+          aiSpeaking: false,
+          outputTurnActive: false,
+          outputTurnComplete: false,
+          playbackReady: false,
+          outputUnderruns: 0,
+          greetingAudioStarted: false,
+          startWaitMs: 400,
         }
         socket.data = state
 
-        // 20ms'de bir frame gönder: queue'da varsa gerçek audio, yoksa sessizlik
+        const openMicrophoneAfterGreeting = (reason: string) => {
+          if (state.closed || state.micEnabled || state.micOpenTimer) return
+          if (state.greetingTimeoutTimer) {
+            clearTimeout(state.greetingTimeoutTimer)
+            state.greetingTimeoutTimer = undefined
+          }
+
+          const enableMicrophone = () => {
+            state.micOpenTimer = undefined
+            if (state.closed || state.micEnabled) return
+            state.micEnabled = true
+            console.log(`[${shortId}] ${reason} — mikrofon açıldı`)
+            startSilenceWatch(state, socket)
+          }
+
+          if (state.startWaitMs > 0) {
+            state.micOpenTimer = setTimeout(enableMicrophone, state.startWaitMs)
+          } else {
+            enableMicrophone()
+          }
+        }
+
+        const finishOutputTurn = () => {
+          if (!state.outputTurnActive) return
+          state.outputTurnActive = false
+          state.outputTurnComplete = false
+          state.playbackReady = false
+          state.aiSpeaking = false
+          if (!state.micEnabled) {
+            openMicrophoneAfterGreeting('Greeting sesi tamamen oynatıldı')
+          } else {
+            startSilenceWatch(state, socket)
+          }
+        }
+
+        // 20ms'de bir frame gönder. Gemini'nin değişken aralıklı ses
+        // paketlerini doğrudan oynatmak yerine kısa bir jitter tamponunda tut;
+        // kuyruk tur ortasında tükenirse yeniden dolana kadar sessizce bekle.
         const silenceFrame = encodeAudioFrame(Buffer.alloc(AS_FRAME_BYTES, 0))
         let nextFrameAt = Date.now() + 20
         function scheduleFrame() {
@@ -418,10 +482,27 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           setTimeout(() => {
             if (state.closed) return
             nextFrameAt += 20
-            const frame = state.audioQueue.shift()
+
+            if (!state.playbackReady && state.audioQueue.length > 0 &&
+                (state.outputTurnComplete || state.audioQueue.length >= outputBufferFrames)) {
+              state.playbackReady = true
+              console.log(
+                `[${shortId}] AI ses oynatma başladı (${state.audioQueue.length * PHONE_FRAME_MS}ms tampon${state.outputUnderruns > 0 ? `, ${state.outputUnderruns}. yeniden tamponlama` : ''})`,
+              )
+            }
+
+            const frame = state.playbackReady ? state.audioQueue.shift() : undefined
             if (frame) {
               try { socket.write(frame); scheduleFrame() } catch { }
-            } else if (state.hangupPending) {
+            } else if (state.outputTurnActive && state.outputTurnComplete) {
+              finishOutputTurn()
+              try { socket.write(silenceFrame); scheduleFrame() } catch { }
+            } else if (state.playbackReady && state.outputTurnActive) {
+              state.playbackReady = false
+              state.outputUnderruns++
+              console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
+              try { socket.write(silenceFrame); scheduleFrame() } catch { }
+            } else if (state.hangupPending && !state.outputTurnActive) {
               // Ses kuyruğu boşaldı ve hangup bekleniyor — şimdi kapat
               console.log(`[${shortId}] Ses kuyruğu boşaldı, bağlantı kapatılıyor`)
               try { socket.write(encodeHangupFrame()) } catch { }
@@ -557,6 +638,7 @@ ${isOwnerCall
             const silenceCloseSeconds = Math.min(120, Math.max(5, silenceCloseSec))
             state.silenceWarnMs = silenceWarnSeconds * 1000
             state.silenceCloseMs = silenceCloseSeconds * 1000
+            state.startWaitMs = Math.max(0, Math.round(startWaitSec * 1_000))
             const maxCallSeconds = Math.min(MAX_MAX_CALL_SECONDS, Math.max(MIN_MAX_CALL_SECONDS, maxCallDurationSec))
             const maxCallMs = maxCallSeconds * 1000
 
@@ -594,7 +676,15 @@ ${isOwnerCall
 
                   onAudio: (pcm) => {
                     if (state.closed) return
+                    if (!state.outputTurnActive) {
+                      clearSilenceTimers(state)
+                      state.outputTurnActive = true
+                      state.outputTurnComplete = false
+                      state.playbackReady = false
+                      state.outputUnderruns = 0
+                    }
                     state.aiSpeaking = true
+                    if (!state.micEnabled) state.greetingAudioStarted = true
                     if (state.userSpeechEndTime) {
                       const responseTime = Date.now() - state.userSpeechEndTime
                       console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
@@ -646,6 +736,9 @@ ${isOwnerCall
                   onInterrupted: () => {
                     // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
                     state.aiSpeaking = false
+                    state.outputTurnActive = false
+                    state.outputTurnComplete = false
+                    state.playbackReady = false
                     state.audioQueue.length = 0
                     state.outChunker = new FrameChunker()
                   },
@@ -655,17 +748,19 @@ ${isOwnerCall
                     state.hangupPending = true
                   },
                   onTurnComplete: () => {
-                    state.aiSpeaking = false
+                    const tailFrame = state.outChunker.flush()
+                    if (tailFrame) state.audioQueue.push(tailFrame)
+                    state.outChunker = new FrameChunker()
+                    state.outputTurnComplete = true
                     if (state.greetingTimeoutTimer) {
                       clearTimeout(state.greetingTimeoutTimer)
                       state.greetingTimeoutTimer = undefined
                     }
-                    if (!state.micEnabled) {
-                      console.log(`[${shortId}] Greeting turn tamamlandı — mikrofon açılıyor`)
-                      state.micEnabled = true
+                    // Hiç ses üretilmeyen bir turda oynatma kuyruğu yoktur.
+                    if (!state.outputTurnActive) {
+                      if (!state.micEnabled) openMicrophoneAfterGreeting('Greeting turn sessiz tamamlandı')
+                      else startSilenceWatch(state, socket)
                     }
-                    // Müşteri cevabını bekliyor — sessizlik timer'ını başlat.
-                    startSilenceWatch(state, socket)
                   },
                   onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
                   onClose: () => {
@@ -834,12 +929,31 @@ ${isOwnerCall
             // bu uzun geri dönüş süresi AI'ın kendi sesini müşteri sesi sanıp peş peşe
             // sorular üretmesini ve barge-in döngüsünü önler.
             const greetingFallbackMs = Math.max(8_000, Math.round((startWaitSec + 5) * 1_000))
-            state.greetingTimeoutTimer = setTimeout(() => {
+            const greetingFallbackStartedAt = Date.now()
+            const checkGreetingTimeout = () => {
               if (state.closed || state.micEnabled) return
-              console.warn(`[${shortId}] Greeting turnComplete zaman aşımı (${greetingFallbackMs}ms) — mikrofon güvenli şekilde açılıyor`)
-              state.micEnabled = true
-              startSilenceWatch(state, socket)
-            }, greetingFallbackMs)
+              const elapsedMs = Date.now() - greetingFallbackStartedAt
+              const outputInProgress = state.greetingAudioStarted || state.outputTurnActive || state.audioQueue.length > 0
+
+              if (outputInProgress && elapsedMs < GREETING_HARD_TIMEOUT_MS) {
+                console.warn(`[${shortId}] Greeting yanıtı devam ediyor; mikrofon kapalı tutuluyor (${elapsedMs}ms)`)
+                state.greetingTimeoutTimer = setTimeout(checkGreetingTimeout, 2_000)
+                return
+              }
+
+              if (outputInProgress) {
+                console.warn(`[${shortId}] Greeting hard timeout (${GREETING_HARD_TIMEOUT_MS}ms) — bekleyen ses tamamlanmış kabul ediliyor`)
+                state.outputTurnComplete = true
+                if (state.audioQueue.length > 0) return
+                state.outputTurnActive = false
+                state.playbackReady = false
+                state.aiSpeaking = false
+              } else {
+                console.warn(`[${shortId}] Greeting yanıtı başlamadı (${elapsedMs}ms) — fallback devrede`)
+              }
+              openMicrophoneAfterGreeting('Greeting fallback')
+            }
+            state.greetingTimeoutTimer = setTimeout(checkGreetingTimeout, greetingFallbackMs)
           })
         } catch (err) {
           console.error(`[${shortId}] Telephony session başlatılamadı:`, err)
@@ -948,6 +1062,7 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
   // Tüm timeout timer'larını temizle — bellek sızıntısı / geç tetiklenme olmasın.
   clearSilenceTimers(state)
   if (state.greetingTimeoutTimer) { clearTimeout(state.greetingTimeoutTimer); state.greetingTimeoutTimer = undefined }
+  if (state.micOpenTimer) { clearTimeout(state.micOpenTimer); state.micOpenTimer = undefined }
   if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
   if (state.maxCloseTimer) { clearTimeout(state.maxCloseTimer); state.maxCloseTimer = undefined }
 

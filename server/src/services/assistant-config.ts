@@ -2,9 +2,9 @@ import { getAiModel, getAllPromptSections } from '../db/repositories/settings'
 import { PROMPT_SECTION_KEYS, getDefaultPromptValue } from '../data/default-prompts'
 
 export const ALLOWED_LIVE_MODELS = [
-  'gemini-3.1-flash-live-preview',
+  'gemini-3.8-live',
 ] as const
-export const DEFAULT_LIVE_MODEL = 'gemini-3.1-flash-live-preview'
+export const DEFAULT_LIVE_MODEL = 'gemini-3.8-live'
 
 export async function resolveLiveModel(): Promise<string> {
   const saved = await getAiModel()

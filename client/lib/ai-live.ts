@@ -65,7 +65,7 @@ export class AiLiveSession {
   }
 
   async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
-    const modelName = config.model || 'gemini-3.1-flash-live-preview'
+    const modelName = config.model || 'gemini-3.8-live'
 
     return new Promise<void>((resolve, reject) => {
       const ai = new GoogleGenAI({ apiKey })
