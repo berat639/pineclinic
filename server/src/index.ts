@@ -2286,7 +2286,9 @@ app.ws('/ws', {
     console.log(`\n Voice AI Server`)
     console.log(`   http://localhost:${PORT}`)
     console.log(`   ws://localhost:${PORT}/ws`)
-    console.log(`   Model: ${await resolveLiveModel()}`)
+    // Startup has no tenant context. Clinic-specific model resolution happens
+    // inside request/call contexts; the boot log must stay tenant-independent.
+    console.log(`   Model: ${process.env.GEMINI_LIVE_MODEL || DEFAULT_LIVE_MODEL}`)
     console.log(`   RAG: pgvector + HNSW (${getEmbeddingModel()}, dim=${getEmbeddingDimensions()})`)
 
     // Seed default categories for every active clinic. Startup has no HTTP
