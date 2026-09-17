@@ -2,7 +2,6 @@ import { whatsappPlugin } from './api/whatsapp'
 import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, resolveLiveModel, buildSystemPrompt } from './services/assistant-config'
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
-import { staticPlugin } from '@elysiajs/static'
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { createReadStream, writeFileSync, mkdirSync } from 'fs'
 import { resolve } from 'path'
@@ -67,6 +66,7 @@ import { authPlugin } from './api/auth'
 import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
+import { platformPlugin } from './api/platform'
 import { startReminderCron } from './cron/reminders'
 import { bindRequestContext, currentClinicId, currentTenant, enterTenantContext, findTenantByHostname, requireClinicId, resolveTenantFromRequest, runWithTenantContext, setRequestTenant } from './tenancy/context'
 import { authenticateRequest } from './middleware/auth'
@@ -254,7 +254,8 @@ const app = new Elysia()
     const pathname = new URL(request.url).pathname
     const protectedPrefixes = [
       '/api/admin', '/api/dental', '/api/yonetici', '/api/shifts',
-      '/api/notifications', '/api/recordings', '/api/patient-notes',
+      '/api/notifications', '/api/recordings', '/api/patient-notes', '/api/platform',
+      '/api/knowledge', '/api/appointments',
     ]
     if (!protectedPrefixes.some(prefix => pathname.startsWith(prefix))) return
     if (pathname === '/api/admin/settings/calendar/callback') return
@@ -269,11 +270,21 @@ const app = new Elysia()
     }
   })
   .use(cors({ origin: corsOrigins }))
-  .use(staticPlugin({ assets: PUBLIC_DIR, prefix: '/' }))
   .get('/uploads/*', async ({ params, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) {
+      set.status = 404
+      return { error: 'Bu domain için aktif klinik bulunamadı' }
+    }
     const rawPath = (params as Record<string, string>)['*'] || ''
     const safeParts = rawPath.split('/').map(p => p.replace(/[^a-zA-Z0-9._-]/g, '')).filter(Boolean)
     if (safeParts.length === 0) {
+      set.status = 404
+      return { error: 'Dosya bulunamadı' }
+    }
+    const { getSetting } = await import('./db/repositories/settings')
+    const expectedLogoUrl = await getSetting('branding.logo_url')
+    if (expectedLogoUrl !== `/uploads/${safeParts.join('/')}`) {
       set.status = 404
       return { error: 'Dosya bulunamadı' }
     }
@@ -292,7 +303,6 @@ const app = new Elysia()
     // Check database if it's a logo and restore
     const fileName = safeParts[safeParts.length - 1] || ''
     if (fileName.startsWith('logo_')) {
-      const { getSetting } = await import('./db/repositories/settings')
       const logoData = await getSetting('branding.logo_data')
       if (logoData) {
         const parts = logoData.split(',')
@@ -312,10 +322,56 @@ const app = new Elysia()
     set.status = 404
     return { error: 'Dosya bulunamadı' }
   })
+  .get('/api/branding/logo/:filename', async ({ params, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) {
+      set.status = 404
+      return { error: 'Bu domain için aktif klinik bulunamadı' }
+    }
+    const safeName = params.filename.replace(/[^a-zA-Z0-9._-]/g, '')
+    if (!safeName || safeName !== params.filename) {
+      set.status = 400
+      return { error: 'Geçersiz dosya adı' }
+    }
+
+    const clinicDirectory = resolve(PUBLIC_DIR, 'tenant-assets', clinicId, 'branding')
+    const filePath = resolve(clinicDirectory, safeName)
+    if (!filePath.startsWith(`${clinicDirectory}/`)) {
+      set.status = 403
+      return { error: 'Erişim reddedildi' }
+    }
+
+    let file = Bun.file(filePath)
+    if (!(await file.exists())) {
+      const { getSetting } = await import('./db/repositories/settings')
+      const logoData = await getSetting('branding.logo_data')
+      if (!logoData) {
+        set.status = 404
+        return { error: 'Logo bulunamadı' }
+      }
+      const parts = logoData.split(',')
+      const base64 = parts.length > 1 ? parts[1] : parts[0]
+      mkdirSync(clinicDirectory, { recursive: true })
+      writeFileSync(filePath, Buffer.from(base64, 'base64'))
+      file = Bun.file(filePath)
+    }
+
+    const ext = safeName.split('.').pop()?.toLowerCase()
+    if (ext === 'png') set.headers['content-type'] = 'image/png'
+    else if (ext === 'jpg' || ext === 'jpeg') set.headers['content-type'] = 'image/jpeg'
+    else if (ext === 'webp') set.headers['content-type'] = 'image/webp'
+    else {
+      set.status = 415
+      return { error: 'Desteklenmeyen logo biçimi' }
+    }
+    set.headers['cache-control'] = 'public, max-age=31536000, immutable'
+    return file
+  })
   .use(authPlugin)
   .use(shiftsPlugin)
   .use(notificationsPlugin)
   .use(yoneticiPlugin)
+  .use(platformPlugin)
 
   // ── Public Opt-out API ─────────────────────────────────────────────────────
   .get('/api/public/optout/:id', async ({ params, set }: any) => {
@@ -1599,22 +1655,33 @@ const app = new Elysia()
       set.status = 400
       return { error: 'Geçersiz dosya' }
     }
-    const ext = file.name.split('.').pop() || 'png'
-    const fileName = `logo_${Date.now()}.${ext}`
-    
-    const { mkdirSync, writeFileSync } = await import('fs')
-    const { resolve } = await import('path')
-    
-    mkdirSync(resolve(PUBLIC_DIR, 'uploads'), { recursive: true })
-    const dest = resolve(PUBLIC_DIR, 'uploads', fileName)
+    if (file.size > 2 * 1024 * 1024) {
+      set.status = 413
+      return { error: 'Logo en fazla 2 MB olabilir.' }
+    }
+    const allowedTypes: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/webp': 'webp',
+    }
+    const ext = allowedTypes[file.type]
+    if (!ext) {
+      set.status = 415
+      return { error: 'Yalnızca PNG, JPG ve WEBP logolar desteklenir.' }
+    }
+
+    const clinicId = requireClinicId()
+    const fileName = `logo_${randomUUID()}.${ext}`
+    const clinicDirectory = resolve(PUBLIC_DIR, 'tenant-assets', clinicId, 'branding')
+    mkdirSync(clinicDirectory, { recursive: true })
+    const dest = resolve(clinicDirectory, fileName)
     
     const arrayBuffer = await file.arrayBuffer()
     const buf = Buffer.from(arrayBuffer)
     writeFileSync(dest, buf)
     
-    const mime = file.type || `image/${ext === 'svg' ? 'svg+xml' : ext}`
-    const base64Data = `data:${mime};base64,${buf.toString('base64')}`
-    const logoUrl = `/uploads/${fileName}`
+    const base64Data = `data:${file.type};base64,${buf.toString('base64')}`
+    const logoUrl = `/api/branding/logo/${fileName}`
     await setBranding({ logoUrl })
     const { setSetting } = await import('./db/repositories/settings')
     await setSetting('branding.logo_data', base64Data)

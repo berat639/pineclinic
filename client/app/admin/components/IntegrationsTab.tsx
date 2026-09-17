@@ -216,10 +216,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           <div className={styles.logoActions}>
             <label className={styles.uploadButton}>
               {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
-              <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} />
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoUpload} disabled={uploadingLogo} />
             </label>
             <p className={styles.helperText}>
-              PNG, JPG veya SVG formatlarında, maksimum 2MB boyutunda görsel yükleyebilirsiniz.
+              PNG, JPG veya WEBP formatlarında, maksimum 2 MB boyutunda görsel yükleyebilirsiniz.
             </p>
           </div>
         </div>

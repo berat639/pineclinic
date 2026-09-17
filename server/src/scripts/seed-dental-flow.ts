@@ -4,7 +4,7 @@
  *   existing customer → select doctor, procedure type, date, time → assigned randevu
  */
 import { db } from '../db/client'
-import { conversationFlows } from '../db/schema'
+import { clinics, conversationFlows } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import type { FlowNode, FlowEdge } from '../db/repositories/flows'
 
@@ -46,11 +46,14 @@ const edges: FlowEdge[] = [
 ]
 
 async function main() {
+  const [clinic] = await db.select({ id: clinics.id }).from(clinics).where(eq(clinics.isActive, true)).limit(1)
+  if (!clinic) throw new Error('Aktif klinik bulunamadı')
   // Deactivate existing flows
-  await db.update(conversationFlows).set({ isActive: false }).where(eq(conversationFlows.isActive, true))
+  await db.update(conversationFlows).set({ isActive: false }).where(eq(conversationFlows.clinicId, clinic.id))
 
   // Insert new branching flow
   const [row] = await db.insert(conversationFlows).values({
+    clinicId: clinic.id,
     name: 'dental-branching',
     nodes: nodes as unknown as Record<string, unknown>[],
     edges: edges as unknown as Record<string, unknown>[],

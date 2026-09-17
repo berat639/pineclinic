@@ -2,8 +2,8 @@ import { Elysia } from 'elysia'
 import { randomUUID } from 'crypto'
 import { getUserByEmail, createUser, createSession, deleteSessionByJti, updateUser } from '../db/repositories/users'
 import { signToken, authenticateRequest } from '../middleware/auth'
-import { ensurePlatformAdminMembership, getActiveMembership, provisionClinicForPlatformAdmin } from '../db/repositories/tenancy'
-import { hostnameFromRequest, resolveTenantFromRequest } from '../tenancy/context'
+import { ensurePlatformAdminMembership, getActiveMembership } from '../db/repositories/tenancy'
+import { resolveTenantFromRequest } from '../tenancy/context'
 
 export const authPlugin = new Elysia({ prefix: '/api/auth' })
 
@@ -17,17 +17,10 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
     const valid = await Bun.password.verify(password, user.passwordHash)
     if (!valid) { set.status = 401; return { error: 'Geçersiz kimlik bilgileri' } }
 
-    let tenant = await resolveTenantFromRequest(request)
+    const tenant = await resolveTenantFromRequest(request)
     if (!tenant) {
-      if (!user.isPlatformAdmin) {
-        set.status = 404; return { error: 'Bu domain için aktif klinik bulunamadı' }
-      }
-      try {
-        tenant = await provisionClinicForPlatformAdmin(hostnameFromRequest(request), user.id)
-      } catch (error) {
-        set.status = 400
-        return { error: error instanceof Error ? error.message : 'Klinik oluşturulamadı' }
-      }
+      set.status = 404
+      return { error: 'Bu domain için aktif klinik bulunamadı. Klinikler platform panelinden oluşturulmalıdır.' }
     }
 
     const existingMembership = await getActiveMembership(user.id, tenant.clinicId)

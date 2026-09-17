@@ -60,7 +60,7 @@ export const appointments = pgTable('appointments', {
 
 export const conversationFlows = pgTable('conversation_flows', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  clinicId: uuid('clinic_id').references(() => clinics.id),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
   name: text('name').notNull().default('main'),
   direction: text('direction').notNull().default('inbound'),
   nodes: jsonb('nodes').notNull().default([]),
@@ -286,7 +286,7 @@ export const completedWorks = pgTable('completed_works', {
 // Single-doc + single-embedding model (admin UI uses category/title/content/active)
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  clinicId: uuid('clinic_id').references(() => clinics.id),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
   category: text('category').notNull().default('genel'),
   title: text('title').notNull(),
   content: text('content').notNull(),
@@ -312,7 +312,7 @@ export const recordings = pgTable('recordings', {
 
 export const knowledgeCategories = pgTable('knowledge_categories', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  clinicId: uuid('clinic_id').references(() => clinics.id),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
   slug: text('slug').notNull(),
   label: text('label').notNull(),
   icon: text('icon').notNull().default('📁'),

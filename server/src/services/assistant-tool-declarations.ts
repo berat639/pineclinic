@@ -22,7 +22,7 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     }
     fieldRequired = required
   } else {
-    // Fallback: legacy custom_fields from business_settings
+    // Fallback: clinic-scoped custom fields
     let allFields: Array<{ name: string; description: string; required?: boolean; active?: boolean }> = []
     try {
       const raw = dbDescs['tools.custom_fields']

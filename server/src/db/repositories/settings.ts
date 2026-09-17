@@ -1,60 +1,40 @@
 import { and, eq, sql as drizzleSql, inArray } from 'drizzle-orm'
 import { db } from '../client'
-import { businessSettings, clinicSettings } from '../schema'
-import { currentClinicId } from '../../tenancy/context'
+import { clinicSettings } from '../schema'
+import { requireClinicId } from '../../tenancy/context'
+
+function settingClinicId(explicitClinicId?: string): string {
+  return explicitClinicId ?? requireClinicId()
+}
 
 export async function getSetting(key: string, explicitClinicId?: string): Promise<string | null> {
-  const clinicId = explicitClinicId ?? currentClinicId()
-  if (clinicId) {
-    const rows = await db.select({ value: clinicSettings.value }).from(clinicSettings)
-      .where(drizzleSql`${clinicSettings.clinicId} = ${clinicId} AND ${clinicSettings.key} = ${key}`)
-      .limit(1)
-    return rows[0]?.value ?? null
-  }
-  const result = await db.execute(drizzleSql`
-    SELECT value FROM business_settings WHERE key = ${key} LIMIT 1
-  `)
-  const rows = ((result as unknown as { rows?: Array<{ value: string }> }).rows
-    ?? (result as unknown as Array<{ value: string }>))
+  const clinicId = settingClinicId(explicitClinicId)
+  const rows = await db.select({ value: clinicSettings.value }).from(clinicSettings)
+    .where(drizzleSql`${clinicSettings.clinicId} = ${clinicId} AND ${clinicSettings.key} = ${key}`)
+    .limit(1)
   return rows[0]?.value ?? null
 }
 
 export async function setSetting(key: string, value: string, explicitClinicId?: string): Promise<void> {
-  const clinicId = explicitClinicId ?? currentClinicId()
-  if (clinicId) {
-    await db.insert(clinicSettings).values({ clinicId, key, value, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [clinicSettings.clinicId, clinicSettings.key],
-        set: { value, updatedAt: new Date() },
-      })
-    return
-  }
-  await db.execute(drizzleSql`
-    INSERT INTO business_settings (key, value, updated_at)
-    VALUES (${key}, ${value}, now())
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-  `)
+  const clinicId = settingClinicId(explicitClinicId)
+  await db.insert(clinicSettings).values({ clinicId, key, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [clinicSettings.clinicId, clinicSettings.key],
+      set: { value, updatedAt: new Date() },
+    })
 }
 
 export async function deleteSetting(key: string, explicitClinicId?: string): Promise<void> {
-  const clinicId = explicitClinicId ?? currentClinicId()
-  if (clinicId) {
-    await db.execute(drizzleSql`DELETE FROM clinic_settings WHERE clinic_id = ${clinicId} AND key = ${key}`)
-    return
-  }
-  await db.execute(drizzleSql`DELETE FROM business_settings WHERE key = ${key}`)
+  const clinicId = settingClinicId(explicitClinicId)
+  await db.execute(drizzleSql`DELETE FROM clinic_settings WHERE clinic_id = ${clinicId} AND key = ${key}`)
 }
 
 async function getMany(keys: string[]): Promise<Record<string, string>> {
   if (keys.length === 0) return {}
-  const clinicId = currentClinicId()
-  const rows = clinicId
-    ? await db.select({ key: clinicSettings.key, value: clinicSettings.value })
-      .from(clinicSettings)
-      .where(and(eq(clinicSettings.clinicId, clinicId), inArray(clinicSettings.key, keys)))
-    : await db.select({ key: businessSettings.key, value: businessSettings.value })
-      .from(businessSettings)
-      .where(inArray(businessSettings.key, keys))
+  const clinicId = requireClinicId()
+  const rows = await db.select({ key: clinicSettings.key, value: clinicSettings.value })
+    .from(clinicSettings)
+    .where(and(eq(clinicSettings.clinicId, clinicId), inArray(clinicSettings.key, keys)))
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   return map
@@ -189,8 +169,11 @@ export interface PromptSectionRow {
 
 /** Get all prompt.* sections from DB */
 export async function getAllPromptSections(): Promise<Record<string, PromptSectionRow>> {
+  const clinicId = requireClinicId()
   const result = await db.execute(drizzleSql`
-    SELECT key, value, updated_at FROM business_settings WHERE key LIKE 'prompt.%'
+    SELECT key, value, updated_at
+    FROM clinic_settings
+    WHERE clinic_id = ${clinicId} AND key LIKE 'prompt.%'
   `)
   const rows = (result as unknown as { rows?: Array<{ key: string; value: string; updated_at: string | null }> }).rows
     ?? (result as unknown as Array<{ key: string; value: string; updated_at: string | null }>)
@@ -224,8 +207,11 @@ const TOOLS_PREFIX = 'tools.'
 
 /** Get all tools.* descriptions from DB */
 export async function getToolDescriptions(): Promise<Record<string, string>> {
+  const clinicId = requireClinicId()
   const result = await db.execute(drizzleSql`
-    SELECT key, value FROM business_settings WHERE key LIKE 'tools.%'
+    SELECT key, value
+    FROM clinic_settings
+    WHERE clinic_id = ${clinicId} AND key LIKE 'tools.%'
   `)
   const rows = (result as unknown as { rows?: Array<{ key: string; value: string }> }).rows
     ?? (result as unknown as Array<{ key: string; value: string }>)

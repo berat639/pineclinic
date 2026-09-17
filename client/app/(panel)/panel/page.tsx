@@ -16,8 +16,9 @@ const FinansalTab = dynamic(() => import('./tabs/FinansalTab'), { ssr: false })
 const StokTab = dynamic(() => import('./tabs/StokTab'), { ssr: false })
 const KlinikPersonelTab = dynamic(() => import('./tabs/KlinikPersonelTab'), { ssr: false })
 const VipAssistantTab = dynamic(() => import('./tabs/VipAssistantTab'), { ssr: false })
+const PlatformClinicsTab = dynamic(() => import('./tabs/PlatformClinicsTab'), { ssr: false })
 
-type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations' | 'vip'
+type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations' | 'vip' | 'platform-clinics'
 
 const BASE_TABS: { id: Tab; label: string }[] = [
   { id: 'calendar', label: 'Takvim' },
@@ -37,9 +38,12 @@ export default function YoneticiPage() {
 
   const isModerator = user?.role === 'moderator' || user?.email === 'moderator@klinik.com'
 
-  const tabsList = isModerator
+  const roleTabs = isModerator
     ? [{ id: 'vip' as Tab, label: '🌟 Özel Asistan (VIP)' }, ...BASE_TABS]
     : BASE_TABS
+  const tabsList = user?.isPlatformAdmin
+    ? [{ id: 'platform-clinics' as Tab, label: 'Klinikler' }, ...roleTabs]
+    : roleTabs
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
   const fetchAppts = useCallback(() => {
@@ -50,10 +54,16 @@ export default function YoneticiPage() {
   useEffect(() => {
     if (!user) return
     if (isModerator) {
-      setAllowedTabs(['vip', 'knowledge', 'calendar'])
+      setAllowedTabs([
+        ...(user.isPlatformAdmin ? ['platform-clinics' as Tab] : []),
+        'vip', 'knowledge', 'calendar',
+      ])
       if (!tab) setTab('vip')
     } else if (user.role === 'yonetici') {
-      setAllowedTabs(BASE_TABS.map(t => t.id))
+      setAllowedTabs([
+        ...(user.isPlatformAdmin ? ['platform-clinics' as Tab] : []),
+        ...BASE_TABS.map(t => t.id),
+      ])
       if (!tab) setTab('calendar')
     } else {
       fetch('/api/admin/settings/roles')
@@ -125,6 +135,7 @@ export default function YoneticiPage() {
           {tab === 'klinik' && <KlinikPersonelTab />}
           {tab === 'integrations' && <IntegrationsTab apiPrefix="/api/yonetici/integrations" />}
           {tab === 'vip' && <VipAssistantTab />}
+          {tab === 'platform-clinics' && user?.isPlatformAdmin && <PlatformClinicsTab />}
         </div>
       </div>
     </div>

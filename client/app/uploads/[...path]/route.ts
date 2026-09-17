@@ -10,7 +10,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
-        host: new URL(backendUrl).host,
+        'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+        'x-forwarded-proto': req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', ''),
       },
     })
 

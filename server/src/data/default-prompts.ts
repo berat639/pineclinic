@@ -1,7 +1,7 @@
 /**
  * data/default-prompts.ts — Varsayılan sistem prompt bölümleri
  *
- * Her bölüm `business_settings` tablosunda `prompt.*` prefix'li key ile
+ * Her bölüm `clinic_settings` tablosunda `prompt.*` prefix'li key ile
  * saklanır. DB'de değer yoksa buradaki sabitler fallback olarak kullanılır.
  * Admin panelden düzenleme yapıldığında DB'deki değer önceliklidir.
  */
