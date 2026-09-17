@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
-import { type GoogleGenAI } from '@google/genai'
+import { StartSensitivity, EndSensitivity, type GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
 import { buildRagPrompt, getPreWarmEmbedding } from '../rag'
@@ -180,10 +180,13 @@ class NoiseGate {
 }
 
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
-  // Default threshold: 250 (telefon hattı dip gürültüsünü filtreler, normal
-  // konuşmayı yakalar). Ayrıca NoiseGate 3 ardışık kare şartı uygular.
+  // Varsayılan olarak PCM'i kesmeden Gemini'nin yerleşik VAD'ine gönder.
+  // Sabit bir RMS eşiği, gürültülü GSM hatlarında gerçek konuşmayı kesip
+  // input transcription ve turn detection'ın hiç oluşmamasına yol açabiliyor.
+  // Gereken hatlarda bu filtre env üzerinden ayrıca etkinleştirilebilir.
   const envVal = process.env.PHONE_NOISE_GATE_RMS
-  const threshold = envVal !== undefined && envVal !== '' ? Math.max(0, parseInt(envVal, 10)) : 250
+  const parsedThreshold = Number.parseInt(envVal || '', 10)
+  const threshold = Number.isFinite(parsedThreshold) ? Math.max(0, parsedThreshold) : 0
   const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '250', 10) || 250)
   const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
   return {
@@ -804,6 +807,16 @@ ${isOwnerCall
                   systemPrompt,
                   model,
                   voiceName,
+                  realtimeInputConfig: {
+                    automaticActivityDetection: {
+                      disabled: false,
+                      // 8 kHz telefon sesinde kısa ve düşük sesli ifadeleri kaçırma.
+                      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+                      prefixPaddingMs: 100,
+                      silenceDurationMs: 500,
+                    },
+                  },
                   clinicId: state.clinicId,
                   hostname: state.hostname,
                   telephonyChannel: state.callerChannel,
