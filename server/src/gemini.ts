@@ -20,6 +20,7 @@ import { findCustomerDocByPhone } from './db/repositories/knowledge'
 import { getToolDescriptions } from './db/repositories/settings'
 import { runWithTenantContext } from './tenancy/context'
 import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription } from './data/default-tools'
+import { findAutomaticTransferRule, type AutomaticTransferRule } from './services/transfer-triggers'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -67,11 +68,15 @@ export async function createLiveSession(
     clinicId?: string
     hostname?: string
     enableGoogleSearch?: boolean
+    automaticTransferRules?: readonly AutomaticTransferRule[]
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
   let lastPhoneUsed: string | null = null
   let locationSent = false
+  let transferAttempted = false
+  let automaticTransferStarted = false
+  let automaticTransferTranscript = ''
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
@@ -128,6 +133,10 @@ export async function createLiveSession(
     }
 
     if (name === 'aramaAktar') {
+      if (transferAttempted) {
+        return { success: true, message: 'Arama aktarımı zaten başlatıldı.' }
+      }
+      transferAttempted = true
       const rawTarget = (args.hedef as string | undefined) || 'resepsiyon'
       const targetKey = rawTarget.toLowerCase().trim()
       console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${args.sebep || 'Belirtilmedi'}`)
@@ -623,13 +632,34 @@ export async function createLiveSession(
         // (chunks halinde gelir). Konuşma tamamlanıp tamamlanmadığı bilgisini
         // de iletebilmek için boş text'leri filtreliyoruz.
         if (content.inputTranscription?.text) {
-          callbacks.onTranscript('user', content.inputTranscription.text)
+          const transcript = content.inputTranscription.text
+          callbacks.onTranscript('user', transcript)
+
+          if (!automaticTransferStarted && options.automaticTransferRules?.length) {
+            automaticTransferTranscript = `${automaticTransferTranscript} ${transcript}`.trim().slice(-500)
+            const rule = findAutomaticTransferRule(automaticTransferTranscript, options.automaticTransferRules)
+            if (rule) {
+              automaticTransferStarted = true
+              console.log(`[aramaAktar] Otomatik anahtar kelime eşleşti: "${rule.keyword}" -> ${rule.target}`)
+              const invokeTransfer = () => handleTool('aramaAktar', {
+                hedef: rule.target,
+                sebep: `Otomatik anahtar kelime: ${rule.keyword}`,
+              })
+              const transfer = options.clinicId && options.hostname
+                ? runWithTenantContext({ clinicId: options.clinicId, hostname: options.hostname }, invokeTransfer)
+                : invokeTransfer()
+              void Promise.resolve(transfer).then(result => {
+                if (!result.success) console.error('[aramaAktar] Otomatik aktarım başarısız:', result.message)
+              }).catch(err => console.error('[aramaAktar] Otomatik aktarım hatası:', err))
+            }
+          }
         }
         if (content.outputTranscription?.text) {
           callbacks.onTranscript('model', content.outputTranscription.text)
         }
 
         if (content.turnComplete) {
+          automaticTransferTranscript = ''
           callbacks.onTurnComplete()
         }
 

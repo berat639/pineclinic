@@ -20,6 +20,7 @@ import { findVipByPhone } from '../db/repositories/vip'
 import { runWithTenantContext } from '../tenancy/context'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
+import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../services/transfer-triggers'
 
 // ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
 //
@@ -563,10 +564,15 @@ ${isOwnerCall
             // maksimum görüşme süresine tabi değildir. Sessizlik koruması yine
             // aktif kalır; böylece sessiz hat sonsuza kadar açık kalmaz.
             let minimalGreetingEndFlow = false
+            let automaticTransferRules: AutomaticTransferRule[] = []
             try {
               const { getActiveFlow, isMinimalGreetingEndFlow } = await import('../db/repositories/flows')
               const activeFlow = await getActiveFlow(direction)
               minimalGreetingEndFlow = Boolean(activeFlow && isMinimalGreetingEndFlow(activeFlow))
+              automaticTransferRules = buildAutomaticTransferRules(activeFlow?.nodes)
+              if (automaticTransferRules.length > 0) {
+                console.log(`[${shortId}] Otomatik aktarım kuralı: ${automaticTransferRules.length}`)
+              }
             } catch (e) {
               console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
             }
@@ -683,6 +689,7 @@ ${isOwnerCall
                   callerPhone: state.callerPhone,
                   direction: direction,
                   enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
+                  automaticTransferRules,
                 },
               ),
               new Promise<never>((_, reject) =>
