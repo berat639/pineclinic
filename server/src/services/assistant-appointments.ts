@@ -37,6 +37,7 @@ export async function createAssistantAppointment(fields: Record<string, unknown>
     const type = String(fields.randevu_turu || fields.islem_turu || 'kontrol')
     const complaint = String(fields.sikayet || fields.sorun_veya_talep || '')
     const [dental] = await tx.insert(dentalAppointments).values({
+      clinicId: context.clinicId,
       patientId: patient.id, doctorId, title: `${name} - ${type}`, startTime: start,
       endTime: new Date(start.getTime() + 15 * 60_000), status: doctorId ? 'scheduled' : 'pending_assignment',
       type, complaint: complaint || null, notes: complaint || null, timeConfirmed: false,

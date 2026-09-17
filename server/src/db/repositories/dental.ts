@@ -745,8 +745,9 @@ export async function createPatientNote(data: {
   content: string
   patientId?: string | null
   source?: string
+  clinicId?: string
 }) {
-  const clinicId = requireClinicId()
+  const clinicId = data.clinicId || requireClinicId()
   let pId = data.patientId
   if (!pId && data.phone) {
     const [p] = await db.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, clinicId), eq(patients.phone, data.phone))).limit(1)

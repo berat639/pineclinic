@@ -103,7 +103,7 @@ export async function createLiveSession(
       if (!args.telefon && lastPhoneUsed) args.telefon = lastPhoneUsed
       try {
         const { createAssistantAppointment } = await import('./services/assistant-appointments')
-        const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId })
+        const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId })
         return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı. Başka bir konuda yardımcı olabilir miyim?` }
       } catch {
         return { success: false, message: 'Randevu oluşturulamadı. Ad, telefon, tarih ve saati kontrol edin.' }
@@ -126,6 +126,7 @@ export async function createLiveSession(
           phone,
           content: fullContent,
           source: 'voice',
+          clinicId: options.clinicId,
         })
         return {
           success: true,
@@ -308,7 +309,7 @@ export async function createLiveSession(
       lastPhoneUsed = rawPhone
       console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
-        const customer = await getCustomerByPhone(rawPhone)
+        const customer = await getCustomerByPhone(rawPhone, options.clinicId)
         const { getPatientDoctorHistory } = await import('./db/repositories/dental')
         const doktorGecmisi = await getPatientDoctorHistory(rawPhone)
 
@@ -369,7 +370,7 @@ export async function createLiveSession(
         return { sonuc: 'Geçmiş sorgu için telefon numarası gerekli.' }
       }
       try {
-        const customer = await getCustomerByPhone(rawPhone)
+        const customer = await getCustomerByPhone(rawPhone, options.clinicId)
         if (!customer || customer.appointmentHistory.length === 0) {
           return { sonuc: 'Bu numara için kayıtlı önceki randevu bulunamadı.' }
         }

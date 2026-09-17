@@ -899,7 +899,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
               // session hazır olduğunda callerPhone zaten set olmuş olur.
               if (state.callerPhone) {
                 try {
-                  const customerCtx = await getCustomerByPhone(state.callerPhone)
+                  const customerCtx = await getCustomerByPhone(state.callerPhone, state.clinicId)
                   if (customerCtx) {
                     const TYPE_LABELS: Record<string, string> = {
                       service: 'Tedavi', test_drive: 'Muayene',
