@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getExternalHostname, getExternalProtocol } from '@/lib/forwarded-request'
 
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
 
@@ -10,8 +11,8 @@ export async function POST(req: NextRequest) {
       'Content-Type': 'application/json',
       'x-forwarded-for': req.headers.get('x-forwarded-for') || (req as any).ip || '',
       'user-agent': req.headers.get('user-agent') || '',
-      'x-forwarded-proto': req.headers.get('x-forwarded-proto') || 'http',
-      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+      'x-forwarded-proto': getExternalProtocol(req),
+      'x-forwarded-host': getExternalHostname(req),
     },
     body: JSON.stringify(body),
   })

@@ -41,18 +41,37 @@ import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../serv
 const PHONE_FRAME_MS = 20
 const RAG_BOOTSTRAP_TIMEOUT_MS = 2_500
 const SESSION_CONNECT_TIMEOUT_MS = 20_000
-const DEFAULT_OUTPUT_BUFFER_MS = 1_200
+const DEFAULT_OUTPUT_START_BUFFER_MS = 700
+const DEFAULT_OUTPUT_REBUFFER_MS = 1_200
 const MIN_OUTPUT_BUFFER_MS = 200
 const MAX_OUTPUT_BUFFER_MS = 4_000
 const GREETING_HARD_TIMEOUT_MS = 30_000
 const GREETING_TRANSCRIPT_IDLE_COMPLETE_MS = 1_800
 
-function readOutputBufferFrames(): number {
-  const configured = Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10)
-  const bufferMs = Number.isFinite(configured)
-    ? Math.min(MAX_OUTPUT_BUFFER_MS, Math.max(MIN_OUTPUT_BUFFER_MS, configured))
-    : DEFAULT_OUTPUT_BUFFER_MS
-  return Math.ceil(bufferMs / PHONE_FRAME_MS)
+function clampOutputBufferMs(value: number, fallback: number): number {
+  return Number.isFinite(value)
+    ? Math.min(MAX_OUTPUT_BUFFER_MS, Math.max(MIN_OUTPUT_BUFFER_MS, value))
+    : fallback
+}
+
+function readOutputBufferFrames(): { start: number; rebuffer: number } {
+  const startMs = clampOutputBufferMs(
+    Number.parseInt(process.env.PHONE_OUTPUT_START_BUFFER_MS || '', 10),
+    DEFAULT_OUTPUT_START_BUFFER_MS,
+  )
+  const rebufferMs = Math.max(startMs, clampOutputBufferMs(
+    Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10),
+    DEFAULT_OUTPUT_REBUFFER_MS,
+  ))
+  return {
+    start: Math.ceil(startMs / PHONE_FRAME_MS),
+    rebuffer: Math.ceil(rebufferMs / PHONE_FRAME_MS),
+  }
+}
+
+function readVadSilenceDurationMs(): number {
+  const configured = Number.parseInt(process.env.PHONE_VAD_SILENCE_MS || '', 10)
+  return Number.isFinite(configured) ? Math.min(1_000, Math.max(200, configured)) : 300
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -384,10 +403,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
   const gateCfg = readGateConfig()
   const outputBufferFrames = readOutputBufferFrames()
+  const vadSilenceDurationMs = readVadSilenceDurationMs()
   console.log(
     `   NoiseGate: thresh=${gateCfg.threshold} trailing=${gateCfg.trailingFrames}fr preRoll=${gateCfg.preRollFrames}fr`,
   )
-  console.log(`   Telefon ses tamponu: ${outputBufferFrames * PHONE_FRAME_MS}ms`)
+  console.log(`   Telefon ses tamponu: başlangıç=${outputBufferFrames.start * PHONE_FRAME_MS}ms yeniden=${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms`)
+  console.log(`   Gemini VAD konuşma sonu: ${vadSilenceDurationMs}ms`)
 
   const server = Bun.listen<CallState>({
     hostname: '0.0.0.0',
@@ -506,8 +527,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               )
             }
 
+            const requiredBufferFrames = state.outputUnderruns > 0
+              ? outputBufferFrames.rebuffer
+              : outputBufferFrames.start
             if (!state.playbackReady && state.audioQueue.length > 0 &&
-                (state.outputTurnComplete || state.audioQueue.length >= outputBufferFrames)) {
+                (state.outputTurnComplete || state.audioQueue.length >= requiredBufferFrames)) {
               state.playbackReady = true
               console.log(
                 `[${shortId}] AI ses oynatma başladı (${state.audioQueue.length * PHONE_FRAME_MS}ms tampon${state.outputUnderruns > 0 ? `, ${state.outputUnderruns}. yeniden tamponlama` : ''})`,
@@ -523,7 +547,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             } else if (state.playbackReady && state.outputTurnActive) {
               state.playbackReady = false
               state.outputUnderruns++
-              console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
+              console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
               try { socket.write(silenceFrame); scheduleFrame() } catch { }
             } else if (state.hangupPending && !state.outputTurnActive) {
               // Ses kuyruğu boşaldı ve hangup bekleniyor — şimdi kapat
@@ -587,15 +611,11 @@ ${isOwnerCall
                 : `- Kendisine ismiyle (${callerName}) hitap et. Kendisini tanıdığını ve Berat Bey'in yakın çevresinden olduğunu hissettir.`
               }
 
-BERAT BEY'E AKTARMA VE ACİL DURUM AKIŞI (ÇOK ÖNEMLİ):
-- Berat Bey'in kişisel telefon numarası: 05076652367.
-- Karşıdaki kişi Berat Bey ile görüşmek istediğinde ("Berat Bey'e aktarır mısın?", "Berat ile görüşebilir miyim?", "Beni aktar", "Bağlar mısın?") VEYA "aktarmamı ister misiniz?" teklifine "Evet", "Olur", "Lütfen", "Aktar", "Aktar bakalım", "Test et" dediğinde:
-  KESİNLİKLE İKİNCİ BİR TUR VEYA CEVAP BEKLEME! AYNI TUR İÇERİSİNDE HEM sesli olarak "Tabii ki, hemen Berat Bey'e aktarıyorum, lütfen hatta kalın." de, HEM DE AYNI ANDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma") ARACINI ÇAĞIR.
-- Eğer karşıdaki kişi acil veya önemli bir durumdan bahsederse: "Durum acilse veya doğrudan görüşmek isterseniz sizi hemen Berat Bey'e aktarmamı ister misiniz?" diye teklifte bulun. Onay aldığın an aramaAktar aracını çağır.
-${isOwnerCall
-                ? `- Eğer Berat Bey aktarmayı test etmek amacıyla "beni aktar", "test et", "aktar bakalım", "evet aktar" derse: "Hemen aktarma testini başlatıyorum Berat Bey, lütfen bekleyin." de ve AYNI TURDA ANINDA aramaAktar(hedef: "05076652367", sebep: "Berat Bey aktarma testi") aracını çağır.`
-                : ''
-              }
+ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
+- Aktarım hedefi ve tetikleyici ifadeler yalnızca aktif Flow Builder "Aramayı Aktar" işlem düğümünden gelir.
+- Koddan, örneklerden veya tahminden telefon numarası üretme; işlem düğümünde bulunmayan hiçbir hedefe aktarma yapma.
+- İşlem düğümünde onay açıksa açık olumlu cevap gelmeden aktardığını söyleme ve aramaAktar aracını çağırma.
+- Acil bir durum varsa aktarım teklif edebilirsin; fakat yalnızca aktif işlem düğümündeki kural eşleşirse aktarımı başlat.
 `
 
             const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
@@ -814,7 +834,7 @@ ${isOwnerCall
                       startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
                       endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
                       prefixPaddingMs: 100,
-                      silenceDurationMs: 500,
+                      silenceDurationMs: vadSilenceDurationMs,
                     },
                   },
                   clinicId: state.clinicId,
@@ -824,6 +844,7 @@ ${isOwnerCall
                   direction: direction,
                   enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
                   automaticTransferRules,
+                  enforceConfiguredTransferRules: true,
                 },
               )
             let sessionConnectTimer: ReturnType<typeof setTimeout> | undefined

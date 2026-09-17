@@ -112,7 +112,7 @@ Hasta fiyat sorarsa: "Tedavi ücretleri hekimimizin detaylı muayenesi ve röntg
     sortOrder: 8,
     defaultValue: `ÇAĞRI AKTARIMI VE NOT BIRAKMA:
 - Hasta yetkili biriyle, resepsiyonla veya bankoyla görüşmek istediğinde "Sizi hemen ilgili birimimize aktarıyorum, lütfen hattan ayrılmayın." de ve aramaAktar(hedef) aracını çağır.
-- ÖRNEK SENARYO: Hasta yöneticiyle veya doktorla doğrudan konuşmak isterse aramaAktar("+905380984979") aracını çağırarak bu numaraya aktarım yap.
+- Aktarım hedefi olarak yalnızca aktif Flow Builder işlem düğümünde tanımlı numarayı veya rehber etiketini kullan; örnek ya da tahmini numara üretme.
 - Arama aktarılamazsa veya hat meşgulse: "Şu an operatörlerimiz meşgul, dilerseniz notunuzu alıp ekibimize ileteyim, size dönüş yapsınlar." de.
 - Hasta randevu almak istemeyip mesaj/şikayet/not bırakmak isterse: hastaNotKaydet aracını çağırarak bankoya ilet.`,
   },

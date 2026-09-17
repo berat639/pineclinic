@@ -147,11 +147,11 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     },
     {
       name: 'aramaAktar',
-      description: 'Aramayı yetkili birime veya başka bir telefon numarasına aktarır. Berat Bey\'e aktarmak için hedef: "05076652367" veya "berat" olarak kullanılır.',
+      description: 'Aramayı aktif Flow Builder işlem düğümünde tanımlanan yetkili hedefe aktarır. Hedef numarayı tahmin etme veya örnek numara kullanma.',
       parameters: {
         type: Type.OBJECT,
         properties: {
-          hedef: { type: Type.STRING, description: 'Aktarılacak hedef: Telefon numarası (örn: "05076652367"), "berat", "resepsiyon", "banko", "acil"' },
+          hedef: { type: Type.STRING, description: 'Aktif Flow Builder aktarım düğümünde tanımlı telefon numarası veya rehber etiketi' },
           sebep: { type: Type.STRING, description: 'Aktarım sebebi' },
         },
         required: ['hedef'],

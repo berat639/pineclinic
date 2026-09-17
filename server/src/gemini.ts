@@ -26,6 +26,8 @@ import {
   findTransferConfirmationCandidate,
   findTransferRuleForRequest,
   getTransferConfirmationQuestion,
+  normalizeTransferPhoneNumber,
+  resolveTransferPhonebookTarget,
   type AutomaticTransferRule,
 } from './services/transfer-triggers'
 
@@ -76,6 +78,7 @@ export async function createLiveSession(
     hostname?: string
     enableGoogleSearch?: boolean
     automaticTransferRules?: readonly AutomaticTransferRule[]
+    enforceConfiguredTransferRules?: boolean
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -159,6 +162,13 @@ export async function createLiveSession(
         reason,
         options.automaticTransferRules || [],
       )
+      if (options.enforceConfiguredTransferRules && !configuredRule) {
+        console.warn(`[aramaAktar] Reddedildi: aktif Flow Builder düğümünde tanımsız hedef -> ${requestedTarget}`)
+        return {
+          success: false,
+          message: 'Bu aktarım hedefi aktif konuşma akışında tanımlı değil. Aktarım yapılmadı.',
+        }
+      }
       // A configured Flow Builder node is authoritative; do not let a model
       // generated tool argument redirect to a different number.
       const rawTarget = configuredRule?.target || requestedTarget
@@ -186,40 +196,27 @@ export async function createLiveSession(
       pendingTransferConfirmation = null
       const targetKey = rawTarget.toLowerCase().trim()
       console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${reason}`)
+      const transferStartedAt = Date.now()
 
       try {
-        const { getSetting } = await import('./db/repositories/settings')
-        const phonebookRaw = await getSetting('transfer.phonebook')
-        let phonebook: Array<{ label: string; number: string }> = []
-        if (phonebookRaw) {
-          try { phonebook = JSON.parse(phonebookRaw) } catch {}
-        }
-
-        // Match from phonebook or default settings
-        let targetNumber = ''
-        if (targetKey.includes('berat') || targetKey.includes('sahip') || targetKey.includes('patron') || targetKey.includes('yonetici')) {
-          targetNumber = '05076652367'
-        } else {
-          const found = phonebook.find(p => p.label.toLowerCase().includes(targetKey) || targetKey.includes(p.label.toLowerCase()))
-          if (found) {
-            targetNumber = found.number
-          } else if (/^\+?\d{7,15}$/.test(targetKey)) {
-            targetNumber = targetKey
-          } else {
-            const directSetting = await getSetting(`transfer.${targetKey}`)
-            if (directSetting) {
-              targetNumber = directSetting
-            } else if (phonebook.length > 0) {
-              targetNumber = phonebook[0].number
-            }
+        // Sayısal Flow Builder hedefinde DB/rehber sorgusunu tamamen atla.
+        let targetNumber = normalizeTransferPhoneNumber(rawTarget)
+        if (!targetNumber) {
+          const { getSetting } = await import('./db/repositories/settings')
+          const [phonebookRaw, directSetting] = await Promise.all([
+            getSetting('transfer.phonebook'),
+            getSetting(`transfer.${targetKey}`),
+          ])
+          let phonebook: Array<{ label: string; number: string }> = []
+          if (phonebookRaw) {
+            try { phonebook = JSON.parse(phonebookRaw) } catch {}
           }
-        }
-
-        if (!targetNumber && targetKey.includes('berat')) {
-          targetNumber = '05076652367'
+          targetNumber = resolveTransferPhonebookTarget(rawTarget, phonebook)
+            || normalizeTransferPhoneNumber(directSetting || '')
         }
 
         if (!targetNumber) {
+          transferAttempted = false
           console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
           return {
             success: false,
@@ -231,6 +228,7 @@ export async function createLiveSession(
           // Açık kullanıcı onayından sonra doğrudan AMI yönlendirmesini başlat.
           const { transferCall } = await import('./services/asterisk-ami')
           const result = await transferCall(options.telephonyChannel, targetNumber)
+          console.log(`[PERF] transfer_call: ${Date.now() - transferStartedAt}ms`)
           if (result.success) {
             return {
               success: true,
@@ -252,6 +250,7 @@ export async function createLiveSession(
           message: 'Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, Berat Bey\'e iletirim.',
         }
       } catch (err) {
+        transferAttempted = false
         console.error('[aramaAktar] Hata:', err)
         return {
           success: false,

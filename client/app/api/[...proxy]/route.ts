@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getExternalHostname, getExternalProtocol } from '@/lib/forwarded-request'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ proxy: string[] }> }) {
   const resolvedParams = await params
@@ -32,8 +33,8 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
   const targetUrl = `${backendUrl}${path}${search}`
 
   const headers = new Headers(req.headers)
-  headers.set('x-forwarded-host', req.headers.get('host') || req.nextUrl.host)
-  headers.set('x-forwarded-proto', req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', ''))
+  headers.set('x-forwarded-host', getExternalHostname(req))
+  headers.set('x-forwarded-proto', getExternalProtocol(req))
   headers.delete('host')
   headers.delete('connection')
 

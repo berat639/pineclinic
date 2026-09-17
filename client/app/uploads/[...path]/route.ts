@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getExternalHostname } from '@/lib/forwarded-request'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const resolvedParams = await params
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
-        'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+        'x-forwarded-host': getExternalHostname(req),
         'x-forwarded-proto': req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', ''),
       },
     })

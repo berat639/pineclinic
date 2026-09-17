@@ -7,6 +7,11 @@ export interface AutomaticTransferRule {
   confirmationQuestion?: string
 }
 
+export interface TransferPhonebookEntry {
+  label: string
+  number: string
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
 }
@@ -130,6 +135,35 @@ export function findTransferRuleForRequest(
   const normalizedTarget = normalizeTransferText(target)
   const targetRules = rules.filter(rule => normalizeTransferText(rule.target) === normalizedTarget)
   return targetRules.find(rule => rule.requiresConfirmation) ?? targetRules[0] ?? null
+}
+
+/** Normalize a configured Turkish phone target without silently replacing it. */
+export function normalizeTransferPhoneNumber(value: string): string | null {
+  const trimmed = value.trim()
+  if (!/^\+?[\d\s().-]+$/.test(trimmed)) return null
+
+  let digits = trimmed.replace(/\D/g, '')
+  if (digits.startsWith('90') && digits.length === 12) digits = `0${digits.slice(2)}`
+  if (!digits.startsWith('0') && digits.length === 10) digits = `0${digits}`
+  return digits.length >= 7 && digits.length <= 15 ? digits : null
+}
+
+/** Resolve only an explicit, unambiguous phonebook label; never fall back to the first entry. */
+export function resolveTransferPhonebookTarget(
+  target: string,
+  phonebook: readonly TransferPhonebookEntry[],
+): string | null {
+  const targetKey = normalizeTransferText(target)
+  if (!targetKey) return null
+
+  const exact = phonebook.find(entry => normalizeTransferText(entry.label) === targetKey)
+  if (exact) return normalizeTransferPhoneNumber(exact.number)
+
+  const partialMatches = phonebook.filter(entry => {
+    const label = normalizeTransferText(entry.label)
+    return label.length >= 3 && (label.includes(targetKey) || targetKey.includes(label))
+  })
+  return partialMatches.length === 1 ? normalizeTransferPhoneNumber(partialMatches[0].number) : null
 }
 
 export type TransferConfirmation = 'affirmative' | 'negative' | 'unknown'

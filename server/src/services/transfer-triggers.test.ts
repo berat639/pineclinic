@@ -6,7 +6,9 @@ import {
   findTransferConfirmationCandidate,
   findTransferRuleForRequest,
   getTransferConfirmationQuestion,
+  normalizeTransferPhoneNumber,
   normalizeTransferText,
+  resolveTransferPhonebookTarget,
 } from './transfer-triggers'
 
 describe('automatic transfer triggers', () => {
@@ -78,5 +80,20 @@ describe('automatic transfer triggers', () => {
     expect(classifyTransferConfirmation('Evet, doğru.')).toBe('affirmative')
     expect(classifyTransferConfirmation('Hayır, doğru değil.')).toBe('negative')
     expect(classifyTransferConfirmation('Bir daha söyler misiniz?')).toBe('unknown')
+  })
+
+  test('uses configured numeric targets directly and normalizes country code', () => {
+    expect(normalizeTransferPhoneNumber('0507 665 23 67')).toBe('05076652367')
+    expect(normalizeTransferPhoneNumber('+90 507 665 23 67')).toBe('05076652367')
+    expect(normalizeTransferPhoneNumber('resepsiyon')).toBeNull()
+  })
+
+  test('resolves only explicit phonebook labels without first-entry fallback', () => {
+    const phonebook = [
+      { label: 'Resepsiyon', number: '08503096119' },
+      { label: 'İl Sağlık', number: '05076652367' },
+    ]
+    expect(resolveTransferPhonebookTarget('il sağlık', phonebook)).toBe('05076652367')
+    expect(resolveTransferPhonebookTarget('bilinmeyen hedef', phonebook)).toBeNull()
   })
 })

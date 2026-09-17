@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getExternalHostname } from '@/lib/forwarded-request'
 
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
 
@@ -8,7 +9,7 @@ export async function POST(req: NextRequest) {
     method: 'POST',
     headers: {
       cookie: `token=${token}`,
-      'x-forwarded-host': req.headers.get('host') || req.nextUrl.host,
+      'x-forwarded-host': getExternalHostname(req),
     },
   })
 
