@@ -27,7 +27,8 @@
   flex-wrap: wrap;
 }
 
-.card .heading .description {
+.card .heading .description,
+.card .inboxHeader .description {
   margin: 6px 0 20px;
   color: var(--integration-text-muted, var(--foreground-2)) !important;
 }
@@ -237,7 +238,7 @@
   color: var(--integration-success-text, #bbf7d0) !important;
 }
 
-.inboxHeader { margin-top: 24px; }
+.inboxHeader { margin-top: 0; }
 
 .inbox {
   display: grid;

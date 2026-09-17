@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import FlowBuilder from './FlowBuilder'
+import WhatsAppConversationsCard from './WhatsAppConversationsCard'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 function Spinner() {
@@ -1098,6 +1099,10 @@ export default function KnowledgeTab() {
             )}
           </div>
         </div>
+      </div>
+
+      <div style={{ marginTop: '1.5rem' }}>
+        <WhatsAppConversationsCard />
       </div>
 
       {/* Alt Satır: Konuşma Akışı (Flow Builder - Gelen ve Giden Tabları) */}
