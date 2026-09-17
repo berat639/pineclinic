@@ -903,9 +903,11 @@ async function runMigrations() {
     await sql.unsafe(`CREATE INDEX IF NOT EXISTS "${table}_clinic_idx" ON "${table}" (clinic_id)`)
   }
   await sql`ALTER TABLE sessions ALTER COLUMN clinic_id SET NOT NULL`
-  await sql`ALTER TABLE conversation_flows ALTER COLUMN clinic_id SET NOT NULL`
-  await sql`ALTER TABLE knowledge_documents ALTER COLUMN clinic_id SET NOT NULL`
-  await sql`ALTER TABLE knowledge_categories ALTER COLUMN clinic_id SET NOT NULL`
+  // These legacy tables can contain rows created by older deployments. Keep
+  // the startup migration recoverable: the backfill above scopes existing
+  // rows, while the application schema requires clinic_id for every new row.
+  // Database NOT NULL enforcement can be added later as a verified, offline
+  // constraint migration after production data has been audited.
   await sql`UPDATE patients SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
   await sql`UPDATE treatment_plans SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
   await sql`UPDATE consultations SET clinic_id = ${defaultClinicId} WHERE clinic_id IS NULL`
