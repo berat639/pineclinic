@@ -46,6 +46,9 @@ const MIN_OUTPUT_BUFFER_MS = 200
 const MAX_OUTPUT_BUFFER_MS = 4_000
 const GREETING_HARD_TIMEOUT_MS = 30_000
 const GREETING_TRANSCRIPT_IDLE_COMPLETE_MS = 1_800
+const TRANSFER_ANNOUNCEMENT_START_TIMEOUT_MS = 1_500
+const TRANSFER_ANNOUNCEMENT_IDLE_MS = 500
+const TRANSFER_ANNOUNCEMENT_MAX_WAIT_MS = 10_000
 
 function readOutputBufferFrames(): number {
   const configured = Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10)
@@ -477,6 +480,44 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           }
         }
 
+        const waitForTransferAnnouncement = async () => {
+          const startedAt = Date.now()
+          const initialLastAudioAt = state.lastAiAudioAt
+          let heardAnnouncement = state.outputTurnActive || state.audioQueue.length > 0
+
+          while (!state.closed) {
+            const now = Date.now()
+            const elapsedMs = now - startedAt
+            if (state.outputTurnActive || state.audioQueue.length > 0 || state.lastAiAudioAt > initialLastAudioAt) {
+              heardAnnouncement = true
+            }
+
+            const queueDrained = state.audioQueue.length === 0
+            const sentenceComplete = /[.!?…]["')\]]?\s*$/u.test(state.outputTranscript)
+            const audioIdle = state.lastAiAudioAt > 0 && now - state.lastAiAudioAt >= TRANSFER_ANNOUNCEMENT_IDLE_MS
+            const turnFinished = !state.outputTurnActive || state.outputTurnComplete
+
+            if (heardAnnouncement && queueDrained && (turnFinished || (sentenceComplete && audioIdle))) {
+              // Son frame socket'e yazıldıktan sonra küçük bir ağ payı bırak.
+              await new Promise<void>(resolve => setTimeout(resolve, PHONE_FRAME_MS * 3))
+              console.log(`[${shortId}] Aktarım anonsu tamamlandı (${Date.now() - startedAt}ms) — AMI yönlendirmesi başlıyor`)
+              return
+            }
+
+            if (!heardAnnouncement && elapsedMs >= TRANSFER_ANNOUNCEMENT_START_TIMEOUT_MS) {
+              console.log(`[${shortId}] Aktarım anonsu üretilmedi — AMI yönlendirmesi beklemeden başlıyor`)
+              return
+            }
+
+            if (elapsedMs >= TRANSFER_ANNOUNCEMENT_MAX_WAIT_MS) {
+              console.warn(`[${shortId}] Aktarım anonsu bekleme üst sınırına ulaştı — AMI yönlendirmesi başlıyor`)
+              return
+            }
+
+            await new Promise<void>(resolve => setTimeout(resolve, 25))
+          }
+        }
+
         // 20ms'de bir frame gönder. Gemini'nin değişken aralıklı ses
         // paketlerini doğrudan oynatmak yerine kısa bir jitter tamponunda tut;
         // kuyruk tur ortasında tükenirse yeniden dolana kadar sessizce bekle.
@@ -558,7 +599,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
             // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
             const todayStr = getTodayTurkish()
-            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLİKLE çağırma.\n\nDİYALOG SIRASI: Her turda yalnızca tek bir kısa soru veya tek bir talep yönelt. Karşı taraf cevap vermeden yeni bir soru sorma, peş peşe soru/araç çağrısı üretme ve karşı taraf konuşurken araya girme. Cevabı aldıktan sonra kısa bir onay verip sıradaki tek soruya geç.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
+            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLİKLE çağırma.\n\nARAMA AKTARIMI: aramaAktar aracını çağıracağın turda sesli olarak yalnızca "Hemen aktarıyorum, lütfen hatta kalın." de ve aynı turda aracı çağır. Daha uzun açıklama yapma; sistem bu kısa cümlenin ses kuyruğu tamamen bittikten sonra aktarımı otomatik başlatır.\n\nDİYALOG SIRASI: Her turda yalnızca tek bir kısa soru veya tek bir talep yönelt. Karşı taraf cevap vermeden yeni bir soru sorma, peş peşe soru/araç çağrısı üretme ve karşı taraf konuşurken araya girme. Cevabı aldıktan sonra kısa bir onay verip sıradaki tek soruya geç.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
 
             const callerName = vipRecord?.contactName || 'Misafirimiz'
             const isOwnerCall = state.callerPhone?.replace(/\D/g, '').endsWith('5076652367')
@@ -811,6 +852,7 @@ ${isOwnerCall
                   direction: direction,
                   enableGoogleSearch: isVip ? Boolean(vipRecord?.groundingEnabled) : false,
                   automaticTransferRules,
+                  waitForTransferAnnouncement,
                 },
               )
             let sessionConnectTimer: ReturnType<typeof setTimeout> | undefined
