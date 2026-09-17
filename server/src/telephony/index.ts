@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto'
 import { type GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
-import { buildRagPrompt, getPreWarmEmbedding, embedText, PRE_WARM_QUERY } from '../rag'
+import { buildRagPrompt, getPreWarmEmbedding } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
 import { findVipByPhone } from '../db/repositories/vip'
@@ -38,6 +38,22 @@ import { downsample24to8, upsample8to16 } from './resample'
 // (gerçek audio yerine sessizlik frame'i geçer); böylece Gemini'nin VAD timing'i
 // bozulmaz.
 const PHONE_FRAME_MS = 20
+const RAG_BOOTSTRAP_TIMEOUT_MS = 2_500
+const SESSION_CONNECT_TIMEOUT_MS = 20_000
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} (${timeoutMs}ms)`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 function computeRmsInt16(pcm: Buffer): number {
   const samples = pcm.length >> 1
@@ -480,7 +496,11 @@ ${isOwnerCall
             const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
               (async () => {
                 try {
-                  const preWarmEmbedding = await getPreWarmEmbedding()
+                  const preWarmEmbedding = await withTimeout(
+                    getPreWarmEmbedding(),
+                    RAG_BOOTSTRAP_TIMEOUT_MS,
+                    'RAG başlangıç zaman aşımı',
+                  )
                   const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
                   // Telefon görüşmesinde akış dışı/eğlence belgeleri Flow Builder
                   // kuralını gevşetmemeli. Klinik bilgi belgeleri korunur.
@@ -557,8 +577,6 @@ ${isOwnerCall
             if (minimalGreetingEndFlow) {
               console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
             }
-
-            const SESSION_CONNECT_TIMEOUT_MS = 10_000
 
             const session = await Promise.race([
               createLiveSession(
