@@ -36,7 +36,17 @@ interface ConditionData {
   operator: 'equals' | 'contains' | 'notEmpty'
   conditionValue: string
 }
-interface ActionData { [key: string]: unknown; label: string; action: string; message?: string; webhookUrl?: string; transferNumber?: string }
+interface ActionData {
+  [key: string]: unknown
+  label: string
+  action: string
+  message?: string
+  webhookUrl?: string
+  transferNumber?: string
+  triggerKeywords?: string
+  requireConfirmation?: boolean
+  confirmationQuestion?: string
+}
 interface StartData { [key: string]: unknown; label: string }
 interface EndData { [key: string]: unknown; label: string }
 
@@ -124,7 +134,7 @@ function ActionNode({ data }: { data: ActionData }) {
     'save_patient_note': '🗒️ Hastadan Not Al (Bankoya İlet)',
     'webhook': '🔗 Dış Sisteme Gönder (Webhook)',
     'end_call': '👋 Bilgi Ver ve Bitir',
-    'transfer_call': '📞 Aramayı Aktar (Akıllı Beklemeli)',
+    'transfer_call': '📞 Aramayı Aktar',
     'send_wa_location': '📍 Arayana WhatsApp’tan Konum Gönder',
   }
   const displayLabel = labelMap[data.action] || data.label || '⚡ İşlem'
@@ -132,6 +142,11 @@ function ActionNode({ data }: { data: ActionData }) {
     <div style={{ padding: '10px 20px', borderRadius: 10, background: 'var(--flow-node-action)', border: '1px solid var(--flow-node-action-border)', minWidth: 180, textAlign: 'center' }}>
       <Handle type="target" position={Position.Top} style={{ background: 'var(--flow-node-action-border)' }} />
       <div style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa' }}>{displayLabel}</div>
+      {data.action === 'transfer_call' && (
+        <div style={{ marginTop: 4, fontSize: 9, color: 'var(--flow-text-muted)' }}>
+          {data.requireConfirmation !== false ? '✓ Onay alınır' : '⚡ Doğrudan aktarılır'}
+        </div>
+      )}
       <Handle type="source" position={Position.Bottom} style={{ background: 'var(--flow-node-action-border)' }} />
     </div>
   )
@@ -630,7 +645,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   <select value={d.action || ''} onChange={e => {
                     const action = e.target.value
                     updateSelectedNode({ action, label: e.target.options[e.target.selectedIndex].text,
-                      ...(action === 'send_wa_location' && !d.triggerKeywords ? { triggerKeywords: 'konum, adres, yol tarifi, nasıl gelebilirim' } : {}) })
+                      ...(action === 'send_wa_location' && !d.triggerKeywords ? { triggerKeywords: 'konum, adres, yol tarifi, nasıl gelebilirim' } : {}),
+                      ...(action === 'transfer_call' && d.requireConfirmation === undefined ? { requireConfirmation: true } : {}) })
                   }} style={inputStyle}>
                     <option value="">Bir işlem seçin...</option>
                     {isCustomAction && <option value={d.action}>{d.action} (Özel İşlem)</option>}
@@ -643,7 +659,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                     ) : (
                       <>
                         <option value="end_call">👋 Sadece Bilgi Ver ve Görüşmeyi Bitir</option>
-                        <option value="transfer_call">📞 Aramayı Aktar (Akıllı Beklemeli)</option>
+                        <option value="transfer_call">📞 Aramayı Aktar</option>
                         <option value="send_wa_location">📍 Arayana WhatsApp’tan Konum Gönder</option>
                       </>
                     )}
@@ -732,9 +748,32 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                         style={inputStyle} 
                       />
                       <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
-                        Müşteri akışın herhangi bir yerinde bu kelimeleri söylerse aktarım otomatik tetiklenir.
+                        Virgülle ayırabilirsiniz. Müşteri akışın herhangi bir yerinde bu ifadelerden birini söylerse bu düğüm tetiklenir.
                       </div>
                     </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 9, padding: 10, background: 'var(--flow-node-action)', border: '1px solid var(--flow-node-action-border)', borderRadius: 8, color: 'var(--foreground)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={d.requireConfirmation !== false}
+                        onChange={e => updateSelectedNode({ requireConfirmation: e.target.checked })}
+                        style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: 'pointer' }}
+                      />
+                      Aktarmadan önce kullanıcıdan onay iste
+                    </label>
+                    {d.requireConfirmation !== false && (
+                      <div>
+                        <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Onay Sorusu (Opsiyonel)</label>
+                        <input
+                          value={d.confirmationQuestion || ''}
+                          onChange={e => updateSelectedNode({ confirmationQuestion: e.target.value })}
+                          placeholder="Örn: İl Sağlık mı dediniz?"
+                          style={inputStyle}
+                        />
+                        <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 4 }}>
+                          Boş bırakırsanız eşleşen anahtar kelimeden otomatik kısa bir soru oluşturulur.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

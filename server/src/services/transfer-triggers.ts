@@ -1,7 +1,10 @@
 export interface AutomaticTransferRule {
+  id: string
   keyword: string
   normalizedKeyword: string
   target: string
+  requiresConfirmation: boolean
+  confirmationQuestion?: string
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -19,29 +22,66 @@ export function normalizeTransferText(value: string): string {
     .replace(/\s+/g, ' ')
 }
 
+function questionSuffix(value: string): 'mı' | 'mi' | 'mu' | 'mü' {
+  const vowels = value.toLocaleLowerCase('tr-TR').match(/[aeıioöuü]/g)
+  const lastVowel = vowels?.at(-1)
+  if (lastVowel === 'e' || lastVowel === 'i') return 'mi'
+  if (lastVowel === 'o' || lastVowel === 'u') return 'mu'
+  if (lastVowel === 'ö' || lastVowel === 'ü') return 'mü'
+  return 'mı'
+}
+
+/** Use the optional node text, otherwise create a short Turkish confirmation question. */
+export function getTransferConfirmationQuestion(
+  rule: Pick<AutomaticTransferRule, 'keyword' | 'target' | 'confirmationQuestion'>,
+): string {
+  const customQuestion = rule.confirmationQuestion?.trim()
+  if (customQuestion) return customQuestion
+
+  const subject = (rule.keyword || rule.target).trim()
+  if (!subject) return 'Aramayı aktarmamı onaylıyor musunuz?'
+  const label = subject.charAt(0).toLocaleUpperCase('tr-TR') + subject.slice(1)
+  return `${label} ${questionSuffix(subject)} dediniz?`
+}
+
 /** Build deterministic transfer rules from the active tenant's Flow Builder nodes. */
 export function buildAutomaticTransferRules(nodes: unknown): AutomaticTransferRule[] {
   if (!Array.isArray(nodes)) return []
   const rules: AutomaticTransferRule[] = []
   const seen = new Set<string>()
 
-  for (const rawNode of nodes) {
+  for (const [nodeIndex, rawNode] of nodes.entries()) {
     const node = asRecord(rawNode)
     const data = asRecord(node?.data)
     if (node?.type !== 'ACTION' || data?.action !== 'transfer_call') continue
 
     const target = typeof data.transferNumber === 'string' ? data.transferNumber.trim() : ''
     const rawKeywords = typeof data.triggerKeywords === 'string' ? data.triggerKeywords : ''
-    if (!target || !rawKeywords.trim()) continue
+    if (!target) continue
 
-    for (const rawKeyword of rawKeywords.split(/[,;|\n]+/)) {
+    // Undefined means enabled so transfer nodes saved before this option was
+    // introduced keep the safer, confirmation-first behaviour.
+    const requiresConfirmation = data.requireConfirmation !== false
+    const confirmationQuestion = typeof data.confirmationQuestion === 'string'
+      ? data.confirmationQuestion.trim() || undefined
+      : undefined
+    const nodeId = typeof node.id === 'string' && node.id.trim() ? node.id.trim() : `transfer-${nodeIndex}`
+    const rawKeywordList = rawKeywords.trim() ? rawKeywords.split(/[,;|\n]+/) : ['']
+
+    for (const rawKeyword of rawKeywordList) {
       const keyword = rawKeyword.trim()
       const normalizedKeyword = normalizeTransferText(keyword)
-      if (!normalizedKeyword) continue
       const identity = `${target}\u0000${normalizedKeyword}`
       if (seen.has(identity)) continue
       seen.add(identity)
-      rules.push({ keyword, normalizedKeyword, target })
+      rules.push({
+        id: nodeId,
+        keyword,
+        normalizedKeyword,
+        target,
+        requiresConfirmation,
+        confirmationQuestion,
+      })
     }
   }
 
@@ -55,19 +95,41 @@ export function findAutomaticTransferRule(
   const normalizedTranscript = normalizeTransferText(transcript)
   if (!normalizedTranscript) return null
   const haystack = ` ${normalizedTranscript} `
-  return rules.find(rule => haystack.includes(` ${rule.normalizedKeyword} `)) ?? null
+  return rules.find(rule => rule.normalizedKeyword && haystack.includes(` ${rule.normalizedKeyword} `)) ?? null
 }
 
-/** "sağlık" gibi eksik ASR çıktısını İl Sağlık kuralına yönlendirir; aktarımı başlatmaz. */
-export function findHealthTransferConfirmationRule(
+/**
+ * If ASR returns only one distinctive word from a multi-word keyword, allow
+ * it to start the configured confirmation flow. Direct-transfer rules never
+ * use this fuzzy path, so an incomplete transcription cannot redirect a call.
+ */
+export function findTransferConfirmationCandidate(
   transcript: string,
   rules: readonly AutomaticTransferRule[],
 ): AutomaticTransferRule | null {
   const normalizedTranscript = normalizeTransferText(transcript)
-  const exact = findAutomaticTransferRule(transcript, rules)
-  if (exact?.normalizedKeyword.includes('saglik')) return exact
-  if (normalizedTranscript !== 'saglik') return null
-  return rules.find(rule => /^(?:il|iyi) saglik$/.test(rule.normalizedKeyword)) ?? null
+  if (!normalizedTranscript || normalizedTranscript.includes(' ') || normalizedTranscript.length < 4) return null
+
+  const candidates = rules.filter(rule =>
+    rule.requiresConfirmation
+    && rule.normalizedKeyword.split(' ').includes(normalizedTranscript),
+  )
+  const uniqueRuleIds = new Set(candidates.map(rule => rule.id))
+  return uniqueRuleIds.size === 1 ? candidates[0] : null
+}
+
+/** Resolve which configured node governs a model-initiated transfer tool call. */
+export function findTransferRuleForRequest(
+  target: string,
+  reason: string,
+  rules: readonly AutomaticTransferRule[],
+): AutomaticTransferRule | null {
+  const reasonMatch = findAutomaticTransferRule(reason, rules)
+  if (reasonMatch) return reasonMatch
+
+  const normalizedTarget = normalizeTransferText(target)
+  const targetRules = rules.filter(rule => normalizeTransferText(rule.target) === normalizedTarget)
+  return targetRules.find(rule => rule.requiresConfirmation) ?? targetRules[0] ?? null
 }
 
 export type TransferConfirmation = 'affirmative' | 'negative' | 'unknown'

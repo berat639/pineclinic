@@ -23,8 +23,9 @@ import { TOOL_DESCRIPTIONS, TOOL_PARAM_DESCRIPTIONS, getDefaultToolDescription }
 import {
   classifyTransferConfirmation,
   findAutomaticTransferRule,
-  findHealthTransferConfirmationRule,
-  normalizeTransferText,
+  findTransferConfirmationCandidate,
+  findTransferRuleForRequest,
+  getTransferConfirmationQuestion,
   type AutomaticTransferRule,
 } from './services/transfer-triggers'
 
@@ -84,8 +85,13 @@ export async function createLiveSession(
   let automaticTransferStarted = false
   let automaticTransferTranscript = ''
   let transferConfirmationTranscript = ''
-  let healthTransferConfirmed = false
-  let pendingTransferConfirmation: { target: string; reason: string } | null = null
+  let confirmedTransferRuleId: string | null = null
+  let pendingTransferConfirmation: {
+    ruleId: string
+    target: string
+    reason: string
+    question: string
+  } | null = null
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
@@ -146,27 +152,37 @@ export async function createLiveSession(
         return { success: true, message: 'Arama aktarımı zaten başlatıldı.' }
       }
 
-      const rawTarget = (args.hedef as string | undefined) || 'resepsiyon'
+      const requestedTarget = (args.hedef as string | undefined) || 'resepsiyon'
       const reason = String(args.sebep || 'Belirtilmedi')
-      const transferText = normalizeTransferText(`${rawTarget} ${reason}`)
+      const configuredRule = findTransferRuleForRequest(
+        requestedTarget,
+        reason,
+        options.automaticTransferRules || [],
+      )
+      // A configured Flow Builder node is authoritative; do not let a model
+      // generated tool argument redirect to a different number.
+      const rawTarget = configuredRule?.target || requestedTarget
 
-      if (transferText.includes('saglik') && !healthTransferConfirmed) {
+      if (configuredRule?.requiresConfirmation && confirmedTransferRuleId !== configuredRule.id) {
+        const question = getTransferConfirmationQuestion(configuredRule)
         pendingTransferConfirmation = {
+          ruleId: configuredRule.id,
           target: rawTarget,
           reason,
+          question,
         }
         transferConfirmationTranscript = ''
         automaticTransferStarted = true
-        console.log(`[aramaAktar] İl Sağlık aktarımı açık onay bekliyor -> ${rawTarget}`)
+        console.log(`[aramaAktar] Dinamik aktarım onay bekliyor: "${configuredRule.keyword || configuredRule.target}" -> ${rawTarget}`)
         return {
           success: false,
           confirmationRequired: true,
-          message: 'Aktarım henüz yapılmadı. Kullanıcıya yalnızca "İl Sağlık mı dediniz?" diye sor ve cevabını bekle. Açıkça evet demeden aramaAktar aracını tekrar çağırma.',
+          message: `Aktarım henüz yapılmadı. Kullanıcıya yalnızca ${JSON.stringify(question)} diye sor ve cevabını bekle. Açıkça olumlu cevap vermeden aramaAktar aracını tekrar çağırma.`,
         }
       }
 
       transferAttempted = true
-      healthTransferConfirmed = false
+      confirmedTransferRuleId = null
       pendingTransferConfirmation = null
       const targetKey = rawTarget.toLowerCase().trim()
       console.log(`[aramaAktar] Hedef: ${targetKey}, Sebep: ${reason}`)
@@ -664,9 +680,9 @@ export async function createLiveSession(
               const pending = pendingTransferConfirmation
               pendingTransferConfirmation = null
               transferConfirmationTranscript = ''
-              healthTransferConfirmed = true
+              confirmedTransferRuleId = pending.ruleId
               confirmationHandled = true
-              console.log(`[aramaAktar] İl Sağlık aktarımı kullanıcı tarafından onaylandı -> ${pending.target}`)
+              console.log(`[aramaAktar] Dinamik aktarım kullanıcı tarafından onaylandı -> ${pending.target}`)
 
               const invokeTransfer = () => handleTool('aramaAktar', {
                 hedef: pending.target,
@@ -679,9 +695,10 @@ export async function createLiveSession(
                 if (!result.success) console.error('[aramaAktar] Onaylı aktarım başarısız:', result.message)
               }).catch(err => console.error('[aramaAktar] Onaylı aktarım hatası:', err))
             } else if (confirmation === 'negative') {
-              console.log('[aramaAktar] İl Sağlık aktarımı kullanıcı tarafından reddedildi')
+              console.log('[aramaAktar] Dinamik aktarım kullanıcı tarafından reddedildi')
               pendingTransferConfirmation = null
               transferConfirmationTranscript = ''
+              confirmedTransferRuleId = null
               automaticTransferTranscript = ''
               automaticTransferStarted = false
               confirmationHandled = true
@@ -694,17 +711,23 @@ export async function createLiveSession(
           if (!confirmationHandled && !automaticTransferStarted && options.automaticTransferRules?.length) {
             automaticTransferTranscript = `${automaticTransferTranscript} ${transcript}`.trim().slice(-500)
             const exactRule = findAutomaticTransferRule(automaticTransferTranscript, options.automaticTransferRules)
-            const healthRule = findHealthTransferConfirmationRule(automaticTransferTranscript, options.automaticTransferRules)
-            const rule = exactRule ?? healthRule
+            const confirmationCandidate = findTransferConfirmationCandidate(
+              automaticTransferTranscript,
+              options.automaticTransferRules,
+            )
+            const rule = exactRule ?? confirmationCandidate
             if (rule) {
               automaticTransferStarted = true
-              if (rule.normalizedKeyword.includes('saglik')) {
+              if (rule.requiresConfirmation) {
+                const question = getTransferConfirmationQuestion(rule)
                 pendingTransferConfirmation = {
+                  ruleId: rule.id,
                   target: rule.target,
                   reason: `Otomatik anahtar kelime: ${rule.keyword}`,
+                  question,
                 }
                 transferConfirmationTranscript = ''
-                console.log(`[aramaAktar] İl Sağlık adayı algılandı: "${transcript.trim()}" — kullanıcı onayı bekleniyor`)
+                console.log(`[aramaAktar] Dinamik anahtar kelime eşleşti: "${rule.keyword}" — kullanıcı onayı bekleniyor`)
               } else {
                 console.log(`[aramaAktar] Otomatik anahtar kelime eşleşti: "${rule.keyword}" -> ${rule.target}`)
                 const invokeTransfer = () => handleTool('aramaAktar', {

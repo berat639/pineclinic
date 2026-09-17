@@ -2,6 +2,7 @@ import { and, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '../client'
 import { conversationFlows } from '../schema'
 import { requireClinicId } from '../../tenancy/context'
+import { getTransferConfirmationQuestion } from '../../services/transfer-triggers'
 
 export interface FlowNode {
   id: string
@@ -13,14 +14,20 @@ export interface FlowNode {
     fieldName?: string
     description?: string
     required?: boolean
-    fieldType?: 'text' | 'date' | 'time' | 'enum'
+    fieldType?: 'text' | 'date' | 'time' | 'enum' | 'user'
     enumValues?: string[]
     // CONDITION node
     conditionField?: string
     operator?: 'equals' | 'contains' | 'notEmpty'
     conditionValue?: string
     // ACTION node
-    action?: 'randevuOlustur' | 'searchKnowledgeBase'
+    action?: string
+    message?: string
+    webhookUrl?: string
+    transferNumber?: string
+    triggerKeywords?: string
+    requireConfirmation?: boolean
+    confirmationQuestion?: string
   }
 }
 
@@ -40,6 +47,26 @@ export interface ConversationFlow {
   isActive: boolean
   createdAt: string
   updatedAt: string
+}
+
+function getTransferPromptConfig(data: Record<string, unknown>) {
+  const target = String(data.transferNumber || '')
+  const keywords = String(data.triggerKeywords || '')
+  const keywordList = keywords.split(/[,;|\n]+/).map(value => value.trim()).filter(Boolean)
+  const requiresConfirmation = data.requireConfirmation !== false
+  const confirmationQuestion = typeof data.confirmationQuestion === 'string'
+    ? data.confirmationQuestion.trim()
+    : ''
+
+  const questionInstruction = confirmationQuestion
+    ? `yalnızca ${JSON.stringify(confirmationQuestion)} diye sor`
+    : keywordList.length > 0
+      ? `eşleşen ifadeye ait şu soruyu sor: ${keywordList.map(keyword =>
+          `${JSON.stringify(keyword)} için ${JSON.stringify(getTransferConfirmationQuestion({ keyword, target }))}`,
+        ).join('; ')}`
+      : `yalnızca ${JSON.stringify(getTransferConfirmationQuestion({ keyword: '', target }))} diye sor`
+
+  return { target, keywords, requiresConfirmation, questionInstruction }
 }
 
 function toIso(d: Date | null | undefined): string {
@@ -222,11 +249,15 @@ export function flowToPromptText(flow: ConversationFlow): string {
         return
       }
       case 'ACTION': {
-        const act = (node.data as Record<string, unknown>).action
-        const target = (node.data as Record<string, unknown>).transferNumber || ''
-        const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
+        const actionData = node.data as Record<string, unknown>
+        const act = actionData.action
         if (act === 'transfer_call') {
-          lines.push(`${prefix}${step}. ARAMAYI AKTAR: ŞU AN aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Müşteri "${keywords}" kelimelerini söylerse de derhal aktar.` : ''}`)
+          const { target, keywords, requiresConfirmation, questionInstruction } = getTransferPromptConfig(actionData)
+          if (requiresConfirmation) {
+            lines.push(`${prefix}${step}. ARAMAYI ONAYLA VE AKTAR: Önce kullanıcıya ${questionInstruction}. Açık bir olumlu cevap gelmeden aramaAktar aracını çağırma veya aktardığını söyleme. Kullanıcı onaylarsa aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Bu kural "${keywords}" tetikleyici ifadeleri için geçerlidir.` : ''}`)
+          } else {
+            lines.push(`${prefix}${step}. ARAMAYI AKTAR: ŞU AN aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Müşteri "${keywords}" ifadelerinden birini söylerse de derhal aktar.` : ''}`)
+          }
         } else if (act === 'send_wa_message') {
           const message = (node.data as Record<string, unknown>).message || ''
           lines.push(`${prefix}${step}. WHATSAPP YANITI: Kullanıcıya şu mesajı yanıt olarak yaz: ${JSON.stringify(message)}. Bu adımda randevu oluşturma.`)
@@ -264,15 +295,21 @@ export function flowToPromptText(flow: ConversationFlow): string {
   if (globalActions.length > 0) {
     lines.push('\n⚡ GLOBAL TETİKLEYİCİLER (Görüşmenin HERHANGİ bir anında geçerlidir):')
     for (const node of globalActions) {
-      const act = (node.data as Record<string, unknown>).action
-      const target = (node.data as Record<string, unknown>).transferNumber || ''
-      const keywords = (node.data as Record<string, unknown>).triggerKeywords || ''
+      const actionData = node.data as Record<string, unknown>
+      const act = actionData.action
       
       if (act === 'transfer_call') {
-        lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya ima ederse, akışı derhal kesip aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
+        const { target, keywords, requiresConfirmation, questionInstruction } = getTransferPromptConfig(actionData)
+        if (requiresConfirmation) {
+          lines.push(`- Eğer müşteri "${keywords}" ifadelerinden birini kullanır veya bu ifadelerden belirgin bir parça söylerse, akışı kes ve ${questionInstruction}. Açıkça olumlu cevap gelmeden aramaAktar aracını çağırma veya aktardığını söyleme. Onay gelince aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
+        } else {
+          lines.push(`- Eğer müşteri "${keywords}" ifadelerinden birini kullanırsa, akışı derhal kesip aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
+        }
       } else if (act === 'send_wa_location') {
+        const keywords = String(actionData.triggerKeywords || '')
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya konum/adres/yol tarifi isterse, akışı derhal kesip whatsappKonumGonder aracını çağır. Başarılı sonuçtan sonra konumu WhatsApp'tan gönderdiğini söyle.`)
       } else if (act === 'end_call') {
+        const keywords = String(actionData.triggerKeywords || '')
         const msg = (node.data as Record<string, unknown>).message || ''
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanırsa, akışı derhal kesip cagriySonlandir() aracını çağır. ${msg ? `Öncesinde "${msg}" de.` : ''}`)
       }
