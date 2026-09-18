@@ -52,7 +52,6 @@ export const appointments = pgTable('appointments', {
   issueOrRequest: text('issue_or_request'),
   date: text('date').notNull().default(''),
   time: text('time').notNull().default(''),
-  ataHsysId: text('ata_hsys_id'),
   discountRequested: boolean('discount_requested').default(false),
   notes: text('notes'),
   extraFields: text('extra_fields'),
@@ -208,6 +207,20 @@ export const dentalAppointments = pgTable('dental_appointments', {
   complaint: text('complaint'),
   notes: text('notes'),
   timeConfirmed: boolean('time_confirmed').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const doctorLeaves = pgTable('doctor_leaves', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').references(() => clinics.id, { onDelete: 'cascade' }),
+  doctorId: uuid('doctor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: text('date').notNull(), // 'YYYY-MM-DD'
+  startTime: text('start_time').notNull(), // 'HH:mm'
+  endTime: text('end_time').notNull(), // 'HH:mm'
+  isFullDay: boolean('is_full_day').notNull().default(false),
+  reason: text('reason'), // 'Yıllık İzin', 'Mazeret', 'Seminer' vb.
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -667,3 +680,5 @@ export type PatientNote = typeof patientNotes.$inferSelect
 export type NewPatientNote = typeof patientNotes.$inferInsert
 export type VipAssistant = typeof vipAssistants.$inferSelect
 export type NewVipAssistant = typeof vipAssistants.$inferInsert
+export type DoctorLeave = typeof doctorLeaves.$inferSelect
+export type NewDoctorLeave = typeof doctorLeaves.$inferInsert

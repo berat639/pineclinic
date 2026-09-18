@@ -2,9 +2,11 @@
 import React, { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { toast } from 'react-hot-toast'
+import { Trash2, X, AlertCircle } from 'lucide-react'
 import PatientProfileCard from './PatientProfileCard'
 import Pagination from './Pagination'
 import AddPatientModal from './AddPatientModal'
+import ConfirmModal from './ConfirmModal'
 
 interface Patient {
   id: string
@@ -16,6 +18,23 @@ interface Patient {
   birthDate: string | null
   balance: number
   createdAt: string
+  smsOptOut?: boolean
+  emailOptOut?: boolean
+  whatsappOptOut?: boolean
+}
+
+// Split full name into first name and last name
+export const splitFullName = (fullName: string | null | undefined): { firstName: string, lastName: string } => {
+  if (!fullName) return { firstName: '—', lastName: '' }
+  const clean = fullName.trim()
+  const lastSpaceIndex = clean.lastIndexOf(' ')
+  if (lastSpaceIndex === -1) {
+    return { firstName: clean, lastName: '' }
+  }
+  return {
+    firstName: clean.slice(0, lastSpaceIndex).trim(),
+    lastName: clean.slice(lastSpaceIndex + 1).trim()
+  }
 }
 
 export default function PatientsTab() {
@@ -26,8 +45,58 @@ export default function PatientsTab() {
   const [profileData, setProfileData] = useState<any>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   
+  // Selection for bulk delete
+  const [selectedPatientIds, setSelectedPatientIds] = useState<string[]>([])
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false)
+
+  // Confirm Modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    confirmText?: string
+    variant?: 'danger' | 'warning' | 'primary'
+    onConfirm: () => void
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Evet, Sil',
+    variant: 'danger',
+    onConfirm: () => {}
+  })
+
   const [showAddModal, setShowAddModal] = useState(false)
   const [excelErrors, setExcelErrors] = useState<string[]>([])
+  const [showAllErrors, setShowAllErrors] = useState(false)
+
+  // Edit patient modal state
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null)
+  const [editFormData, setEditFormData] = useState<{
+    firstName: string
+    lastName: string
+    name: string
+    phone: string
+    email: string
+    tcIdentity: string
+    gender: string
+    birthDate: string
+    smsOptOut: boolean
+    emailOptOut: boolean
+    whatsappOptOut: boolean
+  }>({
+    firstName: '',
+    lastName: '',
+    name: '',
+    phone: '',
+    email: '',
+    tcIdentity: '',
+    gender: '',
+    birthDate: '',
+    smsOptOut: false,
+    emailOptOut: false,
+    whatsappOptOut: false
+  })
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -127,24 +196,36 @@ export default function PatientsTab() {
         const data = XLSX.utils.sheet_to_json(ws, { defval: null }) as any[]
         
         setExcelErrors([])
+        setShowAllErrors(false)
         const errors: string[] = []
         const mappedPatients: any[] = []
 
         data.forEach((row, index) => {
-          // Entirely blank rows are skipped silently without generating errors
+          // Entirely blank rows are skipped silently
           if (isRowEmpty(row)) return
 
-          const rawName = findRowValue(row, [
-            'AD SOYAD', 'Ad Soyad', 'Adı Soyadı', 'Hasta Adı', 'Hasta Adı Soyadı',
-            'Ad', 'İsim', 'Name', 'FullName', 'hastaAdiSoyadi'
+          // 1. Separate First Name and Last Name candidate keys
+          const rawFirstName = findRowValue(row, [
+            'AD', 'Ad', 'Adı', 'Adi', 'FirstName', 'First Name', 'İsim', 'Isim'
           ])
-          const name = rawName ? String(rawName).trim() : ''
+          const rawLastName = findRowValue(row, [
+            'SOYAD', 'Soyad', 'Soyadı', 'Soyadi', 'LastName', 'Last Name'
+          ])
+          const rawFullName = findRowValue(row, [
+            'AD SOYAD', 'Ad Soyad', 'Adı Soyadı', 'Hasta Adı', 'Hasta Adı Soyadı',
+            'FullName', 'hastaAdiSoyadi'
+          ])
 
-          if (!name || name === '—' || name === '-' || name.toLowerCase() === 'null') {
-            errors.push(`${index + 2}. Satır: Ad Soyad eksik`)
-            return
+          let name = ''
+          if (rawFirstName || rawLastName) {
+            const f = rawFirstName ? String(rawFirstName).trim() : ''
+            const l = rawLastName ? String(rawLastName).trim() : ''
+            name = `${f} ${l}`.trim()
+          } else if (rawFullName) {
+            name = String(rawFullName).trim()
           }
 
+          // Other fields
           const rawPhone = findRowValue(row, [
             'TELEFON', 'Telefon', 'Telefon No', 'Tel', 'GSM', 'Cep', 'Phone', 'Mobile', 'hastaTelefonu'
           ])
@@ -156,6 +237,12 @@ export default function PatientsTab() {
           ])
           const tcStr = rawTc ? String(rawTc).trim() : ''
           const tcIdentity = (tcStr && tcStr !== '—' && tcStr !== '-' && tcStr.toLowerCase() !== 'null') ? tcStr : null
+
+          const rawEmail = findRowValue(row, [
+            'E-POSTA', 'Eposta', 'E-Posta', 'Email', 'E-mail', 'Mail'
+          ])
+          const emailStr = rawEmail ? String(rawEmail).trim() : ''
+          const email = (emailStr && emailStr !== '—' && emailStr !== '-' && emailStr.toLowerCase() !== 'null') ? emailStr : null
 
           const rawGender = findRowValue(row, [
             'CİNSİYET', 'Cinsiyet', 'Cinsiyeti', 'Gender'
@@ -178,10 +265,23 @@ export default function PatientsTab() {
           ])
           const createdAt = parseSafeDate(rawCreatedAt)
 
+          // CRITICAL EMPTY CHECK:
+          // If there is no name:
+          if (!name || name === '—' || name === '-' || name.toLowerCase() === 'null') {
+            // Only report error if the row has some other meaningful data (phone, tc, email, birthDate)
+            const hasOtherData = Boolean(phone || tcIdentity || email || birthDate)
+            if (hasOtherData) {
+              errors.push(`${index + 2}. Satır: İletişim/Kimlik bilgisi var ancak Ad Soyad eksik`)
+            }
+            // If the row has no name AND no other data, it is just trailing Excel blank rows: skip silently!
+            return
+          }
+
           mappedPatients.push({
             name,
             phone,
             tcIdentity,
+            email,
             gender,
             birthDate,
             ...(createdAt ? { createdAt } : {})
@@ -191,7 +291,7 @@ export default function PatientsTab() {
         setExcelErrors(errors)
 
         if (mappedPatients.length === 0) {
-          toast.error('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "AD SOYAD" sütununun dolu olduğundan emin olun.')
+          toast.error('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "AD" veya "AD SOYAD" sütununu kontrol edin.')
           return
         }
 
@@ -202,7 +302,18 @@ export default function PatientsTab() {
         })
 
         if (res.ok) {
-          toast.success(`${mappedPatients.length} hasta başarıyla eklendi!`)
+          const result = await res.json()
+          const ins = result?.insertedCount ?? mappedPatients.length
+          const upd = result?.updatedCount ?? 0
+          if (ins > 0 && upd > 0) {
+            toast.success(`${ins} yeni hasta eklendi, ${upd} mevcut hastanın eksik bilgileri güncellendi!`)
+          } else if (ins > 0) {
+            toast.success(`${ins} yeni hasta başarıyla eklendi!`)
+          } else if (upd > 0) {
+            toast.success(`${upd} mevcut hastanın eksik bilgileri güncellendi (mükerrer kopya eklenmedi).`)
+          } else {
+            toast.success('Kayıtlar incelendi; tüm hastalar zaten güncel olarak mevcut.')
+          }
           loadPatients()
         } else {
           const err = await res.json()
@@ -218,37 +329,54 @@ export default function PatientsTab() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  // Genel kliniklere uygun Excel şablonu indirme
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
       {
-        'AD SOYAD': 'Sergen Güney',
+        'AD': 'Sergen',
+        'SOYAD': 'Güney',
         'TC KİMLİK': '',
         'TELEFON': '05076652367',
         'CİNSİYET': '',
         'DOĞUM TARİHİ': '',
+        'E-POSTA': '',
         'KAYIT': '18.09.2026'
       },
       {
-        'AD SOYAD': 'Ahmet Yılmaz',
+        'AD': 'Ahmet',
+        'SOYAD': 'Yılmaz',
         'TC KİMLİK': '12345678901',
         'TELEFON': '05321234567',
         'CİNSİYET': 'Erkek',
-        'DOĞUM TARİHİ': '1990-05-15',
-        'KAYIT': ''
+        'DOĞUM TARİHİ': '15.05.1990',
+        'E-POSTA': 'ahmet@klinik.com',
+        'KAYIT': '18.09.2026'
+      },
+      {
+        'AD': 'Ayşe',
+        'SOYAD': 'Demir',
+        'TC KİMLİK': '98765432109',
+        'TELEFON': '05051234567',
+        'CİNSİYET': 'Kadın',
+        'DOĞUM TARİHİ': '22.11.1985',
+        'E-POSTA': 'ayse@klinik.com',
+        'KAYIT': '18.09.2026'
       }
     ])
-    // Column widths matching headers
+    // Column widths
     ws['!cols'] = [
-      { wch: 24 }, // AD SOYAD
-      { wch: 18 }, // TC KİMLİK
-      { wch: 18 }, // TELEFON
-      { wch: 14 }, // CİNSİYET
-      { wch: 18 }, // DOĞUM TARİHİ
-      { wch: 18 }  // KAYIT
+      { wch: 18 }, // AD
+      { wch: 18 }, // SOYAD
+      { wch: 16 }, // TC KİMLİK
+      { wch: 16 }, // TELEFON
+      { wch: 12 }, // CİNSİYET
+      { wch: 14 }, // DOĞUM TARİHİ
+      { wch: 22 }, // E-POSTA
+      { wch: 14 }  // KAYIT
     ]
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Hasta_Sablon')
-    XLSX.writeFile(wb, 'Hasta_Sablon.xlsx')
+    XLSX.utils.book_append_sheet(wb, ws, 'Klinik_Hasta_Sablon')
+    XLSX.writeFile(wb, 'Genel_Klinik_Hasta_Sablonu.xlsx')
   }
 
   useEffect(() => {
@@ -269,31 +397,82 @@ export default function PatientsTab() {
     }
   }, [selectedPatientId])
 
-
-
   const filtered = patients.filter(p => {
-    const term = searchTerm.toLowerCase()
+    const q = searchTerm.toLowerCase()
     return (
-      (p.name && p.name.toLowerCase().includes(term)) ||
-      (p.phone && p.phone.toLowerCase().includes(term)) ||
-      (p.tcIdentity && p.tcIdentity.toLowerCase().includes(term))
+      (p.name && p.name.toLowerCase().includes(q)) ||
+      (p.phone && p.phone.includes(q)) ||
+      (p.tcIdentity && p.tcIdentity.includes(q)) ||
+      (p.email && p.email.toLowerCase().includes(q))
     )
   })
 
-  const totalPages = Math.ceil(filtered.length / pageSize)
+  // Pagination logic
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1
   const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
-  const fmtDate = (iso: string | null) => {
-    if (!iso) return '—'
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return '—'
-    return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const fmtDate = (d: any) => {
+    if (!d) return '—'
+    try {
+      const dt = new Date(d)
+      if (isNaN(dt.getTime())) return '—'
+      return dt.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    } catch {
+      return '—'
+    }
   }
 
-  const [editingPatient, setEditingPatient] = useState<any | null>(null)
-  const [editFormData, setEditFormData] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
+  // Selection toggle
+  const toggleSelectPatient = (id: string) => {
+    setSelectedPatientIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    )
+  }
 
-  const handleOpenEditModal = (p: any) => {
+  const toggleSelectAll = () => {
+    const pageIds = paginated.map(p => p.id)
+    const isAllSelected = pageIds.every(id => selectedPatientIds.includes(id))
+    if (isAllSelected) {
+      setSelectedPatientIds(prev => prev.filter(id => !pageIds.includes(id)))
+    } else {
+      setSelectedPatientIds(prev => Array.from(new Set([...prev, ...pageIds])))
+    }
+  }
+
+  // Toplu silme işlemi
+  const handleBulkDelete = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return
+    setIsDeletingBulk(true)
+    try {
+      const res = await fetch('/api/dental/patients/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientIds: ids })
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        toast.success(`${data.deletedCount || ids.length} hasta başarıyla silindi.`)
+        setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
+        loadPatients()
+        if (selectedPatientId && ids.includes(selectedPatientId)) {
+          setSelectedPatientId(null)
+          setProfileData(null)
+        }
+      } else {
+        const err = await res.json().catch(() => ({}))
+        toast.error('Hata: ' + (err.error || 'Silme işlemi yapılamadı'))
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Hastalar silinirken hata oluştu.')
+    } finally {
+      setIsDeletingBulk(false)
+      setConfirmModal(prev => ({ ...prev, isOpen: false }))
+    }
+  }
+
+  const handleOpenEditModal = (p: Patient) => {
     setEditingPatient(p)
     let bDate = ''
     if (p.birthDate) {
@@ -303,7 +482,10 @@ export default function PatientsTab() {
         bDate = String(p.birthDate).slice(0, 10)
       }
     }
+    const { firstName, lastName } = splitFullName(p.name)
     setEditFormData({
+      firstName,
+      lastName,
       name: p.name || '',
       phone: p.phone || '',
       email: p.email || '',
@@ -318,7 +500,8 @@ export default function PatientsTab() {
 
   const handleSaveEditPatient = async () => {
     if (!editingPatient) return
-    if (!editFormData.name.trim()) {
+    const fullName = `${editFormData.firstName.trim()} ${editFormData.lastName.trim()}`.trim()
+    if (!fullName) {
       toast.error('Hasta adı zorunludur.')
       return
     }
@@ -327,7 +510,10 @@ export default function PatientsTab() {
       const res = await fetch(`/api/dental/patients/${editingPatient.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editFormData)
+        body: JSON.stringify({
+          ...editFormData,
+          name: fullName
+        })
       })
 
       if (res.ok) {
@@ -350,10 +536,19 @@ export default function PatientsTab() {
     }
   }
 
+  const isCurrentPageAllSelected = paginated.length > 0 && paginated.every(p => selectedPatientIds.includes(p.id))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingBottom: '2rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>Hastalar Yönetimi</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--foreground, #ffffff)', margin: 0 }}>
+            Hastalar Yönetimi
+          </h2>
+          <span style={{ fontSize: '0.75rem', background: '#334155', color: '#94a3b8', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>
+            {patients.length} kayıt
+          </span>
+        </div>
         
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
@@ -366,22 +561,38 @@ export default function PatientsTab() {
           <button
             onClick={handleDownloadTemplate}
             style={{
-              padding: '8px 14px', background: 'rgba(59, 130, 246, 0.15)',
-              border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: 8,
-              color: '#60a5fa', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6
+              padding: '8px 14px',
+              background: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: 8,
+              color: '#60a5fa',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
             }}
+            title="Genel kliniklere uygun Excel şablonunu indirin"
           >
             ⬇️ Şablon İndir
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             style={{
-              padding: '8px 14px', background: 'rgba(34, 197, 94, 0.15)',
-              border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: 8,
-              color: '#4ade80', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6
+              padding: '8px 14px',
+              background: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: 8,
+              color: '#4ade80',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
             }}
+            title="Excel dosyasından toplu hasta aktarın"
           >
             📊 Excel İçe Aktar
           </button>
@@ -389,10 +600,17 @@ export default function PatientsTab() {
           <button
             onClick={() => setShowAddModal(true)}
             style={{
-              padding: '8px 16px', background: 'var(--brand-color, #2563eb)',
-              border: 'none', borderRadius: 8,
-              color: '#fff', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6
+              padding: '8px 16px',
+              background: '#2563eb',
+              border: 'none',
+              borderRadius: 8,
+              color: '#fff',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
             }}
           >
             ➕ Yeni Hasta Ekle
@@ -400,42 +618,172 @@ export default function PatientsTab() {
 
           <input
             type="text"
-            placeholder="Hasta adı, telefon veya TC Kimlik..."
+            placeholder="Ad, soyad, telefon veya TC Kimlik..."
             value={searchTerm}
             onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1) }}
             style={{
-              padding: '8px 12px', background: 'var(--input-bg, #0f172a)',
-              border: '1px solid var(--input-border, #334155)', borderRadius: 8,
-              color: 'var(--foreground)', fontSize: '0.82rem', outline: 'none',
+              padding: '8px 12px',
+              background: 'var(--input-bg, #0f172a)',
+              border: '1px solid var(--input-border, #334155)',
+              borderRadius: 8,
+              color: 'var(--foreground, #ffffff)',
+              fontSize: '0.82rem',
+              outline: 'none',
               minWidth: 260
             }}
           />
         </div>
       </div>
 
-      {excelErrors.length > 0 && (
-        <div style={{ padding: '1rem', background: '#1e293b', border: '1px solid #ef4444', borderRadius: 8, color: '#f87171' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontWeight: 600 }}>⚠️ Excel Yükleme Hataları (Bu satırlar atlandı):</span>
+      {/* ── Toplu Silme Barı ── */}
+      {selectedPatientIds.length > 0 && (
+        <div style={{
+          padding: '10px 16px',
+          background: '#1e293b',
+          border: '1px solid #ef4444',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
+            <span style={{ color: '#ef4444', fontWeight: 700 }}>✓</span>
+            <span>Toplam <strong>{selectedPatientIds.length}</strong> hasta seçildi.</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               type="button"
-              onClick={() => setExcelErrors([])}
-              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1rem', padding: '0 4px' }}
+              onClick={() => setSelectedPatientIds([])}
+              style={{
+                padding: '6px 12px',
+                background: '#334155',
+                border: '1px solid #475569',
+                borderRadius: 6,
+                color: '#e2e8f0',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Seçimi Temizle
+            </button>
+            <button
+              type="button"
+              disabled={isDeletingBulk}
+              onClick={() => {
+                setConfirmModal({
+                  isOpen: true,
+                  title: 'Toplu Hasta Silme',
+                  message: `Seçilen ${selectedPatientIds.length} hastayı ve bu hastalara ait tüm randevu/tedavi geçmişini kalıcı olarak silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`,
+                  confirmText: `Evet, ${selectedPatientIds.length} Hastayı Sil`,
+                  variant: 'danger',
+                  onConfirm: () => handleBulkDelete(selectedPatientIds)
+                })
+              }}
+              style={{
+                padding: '6px 14px',
+                background: '#dc2626',
+                border: 'none',
+                borderRadius: 6,
+                color: '#ffffff',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: isDeletingBulk ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <Trash2 size={14} />
+              {isDeletingBulk ? 'Siliniyor...' : `Seçilen (${selectedPatientIds.length}) Hastayı Sil`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Kompakt & UX Uyumlu Hata Bildirim Alanı ── */}
+      {excelErrors.length > 0 && (
+        <div style={{
+          padding: '12px 16px',
+          background: '#1e293b',
+          border: '1px solid #334155',
+          borderLeft: '4px solid #ef4444',
+          borderRadius: 8,
+          color: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle size={16} color="#fca5a5" />
+              <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fca5a5' }}>
+                Excel İçe Aktarma Uyarısı:
+              </span>
+              <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>
+                {excelErrors.length} satır eksik bilgi nedeniyle atlandı.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setExcelErrors([]); setShowAllErrors(false); }}
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px', borderRadius: 4 }}
               title="Kapat"
             >
               ✕
             </button>
           </div>
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.85rem' }}>
-            {excelErrors.map((err, i) => <li key={i}>{err}</li>)}
+
+          {/* İlk 5 hata */}
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.8rem', color: '#f87171', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {excelErrors.slice(0, 5).map((err, i) => <li key={i}>{err}</li>)}
           </ul>
+
+          {/* 5'ten fazla hata varsa açılır/kapanır buton */}
+          {excelErrors.length > 5 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowAllErrors(!showAllErrors)}
+                style={{
+                  background: '#334155',
+                  border: 'none',
+                  color: '#e2e8f0',
+                  fontSize: '0.74rem',
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                {showAllErrors ? (
+                  <>▲ Hataları Gizle</>
+                ) : (
+                  <>▼ Kalan {excelErrors.length - 5} Satır Uyarısını Göster</>
+                )}
+              </button>
+
+              {showAllErrors && (
+                <div style={{ maxHeight: 180, overflowY: 'auto', marginTop: 8, padding: '8px 12px', background: '#0f172a', borderRadius: 6, border: '1px solid #334155' }}>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#f87171', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {excelErrors.slice(5).map((err, i) => <li key={i + 5}>{err}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {loading ? (
-        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Yükleniyor...</div>
+        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3, #94a3b8)' }}>Yükleniyor...</div>
       ) : filtered.length === 0 ? (
-        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)', background: 'var(--card-bg, #1e293b)', borderRadius: 12, border: '1px solid var(--input-border, #334155)' }}>
+        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3, #94a3b8)', background: 'var(--card-bg, #1e293b)', borderRadius: 12, border: '1px solid var(--input-border, #334155)' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>📭</div>
           <div>Hasta bulunamadı</div>
         </div>
@@ -447,66 +795,129 @@ export default function PatientsTab() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)' }}>
-                    {['Ad Soyad', 'TC Kimlik', 'Telefon', 'Cinsiyet', 'Doğum Tarihi', 'Kayıt', 'İşlemler'].map((h, i) => (
-                      <th key={i} style={{ padding: '0.8rem 1rem', textAlign: h === 'İşlemler' ? 'right' : 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
+                    <th style={{ padding: '0.8rem 0.5rem 0.8rem 1rem', width: 40, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={isCurrentPageAllSelected}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: 'pointer' }}
+                        title="Sayfadaki tüm hastaları seç/kaldır"
+                      />
+                    </th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Ad</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Soyad</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>TC Kimlik</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Telefon</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Cinsiyet</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Doğum Tarihi</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Kayıt</th>
+                    <th style={{ padding: '0.8rem 1rem', textAlign: 'right', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>İşlemler</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {paginated.map((p, i) => (
-                    <tr
-                      key={p.id}
-                      onClick={() => setSelectedPatientId(selectedPatientId === p.id ? null : p.id)}
-                      style={{
-                        borderBottom: i < paginated.length - 1 ? '1px solid var(--divider, #334155)' : 'none',
-                        cursor: 'pointer',
-                        transition: 'background 0.15s',
-                        background: selectedPatientId === p.id ? 'rgba(59,130,246,0.12)' : 'transparent'
-                      }}
-                    >
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground)' }}>
-                        {p.name}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
-                        {p.tcIdentity || '—'}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
-                        {p.phone || '—'}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
-                        {p.gender === 'E' ? 'Erkek' : p.gender === 'K' ? 'Kadın' : p.gender || '—'}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
-                        {fmtDate(p.birthDate)}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', fontSize: '0.84rem', color: 'var(--foreground-3)' }}>
-                        {fmtDate(p.createdAt)}
-                      </td>
-                      <td style={{ padding: '0.8rem 1rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleOpenEditModal(p)
-                          }}
-                          style={{
-                            padding: '4px 10px',
-                            background: 'rgba(59,130,246,0.15)',
-                            border: '1px solid rgba(59,130,246,0.3)',
-                            borderRadius: 6,
-                            color: '#60a5fa',
-                            fontSize: '0.76rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            marginRight: 8
-                          }}
-                        >
-                          ✏️ Düzenle
-                        </button>
-                        <span style={{ fontSize: '0.78rem', color: '#60a5fa', fontWeight: 500 }}>Detay &rarr;</span>
-                      </td>
-                    </tr>
-                  ))}
+                  {paginated.map((p, i) => {
+                    const { firstName, lastName } = splitFullName(p.name)
+                    const isSelected = selectedPatientIds.includes(p.id)
+
+                    return (
+                      <tr
+                        key={p.id}
+                        onClick={() => setSelectedPatientId(selectedPatientId === p.id ? null : p.id)}
+                        style={{
+                          borderBottom: i < paginated.length - 1 ? '1px solid var(--divider, #334155)' : 'none',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                          background: isSelected 
+                            ? 'rgba(239, 68, 68, 0.12)' 
+                            : selectedPatientId === p.id 
+                              ? 'rgba(59, 130, 246, 0.12)' 
+                              : 'transparent'
+                        }}
+                      >
+                        <td style={{ padding: '0.8rem 0.5rem 0.8rem 1rem', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectPatient(p.id)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>
+                          {firstName}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: '#93c5fd' }}>
+                          {lastName || '—'}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
+                          {p.tcIdentity || '—'}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
+                          {p.phone || '—'}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
+                          {p.gender === 'E' ? 'Erkek' : p.gender === 'K' ? 'Kadın' : p.gender || '—'}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
+                          {fmtDate(p.birthDate)}
+                        </td>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
+                          {fmtDate(p.createdAt)}
+                        </td>
+                        <td style={{ padding: '0.8rem 1rem', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(p)}
+                            style={{
+                              padding: '4px 10px',
+                              background: 'rgba(59,130,246,0.15)',
+                              border: '1px solid rgba(59,130,246,0.3)',
+                              borderRadius: 6,
+                              color: '#60a5fa',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              marginRight: 6
+                            }}
+                          >
+                            ✏️ Düzenle
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmModal({
+                                isOpen: true,
+                                title: 'Hastayı Sil',
+                                message: `"${p.name}" isimli hastayı ve bu hastaya ait tüm geçmiş kayıtları silmek istediğinizden emin misiniz?`,
+                                confirmText: 'Evet, Sil',
+                                variant: 'danger',
+                                onConfirm: () => handleBulkDelete([p.id])
+                              })
+                            }}
+                            style={{
+                              padding: '4px 8px',
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: 6,
+                              color: '#f87171',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              marginRight: 8
+                            }}
+                            title="Hastayı kalıcı olarak sil"
+                          >
+                            <Trash2 size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                          </button>
+                          <span 
+                            onClick={() => setSelectedPatientId(selectedPatientId === p.id ? null : p.id)}
+                            style={{ fontSize: '0.78rem', color: '#60a5fa', fontWeight: 500, cursor: 'pointer' }}
+                          >
+                            Detay &rarr;
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -519,7 +930,7 @@ export default function PatientsTab() {
           {selectedPatientId && (
             <div style={{ background: 'var(--card-bg, #1e293b)', borderRadius: 12, border: '1px solid var(--input-border, #334155)', padding: '1.2rem', position: 'sticky', top: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--divider, #334155)', paddingBottom: 10 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Hasta Detayı</h3>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground, #ffffff)', margin: 0 }}>Hasta Detayı</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {profileData?.patient && (
                     <button
@@ -541,7 +952,7 @@ export default function PatientsTab() {
                   )}
                   <button
                     onClick={() => setSelectedPatientId(null)}
-                    style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.1rem' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--foreground-3, #94a3b8)', cursor: 'pointer', fontSize: '1.1rem' }}
                   >
                     ✕
                   </button>
@@ -550,7 +961,7 @@ export default function PatientsTab() {
               
               <div style={{ maxHeight: '72vh', overflowY: 'auto', paddingRight: '0.5rem' }}>
                 {profileLoading ? (
-                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Profil yükleniyor...</div>
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3, #94a3b8)' }}>Profil yükleniyor...</div>
                 ) : profileData ? (
                   <PatientProfileCard profile={profileData} onEdit={handleOpenEditModal} />
                 ) : (
@@ -570,35 +981,67 @@ export default function PatientsTab() {
         onSuccess={() => loadPatients()}
       />
 
-      {/* ── Hasta Düzenle Modalı ─────────────────────────────────────────── */}
+      {/* ── Hasta Düzenle Modalı (Ad ve Soyad Ayrı) ─────────────────────────── */}
       {editingPatient && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'var(--card-bg, #1e293b)', padding: '1.5rem', borderRadius: 14, border: '1px solid var(--input-border, #334155)', width: 440, maxWidth: '92vw', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--foreground)', fontSize: '1.1rem', fontWeight: 700 }}>Hasta Bilgilerini Düzenle</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: 'var(--foreground, #ffffff)', fontSize: '1.1rem', fontWeight: 700 }}>Hasta Bilgilerini Düzenle</h3>
+              <button
+                type="button"
+                onClick={() => setEditingPatient(null)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.1rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Ad Soyad (Zorunlu)</label>
-                <input type="text" placeholder="Ad Soyad" value={editFormData.name} onChange={e => setEditFormData({...editFormData, name: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
+                    Ad <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ad"
+                    value={editFormData.firstName}
+                    onChange={e => setEditFormData({...editFormData, firstName: e.target.value})}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
+                    Soyad <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Soyad"
+                    value={editFormData.lastName}
+                    onChange={e => setEditFormData({...editFormData, lastName: e.target.value})}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}
+                  />
+                </div>
               </div>
               
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Telefon</label>
-                <input type="text" placeholder="05XXXXXXXXX" value={editFormData.phone} onChange={e => setEditFormData({...editFormData, phone: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Telefon</label>
+                <input type="text" placeholder="05XXXXXXXXX" value={editFormData.phone} onChange={e => setEditFormData({...editFormData, phone: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>TC Kimlik No</label>
-                <input type="text" placeholder="TC Kimlik No" value={editFormData.tcIdentity} onChange={e => setEditFormData({...editFormData, tcIdentity: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>TC Kimlik No</label>
+                <input type="text" placeholder="TC Kimlik No" value={editFormData.tcIdentity} onChange={e => setEditFormData({...editFormData, tcIdentity: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>E-posta</label>
-                <input type="email" placeholder="ornek@email.com" value={editFormData.email} onChange={e => setEditFormData({...editFormData, email: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>E-posta</label>
+                <input type="email" placeholder="ornek@email.com" value={editFormData.email} onChange={e => setEditFormData({...editFormData, email: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Cinsiyet</label>
-                <select value={editFormData.gender} onChange={e => setEditFormData({...editFormData, gender: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Cinsiyet</label>
+                <select value={editFormData.gender} onChange={e => setEditFormData({...editFormData, gender: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}>
                   <option value="">Belirtilmedi</option>
                   <option value="Erkek">Erkek</option>
                   <option value="Kadın">Kadın</option>
@@ -606,33 +1049,44 @@ export default function PatientsTab() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Doğum Tarihi</label>
-                <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Doğum Tarihi</label>
+                <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
               
               <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>İletişim İzinleri (KVKK)</label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>İletişim İzinleri (KVKK)</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
                   <input type="checkbox" checked={!editFormData.smsOptOut} onChange={e => setEditFormData({...editFormData, smsOptOut: !e.target.checked})} />
                   SMS ile bilgilendirilmek istiyorum
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
                   <input type="checkbox" checked={!editFormData.emailOptOut} onChange={e => setEditFormData({...editFormData, emailOptOut: !e.target.checked})} />
                   E-posta ile bilgilendirilmek istiyorum
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
                   <input type="checkbox" checked={!editFormData.whatsappOptOut} onChange={e => setEditFormData({...editFormData, whatsappOptOut: !e.target.checked})} />
                   WhatsApp ile bilgilendirilmek istiyorum
                 </label>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button onClick={() => setEditingPatient(null)} style={{ padding: '9px 16px', background: 'transparent', border: '1px solid var(--input-border, #334155)', borderRadius: 8, color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
-              <button onClick={handleSaveEditPatient} style={{ padding: '9px 18px', background: 'var(--brand-color, #2563eb)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Değişiklikleri Kaydet</button>
+              <button onClick={() => setEditingPatient(null)} style={{ padding: '9px 16px', background: 'transparent', border: '1px solid var(--input-border, #334155)', borderRadius: 8, color: 'var(--foreground, #ffffff)', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
+              <button onClick={handleSaveEditPatient} style={{ padding: '9px 18px', background: '#2563eb', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Değişiklikleri Kaydet</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── Onay Modalı (Tekil veya Toplu Silme) ── */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        variant={confirmModal.variant}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   )
 }

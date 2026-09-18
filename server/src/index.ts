@@ -446,6 +446,40 @@ const app = new Elysia()
     if (!b.name || !b.specialty) { set.status = 400; return { error: 'Name and specialty required' } }
     return createDoctor({ name: b.name, specialty: b.specialty, color: b.color })
   })
+  .get('/api/dental/doctors/leaves', async ({ query }) => {
+    const { getDoctorLeaves } = await import('./db/repositories/dental')
+    return await getDoctorLeaves({
+      doctorId: query.doctorId as string | undefined,
+      date: query.date as string | undefined,
+      startDate: query.startDate as string | undefined,
+      endDate: query.endDate as string | undefined,
+    })
+  })
+  .post('/api/dental/doctors/leaves', async ({ body, set, cookie }) => {
+    const { authenticateRequest } = await import('./middleware/auth')
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { createDoctorLeave } = await import('./db/repositories/dental')
+    const b = body as any
+    if (!b.doctorId || !b.date || !b.startTime || !b.endTime) {
+      set.status = 400; return { error: 'Hekim, tarih ve saat aralığı zorunludur' }
+    }
+    return await createDoctorLeave({
+      doctorId: b.doctorId,
+      date: b.date,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      isFullDay: Boolean(b.isFullDay),
+      reason: b.reason,
+      notes: b.notes,
+      createdBy: user?.id,
+    })
+  })
+  .delete('/api/dental/doctors/leaves/:id', async ({ params, set }) => {
+    const { deleteDoctorLeave } = await import('./db/repositories/dental')
+    const ok = await deleteDoctorLeave(params.id)
+    if (!ok) { set.status = 404; return { error: 'İzin bulunamadı' } }
+    return { success: true }
+  })
   .get('/api/dental/appointments', async ({ query }) => {
     const { listDentalAppointments } = await import('./db/repositories/dental')
     return await listDentalAppointments(query.date as string | undefined)
@@ -456,11 +490,15 @@ const app = new Elysia()
     if (!b.patientId || !b.title || !b.startTime || !b.endTime) {
       set.status = 400; return { error: 'Missing required fields' }
     }
-    return await createDentalAppointment({
-      patientId: b.patientId, doctorId: b.doctorId || null, title: b.title,
-      startTime: new Date(b.startTime), endTime: new Date(b.endTime),
-      status: b.status, type: b.type, notes: b.notes,
-    })
+    try {
+      return await createDentalAppointment({
+        patientId: b.patientId, doctorId: b.doctorId || null, title: b.title,
+        startTime: new Date(b.startTime), endTime: new Date(b.endTime),
+        status: b.status, type: b.type, notes: b.notes,
+      })
+    } catch (err: any) {
+      set.status = 400; return { error: err.message || 'Randevu oluşturulamadı' }
+    }
   })
   .delete('/api/dental/appointments/:id', async ({ params, set }) => {
     const { deleteDentalAppointment } = await import('./db/repositories/dental')
@@ -471,18 +509,22 @@ const app = new Elysia()
   .put('/api/dental/appointments/:id', async ({ params, body, set }) => {
     const { updateDentalAppointment } = await import('./db/repositories/dental')
     const b = body as Record<string, unknown>
-    const updated = await updateDentalAppointment(params.id, {
-      doctorId: b.doctorId !== undefined ? (b.doctorId as string | null) : undefined,
-      timeConfirmed: b.timeConfirmed !== undefined ? (b.timeConfirmed as boolean) : undefined,
-      status: b.status as string | undefined,
-      startTime: b.startTime ? new Date(b.startTime as string) : undefined,
-      endTime: b.endTime ? new Date(b.endTime as string) : undefined,
-      type: b.type as string | undefined,
-      complaint: b.complaint as string | undefined,
-      notes: b.notes as string | undefined,
-    })
-    if (!updated) { set.status = 404; return { error: 'Not found' } }
-    return updated
+    try {
+      const updated = await updateDentalAppointment(params.id, {
+        doctorId: b.doctorId !== undefined ? (b.doctorId as string | null) : undefined,
+        timeConfirmed: b.timeConfirmed !== undefined ? (b.timeConfirmed as boolean) : undefined,
+        status: b.status as string | undefined,
+        startTime: b.startTime ? new Date(b.startTime as string) : undefined,
+        endTime: b.endTime ? new Date(b.endTime as string) : undefined,
+        type: b.type as string | undefined,
+        complaint: b.complaint as string | undefined,
+        notes: b.notes as string | undefined,
+      })
+      if (!updated) { set.status = 404; return { error: 'Not found' } }
+      return updated
+    } catch (err: any) {
+      set.status = 400; return { error: err.message || 'Randevu güncellenemedi' }
+    }
   })
   .get('/api/dental/appointments/:id/treatments', async ({ params }) => {
     const { getAppointmentTreatments } = await import('./db/repositories/dental')
@@ -594,6 +636,31 @@ const app = new Elysia()
     
     await db.update(patients).set(updateData).where(and(eq(patients.id, params.id), eq(patients.clinicId, requireClinicId())))
     return { success: true }
+  })
+  .delete('/api/dental/patients/:id', async ({ params, set }) => {
+    try {
+      const { deletePatient } = await import('./db/repositories/dental')
+      const res = await deletePatient(params.id)
+      return res
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message || 'Hasta silinemedi' }
+    }
+  })
+  .post('/api/dental/patients/bulk-delete', async ({ body, set }) => {
+    try {
+      const { patientIds } = body as { patientIds?: string[] }
+      if (!patientIds || !Array.isArray(patientIds) || patientIds.length === 0) {
+        set.status = 400
+        return { error: 'Silinecek hasta ID listesi boş olamaz' }
+      }
+      const { deletePatientsBulk } = await import('./db/repositories/dental')
+      const res = await deletePatientsBulk(patientIds)
+      return res
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message || 'Hastalar silinemedi' }
+    }
   })
   .get('/api/dental/patients/:id/treatment-groups', async ({ params }) => {
     const { getPatientTreatmentGroups } = await import('./db/repositories/dental')
@@ -2043,8 +2110,6 @@ const app = new Elysia()
         const last = pastAppointments[0]
         info.push(`Son Randevu: ${last.date} ${last.time} — ${last.issueOrRequest || last.type}`)
       }
-      const vehicleInfo = customer.appointmentHistory.find(a => a.vehicleInfo)?.vehicleInfo
-      if (vehicleInfo) info.push(`Araç: ${vehicleInfo}`)
       return { kayitli: true, musteri_adi: customer.name, sonuc: info.join('\n') }
     } catch (err) {
       console.error('[Tools/CustomerQuery]', err)
@@ -2309,6 +2374,12 @@ app.ws('/ws', {
       const activeClinics = await db.select({ id: clinics.id }).from(clinics).where(eq(clinics.isActive, true))
       for (const clinic of activeClinics) await seedCategoriesForClinic(clinic.id)
     } catch (e) { console.error('[Categories] Seed hatası:', e) }
+
+    // Ensure doctor_leaves table exists on startup (auto-migration / self-healing)
+    try {
+      const { ensureDoctorLeavesTable } = await import('./db/repositories/dental')
+      await ensureDoctorLeavesTable()
+    } catch (e) { console.error('[DoctorLeaves] Startup ensure table error:', e) }
 
     // Stale session temizliği — zombi/takılı session'ları periyodik olarak kapat
     setInterval(() => {

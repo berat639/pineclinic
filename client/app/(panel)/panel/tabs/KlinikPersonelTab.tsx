@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAuth } from '../../../../lib/auth-context'
 import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
+import DoctorLeaveModal from '../../../admin/components/DoctorLeaveModal'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
 import WeeklyTemplateModal from '../../../admin/components/WeeklyTemplateModal'
 import MonthlyTemplateModal from '../../../admin/components/MonthlyTemplateModal'
@@ -121,6 +122,9 @@ export default function KlinikPersonelTab() {
   const [shiftForm, setShiftForm] = useState({ userId: '', date: '', startTime: '09:00', endTime: '18:00', shiftType: 'Tam Gün' })
   const [showShiftForm, setShowShiftForm] = useState(false)
   const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false)
+  const [leaveDoctorId, setLeaveDoctorId] = useState<string | undefined>(undefined)
+  const [leaveDate, setLeaveDate] = useState<string | undefined>(undefined)
 
   // Edit user state
   const [editingUser, setEditingUser] = useState<User | null>(null)
@@ -480,6 +484,25 @@ export default function KlinikPersonelTab() {
         </span>
         <button onClick={() => setShowUserForm(!showUserForm)} style={btnStyle}>
           {showUserForm ? 'İptal' : '+ Yeni Personel Ekle'}
+        </button>
+        <button
+          onClick={() => {
+            setLeaveDoctorId(undefined)
+            setLeaveDate(new Date().toISOString().split('T')[0])
+            setIsLeaveModalOpen(true)
+          }}
+          style={{
+            ...btnStyle,
+            background: '#1e293b',
+            border: '1px solid #334155',
+            color: '#f8fafc',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6
+          }}
+          title="Hekimlerin izinli veya kapalı olduğu saatleri yönetin"
+        >
+          🏖️ Hekim İzin / Kapalı Saat Yönetimi
         </button>
       </div>
 
@@ -1017,6 +1040,26 @@ export default function KlinikPersonelTab() {
               }}
             >
               {showShiftForm ? '✕ İptal' : '+ Tekil Vardiya'}
+            </button>
+
+            <button
+              onClick={() => {
+                setLeaveDoctorId(doctorFilter !== 'all' ? doctorFilter : undefined)
+                setLeaveDate(new Date().toISOString().split('T')[0])
+                setIsLeaveModalOpen(true)
+              }}
+              style={{
+                ...btnStyle,
+                background: '#1e293b',
+                border: '1px solid #334155',
+                color: '#f8fafc',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+              title="Hekimlerin izinli veya kapalı olduğu saatleri yönetin"
+            >
+              🏖️ İzin / Kapalı Saat
             </button>
 
             {/* Navigasyon */}
@@ -1746,6 +1789,11 @@ export default function KlinikPersonelTab() {
           users={users}
           date={shiftContextMenu.date}
           onClose={() => setShiftContextMenu(null)}
+          onOpenLeaveModal={(docId, dt) => {
+            setLeaveDoctorId(docId)
+            setLeaveDate(dt)
+            setIsLeaveModalOpen(true)
+          }}
           onSave={async (shift) => {
             await fetch('/api/shifts', {
               method: 'POST',
@@ -1758,6 +1806,16 @@ export default function KlinikPersonelTab() {
           }}
         />
       )}
+
+      {/* Hekim İzin / Kapalı Saat Modalı */}
+      <DoctorLeaveModal
+        isOpen={isLeaveModalOpen}
+        onClose={() => setIsLeaveModalOpen(false)}
+        doctors={users.map(u => ({ id: u.id, name: u.name, specialty: u.specialty, color: u.color }))}
+        initialDoctorId={leaveDoctorId}
+        initialDate={leaveDate || new Date().toISOString().split('T')[0]}
+        onSuccess={() => fetchData()}
+      />
 
       {/* Haftalık Şablon Oluşturma/Düzenleme Modalı */}
       {isWeeklyModalOpen && (

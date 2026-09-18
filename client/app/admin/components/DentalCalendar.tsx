@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState, useEffect, useRef } from 'react'
+import React, { useMemo, useState, useEffect, useRef } from 'react'
+import { toast } from 'react-hot-toast'
+import type { DoctorLeaveItem } from './DoctorLeaveModal'
 
 interface Doctor {
   id: string
@@ -37,6 +39,7 @@ interface Props {
   doctors: Doctor[]
   events: CalendarEvent[]
   shifts?: ShiftItem[]
+  doctorLeaves?: DoctorLeaveItem[]
   currentDate: string
   onEventClick: (eventId: string, event: CalendarEvent) => void
   view?: 'day' | 'week' | 'month'
@@ -168,7 +171,7 @@ function getLocalYMD(dateStrOrObj: string | Date): string {
   }
 }
 
-export default function DentalCalendar({ doctors, events, shifts, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
+export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -184,6 +187,9 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
   
   // Calculate displayDoctors at the top so handleMouseUp can use it
   const dayShifts = shifts?.filter(s => s.date === currentDate) || [];
+  const dayDoctorLeaves = useMemo(() => {
+    return (doctorLeaves || []).filter(l => l.date === currentDate);
+  }, [doctorLeaves, currentDate]);
   let displayDoctors = doctors;
   if (view === 'day' && dayShifts.length > 0) {
     const doctorsWithShift = dayShifts.map(s => s.userId);
@@ -298,6 +304,23 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
             const m = mins % 60;
             return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
           };
+
+          if (doctorId) {
+            const conflictLeave = (doctorLeaves || []).find(l => {
+              if (l.doctorId !== doctorId || l.date !== dateStr) return false;
+              if (l.isFullDay) return true;
+              const [sH, sM] = (l.startTime || '00:00').split(':').map(Number);
+              const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
+              const lStart = (sH || 0) * 60 + (sM || 0);
+              const lEnd = (eH || 0) * 60 + (eM || 0);
+              return startMins < lEnd && endMins > lStart;
+            });
+            if (conflictLeave) {
+              const docObj = doctors.find(d => d.id === doctorId);
+              toast.error(`⚠️ Dr. ${docObj?.name || 'Hekim'} bu saatlerde (${conflictLeave.startTime} - ${conflictLeave.endTime}) izinlidir. Randevu eklenemez!`);
+              return null;
+            }
+          }
 
           if (onEmptySlotSelect) {
             onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.clientX, e.clientY);
@@ -432,6 +455,22 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
               );
               return;
             }
+
+            // İzin Kontrolü: Hedef hekim o gün ve saatte izinli mi?
+            const conflictLeave = (doctorLeaves || []).find(l => {
+              if (l.doctorId !== newDoctorId || l.date !== newDate) return false;
+              if (l.isFullDay) return true;
+              const [sH, sM] = (l.startTime || '00:00').split(':').map(Number);
+              const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
+              const lStartMin = (sH || 0) * 60 + (sM || 0);
+              const lEndMin = (eH || 0) * 60 + (eM || 0);
+              return startMinOfDay < lEndMin && endMinOfDay > lStartMin;
+            });
+
+            if (conflictLeave) {
+              toast.error(`⚠️ ${docName} bu saatlerde (${conflictLeave.startTime}-${conflictLeave.endTime}) izinlidir. Randevu taşınamaz!`);
+              return;
+            }
           }
 
           onEventUpdate({
@@ -557,6 +596,24 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
               const m = mins % 60;
               return `${currentDate}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
             };
+
+            if (doctorId) {
+              const conflictLeave = (doctorLeaves || []).find(l => {
+                if (l.doctorId !== doctorId || l.date !== currentDate) return false;
+                if (l.isFullDay) return true;
+                const [sH, sM] = (l.startTime || '00:00').split(':').map(Number);
+                const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
+                const lStart = (sH || 0) * 60 + (sM || 0);
+                const lEnd = (eH || 0) * 60 + (eM || 0);
+                return startMins < lEnd && endMins > lStart;
+              });
+              if (conflictLeave) {
+                const docName = displayDoctors[colIdx]?.name || 'Hekim';
+                toast.error(`⚠️ Dr. ${docName} bu saatlerde (${conflictLeave.startTime}-${conflictLeave.endTime}) izinlidir. Randevu eklenemez!`);
+                return;
+              }
+            }
+
             if (onEmptySlotSelect) {
               onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, cellX, cellY);
             }
@@ -600,42 +657,105 @@ export default function DentalCalendar({ doctors, events, shifts, currentDate, o
           {displayDoctors.map((d, colIdx) => {
             const docEvents = dayEvents.filter(e => e.doctorId === d.id);
             const layout = calculateEventLayout(docEvents);
-            return layout.map(({ event: e, col, maxCol }) => {
-              const { top, height } = eventPosition(e.startTime, e.endTime, 0)
-              const isTimeWarning = e.timeConfirmed === false
-              const doc = doctors.find(docItem => docItem.id === e.doctorId) || d
-              const docColor = doc?.color || '#3b82f6'
-              
-              let bg = doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)'
-              let borderLeftColor = docColor
-              let borderStyle = 'solid'
+            const docLeaves = dayDoctorLeaves.filter(l => l.doctorId === d.id);
 
-              if (isTimeWarning) {
-                bg = TIME_WARNING_STYLE.bg
-                borderLeftColor = TIME_WARNING_STYLE.border
-              }
-              
-              const colWidth = `((100% - 56px) / ${cols})`
-              const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px + (${colWidth} - 4px) / ${maxCol} * ${col})`
-              const width = `calc((${colWidth} - 4px) / ${maxCol})`
-              
-              const isShort = height < 36
-              
-              return (
-                <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle }} 
-                     onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
-                     onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                     title={e.title}
-                     onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
-                >
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
-                  <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
-                  {!isShort && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
-                  {height > 56 && <span className="rc-ev-doc" style={{ pointerEvents: 'none' }}>{d.name}</span>}
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
-                </div>
-              )
-            })
+            return (
+              <React.Fragment key={d.id}>
+                {layout.map(({ event: e, col, maxCol }) => {
+                  const { top, height } = eventPosition(e.startTime, e.endTime, 0)
+                  const isTimeWarning = e.timeConfirmed === false
+                  const doc = doctors.find(docItem => docItem.id === e.doctorId) || d
+                  const docColor = doc?.color || '#3b82f6'
+                  
+                  let bg = doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)'
+                  let borderLeftColor = docColor
+                  let borderStyle = 'solid'
+
+                  if (isTimeWarning) {
+                    bg = TIME_WARNING_STYLE.bg
+                    borderLeftColor = TIME_WARNING_STYLE.border
+                  }
+                  
+                  const colWidth = `((100% - 56px) / ${cols})`
+                  const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px + (${colWidth} - 4px) / ${maxCol} * ${col})`
+                  const width = `calc((${colWidth} - 4px) / ${maxCol})`
+                  
+                  const isShort = height < 36
+                  
+                  return (
+                    <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle }} 
+                         onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
+                         onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
+                         title={e.title}
+                         onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
+                    >
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
+                      <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
+                      {!isShort && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                      {height > 56 && <span className="rc-ev-doc" style={{ pointerEvents: 'none' }}>{d.name}</span>}
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
+                    </div>
+                  )
+                })}
+                {/* Doctor Leaves (İzinli / Kapalı Saatler) */}
+                {docLeaves.map(l => {
+                  const lStart = `${l.date}T${l.startTime}:00+03:00`;
+                  const lEnd = `${l.date}T${l.endTime}:00+03:00`;
+                  const { top, height } = eventPosition(lStart, lEnd, 0);
+                  const colWidth = `((100% - 56px) / ${cols})`;
+                  const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`;
+                  const width = `calc(${colWidth} - 4px)`;
+
+                  return (
+                    <div
+                      key={`leave-${l.id}`}
+                      className="rc-doctor-leave"
+                      style={{
+                        position: 'absolute',
+                        top,
+                        height,
+                        left,
+                        width,
+                        background: '#1e293b',
+                        border: '1.5px solid #ef4444',
+                        borderLeft: '5px solid #ef4444',
+                        borderRadius: 6,
+                        zIndex: 35,
+                        padding: '4px 8px',
+                        boxSizing: 'border-box',
+                        cursor: 'not-allowed',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                      }}
+                      onClick={(evt) => {
+                        evt.stopPropagation();
+                        evt.preventDefault();
+                        toast.error(`Dr. ${d.name} bu saatlerde izinlidir (${l.startTime} - ${l.endTime})${l.reason ? `: ${l.reason}` : ''}. Randevu eklenemez!`);
+                      }}
+                      onDoubleClick={(evt) => {
+                        evt.stopPropagation();
+                        evt.preventDefault();
+                        toast.error(`Dr. ${d.name} bu saatlerde izinlidir. Randevu eklenemez!`);
+                      }}
+                      title={`Dr. ${d.name} İzinli: ${l.startTime} - ${l.endTime}${l.reason ? ` (${l.reason})` : ''}`}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                        <span>🏖️ İZİNLİ</span>
+                        <span style={{ fontSize: '0.68rem', color: '#f8fafc', fontWeight: 600 }}>({l.startTime} - {l.endTime})</span>
+                      </div>
+                      {l.reason && (
+                        <div style={{ fontSize: '0.68rem', color: '#cbd5e1', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                          {l.reason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            );
           })}
           {/* Unassigned events spanning all columns */}
           {hasUnassigned && calculateEventLayout(unassigned).map(({ event: e, col, maxCol }) => {

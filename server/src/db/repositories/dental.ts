@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, ilike, or } from 'drizzle-orm'
+import { eq, desc, and, gte, lte, sql, ilike, or, inArray } from 'drizzle-orm'
 import { db } from '../client'
 import {
   users,
@@ -13,7 +13,16 @@ import {
   notificationTemplates,
   consultations,
   patientNotes,
-  clinicMemberships
+  clinicMemberships,
+  doctorLeaves,
+  waitingList,
+  toothRecords,
+  doctorNotes,
+  patientAnamnesis,
+  patientDiseases,
+  materialUsages,
+  installmentPlans,
+  whatsappConversations
 } from '../schema'
 import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
@@ -40,6 +49,156 @@ export async function createDoctor(data: { name: string; specialty: string; colo
   }).returning()
   await db.insert(clinicMemberships).values({ clinicId, userId: row!.id, role: 'hekim', active: true })
   return { id: row!.id, name: row!.name, specialty: row!.specialty, color: row!.color, active: row!.active }
+}
+
+// ── Doctor Leaves (Hekim İzinleri / Çalışma Dışı Saatler) ───────────────────
+
+let hasEnsuredLeavesTable = false
+export async function ensureDoctorLeavesTable() {
+  if (hasEnsuredLeavesTable) return
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS doctor_leaves (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        clinic_id   UUID REFERENCES clinics(id) ON DELETE CASCADE,
+        doctor_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        date        TEXT NOT NULL,
+        start_time  TEXT NOT NULL,
+        end_time    TEXT NOT NULL,
+        is_full_day BOOLEAN NOT NULL DEFAULT false,
+        reason      TEXT,
+        notes       TEXT,
+        created_by  UUID REFERENCES users(id),
+        created_at  TIMESTAMPTZ DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS doctor_leaves_clinic_date_idx ON doctor_leaves (clinic_id, date);
+      CREATE INDEX IF NOT EXISTS doctor_leaves_doctor_date_idx ON doctor_leaves (doctor_id, date);
+    `)
+    hasEnsuredLeavesTable = true
+  } catch (err) {
+    console.error('[DentalRepo] Error ensuring doctor_leaves table:', err)
+  }
+}
+
+export async function getDoctorLeaves(filters?: {
+  doctorId?: string
+  date?: string
+  startDate?: string
+  endDate?: string
+}) {
+  await ensureDoctorLeavesTable()
+  const clinicId = requireClinicId()
+
+  const conditions = [eq(doctorLeaves.clinicId, clinicId)]
+  if (filters?.doctorId) {
+    conditions.push(eq(doctorLeaves.doctorId, filters.doctorId))
+  }
+  if (filters?.date) {
+    conditions.push(eq(doctorLeaves.date, filters.date))
+  }
+  if (filters?.startDate && filters?.endDate) {
+    conditions.push(gte(doctorLeaves.date, filters.startDate), lte(doctorLeaves.date, filters.endDate))
+  }
+
+  const rows = await db
+    .select({
+      id: doctorLeaves.id,
+      clinicId: doctorLeaves.clinicId,
+      doctorId: doctorLeaves.doctorId,
+      doctorName: users.name,
+      doctorColor: users.color,
+      doctorSpecialty: users.specialty,
+      date: doctorLeaves.date,
+      startTime: doctorLeaves.startTime,
+      endTime: doctorLeaves.endTime,
+      isFullDay: doctorLeaves.isFullDay,
+      reason: doctorLeaves.reason,
+      notes: doctorLeaves.notes,
+      createdBy: doctorLeaves.createdBy,
+      createdAt: doctorLeaves.createdAt,
+    })
+    .from(doctorLeaves)
+    .leftJoin(users, eq(doctorLeaves.doctorId, users.id))
+    .where(and(...conditions))
+    .orderBy(doctorLeaves.date, doctorLeaves.startTime)
+
+  return rows
+}
+
+export async function createDoctorLeave(data: {
+  doctorId: string
+  date: string
+  startTime: string
+  endTime: string
+  isFullDay?: boolean
+  reason?: string
+  notes?: string
+  createdBy?: string
+}) {
+  await ensureDoctorLeavesTable()
+  const clinicId = requireClinicId()
+
+  const [row] = await db
+    .insert(doctorLeaves)
+    .values({
+      clinicId,
+      doctorId: data.doctorId,
+      date: data.date,
+      startTime: data.startTime,
+      endTime: data.endTime,
+      isFullDay: Boolean(data.isFullDay),
+      reason: data.reason || null,
+      notes: data.notes || null,
+      createdBy: data.createdBy || null,
+    })
+    .returning()
+
+  return row
+}
+
+export async function deleteDoctorLeave(id: string): Promise<boolean> {
+  await ensureDoctorLeavesTable()
+  const clinicId = requireClinicId()
+
+  const rows = await db
+    .delete(doctorLeaves)
+    .where(and(eq(doctorLeaves.id, id), eq(doctorLeaves.clinicId, clinicId)))
+    .returning({ id: doctorLeaves.id })
+
+  return rows.length > 0
+}
+
+export async function checkDoctorLeaveConflict(
+  doctorId: string,
+  startTime: Date,
+  endTime: Date
+): Promise<{ conflict: boolean; leave?: any }> {
+  try {
+    await ensureDoctorLeavesTable()
+    const dateStr = startTime.toLocaleDateString('sv')
+
+    const leaves = await getDoctorLeaves({ doctorId, date: dateStr })
+    const apptStartMins = startTime.getHours() * 60 + startTime.getMinutes()
+    const apptEndMins = endTime.getHours() * 60 + endTime.getMinutes()
+
+    for (const l of leaves) {
+      if (l.isFullDay) {
+        return { conflict: true, leave: l }
+      }
+      const [sh, sm] = (l.startTime || '00:00').split(':').map(Number)
+      const [eh, em] = (l.endTime || '23:59').split(':').map(Number)
+      const lStartMins = (sh || 0) * 60 + (sm || 0)
+      const lEndMins = (eh || 0) * 60 + (em || 0)
+
+      if (apptStartMins < lEndMins && apptEndMins > lStartMins) {
+        return { conflict: true, leave: l }
+      }
+    }
+    return { conflict: false }
+  } catch (err) {
+    console.error('[DentalRepo] Error checking leave conflict:', err)
+    return { conflict: false }
+  }
 }
 
 // ── Dental Appointments ──────────────────────────────────────────────────────
@@ -84,6 +243,13 @@ export async function createDentalAppointment(data: {
   notes?: string
 }) {
   const clinicId = requireClinicId()
+  if (data.doctorId) {
+    const { conflict, leave } = await checkDoctorLeaveConflict(data.doctorId, data.startTime, data.endTime)
+    if (conflict) {
+      const reasonText = leave?.reason ? ` (${leave.reason})` : ''
+      throw new Error(`Hekim belirtilen saatlerde izinlidir: ${leave.startTime}-${leave.endTime}${reasonText}. Randevu oluşturulamaz.`)
+    }
+  }
   const [row] = await db.insert(dentalAppointments).values({
     clinicId,
     patientId: data.patientId,
@@ -839,6 +1005,13 @@ export async function updateDentalAppointment(id: string, data: {
   complaint?: string
 }) {
   const clinicId = requireClinicId()
+  if (data.doctorId && data.startTime && data.endTime) {
+    const { conflict, leave } = await checkDoctorLeaveConflict(data.doctorId, data.startTime, data.endTime)
+    if (conflict) {
+      const reasonText = leave?.reason ? ` (${leave.reason})` : ''
+      throw new Error(`Hekim belirtilen saatlerde izinlidir: ${leave.startTime}-${leave.endTime}${reasonText}. Randevu taşınamaz.`)
+    }
+  }
   const values: Record<string, unknown> = {}
   if (data.doctorId !== undefined) values.doctorId = data.doctorId
   if (data.timeConfirmed !== undefined) values.timeConfirmed = data.timeConfirmed
@@ -942,80 +1115,148 @@ export async function createPatientsBulk(patientList: {
   name: string
   phone?: string | null
   tcIdentity?: string | null
+  email?: string | null
   gender?: string | null
   birthDate?: string | null
   createdAt?: string | null
 }[]) {
   const clinicId = requireClinicId()
-  if (!patientList || patientList.length === 0) return []
+  if (!patientList || patientList.length === 0) return { success: true, insertedCount: 0, updatedCount: 0, totalProcessed: 0 }
   const { patients } = await import('../schema')
+  const { and, eq } = await import('drizzle-orm')
   
-  const existing = await db.select({ tcIdentity: patients.tcIdentity, phone: patients.phone }).from(patients).where(eq(patients.clinicId, clinicId))
-  const existingTcs = new Set(existing.map(e => e.tcIdentity?.trim()).filter(Boolean) as string[])
-  const existingPhones = new Set(existing.map(e => e.phone?.trim()).filter(Boolean) as string[])
+  // Mevcut hastaları çekiyoruz (akıllı birleştirme ve eksik alan tamamlama için)
+  const existingRows = await db.select().from(patients).where(eq(patients.clinicId, clinicId))
   
+  // TC ve Telefon üzerinden hızlı erişim haritaları
+  const existingByTc = new Map<string, typeof existingRows[0]>()
+  const existingByPhone = new Map<string, typeof existingRows[0]>()
+  for (const row of existingRows) {
+    if (row.tcIdentity?.trim()) existingByTc.set(row.tcIdentity.trim(), row)
+    if (row.phone?.trim()) existingByPhone.set(row.phone.trim(), row)
+  }
+
   const uniqueList: {
     name: string
     phone: string | null
     tcIdentity: string | null
+    email: string | null
     gender: string | null
     birthDate?: string | null
     createdAt?: string | null
   }[] = []
+  
   const currentTcs = new Set<string>()
   const currentPhones = new Set<string>()
-  
+  let updatedCount = 0
+
   for (const p of patientList) {
     const name = p.name ? String(p.name).trim() : ''
     if (!name) continue
 
     const tc = p.tcIdentity ? String(p.tcIdentity).trim() : null
     const ph = p.phone ? String(p.phone).trim() : null
+    const em = p.email ? String(p.email).trim() : null
     const validTc = tc && tc !== 'null' && tc !== '—' && tc !== '-' ? tc : null
     const validPh = ph && ph !== 'null' && ph !== '—' && ph !== '-' ? ph : null
+    const validEm = em && em !== 'null' && em !== '—' && em !== '-' ? em : null
+    const validGender = p.gender && p.gender.trim() !== '' && p.gender !== 'null' && p.gender !== '—' ? p.gender.trim() : null
 
-    if (validTc && (existingTcs.has(validTc) || currentTcs.has(validTc))) continue
-    if (validPh && (existingPhones.has(validPh) || currentPhones.has(validPh))) continue
-    
+    let parsedBirthDate: Date | null = null
+    if (p.birthDate) {
+      const d = new Date(p.birthDate)
+      if (!isNaN(d.getTime())) parsedBirthDate = d
+    }
+
+    // 1. Mevcut kayıtlarda eşleşme var mı kontrol et (TC veya Telefon ile)
+    const existingPatient = (validTc ? existingByTc.get(validTc) : null) || (validPh ? existingByPhone.get(validPh) : null)
+
+    if (existingPatient) {
+      // Mükerrer kayıt: YENİ KOPYA EKLENMEZ.
+      // Ancak mevcut kayıtta OLMAYAN (boş/null) alanlar Excel'de varsa o alanlar GÜNCELLENİR.
+      const fieldsToUpdate: any = {}
+
+      if (!existingPatient.tcIdentity && validTc) {
+        fieldsToUpdate.tcIdentity = validTc
+        existingPatient.tcIdentity = validTc
+      }
+      if (!existingPatient.phone && validPh) {
+        fieldsToUpdate.phone = validPh
+        existingPatient.phone = validPh
+      }
+      if (!existingPatient.email && validEm) {
+        fieldsToUpdate.email = validEm
+        existingPatient.email = validEm
+      }
+      if (!existingPatient.gender && validGender) {
+        fieldsToUpdate.gender = validGender
+        existingPatient.gender = validGender
+      }
+      if (!existingPatient.birthDate && parsedBirthDate) {
+        fieldsToUpdate.birthDate = parsedBirthDate
+        existingPatient.birthDate = parsedBirthDate
+      }
+
+      if (Object.keys(fieldsToUpdate).length > 0) {
+        await db.update(patients).set(fieldsToUpdate).where(and(eq(patients.id, existingPatient.id), eq(patients.clinicId, clinicId)))
+        updatedCount++
+        // Haritaları da güncelle
+        if (existingPatient.tcIdentity) existingByTc.set(existingPatient.tcIdentity, existingPatient)
+        if (existingPatient.phone) existingByPhone.set(existingPatient.phone, existingPatient)
+      }
+      continue
+    }
+
+    // 2. Dosya içinde daha önceki satırlarda zaten eklendiyse kopya ekleme
+    if (validTc && currentTcs.has(validTc)) continue
+    if (validPh && currentPhones.has(validPh)) continue
+
     uniqueList.push({
       ...p,
       name,
       tcIdentity: validTc,
       phone: validPh,
-      gender: p.gender && p.gender.trim() !== '' && p.gender !== 'null' && p.gender !== '—' ? p.gender.trim() : null
+      email: validEm,
+      gender: validGender
     })
     if (validTc) currentTcs.add(validTc)
     if (validPh) currentPhones.add(validPh)
   }
-  
-  if (uniqueList.length === 0) return []
-  
-  const mapped = uniqueList.map(p => {
-    let birthDate: Date | null = null
-    if (p.birthDate) {
-      const d = new Date(p.birthDate)
-      if (!isNaN(d.getTime())) {
-        birthDate = d
+
+  let insertedCount = 0
+  if (uniqueList.length > 0) {
+    const mapped = uniqueList.map(p => {
+      let birthDate: Date | null = null
+      if (p.birthDate) {
+        const d = new Date(p.birthDate)
+        if (!isNaN(d.getTime())) birthDate = d
       }
-    }
-    let createdAt: Date | undefined = undefined
-    if (p.createdAt) {
-      const d = new Date(p.createdAt)
-      if (!isNaN(d.getTime())) {
-        createdAt = d
+      let createdAt: Date | undefined = undefined
+      if (p.createdAt) {
+        const d = new Date(p.createdAt)
+        if (!isNaN(d.getTime())) createdAt = d
       }
-    }
-    return {
-      clinicId,
-      name: p.name,
-      phone: p.phone,
-      tcIdentity: p.tcIdentity,
-      gender: p.gender,
-      birthDate,
-      ...(createdAt ? { createdAt } : {})
-    }
-  })
-  return await db.insert(patients).values(mapped).returning()
+      return {
+        clinicId,
+        name: p.name,
+        phone: p.phone,
+        tcIdentity: p.tcIdentity,
+        email: p.email,
+        gender: p.gender,
+        birthDate,
+        ...(createdAt ? { createdAt } : {})
+      }
+    })
+    const inserted = await db.insert(patients).values(mapped).returning()
+    insertedCount = inserted.length
+  }
+
+  return {
+    success: true,
+    insertedCount,
+    updatedCount,
+    totalProcessed: patientList.length
+  }
 }
 
 export async function updateTreatmentGroupFull(groupId: string, data: {
@@ -1065,4 +1306,75 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
     }
   }
   return true
+}
+
+export async function deletePatientsBulk(patientIds: string[]) {
+  const clinicId = requireClinicId()
+  if (!patientIds || patientIds.length === 0) return { deletedCount: 0 }
+
+  const validPatients = await db
+    .select({ id: patients.id })
+    .from(patients)
+    .where(and(eq(patients.clinicId, clinicId), inArray(patients.id, patientIds)))
+
+  const validIds = validPatients.map(p => p.id)
+  if (validIds.length === 0) return { deletedCount: 0 }
+
+  await db.transaction(async (tx) => {
+    // 1. WhatsApp conversation referansını null yap
+    await tx
+      .update(whatsappConversations)
+      .set({ patientId: null })
+      .where(inArray(whatsappConversations.patientId, validIds))
+
+    // 2. Material Usages (hastaya bağlı)
+    await tx.delete(materialUsages).where(inArray(materialUsages.patientId, validIds))
+
+    // 3. Tooth records
+    await tx.delete(toothRecords).where(inArray(toothRecords.patientId, validIds))
+
+    // 4. Appointment Treatments ve Dental Appointments
+    const patientAppointments = await tx
+      .select({ id: dentalAppointments.id })
+      .from(dentalAppointments)
+      .where(inArray(dentalAppointments.patientId, validIds))
+    const apptIds = patientAppointments.map(a => a.id)
+
+    if (apptIds.length > 0) {
+      await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.appointmentId, apptIds))
+      await tx.delete(dentalAppointments).where(inArray(dentalAppointments.id, apptIds))
+    }
+
+    // 5. Patient payments
+    await tx.delete(patientPayments).where(inArray(patientPayments.patientId, validIds))
+
+    // 6. Installment plans
+    await tx.delete(installmentPlans).where(inArray(installmentPlans.patientId, validIds))
+
+    // 7. Completed works (lab works)
+    await tx.delete(completedWorks).where(inArray(completedWorks.patientId, validIds))
+
+    // 8. Waiting list
+    await tx.delete(waitingList).where(inArray(waitingList.patientId, validIds))
+
+    // 9. Consultations & Notes & Diseases & Anamnesis
+    await tx.delete(consultations).where(inArray(consultations.patientId, validIds))
+    await tx.delete(doctorNotes).where(inArray(doctorNotes.patientId, validIds))
+    await tx.delete(patientNotes).where(inArray(patientNotes.patientId, validIds))
+    await tx.delete(patientDiseases).where(inArray(patientDiseases.patientId, validIds))
+    await tx.delete(patientAnamnesis).where(inArray(patientAnamnesis.patientId, validIds))
+
+    // 10. Treatment plans & treatment groups
+    await tx.delete(treatmentPlans).where(inArray(treatmentPlans.patientId, validIds))
+    await tx.delete(treatmentGroups).where(inArray(treatmentGroups.patientId, validIds))
+
+    // 11. En son hastaları sil
+    await tx.delete(patients).where(and(eq(patients.clinicId, clinicId), inArray(patients.id, validIds)))
+  })
+
+  return { deletedCount: validIds.length }
+}
+
+export async function deletePatient(patientId: string) {
+  return await deletePatientsBulk([patientId])
 }

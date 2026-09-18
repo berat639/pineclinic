@@ -388,7 +388,6 @@ export async function createLiveSession(
               r.date,
               r.time,
               r.issueOrRequest ? `— ${r.issueOrRequest}` : `— ${TYPE_LABELS[r.type] || r.type}`,
-              r.vehicleInfo ? `(${r.vehicleInfo})` : '',
             ]
             return parts.filter(Boolean).join(' ')
           })

@@ -115,9 +115,6 @@ services:
       NETGSM_API_USERCODE: ${NETGSM_API_USERCODE}
       NETGSM_API_PASSWORD: ${NETGSM_API_PASSWORD}
       NETGSM_API_MSGHEADER: ${NETGSM_API_MSGHEADER}
-      ATA_HSYS_BASE_URL: ${ATA_HSYS_BASE_URL}
-      ATA_HSYS_APP_KEY: ${ATA_HSYS_APP_KEY}
-      ATA_HSYS_APP_SECRET: ${ATA_HSYS_APP_SECRET}
     depends_on:
       postgres:
         condition: service_healthy

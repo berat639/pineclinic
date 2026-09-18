@@ -11,6 +11,8 @@ interface AddPatientModalProps {
 }
 
 const initialPatientState = {
+  firstName: '',
+  lastName: '',
   name: '',
   phone: '',
   email: '',
@@ -47,7 +49,8 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
   if (!isOpen) return null
 
   const handleAddPatient = async () => {
-    if (!newPatient.name.trim()) {
+    const fullName = `${newPatient.firstName.trim()} ${newPatient.lastName.trim()}`.trim()
+    if (!fullName) {
       toast.error('Hasta adı zorunludur.')
       return
     }
@@ -57,7 +60,10 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
       const res = await fetch('/api/dental/patients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPatient)
+        body: JSON.stringify({
+          ...newPatient,
+          name: fullName
+        })
       })
 
       if (res.ok) {
@@ -133,27 +139,50 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <div>
-            <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
-              Ad Soyad <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="Ad Soyad (Zorunlu)"
-              value={newPatient.name}
-              onChange={(e) => setNewPatient({ ...newPatient, name: e.target.value })}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '9px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--input-border, #334155)',
-                background: 'var(--input-bg, #0f172a)',
-                color: 'var(--foreground, #ffffff)',
-                fontSize: '0.85rem'
-              }}
-              autoFocus
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
+                Ad <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Örn: Ahmet"
+                value={newPatient.firstName}
+                onChange={(e) => setNewPatient({ ...newPatient, firstName: e.target.value })}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '9px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--input-border, #334155)',
+                  background: 'var(--input-bg, #0f172a)',
+                  color: 'var(--foreground, #ffffff)',
+                  fontSize: '0.85rem'
+                }}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
+                Soyad <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Örn: Yılmaz"
+                value={newPatient.lastName}
+                onChange={(e) => setNewPatient({ ...newPatient, lastName: e.target.value })}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '9px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--input-border, #334155)',
+                  background: 'var(--input-bg, #0f172a)',
+                  color: 'var(--foreground, #ffffff)',
+                  fontSize: '0.85rem'
+                }}
+              />
+            </div>
           </div>
 
           <div>

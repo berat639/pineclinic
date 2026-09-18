@@ -19,7 +19,7 @@ type Tab = 'calendar' | 'patients' | 'payments' | 'knowledge' | 'settings' | 'us
 interface Appointment {
   id: string; createdAt: string; customerName?: string; phone?: string
   type: string
-  vehicleInfo?: string; issueOrRequest?: string; date: string; time: string
+  issueOrRequest?: string; date: string; time: string
   extraFields?: Record<string, string> | null
 }
 

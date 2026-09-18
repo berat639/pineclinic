@@ -100,11 +100,6 @@ async function runMigrations() {
 
   await sql`
     ALTER TABLE appointments
-    ADD COLUMN IF NOT EXISTS ata_hsys_id TEXT
-  `
-
-  await sql`
-    ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS discount_requested BOOLEAN DEFAULT false
   `
 
@@ -918,6 +913,24 @@ async function runMigrations() {
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_categories_clinic_slug_unique ON knowledge_categories (clinic_id, slug)`
   await sql`ALTER TABLE vip_assistants DROP CONSTRAINT IF EXISTS vip_assistants_phone_unique`
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS vip_assistants_clinic_phone_unique ON vip_assistants (clinic_id, phone)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS doctor_leaves (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id   UUID REFERENCES clinics(id) ON DELETE CASCADE,
+      doctor_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      date        TEXT NOT NULL,
+      start_time  TEXT NOT NULL,
+      end_time    TEXT NOT NULL,
+      is_full_day BOOLEAN NOT NULL DEFAULT false,
+      reason      TEXT,
+      notes       TEXT,
+      created_by  UUID REFERENCES users(id),
+      created_at  TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_clinic_date_idx ON doctor_leaves (clinic_id, date)`
+  await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_doctor_date_idx ON doctor_leaves (doctor_id, date)`
 
   // Copy legacy global settings into the default clinic without removing the
   // old table yet; this keeps rollback and mixed-version deployments safe.

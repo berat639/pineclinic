@@ -19,7 +19,6 @@ export interface Appointment {
   issueOrRequest?: string | null
   date: string
   time: string
-  ataHsysId?: string | null
   discountRequested?: boolean
   notes?: string | null
   extraFields?: Record<string, string> | null
@@ -48,7 +47,6 @@ function rowToAppointment(r: typeof appointments.$inferSelect): Appointment {
     issueOrRequest: r.issueOrRequest,
     date: (data.tarih as string) || r.date || '',
     time: (data.saat as string) || r.time || '',
-    ataHsysId: r.ataHsysId,
     discountRequested: r.discountRequested ?? false,
     notes: r.notes,
     extraFields,
@@ -185,7 +183,6 @@ export async function updateAppointment(
   if (data.time !== undefined) update.time = data.time
   if (data.sessionId !== undefined) update.sessionId = data.sessionId
   if (data.calendarEventId !== undefined) update.calendarEventId = data.calendarEventId
-  if (data.ataHsysId !== undefined) update.ataHsysId = data.ataHsysId
   if (data.discountRequested !== undefined) update.discountRequested = data.discountRequested
   if (data.notes !== undefined) update.notes = data.notes
 

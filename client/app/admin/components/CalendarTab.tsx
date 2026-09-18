@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
 import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
+import DoctorLeaveModal, { DoctorLeaveItem } from './DoctorLeaveModal'
 import DentalCalendar from './DentalCalendar'
 import { ToothChip, inputStyle } from './ToothChip'
 import PatientSidePanel from './PatientSidePanel'
@@ -137,6 +138,8 @@ export default function CalendarTab() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
   const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
+  const [doctorLeaves, setDoctorLeaves] = useState<DoctorLeaveItem[]>([])
+  const [leaveModalState, setLeaveModalState] = useState<{ isOpen: boolean; doctorId?: string; date?: string }>({ isOpen: false })
   const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
 
   const [confirmModal, setConfirmModal] = useState<{
@@ -458,12 +461,13 @@ export default function CalendarTab() {
       }
     }
 
-    const [docs, evts, shiftsData, invs, pats] = await Promise.all([
+    const [docs, evts, shiftsData, invs, pats, leavesData] = await Promise.all([
       fetchSafe('/api/dental/doctors'),
       fetchSafe('/api/dental/appointments'),
       fetchSafe('/api/shifts'),
       fetchSafe('/api/yonetici/inventory'),
-      fetchSafe('/api/dental/patients')
+      fetchSafe('/api/dental/patients'),
+      fetchSafe('/api/dental/doctors/leaves')
     ])
 
     if (docs) {
@@ -477,6 +481,7 @@ export default function CalendarTab() {
     if (shiftsData) setShifts(shiftsData)
     if (invs) setInventoryItems(invs)
     if (pats) setPatients(pats)
+    if (leavesData) setDoctorLeaves(leavesData)
   }, [currentDate])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -1312,6 +1317,27 @@ export default function CalendarTab() {
               >
                 <Plus size={16} /> Yeni Hasta Ekle
               </button>
+              <button
+                onClick={() => setLeaveModalState({ isOpen: true, date: currentDate })}
+                style={{
+                  padding: '7px 13px',
+                  borderRadius: 8,
+                  border: '1px solid #334155',
+                  background: '#1e293b',
+                  color: '#f8fafc',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+                title="Hekimlerin izinli veya kapalı olduğu saatleri yönetin"
+              >
+                🏖️ İzin / Kapalı Saat Ekle
+              </button>
             </div>
           </div>
         </div>
@@ -1321,6 +1347,7 @@ export default function CalendarTab() {
           doctors={doctors.filter(d => selectedDoctorIds.includes(d.id))}
           events={filteredEvents.filter(ev => !ev.doctorId || selectedDoctorIds.includes(ev.doctorId))}
           shifts={shifts}
+          doctorLeaves={doctorLeaves}
           currentDate={currentDate}
           onHeaderContextMenu={(e, doctorId) => {
             e.preventDefault()
@@ -2760,6 +2787,9 @@ export default function CalendarTab() {
               doctorId={shiftContextMenu.doctorId}
               date={shiftContextMenu.date}
               onClose={() => setShiftContextMenu(null)}
+              onOpenLeaveModal={(docId, dt) => {
+                setLeaveModalState({ isOpen: true, doctorId: docId, date: dt })
+              }}
               onSave={async (shift) => {
                 await fetch('/api/shifts', {
                   method: 'POST',
@@ -2777,6 +2807,15 @@ export default function CalendarTab() {
         isOpen={patientPanelOpen}
         onClose={() => setPatientPanelOpen(false)}
         patients={patients}
+      />
+
+      <DoctorLeaveModal
+        isOpen={leaveModalState.isOpen}
+        onClose={() => setLeaveModalState({ isOpen: false })}
+        doctors={doctors}
+        initialDoctorId={leaveModalState.doctorId}
+        initialDate={leaveModalState.date || currentDate}
+        onSuccess={() => fetchData()}
       />
 
       <ConfirmModal
