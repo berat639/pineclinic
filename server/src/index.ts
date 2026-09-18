@@ -90,7 +90,12 @@ function createAI(): GoogleGenAI {
   return new GoogleGenAI({ apiKey })
 }
 
-const ai = createAI()
+let aiClient: GoogleGenAI | null = null
+
+function getAI(): GoogleGenAI {
+  aiClient ??= createAI()
+  return aiClient
+}
 
 // ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
 const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
@@ -2185,7 +2190,7 @@ app.ws('/ws', {
         const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
         console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
 
-        const session = await createLiveSession(ai, {
+        const session = await createLiveSession(getAI(), {
           onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
           onAudio: (pcm) => {
             ws.send(pcm)
@@ -2323,7 +2328,7 @@ app.ws('/ws', {
       try {
         const { startTelephony } = await import('./telephony')
         await startTelephony({
-          ai,
+          ai: getAI(),
           port: Number(process.env.AUDIOSOCKET_PORT) || 12000,
           resolveLiveModel,
           buildSystemPrompt: async (direction?: string) => {
