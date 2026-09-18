@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getExternalHostname, getExternalProtocol } from '@/lib/forwarded-request'
+import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
 
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
 
@@ -10,8 +10,7 @@ export async function GET(req: NextRequest) {
   const res = await fetch(`${SERVER_URL}/api/auth/me`, {
     headers: {
       cookie: `token=${token}`,
-      'x-forwarded-host': getExternalHostname(req),
-      'x-forwarded-proto': getExternalProtocol(req),
+      ...getTenantForwardingHeaders(req),
     },
   })
 

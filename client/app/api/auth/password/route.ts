@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getExternalHostname } from '@/lib/forwarded-request'
+import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
 
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
 
@@ -11,7 +11,7 @@ export async function PUT(req: NextRequest) {
     headers: {
       'Content-Type': 'application/json',
       cookie: `token=${token}`,
-      'x-forwarded-host': getExternalHostname(req),
+      ...getTenantForwardingHeaders(req),
     },
     body: JSON.stringify(body),
   })
