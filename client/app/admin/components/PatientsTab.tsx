@@ -52,6 +52,66 @@ export default function PatientsTab() {
     loadPatients()
   }, [])
 
+  // Helper to normalize header keys for flexible matching
+  const normalizeHeader = (str: string) => {
+    return str
+      .toLocaleLowerCase('tr-TR')
+      .replace(/[^a-z0-9]/g, '')
+  }
+
+  // Helper to find value from row using multiple potential candidate keys
+  const findRowValue = (row: Record<string, any>, candidateKeys: string[]) => {
+    const normCandidates = candidateKeys.map(k => normalizeHeader(k))
+    for (const rawKey of Object.keys(row)) {
+      const normKey = normalizeHeader(rawKey)
+      if (normCandidates.includes(normKey)) {
+        const val = row[rawKey]
+        if (val !== undefined && val !== null) {
+          return val
+        }
+      }
+    }
+    return undefined
+  }
+
+  // Check if an Excel row is completely blank
+  const isRowEmpty = (row: Record<string, any>) => {
+    if (!row || typeof row !== 'object') return true
+    return Object.values(row).every(v => {
+      if (v === null || v === undefined) return true
+      const s = String(v).trim()
+      return s === '' || s === '—' || s === '-' || s.toLowerCase() === 'null'
+    })
+  }
+
+  // Safe date parser: supports JS Date, Excel date serials, DD.MM.YYYY, DD/MM/YYYY, ISO strings
+  const parseSafeDate = (raw: any): string | null => {
+    if (!raw) return null
+    if (raw instanceof Date) {
+      return !isNaN(raw.getTime()) ? raw.toISOString() : null
+    }
+    // Excel date serial number (e.g. 44197 -> 2021-01-01)
+    if (typeof raw === 'number' && raw > 10000 && raw < 100000) {
+      const jsDate = new Date(Math.round((raw - 25569) * 86400 * 1000))
+      return !isNaN(jsDate.getTime()) ? jsDate.toISOString() : null
+    }
+    const str = String(raw).trim()
+    if (!str || str === '—' || str === '-' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
+      return null
+    }
+    // Match Turkish date format DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
+    const dmy = str.match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$/)
+    if (dmy) {
+      const day = parseInt(dmy[1], 10)
+      const month = parseInt(dmy[2], 10) - 1
+      const year = parseInt(dmy[3], 10)
+      const d = new Date(year, month, day)
+      return !isNaN(d.getTime()) ? d.toISOString() : null
+    }
+    const d = new Date(str)
+    return !isNaN(d.getTime()) ? d.toISOString() : null
+  }
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -61,33 +121,77 @@ export default function PatientsTab() {
       const bstr = evt.target?.result
       if (!bstr) return
       try {
-        const wb = XLSX.read(bstr, { type: 'binary' })
+        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true })
         const wsname = wb.SheetNames[0]
         const ws = wb.Sheets[wsname]
-        const data = XLSX.utils.sheet_to_json(ws) as any[]
+        const data = XLSX.utils.sheet_to_json(ws, { defval: null }) as any[]
         
         setExcelErrors([])
         const errors: string[] = []
-        
-        const mappedPatients = data.map((row, index) => {
-          const name = row['Ad Soyad'] || row['Name'] || row['Adı Soyadı'] || row['hastaAdiSoyadi']
-          if (!name) {
+        const mappedPatients: any[] = []
+
+        data.forEach((row, index) => {
+          // Entirely blank rows are skipped silently without generating errors
+          if (isRowEmpty(row)) return
+
+          const rawName = findRowValue(row, [
+            'AD SOYAD', 'Ad Soyad', 'Adı Soyadı', 'Hasta Adı', 'Hasta Adı Soyadı',
+            'Ad', 'İsim', 'Name', 'FullName', 'hastaAdiSoyadi'
+          ])
+          const name = rawName ? String(rawName).trim() : ''
+
+          if (!name || name === '—' || name === '-' || name.toLowerCase() === 'null') {
             errors.push(`${index + 2}. Satır: Ad Soyad eksik`)
-            return null
+            return
           }
-          return {
+
+          const rawPhone = findRowValue(row, [
+            'TELEFON', 'Telefon', 'Telefon No', 'Tel', 'GSM', 'Cep', 'Phone', 'Mobile', 'hastaTelefonu'
+          ])
+          const phoneStr = rawPhone ? String(rawPhone).trim() : ''
+          const phone = (phoneStr && phoneStr !== '—' && phoneStr !== '-' && phoneStr.toLowerCase() !== 'null') ? phoneStr : null
+
+          const rawTc = findRowValue(row, [
+            'TC KİMLİK', 'TC Kimlik', 'TC Kimlik No', 'TCKİMLİK', 'TCKIMLIK', 'TC NO', 'TC', 'TCKN', 'tcIdentity'
+          ])
+          const tcStr = rawTc ? String(rawTc).trim() : ''
+          const tcIdentity = (tcStr && tcStr !== '—' && tcStr !== '-' && tcStr.toLowerCase() !== 'null') ? tcStr : null
+
+          const rawGender = findRowValue(row, [
+            'CİNSİYET', 'Cinsiyet', 'Cinsiyeti', 'Gender'
+          ])
+          let gender: string | null = null
+          if (rawGender) {
+            const gClean = String(rawGender).trim().toLocaleLowerCase('tr-TR')
+            if (gClean === 'e' || gClean === 'erkek' || gClean === 'm' || gClean === 'male') gender = 'E'
+            else if (gClean === 'k' || gClean === 'kadın' || gClean === 'kadin' || gClean === 'f' || gClean === 'female') gender = 'K'
+            else if (gClean !== '—' && gClean !== '-' && gClean !== 'null' && gClean !== '') gender = String(rawGender).trim()
+          }
+
+          const rawBirthDate = findRowValue(row, [
+            'DOĞUM TARİHİ', 'Doğum Tarihi', 'Dogum Tarihi', 'Doğum Tarih', 'D.Tarihi', 'BirthDate', 'Birth Date'
+          ])
+          const birthDate = parseSafeDate(rawBirthDate)
+
+          const rawCreatedAt = findRowValue(row, [
+            'KAYIT', 'Kayıt', 'Kayıt Tarihi', 'KAYIT TARİHİ', 'Kayit Tarihi', 'Registration Date', 'Tarih', 'CreatedAt'
+          ])
+          const createdAt = parseSafeDate(rawCreatedAt)
+
+          mappedPatients.push({
             name,
-            phone: row['Telefon'] || row['Phone'] || row['hastaTelefonu'],
-            tcIdentity: String(row['TC Kimlik'] || row['TC'] || row['TC Kimlik No'] || row['tcKimlikNo'] || ''),
-            gender: row['Cinsiyet'] || row['Gender'] || '',
-            birthDate: row['Doğum Tarihi'] || row['BirthDate'] || null,
-          }
-        }).filter(Boolean) as any[]
+            phone,
+            tcIdentity,
+            gender,
+            birthDate,
+            ...(createdAt ? { createdAt } : {})
+          })
+        })
 
         setExcelErrors(errors)
 
         if (mappedPatients.length === 0) {
-          toast.error('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "Ad Soyad" sütunu olduğundan emin olun.')
+          toast.error('Excel dosyasında geçerli hasta kaydı bulunamadı. Lütfen "AD SOYAD" sütununun dolu olduğundan emin olun.')
           return
         }
 
@@ -116,10 +220,34 @@ export default function PatientsTab() {
 
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { 'Ad Soyad': 'Ahmet Yılmaz', 'TC Kimlik': '12345678901', 'Telefon': '05321234567', 'Cinsiyet': 'E', 'Doğum Tarihi': '1990-01-01' }
+      {
+        'AD SOYAD': 'Sergen Güney',
+        'TC KİMLİK': '',
+        'TELEFON': '05076652367',
+        'CİNSİYET': '',
+        'DOĞUM TARİHİ': '',
+        'KAYIT': '18.09.2026'
+      },
+      {
+        'AD SOYAD': 'Ahmet Yılmaz',
+        'TC KİMLİK': '12345678901',
+        'TELEFON': '05321234567',
+        'CİNSİYET': 'Erkek',
+        'DOĞUM TARİHİ': '1990-05-15',
+        'KAYIT': ''
+      }
     ])
+    // Column widths matching headers
+    ws['!cols'] = [
+      { wch: 24 }, // AD SOYAD
+      { wch: 18 }, // TC KİMLİK
+      { wch: 18 }, // TELEFON
+      { wch: 14 }, // CİNSİYET
+      { wch: 18 }, // DOĞUM TARİHİ
+      { wch: 18 }  // KAYIT
+    ]
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sablon')
+    XLSX.utils.book_append_sheet(wb, ws, 'Hasta_Sablon')
     XLSX.writeFile(wb, 'Hasta_Sablon.xlsx')
   }
 
@@ -157,7 +285,9 @@ export default function PatientsTab() {
 
   const fmtDate = (iso: string | null) => {
     if (!iso) return '—'
-    return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
   }
 
   const [editingPatient, setEditingPatient] = useState<any | null>(null)
@@ -284,8 +414,18 @@ export default function PatientsTab() {
       </div>
 
       {excelErrors.length > 0 && (
-        <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 8, color: '#f87171' }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠️ Excel Yükleme Hataları (Bu satırlar atlandı):</div>
+        <div style={{ padding: '1rem', background: '#1e293b', border: '1px solid #ef4444', borderRadius: 8, color: '#f87171' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontWeight: 600 }}>⚠️ Excel Yükleme Hataları (Bu satırlar atlandı):</span>
+            <button
+              type="button"
+              onClick={() => setExcelErrors([])}
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1rem', padding: '0 4px' }}
+              title="Kapat"
+            >
+              ✕
+            </button>
+          </div>
           <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.85rem' }}>
             {excelErrors.map((err, i) => <li key={i}>{err}</li>)}
           </ul>

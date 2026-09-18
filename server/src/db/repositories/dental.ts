@@ -940,35 +940,81 @@ export async function getClinicConsultationAutocomplete(clinicId: string) {
 
 export async function createPatientsBulk(patientList: {
   name: string
-  phone?: string
-  tcIdentity?: string
-  gender?: string
-  birthDate?: string
+  phone?: string | null
+  tcIdentity?: string | null
+  gender?: string | null
+  birthDate?: string | null
+  createdAt?: string | null
 }[]) {
   const clinicId = requireClinicId()
-  if (patientList.length === 0) return []
+  if (!patientList || patientList.length === 0) return []
   const { patients } = await import('../schema')
   
   const existing = await db.select({ tcIdentity: patients.tcIdentity, phone: patients.phone }).from(patients).where(eq(patients.clinicId, clinicId))
-  const existingTcs = new Set(existing.map(e => e.tcIdentity).filter(Boolean))
-  const existingPhones = new Set(existing.map(e => e.phone).filter(Boolean))
+  const existingTcs = new Set(existing.map(e => e.tcIdentity?.trim()).filter(Boolean) as string[])
+  const existingPhones = new Set(existing.map(e => e.phone?.trim()).filter(Boolean) as string[])
   
-  const uniqueList = []
-  const currentTcs = new Set()
-  const currentPhones = new Set()
+  const uniqueList: {
+    name: string
+    phone: string | null
+    tcIdentity: string | null
+    gender: string | null
+    birthDate?: string | null
+    createdAt?: string | null
+  }[] = []
+  const currentTcs = new Set<string>()
+  const currentPhones = new Set<string>()
   
   for (const p of patientList) {
-    if (p.tcIdentity && (existingTcs.has(p.tcIdentity) || currentTcs.has(p.tcIdentity))) continue
-    if (p.phone && (existingPhones.has(p.phone) || currentPhones.has(p.phone))) continue
+    const name = p.name ? String(p.name).trim() : ''
+    if (!name) continue
+
+    const tc = p.tcIdentity ? String(p.tcIdentity).trim() : null
+    const ph = p.phone ? String(p.phone).trim() : null
+    const validTc = tc && tc !== 'null' && tc !== '—' && tc !== '-' ? tc : null
+    const validPh = ph && ph !== 'null' && ph !== '—' && ph !== '-' ? ph : null
+
+    if (validTc && (existingTcs.has(validTc) || currentTcs.has(validTc))) continue
+    if (validPh && (existingPhones.has(validPh) || currentPhones.has(validPh))) continue
     
-    uniqueList.push(p)
-    if (p.tcIdentity) currentTcs.add(p.tcIdentity)
-    if (p.phone) currentPhones.add(p.phone)
+    uniqueList.push({
+      ...p,
+      name,
+      tcIdentity: validTc,
+      phone: validPh,
+      gender: p.gender && p.gender.trim() !== '' && p.gender !== 'null' && p.gender !== '—' ? p.gender.trim() : null
+    })
+    if (validTc) currentTcs.add(validTc)
+    if (validPh) currentPhones.add(validPh)
   }
   
   if (uniqueList.length === 0) return []
   
-  const mapped = uniqueList.map(p => ({ ...p, clinicId, birthDate: p.birthDate ? new Date(p.birthDate) : null }))
+  const mapped = uniqueList.map(p => {
+    let birthDate: Date | null = null
+    if (p.birthDate) {
+      const d = new Date(p.birthDate)
+      if (!isNaN(d.getTime())) {
+        birthDate = d
+      }
+    }
+    let createdAt: Date | undefined = undefined
+    if (p.createdAt) {
+      const d = new Date(p.createdAt)
+      if (!isNaN(d.getTime())) {
+        createdAt = d
+      }
+    }
+    return {
+      clinicId,
+      name: p.name,
+      phone: p.phone,
+      tcIdentity: p.tcIdentity,
+      gender: p.gender,
+      birthDate,
+      ...(createdAt ? { createdAt } : {})
+    }
+  })
   return await db.insert(patients).values(mapped).returning()
 }
 
