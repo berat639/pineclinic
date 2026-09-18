@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --watch --env-file ../.env src/index.ts",
-    "start": "bun --env-file ../.env src/index.ts",
+    "dev": "bun --env-file=../.env --watch src/index.ts",
+    "start": "bun --env-file=../.env src/index.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun --env-file ../.env run src/db/migrate.ts",
+    "db:migrate": "bun --env-file=../.env src/db/migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:seed": "bun run src/scripts/migrate-seed.ts",
-    "db:seed-dental": "bun --env-file ../.env run src/scripts/seed-dental.ts",
-    "db:seed-users": "bun --env-file ../.env run src/scripts/seed-users.ts",
-    "db:import-json": "bun --env-file ../.env run src/scripts/migrate-from-json.ts"
+    "db:seed": "bun --env-file=../.env src/scripts/migrate-seed.ts",
+    "db:seed-dental": "bun --env-file=../.env src/scripts/seed-dental.ts",
+    "db:seed-users": "bun --env-file=../.env src/scripts/seed-users.ts",
+    "db:import-json": "bun --env-file=../.env src/scripts/migrate-from-json.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",

@@ -2,6 +2,9 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinicDomains, clinics } from '../db/schema'
+import { hostnameFromRequest, normalizeHostname } from './hostname'
+
+export { hostnameFromRequest, normalizeHostname } from './hostname'
 
 export interface TenantContext {
   clinicId: string
@@ -13,19 +16,6 @@ const requestStorage = new AsyncLocalStorage<Request>()
 const requestTenants = new WeakMap<Request, TenantContext | null>()
 const cache = new Map<string, { value: TenantContext | null; expiresAt: number }>()
 const CACHE_TTL_MS = 30_000
-
-export function normalizeHostname(value: string | null | undefined): string {
-  if (!value) return ''
-  const first = value.split(',')[0]?.trim().toLowerCase() ?? ''
-  const withoutProtocol = first.replace(/^https?:\/\//, '').split('/')[0] ?? ''
-  return withoutProtocol.replace(/\.$/, '').replace(/:\d+$/, '')
-}
-
-export function hostnameFromRequest(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-host')
-  const host = forwarded || request.headers.get('host')
-  return normalizeHostname(host)
-}
 
 export function isLocalHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'

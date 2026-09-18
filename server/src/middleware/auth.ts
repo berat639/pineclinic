@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import { getUserById, getSessionByJti } from '../db/repositories/users'
 import { ensurePlatformAdminMembership, getActiveMembership } from '../db/repositories/tenancy'
 import { resolveTenantFromRequest } from '../tenancy/context'
+import { canManagePlatform } from '../platform/access'
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'voiceai-dev-secret-change-me')
 const TOKEN_EXPIRY = '8h'
@@ -14,6 +15,7 @@ export interface AuthUser {
   clinicId: string
   hostname?: string
   isPlatformAdmin: boolean
+  canManagePlatform: boolean
 }
 
 export async function signToken(user: { id: string; role: string; clinicId: string }, jti: string): Promise<string> {
@@ -71,5 +73,6 @@ export async function authenticateRequest(cookie: string | undefined, request?: 
     clinicId: payload.clinicId,
     hostname,
     isPlatformAdmin: user.isPlatformAdmin,
+    canManagePlatform: request ? canManagePlatform(user, request) : false,
   }
 }

@@ -238,6 +238,16 @@
   color: var(--integration-success-text, #bbf7d0) !important;
 }
 
+.managedInfo,
+.card p.managedInfo {
+  margin: 0 0 16px;
+  padding: 12px;
+  background: var(--integration-surface, #0f172a);
+  border: 1px solid var(--integration-border-strong, #334155);
+  border-radius: 8px;
+  color: var(--integration-text, #e2e8f0) !important;
+}
+
 .inboxHeader { margin-top: 0; }
 
 .inbox {

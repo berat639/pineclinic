@@ -6,8 +6,8 @@ function firstForwardedValue(value: string | null): string {
 
 /** Preserve the public clinic hostname across the Next.js → API proxy hop. */
 export function getExternalHostname(request: NextRequest): string {
-  return firstForwardedValue(request.headers.get('x-forwarded-host'))
-    || request.headers.get('host')
+  return request.headers.get('host')
+    || firstForwardedValue(request.headers.get('x-forwarded-host'))
     || request.nextUrl.host
 }
 

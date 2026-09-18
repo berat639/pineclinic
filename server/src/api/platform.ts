@@ -5,9 +5,14 @@ import {
   createPlatformClinic,
   listPlatformClinics,
 } from '../db/repositories/platform-clinics'
+import { hasMatchingRequestOrigin, isPlatformAdminRequest } from '../platform/access'
 
 export const platformPlugin = new Elysia({ prefix: '/api/platform' })
   .get('/clinics', async ({ cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request)) {
+      set.status = 404
+      return { error: 'Sayfa bulunamadı.' }
+    }
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
     if (!user) {
       set.status = 401
@@ -20,6 +25,10 @@ export const platformPlugin = new Elysia({ prefix: '/api/platform' })
     return listPlatformClinics()
   })
   .post('/clinics', async ({ body, cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) {
+      set.status = 404
+      return { error: 'Sayfa bulunamadı.' }
+    }
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
     if (!user) {
       set.status = 401

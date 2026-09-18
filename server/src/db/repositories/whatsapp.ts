@@ -30,6 +30,7 @@ export function publicWhatsAppConfig(clinic: Clinic) {
     instanceName: clinic.evolutionInstanceName || automatic?.instanceName || '', hasApiKey: !!clinic.evolutionApiKey || !!automatic,
     enabled: clinic.whatsappEnabled, aiEnabled: clinic.whatsappAiEnabled,
     connectionState: clinic.evolutionConnectionState,
+    evolutionMode: automatic ? 'managed' as const : 'manual' as const,
   }
 }
 export async function saveWhatsAppConfig(id: string, input: { baseUrl: string; instanceName: string; apiKey?: string; enabled: boolean; aiEnabled: boolean }) {

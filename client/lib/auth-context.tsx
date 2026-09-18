@@ -11,6 +11,7 @@ interface AuthUser {
   clinicId: string
   hostname: string
   isPlatformAdmin: boolean
+  canManagePlatform: boolean
 }
 
 interface AuthContextType {

@@ -41,7 +41,7 @@ export default function YoneticiPage() {
   const roleTabs = isModerator
     ? [{ id: 'vip' as Tab, label: '🌟 Özel Asistan (VIP)' }, ...BASE_TABS]
     : BASE_TABS
-  const tabsList = user?.isPlatformAdmin
+  const tabsList = user?.canManagePlatform
     ? [{ id: 'platform-clinics' as Tab, label: 'Klinikler' }, ...roleTabs]
     : roleTabs
 
@@ -55,16 +55,16 @@ export default function YoneticiPage() {
     if (!user) return
     if (isModerator) {
       setAllowedTabs([
-        ...(user.isPlatformAdmin ? ['platform-clinics' as Tab] : []),
+        ...(user.canManagePlatform ? ['platform-clinics' as Tab] : []),
         'vip', 'knowledge', 'calendar',
       ])
-      if (!tab) setTab('vip')
+      if (!tab) setTab(user.canManagePlatform ? 'platform-clinics' : 'vip')
     } else if (user.role === 'yonetici') {
       setAllowedTabs([
-        ...(user.isPlatformAdmin ? ['platform-clinics' as Tab] : []),
+        ...(user.canManagePlatform ? ['platform-clinics' as Tab] : []),
         ...BASE_TABS.map(t => t.id),
       ])
-      if (!tab) setTab('calendar')
+      if (!tab) setTab(user.canManagePlatform ? 'platform-clinics' : 'calendar')
     } else {
       fetch('/api/admin/settings/roles')
         .then(r => r.json())
@@ -135,7 +135,7 @@ export default function YoneticiPage() {
           {tab === 'klinik' && <KlinikPersonelTab />}
           {tab === 'integrations' && <IntegrationsTab apiPrefix="/api/yonetici/integrations" />}
           {tab === 'vip' && <VipAssistantTab />}
-          {tab === 'platform-clinics' && user?.isPlatformAdmin && <PlatformClinicsTab />}
+          {tab === 'platform-clinics' && user?.canManagePlatform && <PlatformClinicsTab />}
         </div>
       </div>
     </div>

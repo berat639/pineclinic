@@ -4,6 +4,7 @@ import { getUserByEmail, createUser, createSession, deleteSessionByJti, updateUs
 import { signToken, authenticateRequest } from '../middleware/auth'
 import { ensurePlatformAdminMembership, getActiveMembership } from '../db/repositories/tenancy'
 import { resolveTenantFromRequest } from '../tenancy/context'
+import { canManagePlatform } from '../platform/access'
 
 export const authPlugin = new Elysia({ prefix: '/api/auth' })
 
@@ -49,7 +50,16 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
       path: '/',
     })
 
-    return { id: user.id, name: user.name, email: user.email, role: membership.role, clinicId: tenant.clinicId, hostname: tenant.hostname, isPlatformAdmin: user.isPlatformAdmin }
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: membership.role,
+      clinicId: tenant.clinicId,
+      hostname: tenant.hostname,
+      isPlatformAdmin: user.isPlatformAdmin,
+      canManagePlatform: canManagePlatform(user, request),
+    }
   })
 
   .post('/logout', async ({ cookie, set }) => {
