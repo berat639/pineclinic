@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import { toast } from 'react-hot-toast'
 import PatientProfileCard from './PatientProfileCard'
 import Pagination from './Pagination'
+import AddPatientModal from './AddPatientModal'
 
 interface Patient {
   id: string
@@ -26,7 +27,6 @@ export default function PatientsTab() {
   const [profileLoading, setProfileLoading] = useState(false)
   
   const [showAddModal, setShowAddModal] = useState(false)
-  const [newPatient, setNewPatient] = useState({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
   const [excelErrors, setExcelErrors] = useState<string[]>([])
 
   // Pagination
@@ -112,33 +112,6 @@ export default function PatientsTab() {
     reader.readAsBinaryString(file)
     // reset input
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const handleAddPatient = async () => {
-    if (!newPatient.name.trim()) {
-      toast.error('Hasta adı zorunludur.')
-      return
-    }
-    
-    try {
-      const res = await fetch('/api/dental/patients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPatient)
-      })
-      if (res.ok) {
-        toast.success('Hasta başarıyla eklendi!')
-        setShowAddModal(false)
-        setNewPatient({ name: '', phone: '', email: '', tcIdentity: '', gender: '', birthDate: '', smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
-        loadPatients()
-      } else {
-        const err = await res.json()
-        toast.error('Hata: ' + (err.error || 'Bilinmeyen hata'))
-      }
-    } catch (err) {
-      console.error(err)
-      toast.error('Hasta eklenirken bir hata oluştu.')
-    }
   }
 
   const handleDownloadTemplate = () => {
@@ -451,48 +424,11 @@ export default function PatientsTab() {
       )}
 
       {/* ── Yeni Hasta Ekle Modalı ─────────────────────────────────────────── */}
-      {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--card-bg, #1e293b)', padding: '1.5rem', borderRadius: 14, border: '1px solid var(--input-border, #334155)', width: 440, maxWidth: '92vw', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--foreground)', fontSize: '1.1rem', fontWeight: 700 }}>Yeni Hasta Ekle</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <input type="text" placeholder="Ad Soyad (Zorunlu)" value={newPatient.name} onChange={e => setNewPatient({...newPatient, name: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
-              <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={newPatient.phone} onChange={e => setNewPatient({...newPatient, phone: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
-              <input type="text" placeholder="TC Kimlik No (İsteğe Bağlı)" value={newPatient.tcIdentity} onChange={e => setNewPatient({...newPatient, tcIdentity: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
-              <input type="email" placeholder="E-posta (İsteğe Bağlı)" value={newPatient.email} onChange={e => setNewPatient({...newPatient, email: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
-              <select value={newPatient.gender} onChange={e => setNewPatient({...newPatient, gender: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }}>
-                <option value="">Cinsiyet (İsteğe Bağlı)</option>
-                <option value="Erkek">Erkek</option>
-                <option value="Kadın">Kadın</option>
-              </select>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', paddingLeft: 4 }}>Doğum Tarihi (İsteğe Bağlı)</label>
-                <input type="date" value={newPatient.birthDate} onChange={e => setNewPatient({...newPatient, birthDate: e.target.value})} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground)', fontSize: '0.85rem' }} />
-              </div>
-              
-              <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)' }}>İletişim İzinleri (KVKK)</label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!newPatient.smsOptOut} onChange={e => setNewPatient({...newPatient, smsOptOut: !e.target.checked})} />
-                  SMS ile bilgilendirilmek istiyorum
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!newPatient.emailOptOut} onChange={e => setNewPatient({...newPatient, emailOptOut: !e.target.checked})} />
-                  E-posta ile bilgilendirilmek istiyorum
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!newPatient.whatsappOptOut} onChange={e => setNewPatient({...newPatient, whatsappOptOut: !e.target.checked})} />
-                  WhatsApp ile bilgilendirilmek istiyorum
-                </label>
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button onClick={() => setShowAddModal(false)} style={{ padding: '9px 16px', background: 'transparent', border: '1px solid var(--input-border, #334155)', borderRadius: 8, color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
-              <button onClick={handleAddPatient} style={{ padding: '9px 18px', background: 'var(--brand-color, #2563eb)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Kaydet</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AddPatientModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={() => loadPatients()}
+      />
 
       {/* ── Hasta Düzenle Modalı ─────────────────────────────────────────── */}
       {editingPatient && (

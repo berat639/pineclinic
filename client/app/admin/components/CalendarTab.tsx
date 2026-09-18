@@ -11,6 +11,7 @@ import MiniCalendar from './MiniCalendar';
 import PatientProfileCard from './PatientProfileCard';
 import FastScheduleModal from './FastScheduleModal';
 import ConfirmModal from './ConfirmModal';
+import AddPatientModal from './AddPatientModal';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 import DicomViewer from './DicomViewer'
@@ -156,6 +157,7 @@ export default function CalendarTab() {
   });
 
   const [quickCreateMenu, setQuickCreateMenu] = useState<{ start: string, end: string, doctorId: string | null, x: number, y: number, isCentered?: boolean } | null>(null)
+  const [showAddPatientModal, setShowAddPatientModal] = useState(false)
 
   const [showPatientSearchDropdown, setShowPatientSearchDropdown] = useState(false)
 
@@ -1287,6 +1289,28 @@ export default function CalendarTab() {
                 }}
               >
                 <Plus size={16} /> Randevu Ekle
+              </button>
+              <button
+                onClick={() => {
+                  setShowAddPatientModal(true)
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <Plus size={16} /> Yeni Hasta Ekle
               </button>
             </div>
           </div>
@@ -2764,6 +2788,22 @@ export default function CalendarTab() {
         variant={confirmModal.variant}
         onConfirm={confirmModal.onConfirm}
         onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      <AddPatientModal
+        isOpen={showAddPatientModal}
+        onClose={() => setShowAddPatientModal(false)}
+        onSuccess={(created) => {
+          if (created) {
+            setPatients(prev => [created, ...(prev || [])])
+          }
+          fetch('/api/dental/patients')
+            .then(r => r.ok ? r.json() : null)
+            .then(pats => {
+              if (pats && Array.isArray(pats)) setPatients(pats)
+            })
+            .catch(() => {})
+        }}
       />
 
     </div>
