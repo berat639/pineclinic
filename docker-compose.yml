@@ -64,7 +64,7 @@ services:
         BACKEND_PROXY_URL: http://server:3001
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3000:3002"
     environment:
       NODE_ENV: production
       SERVER_URL: http://server:3001
