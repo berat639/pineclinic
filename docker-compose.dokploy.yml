@@ -62,8 +62,8 @@ services:
       dockerfile: server/Dockerfile
     restart: always
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-voiceai}:${POSTGRES_PASSWORD:-voiceai_secret}@voiceai-postgres:5432/voiceai
-      REDIS_URL: redis://voiceai-redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-voiceai}:${POSTGRES_PASSWORD:-voiceai_secret}@postgres:5432/voiceai}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: "3001"
       NODE_ENV: production
       APP_URL: ${APP_URL}
