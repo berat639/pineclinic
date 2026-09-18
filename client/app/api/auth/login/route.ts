@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
-
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
+import { fetchBackend } from '@/lib/backend-request'
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const res = await fetch(`${SERVER_URL}/api/auth/login`, {
+    const res = await fetchBackend('/api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

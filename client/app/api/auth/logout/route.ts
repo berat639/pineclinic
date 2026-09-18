@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
-
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
+import { fetchBackend } from '@/lib/backend-request'
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get('token')?.value || ''
-  const res = await fetch(`${SERVER_URL}/api/auth/logout`, {
+  await fetchBackend('/api/auth/logout', {
     method: 'POST',
     headers: {
       cookie: `token=${token}`,

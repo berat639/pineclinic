@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
+import { fetchBackend } from '@/lib/backend-request'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ proxy: string[] }> }) {
   const resolvedParams = await params
@@ -27,10 +28,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
 }
 
 async function handleProxy(req: NextRequest, proxyPath: string[]) {
-  const backendUrl = process.env.BACKEND_PROXY_URL || 'http://127.0.0.1:3001'
   const path = `/api/${(proxyPath || []).join('/')}`
   const search = req.nextUrl.search || ''
-  const targetUrl = `${backendUrl}${path}${search}`
+  const targetPath = `${path}${search}`
 
   const headers = new Headers(req.headers)
   for (const [name, value] of Object.entries(getTenantForwardingHeaders(req))) headers.set(name, value)
@@ -48,7 +48,7 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
       options.body = await req.arrayBuffer()
     }
 
-    const response = await fetch(targetUrl, options)
+    const response = await fetchBackend(targetPath, options)
 
     const responseHeaders = new Headers(response.headers)
     responseHeaders.delete('content-encoding') // Next.js will handle encoding
@@ -60,7 +60,7 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
       headers: responseHeaders,
     })
   } catch (error: any) {
-    console.error(`[Proxy Error] ${req.method} ${targetUrl}`, error)
+    console.error(`[Proxy Error] ${req.method} ${targetPath}`, error)
     return NextResponse.json({ error: 'Proxy failed', details: error.message }, { status: 500 })
   }
 }

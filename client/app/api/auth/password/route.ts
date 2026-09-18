@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
-
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001'
+import { fetchBackend } from '@/lib/backend-request'
 
 export async function PUT(req: NextRequest) {
   const token = req.cookies.get('token')?.value || ''
   const body = await req.json()
-  const res = await fetch(`${SERVER_URL}/api/auth/password`, {
+  const res = await fetchBackend('/api/auth/password', {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
