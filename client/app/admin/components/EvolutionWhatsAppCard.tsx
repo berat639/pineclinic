@@ -110,7 +110,7 @@ export default function EvolutionWhatsAppCard() {
       {configs.length > 1 && <label className={styles.field}>Klinik<select value={form.clinicId} disabled={busy} onChange={e => {
         setForm(configs.find(c => c.clinicId === e.target.value) || null); setApiKey(''); setQr(null)
       }}>{configs.map(c => <option key={c.clinicId} value={c.clinicId}>{c.clinicName}</option>)}</select></label>}
-      {form.evolutionMode === 'managed' && <p className={styles.managedInfo}>Evolution altyapısı merkezi olarak güvenli biçimde yönetiliyor. Bu kliniğe yalnızca kendi WhatsApp bağlantısı ve QR kodu gösterilir.</p>}
+
       <div className={styles.grid}>
         {form.evolutionMode === 'manual' && <>
           <label className={styles.field}>WhatsApp sunucu adresi<input type="url" placeholder="https://whatsapp.ornek.com" value={form.baseUrl} onChange={e => patch({ baseUrl: e.target.value })} /></label>
