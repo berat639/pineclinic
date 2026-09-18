@@ -17,6 +17,15 @@ import {
   Sliders,
   Maximize2
 } from 'lucide-react';
+import {
+  DentalSurface,
+  ToothAxes,
+  detectDentalSurface,
+  doesNormalMatchSurface,
+  doesPositionMatchRoot,
+  getAnatomicalDepthRatio,
+  projectOnToothAxis,
+} from './dentalAnatomy';
 
 // ── Türk Standart FDI Diş İsimleri Sözlüğü ──────────────────────────────────
 export const TOOTH_NAMES: Record<number, string> = {
@@ -266,33 +275,12 @@ export default function Odontogram3D({
   } | null>(null);
 
   // ── Yüzey Normalinden Yüzey (MODBL) Algılama ────────────────────────────────
-  const detectSurfaceFromNormal = useCallback((fdi: number, normalWorld: THREE.Vector3): string => {
-    const isUpper = fdi < 30;
-
-    // Y ekseni dikey (Oklüzal)
-    if (isUpper && normalWorld.y < -0.38) {
-      return 'O'; // Üst diş ısırma yüzeyi aşağı bakar
-    }
-    if (!isUpper && normalWorld.y > 0.38) {
-      return 'O'; // Alt diş ısırma yüzeyi yukarı bakar
-    }
-
-    // Z ekseni ön/arka (Bukkal / Lingual)
-    if (normalWorld.z > 0.38) {
-      return 'B'; // Yanak/dudak tarafı
-    }
-    if (normalWorld.z < -0.38) {
-      return 'L'; // Dil/damak tarafı
-    }
-
-    // X ekseni yanlar (Mezyal / Distal)
-    // FDI Çeyreklerine göre Mezyal (orta hatta bakan) ve Distal (arkaya bakan) hesabı
-    const isRightQuadrant = (fdi >= 11 && fdi <= 18) || (fdi >= 41 && fdi <= 48);
-    if (isRightQuadrant) {
-      return normalWorld.x > 0 ? 'M' : 'D';
-    } else {
-      return normalWorld.x < 0 ? 'M' : 'D';
-    }
+  const detectSurfaceFromNormal = useCallback((
+    fdi: number,
+    normalModel: THREE.Vector3,
+    axes: ToothAxes,
+  ): DentalSurface => {
+    return detectDentalSurface(fdi, [normalModel.x, normalModel.y, normalModel.z], axes);
   }, []);
 
   // ── Renkleri ve Yüzey/Bölüm Vurgularını 3D Mesh'lere Uygulama ──────────────
@@ -333,11 +321,13 @@ export default function Odontogram3D({
 
       const colors = colorAttr.array as Float32Array;
       const vertexCount = mesh.userData.vertexCount || posAttr.count;
-      const minWorldY = mesh.userData.minWorldY ?? -30;
-      const heightY = mesh.userData.heightY ?? 20;
-      const maxWorldY = mesh.userData.maxWorldY ?? (minWorldY + heightY);
-      const isUpper = fdi < 30;
-      const isRightQuadrant = (fdi >= 11 && fdi <= 18) || (fdi >= 41 && fdi <= 48);
+      const axes = mesh.userData.axes as ToothAxes | undefined;
+      const minUpProjection = mesh.userData.minUpProjection as number | undefined;
+      const maxUpProjection = mesh.userData.maxUpProjection as number | undefined;
+
+      // Every ToothFairy tooth carries its own anatomical coordinate frame.
+      // Without it, painting a guessed global region would be misleading.
+      if (!axes || minUpProjection === undefined || maxUpProjection === undefined) return;
 
       let draftR = 0.97, draftG = 0.98, draftB = 0.99;
       if (draftColor) {
@@ -378,17 +368,17 @@ export default function Odontogram3D({
         // 3. Özel Yüzey veya Bölüm Seçildiyse:
         // Kural: Dişin temel seçim rengi (#2563eb) seçilmeyen kısımlarda aynen korunur;
         // sadece seçilen alanın (yüzey veya anatomik bölüm) rengi değişir!
-        const lz = posAttr.getZ(i);
-        const wy = -lz;
-        const ratio = isUpper ? (wy - minWorldY) / heightY : (maxWorldY - wy) / heightY;
-
-        // Dünya normalleri (-lnz, lny, lnx)
-        const lnz = normAttr.getZ(i);
-        const lny = normAttr.getY(i);
-        const lnx = normAttr.getX(i);
-        const wny = -lnz;
-        const wnz = lny;
-        const wnx = lnx;
+        const position: [number, number, number] = [
+          posAttr.getX(i),
+          posAttr.getY(i),
+          posAttr.getZ(i),
+        ];
+        const normal: [number, number, number] = [
+          normAttr.getX(i),
+          normAttr.getY(i),
+          normAttr.getZ(i),
+        ];
+        const ratio = getAnatomicalDepthRatio(position, axes, minUpProjection, maxUpProjection);
 
         // Varsayılan: Diş seçim mavisi (#2563eb) korunur!
         let vertR = 0.145;
@@ -414,20 +404,7 @@ export default function Odontogram3D({
             vertB = 0.506;
           } else if (section && section.includes('Kök') && ratio > 0.48) {
             // Çok köklü azılarda spesifik kök ayrımı: Mor (#8b5cf6)
-            let isMatchingRoot = false;
-            if (section.includes('Mezyal')) {
-              isMatchingRoot = isRightQuadrant ? wnx > 0.0 : wnx < 0.0;
-            } else if (section.includes('Distal')) {
-              isMatchingRoot = isRightQuadrant ? wnx < 0.0 : wnx > 0.0;
-            } else if (section.includes('Bukkal')) {
-              isMatchingRoot = wnz > 0.0;
-            } else if (section.includes('Palatinal') || section.includes('Lingual')) {
-              isMatchingRoot = wnz < 0.0;
-            } else {
-              isMatchingRoot = true;
-            }
-
-            if (isMatchingRoot) {
+            if (doesPositionMatchRoot(section, fdi, position, axes)) {
               // Mor (#8b5cf6)
               vertR = 0.545;
               vertG = 0.360;
@@ -438,23 +415,9 @@ export default function Odontogram3D({
 
         // B) MODBL Yüzey Vurgusu (Kuron bölgesinde ratio < 0.48)
         if (hasSpecificSurfaces && ratio < 0.48) {
-          let surfaceMatch = false;
-
-          if (surfaces.includes('O')) {
-            if (isUpper ? wny < -0.32 : wny > 0.32) surfaceMatch = true;
-          }
-          if (surfaces.includes('B')) {
-            if (wnz > 0.32) surfaceMatch = true;
-          }
-          if (surfaces.includes('L')) {
-            if (wnz < -0.32) surfaceMatch = true;
-          }
-          if (surfaces.includes('M')) {
-            if (isRightQuadrant ? wnx > 0.28 : wnx < -0.28) surfaceMatch = true;
-          }
-          if (surfaces.includes('D')) {
-            if (isRightQuadrant ? wnx < -0.28 : wnx > 0.28) surfaceMatch = true;
-          }
+          const surfaceMatch = surfaces.some(surface =>
+            doesNormalMatchSurface(surface as DentalSurface, fdi, normal, axes),
+          );
 
           if (surfaceMatch) {
             // Seçilen Yüzey: Parlak Turkuaz (#06b6d4)
@@ -704,9 +667,20 @@ export default function Odontogram3D({
           let mesh: THREE.Mesh;
 
           if (part.group === 'tooth' && part.fdi) {
-            const minWorldY = -part.bounds[1][2];
-            const maxWorldY = -part.bounds[0][2];
-            const heightY = maxWorldY - minWorldY;
+            const axes = part.axes as ToothAxes | undefined;
+            if (!axes) throw new Error(`Diş #${part.fdi} için anatomik eksen verisi bulunamadı.`);
+
+            const positions = geo.getAttribute('position') as THREE.BufferAttribute;
+            let minUpProjection = Infinity;
+            let maxUpProjection = -Infinity;
+            for (let i = 0; i < positions.count; i++) {
+              const projection = projectOnToothAxis(
+                [positions.getX(i), positions.getY(i), positions.getZ(i)],
+                axes,
+              );
+              minUpProjection = Math.min(minUpProjection, projection);
+              maxUpProjection = Math.max(maxUpProjection, projection);
+            }
 
             // Vertex Colors tamponu oluştur ve mine beyazıyla başlat
             const colors = new Float32Array(part.vertexCount * 3);
@@ -729,9 +703,9 @@ export default function Odontogram3D({
               fdi: part.fdi, 
               group: 'tooth', 
               name: TOOTH_NAMES[part.fdi] || `Diş ${part.fdi}`,
-              minWorldY,
-              maxWorldY,
-              heightY,
+              axes,
+              minUpProjection,
+              maxUpProjection,
               vertexCount: part.vertexCount,
             };
             mesh.position.set(-center[0], -center[1], -center[2]);
@@ -849,11 +823,12 @@ export default function Odontogram3D({
         threeRef.current.hoveredMesh = hitMesh;
         canvasRef.current.style.cursor = activeTool === 'brush' ? 'crosshair' : 'pointer';
 
-        // Yüzey normalini dünya koordinatına çevir ve yüzeyi tespit et
+        // Face normal and anatomical axes are both in the model's local frame.
+        // Keeping classification in that frame also makes it camera-independent.
         let surfaceName: string | null = null;
-        if (hit.face?.normal) {
-          const nWorld = hit.face.normal.clone().transformDirection(hitMesh.matrixWorld);
-          surfaceName = detectSurfaceFromNormal(fdi, nWorld);
+        const axes = hitMesh.userData.axes as ToothAxes | undefined;
+        if (hit.face?.normal && axes) {
+          surfaceName = detectSurfaceFromNormal(fdi, hit.face.normal, axes);
         }
 
         setHoveredTooth({
