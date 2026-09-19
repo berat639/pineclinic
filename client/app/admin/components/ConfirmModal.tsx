@@ -67,8 +67,6 @@ export default function ConfirmModal({
         position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.65)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -83,10 +81,10 @@ export default function ConfirmModal({
         style={{
           width: '100%',
           maxWidth: '420px',
-          background: 'var(--background-2, #0f172a)',
+          background: 'var(--card-bg, #1e293b)',
           borderRadius: '16px',
-          border: '1px solid var(--glass-border, rgba(255, 255, 255, 0.12))',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.05)',
+          border: '1px solid var(--input-border, #334155)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
           padding: '24px',
           position: 'relative',
           display: 'flex',
@@ -164,13 +162,11 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={onClose}
+            className="btn-clinic-blue"
             style={{
               flex: 1,
               padding: '10px 16px',
               borderRadius: '10px',
-              border: '1px solid var(--glass-border, rgba(255, 255, 255, 0.12))',
-              background: 'rgba(255, 255, 255, 0.05)',
-              color: 'var(--foreground, #f8fafc)',
               fontWeight: 600,
               fontSize: '0.88rem',
               cursor: 'pointer',

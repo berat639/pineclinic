@@ -1319,13 +1319,11 @@ export default function CalendarTab() {
               </button>
               <button
                 onClick={() => setLeaveModalState({ isOpen: true, date: currentDate })}
+                className="btn-clinic-blue"
                 style={{
-                  padding: '7px 13px',
+                  padding: '8px 14px',
                   borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#1e293b',
-                  color: '#f8fafc',
-                  fontSize: '0.8rem',
+                  fontSize: '0.82rem',
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',

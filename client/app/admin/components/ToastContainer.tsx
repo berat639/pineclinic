@@ -67,8 +67,11 @@ export default function ToastContainer({ onNewAppointment }: { onNewAppointment?
         const s = TYPE_STYLE[t.type]
         return (
           <div key={t.id} style={{
-            background: s.bg, border: `1px solid ${s.border}`, borderRadius: 12,
-            padding: '0.85rem 1rem', backdropFilter: 'blur(12px)',
+            background: 'var(--card-bg, #1e293b)',
+            border: `1px solid ${s.border}`,
+            borderRadius: 12,
+            padding: '0.85rem 1rem',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.25)',
             display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
           }}>
             <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{s.icon}</span>

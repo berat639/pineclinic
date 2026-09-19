@@ -231,13 +231,12 @@ function ContextMenu({
         left: adjustedX,
         top: adjustedY,
         zIndex: 10000,
-        background: 'var(--background-2)',
-        border: '1px solid var(--glass-border)',
+        background: 'var(--card-bg, #1e293b)',
+        border: '1px solid var(--input-border, #334155)',
         borderRadius: 10,
         padding: '6px 0',
         minWidth: 200,
         boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(12px)',
         animation: 'fadeIn 0.15s ease',
       }}
     >
@@ -246,7 +245,7 @@ function ContextMenu({
         fontSize: 11,
         fontWeight: 600,
         color: 'var(--foreground-2)',
-        borderBottom: '1px solid var(--glass-border)',
+        borderBottom: '1px solid var(--input-border, #334155)',
         marginBottom: 4,
       }}>
         Diş #{toothNumber} — Durum Belirle

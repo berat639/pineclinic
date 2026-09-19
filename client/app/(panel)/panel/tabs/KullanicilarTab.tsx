@@ -211,7 +211,6 @@ export default function KullanicilarTab() {
             position: 'fixed',
             inset: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            backdropFilter: 'blur(8px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -225,9 +224,9 @@ export default function KullanicilarTab() {
             style={{
               width: '100%',
               maxWidth: 500,
-              background: 'var(--background-2, #0f172a)',
+              background: 'var(--card-bg, #1e293b)',
               borderRadius: 16,
-              border: '1px solid var(--glass-border, rgba(255, 255, 255, 0.12))',
+              border: '1px solid var(--input-border, #334155)',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
               padding: 24,
               display: 'flex',
@@ -332,7 +331,7 @@ export default function KullanicilarTab() {
                   <Trash2 size={12} /> Sil
                 </button>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={() => setEditingUser(null)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground-2)', fontSize: 12, cursor: 'pointer' }}>Vazgeç</button>
+                  <button type="button" onClick={() => setEditingUser(null)} className="btn-clinic-blue" style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Vazgeç</button>
                   <button type="submit" disabled={isSavingUser} style={btnStyle}>{isSavingUser ? 'Kaydediliyor...' : 'Kaydet'}</button>
                 </div>
               </div>

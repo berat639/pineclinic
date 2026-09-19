@@ -87,8 +87,6 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
         position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -104,9 +102,9 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
           maxWidth: 580,
           maxHeight: '92vh',
           overflowY: 'auto',
-          background: 'var(--background-2, #0f172a)',
+          background: 'var(--card-bg, #1e293b)',
           borderRadius: 16,
-          border: '1px solid var(--glass-border, rgba(255, 255, 255, 0.12))',
+          border: '1px solid var(--input-border, #334155)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
           padding: 24,
           position: 'relative',
@@ -437,12 +435,10 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
             <button
               type="button"
               onClick={onClose}
+              className="btn-clinic-blue"
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
-                border: '1px solid var(--glass-border)',
-                background: 'transparent',
-                color: 'var(--foreground-2)',
                 fontSize: '0.8rem',
                 cursor: 'pointer'
               }}
@@ -451,12 +447,10 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
             </button>
             <button
               type="submit"
+              className="btn-clinic-primary"
               style={{
                 padding: '8px 20px',
                 borderRadius: 8,
-                border: 'none',
-                background: '#a855f7',
-                color: '#fff',
                 fontSize: '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer',

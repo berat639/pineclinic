@@ -70,12 +70,12 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+      background: 'rgba(0,0,0,0.65)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '1rem',
     }} {...backdropDismiss}>
       <div style={{
-        background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
+        background: 'var(--card-bg, #1e293b)', border: '1px solid var(--input-border, #334155)',
         borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 800,
         animation: 'fadeIn 0.2s ease',
       }}>
@@ -536,11 +536,12 @@ export default function KnowledgeTab() {
       {toast && (
         <div style={{
           position: 'fixed', top: 80, right: 24, zIndex: 2000,
-          background: toast.type === 'success' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          background: 'var(--card-bg, #1e293b)',
+          border: `1px solid ${toast.type === 'success' ? '#22c55e' : '#ef4444'}`,
           color: toast.type === 'success' ? '#22c55e' : '#ef4444',
           borderRadius: 12, padding: '10px 18px', fontSize: '0.875rem', fontWeight: 500,
-          backdropFilter: 'blur(12px)', animation: 'fadeIn 0.2s ease',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+          animation: 'fadeIn 0.2s ease',
           maxWidth: 340,
         }}>
           {toast.msg}
@@ -1022,11 +1023,11 @@ export default function KnowledgeTab() {
                       borderRadius: 6, color: 'var(--foreground)', outline: 'none', cursor: 'pointer'
                     }}
                   >
-                    <option value="Aoede" style={{ background: '#111' }}>Kadın (Sıcak ve Dost Canlısı)</option>
-                    <option value="Puck" style={{ background: '#111' }}>Erkek (Dinamik ve Genç)</option>
-                    <option value="Charon" style={{ background: '#111' }}>Erkek (Sakin ve Güven Verici)</option>
-                    <option value="Kore" style={{ background: '#111' }}>Kadın (Profesyonel ve Net)</option>
-                    <option value="Fenrir" style={{ background: '#111' }}>Erkek (Derin ve Olgun)</option>
+                    <option value="Aoede">Kadın (Sıcak ve Dost Canlısı)</option>
+                    <option value="Puck">Erkek (Dinamik ve Genç)</option>
+                    <option value="Charon">Erkek (Sakin ve Güven Verici)</option>
+                    <option value="Kore">Kadın (Profesyonel ve Net)</option>
+                    <option value="Fenrir">Erkek (Derin ve Olgun)</option>
                   </select>
                 </div>
 
@@ -1179,12 +1180,12 @@ export default function KnowledgeTab() {
       {callModalOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+          background: 'rgba(0,0,0,0.65)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: '1rem',
         }} {...callModalBackdropDismiss}>
           <div style={{
-            background: '#0d1829', border: '1px solid rgba(255,255,255,0.1)',
+            background: 'var(--card-bg, #1e293b)', border: '1px solid var(--input-border, #334155)',
             borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420,
             animation: 'fadeIn 0.2s ease',
           }}>

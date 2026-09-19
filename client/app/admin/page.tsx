@@ -585,13 +585,13 @@ export default function AdminPage() {
           position: 'fixed', top: 20, right: 20, zIndex: 999,
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '10px 15px',
-          background: toast.type === 'success' ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.15)',
-          border: `1px solid ${toast.type === 'success' ? 'rgba(22,163,74,0.35)' : 'rgba(220,38,38,0.35)'}`,
+          background: 'var(--card-bg, #1e293b)',
+          border: `1px solid ${toast.type === 'success' ? '#16a34a' : '#dc2626'}`,
           borderRadius: 10,
-          color: toast.type === 'success' ? '#4ade80' : '#f87171',
+          color: toast.type === 'success' ? '#16a34a' : '#dc2626',
           fontSize: 13, fontWeight: 500,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
           animation: 'fadeSlideIn 0.2s ease',
-          backdropFilter: 'blur(12px)',
         }}>
           {toast.type === 'success' ? <IconCheck /> : <IconX />}
           {toast.text}
@@ -618,13 +618,11 @@ export default function AdminPage() {
               <ThemeToggle />
               <button
                 onClick={handleLogout}
+                className="btn-clinic-blue"
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '7px 14px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
                   borderRadius: 8,
-                  color: '#94a3b8',
                   cursor: 'pointer',
                   fontSize: 13, fontWeight: 500,
                   transition: 'background 0.2s',
@@ -642,7 +640,7 @@ export default function AdminPage() {
           {/* ── Tab navigation ──────────────────────────────────────────── */}
           <div style={{
             display: 'flex', gap: 2,
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            borderBottom: '1px solid var(--border, rgba(255,255,255,0.07))',
             marginBottom: 24,
             overflowX: 'auto',
             WebkitOverflowScrolling: 'touch',
@@ -662,7 +660,7 @@ export default function AdminPage() {
                   padding: '9px 18px',
                   background: 'transparent',
                   border: 'none',
-                  borderBottom: `2px solid ${activeTab === tab.id ? '#60a5fa' : 'transparent'}`,
+                  borderBottom: `2px solid ${activeTab === tab.id ? 'var(--accent, #1d4ed8)' : 'transparent'}`,
                   color: activeTab === tab.id ? 'var(--foreground)' : 'var(--muted)',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
@@ -735,16 +733,16 @@ export default function AdminPage() {
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     marginBottom: 18, paddingBottom: 14,
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))',
                   }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
                       Karşılama Mesajı
                     </span>
                     {greetingLoading ? <Spinner /> : (
                       <span style={{
-                        fontSize: 11, color: 'rgba(240,244,255,0.45)',
-                        padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                        fontSize: 11, color: 'var(--foreground-3)',
+                        padding: '3px 9px', background: 'var(--card-inner, rgba(255,255,255,0.04))',
+                        border: '1px solid var(--border, rgba(255,255,255,0.08))', borderRadius: 20,
                       }}>
                         Sesli AI Açılış
                       </span>
@@ -753,7 +751,7 @@ export default function AdminPage() {
 
                   {!greetingLoading && (
                     <>
-                      <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginBottom: 14, lineHeight: 1.6 }}>
                         Müşteri bağlandığında AI asistanın söyleyeceği ilk karşılama mesajı. Değişiklik sonraki çağrılarda geçerli olur.
                       </p>
 
@@ -766,10 +764,10 @@ export default function AdminPage() {
                           padding: '10px 14px',
                           fontSize: 13,
                           lineHeight: 1.6,
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid rgba(255,255,255,0.1)',
+                          background: 'var(--input-bg, #0f172a)',
+                          border: '1px solid var(--input-border, #334155)',
                           borderRadius: 8,
-                          color: '#f0f4ff',
+                          color: 'var(--foreground, #f0f4ff)',
                           resize: 'vertical',
                           outline: 'none',
                           fontFamily: 'inherit',
@@ -782,15 +780,14 @@ export default function AdminPage() {
                           type="button"
                           onClick={handleSaveGreeting}
                           disabled={greetingSaving || !greetingText.trim()}
+                          className="btn-clinic-green"
                           style={{
                             padding: '8px 18px',
                             fontSize: 12,
                             fontWeight: 600,
-                            background: greetingSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)',
-                            border: '1px solid rgba(52,211,153,0.3)',
                             borderRadius: 8,
-                            color: '#34d399',
                             cursor: greetingSaving ? 'wait' : 'pointer',
+                            opacity: greetingSaving ? 0.6 : 1,
                           }}
                         >
                           {greetingSaving ? 'Kaydediliyor...' : 'Kaydet'}
@@ -824,7 +821,7 @@ export default function AdminPage() {
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     marginBottom: 20, paddingBottom: 14,
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))',
                   }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
                       Google Calendar
@@ -835,10 +832,10 @@ export default function AdminPage() {
                       <div style={{
                         display: 'flex', alignItems: 'center', gap: 6,
                         padding: '4px 11px',
-                        background: calStatus?.connected ? 'rgba(22,163,74,0.1)' : 'rgba(255,255,255,0.05)',
-                        border: `1px solid ${calStatus?.connected ? 'rgba(22,163,74,0.28)' : 'rgba(255,255,255,0.08)'}`,
+                        background: calStatus?.connected ? 'rgba(22,163,74,0.1)' : 'var(--card-inner, rgba(255,255,255,0.05))',
+                        border: `1px solid ${calStatus?.connected ? 'rgba(22,163,74,0.28)' : 'var(--border, rgba(255,255,255,0.08))'}`,
                         borderRadius: 20, fontSize: 12, fontWeight: 500,
-                        color: calStatus?.connected ? '#4ade80' : 'rgba(240,244,255,0.38)',
+                        color: calStatus?.connected ? '#16a34a' : 'var(--foreground-3)',
                       }}>
                         <IconDot active={calStatus?.connected} />
                         {calStatus?.connected ? 'Bağlı' : 'Bağlı Değil'}
@@ -853,14 +850,14 @@ export default function AdminPage() {
                           {calStatus.email && (
                             <div style={{
                               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                              background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10,
+                              background: 'var(--card-inner, rgba(255,255,255,0.03))', border: '1px solid var(--border, rgba(255,255,255,0.06))', borderRadius: 10,
                             }}>
                               <GoogleLogo />
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 500, color: '#f0f4ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {calStatus.email}
                                 </div>
-                                <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 2 }}>
+                                <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 2 }}>
                                   {calStatus.authType === 'oauth2' ? 'OAuth 2.0 ile bağlı' : 'Servis hesabı'}
                                 </div>
                               </div>
@@ -868,13 +865,13 @@ export default function AdminPage() {
                           )}
                           {calStatus.calendarId && (
                             <div>
-                              <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                              <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                                 Aktif Takvim
                               </div>
                               <code style={{
                                 display: 'block', padding: '8px 12px',
                                 background: 'rgba(3,105,161,0.08)', border: '1px solid rgba(3,105,161,0.18)',
-                                borderRadius: 8, fontSize: 12, color: '#7dd3fc', wordBreak: 'break-all', lineHeight: 1.5,
+                                borderRadius: 8, fontSize: 12, color: 'var(--accent, #0284c7)', wordBreak: 'break-all', lineHeight: 1.5,
                               }}>
                                 {calStatus.calendarId}
                               </code>
@@ -882,7 +879,7 @@ export default function AdminPage() {
                           )}
                           {calStatus.authType === 'oauth2' && calendars.length > 0 && (
                             <div>
-                              <div style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                              <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                                 Takvim Seç
                               </div>
                               <div style={{ display: 'flex', gap: 8 }}>
@@ -892,13 +889,13 @@ export default function AdminPage() {
                                   onChange={e => setSelectedCalId(e.target.value)}
                                   style={{
                                     flex: 1, padding: '9px 12px',
-                                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                                    borderRadius: 8, color: '#f0f4ff', fontSize: 13, cursor: 'pointer',
+                                    background: 'var(--input-bg, #0f172a)', border: '1px solid var(--input-border, #334155)',
+                                    borderRadius: 8, color: 'var(--foreground, #f0f4ff)', fontSize: 13, cursor: 'pointer',
                                   }}
                                 >
-                                  <option value="" style={{ background: '#1e293b' }}>-- Takvim seçin --</option>
+                                  <option value="" style={{ background: 'var(--card-bg, #1e293b)', color: 'var(--foreground)' }}>-- Takvim seçin --</option>
                                   {calendars.map(c => (
-                                    <option key={c.id} value={c.id} style={{ background: '#1e293b' }}>
+                                    <option key={c.id} value={c.id} style={{ background: 'var(--card-bg, #1e293b)', color: 'var(--foreground)' }}>
                                       {c.name}{c.isPrimary ? ' (Ana Takvim)' : ''}
                                     </option>
                                   ))}
@@ -928,7 +925,7 @@ export default function AdminPage() {
                         </div>
                       ) : (
                         <div>
-                          <p style={{ fontSize: 14, color: 'rgba(240,244,255,0.45)', marginBottom: 20, lineHeight: 1.65 }}>
+                          <p style={{ fontSize: 14, color: 'var(--foreground-3)', marginBottom: 20, lineHeight: 1.65 }}>
                             Firma Google hesabıyla giriş yaparak takvime randevu ekleme izni verin.
                           </p>
                           <button
@@ -958,16 +955,16 @@ export default function AdminPage() {
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     marginBottom: 18, paddingBottom: 14,
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))',
                   }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground-2)' }}>
                       Yapay Zeka Modeli
                     </span>
                     {aiLoading ? <Spinner /> : (
                       <span style={{
-                        fontSize: 11, color: 'rgba(240,244,255,0.45)',
-                        padding: '3px 9px', background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20,
+                        fontSize: 11, color: 'var(--foreground-3)',
+                        padding: '3px 9px', background: 'var(--card-inner, rgba(255,255,255,0.04))',
+                        border: '1px solid var(--border, rgba(255,255,255,0.08))', borderRadius: 20,
                       }}>
                         Sesli AI API
                       </span>
@@ -976,7 +973,7 @@ export default function AdminPage() {
 
                   {!aiLoading && (
                     <>
-                      <p style={{ fontSize: 12, color: 'rgba(240,244,255,0.45)', marginBottom: 14, lineHeight: 1.6 }}>
+                      <p style={{ fontSize: 12, color: 'var(--foreground-3)', marginBottom: 14, lineHeight: 1.6 }}>
                         Yalnızca gerçek-zamanlı sesli oturumu destekleyen modeller listelenir.
                       </p>
 
@@ -1000,8 +997,8 @@ export default function AdminPage() {
                                 textAlign: 'left',
                                 display: 'flex', alignItems: 'flex-start', gap: 12,
                                 padding: '12px 14px',
-                                background: isActive ? `rgba(${hexToRgb(tierColor)}, 0.10)` : 'rgba(255,255,255,0.03)',
-                                border: `1px solid ${isActive ? `rgba(${hexToRgb(tierColor)}, 0.45)` : 'rgba(255,255,255,0.07)'}`,
+                                background: isActive ? `rgba(${hexToRgb(tierColor)}, 0.10)` : 'var(--card-inner, rgba(255,255,255,0.03))',
+                                border: `1px solid ${isActive ? `rgba(${hexToRgb(tierColor)}, 0.45)` : 'var(--border, rgba(255,255,255,0.07))'}`,
                                 borderRadius: 10,
                                 cursor: aiSaving ? 'wait' : 'pointer',
                                 transition: 'background 0.15s, border-color 0.15s',
@@ -1019,7 +1016,7 @@ export default function AdminPage() {
                               }} />
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-                                  <span style={{ fontSize: 13, fontWeight: 600, color: '#f0f4ff' }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>
                                     {meta?.label ?? model}
                                   </span>
                                   <span style={{
@@ -1043,7 +1040,7 @@ export default function AdminPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: 12, color: 'rgba(240,244,255,0.55)', lineHeight: 1.5 }}>
+                                <div style={{ fontSize: 12, color: 'var(--foreground-2)', lineHeight: 1.5 }}>
                                   {meta?.tagline ?? '—'}
                                 </div>
                               </div>
@@ -1053,7 +1050,7 @@ export default function AdminPage() {
                         })}
                       </div>
 
-                      <p style={{ fontSize: 11, color: 'rgba(240,244,255,0.35)', marginTop: 14, lineHeight: 1.6 }}>
+                      <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 14, lineHeight: 1.6 }}>
                         Değişiklik yalnızca <strong>sonraki çağrılar</strong> için geçerlidir; o anki aktif oturumlar etkilenmez.
                       </p>
                     </>

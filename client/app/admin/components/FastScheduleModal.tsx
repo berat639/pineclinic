@@ -171,7 +171,6 @@ export default function FastScheduleModal({
         position: 'fixed',
         inset: 0,
         background: 'rgba(0, 0, 0, 0.65)',
-        backdropFilter: 'blur(8px)',
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',
@@ -186,7 +185,7 @@ export default function FastScheduleModal({
           width: '100%',
           maxWidth: '440px',
           borderRadius: '18px',
-          border: '1px solid var(--glass-border, rgba(255,255,255,0.12))',
+          border: '1px solid var(--input-border, #334155)',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.7)',
           overflow: 'hidden',
           display: 'flex',
@@ -419,12 +418,10 @@ export default function FastScheduleModal({
           <button
             type="button"
             onClick={onClose}
+            className="btn-clinic-blue"
             style={{
               padding: '8px 16px',
               borderRadius: 8,
-              border: '1px solid var(--glass-border, rgba(255,255,255,0.1))',
-              background: 'transparent',
-              color: 'var(--foreground-2)',
               cursor: 'pointer',
               fontSize: '0.82rem',
               fontWeight: 500
@@ -436,19 +433,16 @@ export default function FastScheduleModal({
             type="button"
             onClick={handleSave}
             disabled={isSubmitting}
+            className="btn-clinic-primary"
             style={{
               padding: '8px 18px',
               borderRadius: 8,
-              border: 'none',
-              background: '#3b82f6',
-              color: 'white',
               cursor: isSubmitting ? 'not-allowed' : 'pointer',
               fontSize: '0.82rem',
               fontWeight: 600,
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.35)',
               opacity: isSubmitting ? 0.7 : 1
             }}
           >

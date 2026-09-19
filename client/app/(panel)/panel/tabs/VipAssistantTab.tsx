@@ -156,17 +156,17 @@ export default function VipAssistantTab() {
           flexWrap: 'wrap',
           gap: 12,
           padding: '16px 20px',
-          background: '#1e293b',
-          border: '1px solid #334155',
+          background: 'var(--card-bg, #1e293b)',
+          border: '1px solid var(--input-border, #334155)',
           borderRadius: 10,
           marginBottom: 20,
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--foreground, #ffffff)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>🌟</span> Özel Kişisel Asistan (VIP Hatlar)
           </h2>
-          <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+          <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)' }}>
             Bu listedeki numaralar aradığında klinik randevu akışı devre dışı kalır. &quot;Pine Asistan&quot; olarak Berat Bey&apos;in kişisel asistanı karşılar ve Google Grounding ile canlı arama yapar.
           </p>
         </div>
@@ -195,12 +195,12 @@ export default function VipAssistantTab() {
       <div
         style={{
           padding: '12px 16px',
-          background: '#0f172a',
-          border: '1px solid #1e3a8a',
+          background: 'var(--card-inner, #0f172a)',
+          border: '1px solid var(--glass-border, #1e3a8a)',
           borderRadius: 8,
           marginBottom: 16,
           fontSize: '0.82rem',
-          color: '#cbd5e1',
+          color: 'var(--foreground-2, #cbd5e1)',
           lineHeight: 1.5,
         }}
       >
@@ -210,27 +210,25 @@ export default function VipAssistantTab() {
       {/* Table Container */}
       <div
         style={{
-          background: '#1e293b',
-          border: '1px solid #334155',
+          background: 'var(--card-bg, #1e293b)',
+          border: '1px solid var(--input-border, #334155)',
           borderRadius: 10,
           overflow: 'hidden',
         }}
       >
         {loading ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--foreground-3, #94a3b8)', fontSize: '0.85rem' }}>
             VIP numaralar yükleniyor...
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center' }}>
-            <p style={{ color: '#94a3b8', margin: '0 0 16px', fontSize: '0.9rem' }}>Henüz kayıtlı VIP numara bulunmuyor.</p>
+            <p style={{ color: 'var(--foreground-3, #94a3b8)', margin: '0 0 16px', fontSize: '0.9rem' }}>Henüz kayıtlı VIP numara bulunmuyor.</p>
             <button
               onClick={openCreateModal}
+              className="btn-clinic-primary"
               style={{
                 padding: '8px 16px',
                 borderRadius: 6,
-                background: '#2563eb',
-                color: '#ffffff',
-                border: 'none',
                 cursor: 'pointer',
                 fontWeight: 600,
               }}
@@ -242,7 +240,7 @@ export default function VipAssistantTab() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.84rem' }}>
               <thead>
-                <tr style={{ background: '#0f172a', borderBottom: '1px solid #334155', color: '#94a3b8' }}>
+                <tr style={{ background: 'var(--background-2, #0f172a)', borderBottom: '1px solid var(--divider, #334155)', color: 'var(--foreground-2, #94a3b8)' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Numara</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Kişi / İsim</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Özel Karşılama Cümlesi</th>
@@ -384,16 +382,16 @@ export default function VipAssistantTab() {
             style={{
               width: '100%',
               maxWidth: 540,
-              background: '#1e293b',
-              border: '1px solid #334155',
+              background: 'var(--card-bg, #1e293b)',
+              border: '1px solid var(--input-border, #334155)',
               borderRadius: 12,
               padding: 24,
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-              color: '#ffffff',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
+              color: 'var(--foreground, #ffffff)',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground, #ffffff)' }}>
                 {editingItem ? 'VIP Numarayı Düzenle' : 'Yeni VIP Numara Ekle'}
               </h3>
               <button
@@ -427,7 +425,7 @@ export default function VipAssistantTab() {
 
             <form onSubmit={handleSave}>
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 500 }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
                   Telefon Numarası *
                 </label>
                 <input
@@ -440,9 +438,9 @@ export default function VipAssistantTab() {
                     width: '100%',
                     padding: '10px 12px',
                     borderRadius: 8,
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    color: '#ffffff',
+                    background: 'var(--input-bg, #0f172a)',
+                    border: '1px solid var(--input-border, #334155)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.88rem',
                     boxSizing: 'border-box',
                     outline: 'none',
@@ -451,7 +449,7 @@ export default function VipAssistantTab() {
               </div>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 500 }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
                   Kişi Adı / Açıklama
                 </label>
                 <input
@@ -463,9 +461,9 @@ export default function VipAssistantTab() {
                     width: '100%',
                     padding: '10px 12px',
                     borderRadius: 8,
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    color: '#ffffff',
+                    background: 'var(--input-bg, #0f172a)',
+                    border: '1px solid var(--input-border, #334155)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.88rem',
                     boxSizing: 'border-box',
                     outline: 'none',
@@ -474,7 +472,7 @@ export default function VipAssistantTab() {
               </div>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 500 }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
                   İlk Karşılama Cümlesi *
                 </label>
                 <textarea
@@ -486,22 +484,22 @@ export default function VipAssistantTab() {
                     width: '100%',
                     padding: '10px 12px',
                     borderRadius: 8,
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    color: '#ffffff',
+                    background: 'var(--input-bg, #0f172a)',
+                    border: '1px solid var(--input-border, #334155)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.85rem',
                     boxSizing: 'border-box',
                     outline: 'none',
                     resize: 'vertical',
                   }}
                 />
-                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--foreground-3, #64748b)' }}>
                   Telefon açıldığında asistanın söyleyeceği ilk cümle.
                 </span>
               </div>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 500 }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
                   Özel Kişisel Asistan Promptu (Opsiyonel)
                 </label>
                 <textarea
@@ -513,9 +511,9 @@ export default function VipAssistantTab() {
                     width: '100%',
                     padding: '10px 12px',
                     borderRadius: 8,
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    color: '#ffffff',
+                    background: 'var(--input-bg, #0f172a)',
+                    border: '1px solid var(--input-border, #334155)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.82rem',
                     boxSizing: 'border-box',
                     outline: 'none',

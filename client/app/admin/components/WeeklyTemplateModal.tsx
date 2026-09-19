@@ -112,8 +112,6 @@ export default function WeeklyTemplateModal({ isOpen, template, dailyTemplates, 
         position: 'fixed',
         inset: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -348,12 +346,10 @@ export default function WeeklyTemplateModal({ isOpen, template, dailyTemplates, 
             <button
               type="button"
               onClick={onClose}
+              className="btn-clinic-blue"
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
-                border: '1px solid var(--glass-border)',
-                background: 'transparent',
-                color: 'var(--foreground-2)',
                 fontSize: '0.8rem',
                 cursor: 'pointer'
               }}
@@ -362,12 +358,10 @@ export default function WeeklyTemplateModal({ isOpen, template, dailyTemplates, 
             </button>
             <button
               type="submit"
+              className="btn-clinic-primary"
               style={{
                 padding: '8px 20px',
                 borderRadius: 8,
-                border: 'none',
-                background: 'var(--accent, #3b82f6)',
-                color: '#fff',
                 fontSize: '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer',

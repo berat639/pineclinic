@@ -9,9 +9,9 @@
   --foreground-2: rgba(240,244,255,0.7);
   --foreground-3: rgba(240,244,255,0.35);
   --muted: #64748b;
-  --brand: #002C5F;
-  --brand-light: #0047a0;
-  --brand-glow: #1a6dd4;
+  --brand: #1d4ed8;
+  --brand-light: #2563eb;
+  --brand-glow: #3b82f6;
   --accent: #60a5fa;
   --accent-2: #a78bfa;
   --success: #22c55e;
@@ -29,7 +29,7 @@
   --scrollbar: rgba(255,255,255,0.1);
   --scrollbar-hover: rgba(255,255,255,0.2);
   --logo-filter: brightness(0) invert(1);
-  --body-gradient-1: rgba(0,44,95,0.15);
+  --body-gradient-1: rgba(29,78,216,0.15);
   --body-gradient-2: rgba(96,165,250,0.05);
   --flow-bg: #0a0f1a;
   --flow-grid: #1e293b;
@@ -81,9 +81,9 @@
   --foreground-2: #1e2d45;
   --foreground-3: #475569;
   --muted: #334155;
-  --brand: #002C5F;
-  --brand-light: #0047a0;
-  --brand-glow: #1a6dd4;
+  --brand: #1d4ed8;
+  --brand-light: #2563eb;
+  --brand-glow: #3b82f6;
   --accent: #1d4ed8;
   --accent-2: #6d28d9;
   --success: #15803d;
@@ -101,7 +101,7 @@
   --scrollbar: rgba(0,0,0,0.2);
   --scrollbar-hover: rgba(0,0,0,0.35);
   --logo-filter: none;
-  --body-gradient-1: rgba(0,44,95,0.08);
+  --body-gradient-1: rgba(29,78,216,0.06);
   --body-gradient-2: rgba(96,165,250,0.06);
   --flow-bg: #f1f5f9;
   --flow-grid: #cbd5e1;
@@ -126,13 +126,13 @@
   --card-bg: #ffffff;
 
   /* ── Clinical Health Design System (Light) ───────────────────────── */
-  --btn-clinic-primary-bg: #0284c7;
+  --btn-clinic-primary-bg: #1d4ed8;
   --btn-clinic-primary-fg: #ffffff;
-  --btn-clinic-primary-hover: #0369a1;
+  --btn-clinic-primary-hover: #1e40af;
 
   --btn-clinic-blue-bg: #ffffff;
   --btn-clinic-blue-border: #93c5fd;
-  --btn-clinic-blue-fg: #0284c7;
+  --btn-clinic-blue-fg: #1d4ed8;
   --btn-clinic-blue-hover: #eff6ff;
 
   --btn-clinic-mint-bg: #f0fdf4;
@@ -268,7 +268,6 @@ body {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
-  backdrop-filter: blur(12px);
   transition: background 0.25s ease, border-color 0.25s ease;
 }
 
@@ -454,6 +453,46 @@ body {
 [data-theme="light"] .admin-content summary,
 [data-theme="light"] .admin-content li {
   color: var(--foreground) !important;
+}
+
+/* Exempt buttons and badges so white text is never crushed by #060d1a */
+[data-theme="light"] .admin-content button,
+[data-theme="light"] .admin-content button *,
+[data-theme="light"] .admin-content .btn,
+[data-theme="light"] .admin-content .btn *,
+[data-theme="light"] .admin-content .btn-primary,
+[data-theme="light"] .admin-content .btn-primary *,
+[data-theme="light"] .admin-content .btn-clinic-primary,
+[data-theme="light"] .admin-content .btn-clinic-primary *,
+[data-theme="light"] .admin-content .btn-clinic-blue,
+[data-theme="light"] .admin-content .btn-clinic-blue *,
+[data-theme="light"] .admin-content .btn-clinic-mint,
+[data-theme="light"] .admin-content .btn-clinic-mint *,
+[data-theme="light"] .admin-content .badge-clinic,
+[data-theme="light"] .admin-content .badge-clinic * {
+  color: inherit;
+}
+
+[data-theme="light"] .admin-content .btn-primary,
+[data-theme="light"] .admin-content .btn-primary *,
+[data-theme="light"] .admin-content .btn-clinic-primary,
+[data-theme="light"] .admin-content .btn-clinic-primary * {
+  color: #ffffff !important;
+}
+
+/* Primary button in light mode: solid vibrant medical blue matching reference screenshot */
+[data-theme="light"] .btn-primary {
+  background: var(--accent, #1d4ed8) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+[data-theme="light"] .btn-primary:hover {
+  background: #1e40af !important;
+  box-shadow: 0 4px 12px rgba(29,78,216,0.25) !important;
+  transform: translateY(-1px);
 }
 
 /* Keep specific semantic colors */
@@ -833,8 +872,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.8rem 1.5rem;
-  background: rgba(5, 10, 20, 0.6);
-  backdrop-filter: blur(20px);
+  background: var(--card-bg, #0a1220);
   border-bottom: 1px solid var(--glass-border);
 }
 
@@ -966,8 +1004,7 @@ body {
   z-index: 10;
   padding: 1rem 1.5rem;
   padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
-  background: rgba(5, 10, 20, 0.6);
-  backdrop-filter: blur(20px);
+  background: var(--card-bg, #0a1220);
   border-top: 1px solid var(--glass-border);
 }
 

@@ -343,12 +343,10 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             type="button"
             onClick={onClose}
             disabled={loading}
+            className="btn-clinic-blue"
             style={{
               padding: '9px 16px',
-              background: 'transparent',
-              border: '1px solid var(--input-border, #334155)',
               borderRadius: 8,
-              color: 'var(--foreground, #ffffff)',
               cursor: 'pointer',
               fontSize: '0.85rem'
             }}
@@ -359,12 +357,10 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             type="button"
             onClick={handleAddPatient}
             disabled={loading}
+            className="btn-clinic-primary"
             style={{
               padding: '9px 18px',
-              background: 'var(--brand-color, #2563eb)',
-              border: 'none',
               borderRadius: 8,
-              color: '#fff',
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.7 : 1,
               fontWeight: 600,
