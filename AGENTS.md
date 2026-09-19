@@ -12,6 +12,18 @@
    - Tüm kartlar, modallar, popoverlar, context menüler, butonlar, inputlar ve bildirim kutuları HEM AÇIK (LIGHT) HEM DE KOYU (DARK) temada kusursuz görünmelidir.
    - Renkler her zaman temaya duyarlı CSS değişkenleri (`var(--card-bg)`, `var(--input-bg)`, `var(--input-border)`, `var(--foreground)`, `var(--foreground-2)`, `var(--foreground-3)`, `var(--glass-border)`, `var(--card-inner)`, `var(--accent)`, `var(--danger)` vb.) veya `[data-theme="light"]` / `[data-theme="dark"]` seçicileri ile tanımlanmalıdır.
    - Açık temada siyah/koyu arka planlı yamaların kalması veya açık temada beyaz/açık yazıların okunaksızlaşması kesinlikle kabul edilemez.
+4. **Klinik & Sağlık Renk Mimarisi ve Buton Standartları (Medical Clean Design)**:
+   - **Klinik / Sağlık Kimliği:** Bu bir medikal ve klinik yönetim sistemidir. Renk dili her zaman sağlık, ferahlık, güven, hijyen ve profesyonellik hissettirmelidir. Ana renk paleti **Sağlık Mavisi (Medikal Mavi), Açık Mavi, Buz Mavisi, Nane Yeşili ve Opak Beyaz**'dır.
+   - **Açık (Light) Mod Buton Kuralları (KESİNLİKLE SİYAH/KOYU BUTON KULLANILMAZ):**
+     - Light modda butonların siyah, antrasit, koyu gri veya koyu lacivert kutu zeminli olması KESİNLİKLE YASAKTIR. Açık ekranda siyah kutulu buton yer alamaz.
+     - Birincil Butonlar (Primary): Canlı medikal mavi (`#0284c7`, `#2563eb`), beyaz yazı (`#ffffff`).
+     - İkincil / İşlem Butonları (Secondary/Outline): Temiz beyaz veya çok açık buz mavisi zemin (`#ffffff` / `#eff6ff`), medikal mavi sınır (`#93c5fd` / `#3b82f6`), medikal mavi metin (`#0284c7` / `#1d4ed8`).
+     - Pozitif / Eylem Butonları (Excel, İçe Aktar vb.): Ferah nane zemin (`#f0fdf4`), nane yeşili sınır (`#86efac`), sağlık yeşili metin (`#15803d`).
+     - Rozetler ve Sayaçlar (Badges/Pills): Açık gök mavisi zemin (`#e0f2fe`), medikal mavi sınır (`#bae6fd`), koyu medikal mavi metin (`#0369a1`).
+   - **Koyu (Dark) Mod Buton ve Renk Kuralları (Sağlığı Çağrıştıran Medikal Gece Mavisi):**
+     - Koyu modda kasvetli, ölü siyah veya çamurlu renkler yerine; sağlığı ve modern medikal teknolojiyi çağrıştıran derin klinik gece mavisi (`#0b1329`, `#0f172a`, `#132238`), canlı sağlık mavisi (`#38bdf8`, `#60a5fa`) ve nane yeşili (`#34d399`) vurgular kullanılmalıdır.
+     - İkincil butonlar derin klinik mavi zemin (`#132238`), medikal mavi sınır (`#1e40af`) ve parlak mavi metin (`#60a5fa`) ile şık ve sağlık odaklı olmalıdır.
+
 
 ## Project Isolation Rules
 1. **gemini-live-test Bağımsızlığı**:

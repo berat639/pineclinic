@@ -52,6 +52,25 @@
   --flow-success-bg: #052e16;
   --calendar-checkbox-bg: #0a1220;
   --card-bg: #1e293b;
+
+  /* ── Clinical Health Design System (Dark) ────────────────────────── */
+  --btn-clinic-primary-bg: #2563eb;
+  --btn-clinic-primary-fg: #ffffff;
+  --btn-clinic-primary-hover: #1d4ed8;
+
+  --btn-clinic-blue-bg: #132238;
+  --btn-clinic-blue-border: #1e40af;
+  --btn-clinic-blue-fg: #60a5fa;
+  --btn-clinic-blue-hover: #1e3a5f;
+
+  --btn-clinic-mint-bg: #0b2e20;
+  --btn-clinic-mint-border: #059669;
+  --btn-clinic-mint-fg: #34d399;
+  --btn-clinic-mint-hover: #064e3b;
+
+  --badge-clinic-bg: #172554;
+  --badge-clinic-border: #1e3a8a;
+  --badge-clinic-fg: #93c5fd;
 }
 
 /* ── Light ─────────────────────────────────────────────────────────────────── */
@@ -105,6 +124,25 @@
   --flow-success-bg: #dcfce7;
   --calendar-checkbox-bg: #e2e8f0;
   --card-bg: #ffffff;
+
+  /* ── Clinical Health Design System (Light) ───────────────────────── */
+  --btn-clinic-primary-bg: #0284c7;
+  --btn-clinic-primary-fg: #ffffff;
+  --btn-clinic-primary-hover: #0369a1;
+
+  --btn-clinic-blue-bg: #ffffff;
+  --btn-clinic-blue-border: #93c5fd;
+  --btn-clinic-blue-fg: #0284c7;
+  --btn-clinic-blue-hover: #eff6ff;
+
+  --btn-clinic-mint-bg: #f0fdf4;
+  --btn-clinic-mint-border: #86efac;
+  --btn-clinic-mint-fg: #15803d;
+  --btn-clinic-mint-hover: #dcfce7;
+
+  --badge-clinic-bg: #e0f2fe;
+  --badge-clinic-border: #bae6fd;
+  --badge-clinic-fg: #0369a1;
 }
 
 /* ── React Flow Controls ────────────────────────────────────────────────────── */
@@ -287,6 +325,45 @@ body {
   border: 1px solid var(--glass-border);
 }
 .btn-ghost:hover { background: var(--glass-bg-hover); color: var(--foreground); }
+
+/* ── Clinical Health Utility Classes ─────────────────────────────────────── */
+.btn-clinic-primary {
+  background: var(--btn-clinic-primary-bg) !important;
+  color: var(--btn-clinic-primary-fg) !important;
+  border: none !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  transition: all 0.15s ease;
+}
+.btn-clinic-primary:hover {
+  background: var(--btn-clinic-primary-hover) !important;
+  transform: translateY(-1px);
+}
+
+.btn-clinic-blue {
+  background: var(--btn-clinic-blue-bg) !important;
+  border: 1px solid var(--btn-clinic-blue-border) !important;
+  color: var(--btn-clinic-blue-fg) !important;
+  transition: all 0.15s ease;
+}
+.btn-clinic-blue:hover {
+  background: var(--btn-clinic-blue-hover) !important;
+}
+
+.btn-clinic-mint {
+  background: var(--btn-clinic-mint-bg) !important;
+  border: 1px solid var(--btn-clinic-mint-border) !important;
+  color: var(--btn-clinic-mint-fg) !important;
+  transition: all 0.15s ease;
+}
+.btn-clinic-mint:hover {
+  background: var(--btn-clinic-mint-hover) !important;
+}
+
+.badge-clinic {
+  background: var(--badge-clinic-bg) !important;
+  border: 1px solid var(--badge-clinic-border) !important;
+  color: var(--badge-clinic-fg) !important;
+}
 
 /* ── Light mode: component-level overrides ─────────────────────────────────── */
 [data-theme="light"] {

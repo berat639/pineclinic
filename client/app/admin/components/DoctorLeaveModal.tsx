@@ -374,12 +374,10 @@ export default function DoctorLeaveModal({
                   key={r}
                   type="button"
                   onClick={() => setReason(r)}
+                  className={reason === r ? 'btn-clinic-primary' : 'btn-clinic-blue'}
                   style={{
                     padding: '5px 12px',
                     borderRadius: 6,
-                    border: reason === r ? '1px solid var(--accent, #3b82f6)' : '1px solid var(--input-border, #334155)',
-                    background: reason === r ? 'var(--accent, #3b82f6)' : 'var(--card-inner, #0f172a)',
-                    color: reason === r ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                     fontSize: '0.76rem',
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -392,12 +390,10 @@ export default function DoctorLeaveModal({
               <button
                 type="button"
                 onClick={() => setReason('Diğer')}
+                className={reason === 'Diğer' ? 'btn-clinic-primary' : 'btn-clinic-blue'}
                 style={{
                   padding: '5px 12px',
                   borderRadius: 6,
-                  border: reason === 'Diğer' ? '1px solid var(--accent, #3b82f6)' : '1px solid var(--input-border, #334155)',
-                  background: reason === 'Diğer' ? 'var(--accent, #3b82f6)' : 'var(--card-inner, #0f172a)',
-                  color: reason === 'Diğer' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                   fontSize: '0.76rem',
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -459,12 +455,10 @@ export default function DoctorLeaveModal({
             <button
               type="button"
               onClick={onClose}
+              className="btn-clinic-blue"
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
-                border: '1px solid var(--input-border, #334155)',
-                background: 'var(--card-inner, #0f172a)',
-                color: 'var(--foreground-2, #94a3b8)',
                 fontSize: '0.82rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -475,12 +469,10 @@ export default function DoctorLeaveModal({
             <button
               type="submit"
               disabled={saving}
+              className="btn-clinic-primary"
               style={{
                 padding: '8px 20px',
                 borderRadius: 8,
-                border: 'none',
-                background: 'var(--accent, #2563eb)',
-                color: '#ffffff',
                 fontSize: '0.82rem',
                 fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer'

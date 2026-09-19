@@ -86,18 +86,16 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
           <button
             key={t.name}
             onClick={() => handleSelectTemplate(t)}
+            className="btn-clinic-blue"
             style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '8px 12px', borderRadius: 6, border: '1px solid var(--input-border, #334155)',
-              background: 'var(--card-inner, #0f172a)', color: 'var(--foreground, #ffffff)',
+              padding: '8px 12px', borderRadius: 6,
               fontSize: 11, cursor: 'pointer', textAlign: 'left',
               transition: 'all 0.15s ease'
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent, #3b82f6)'; e.currentTarget.style.color = '#ffffff' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--card-inner, #0f172a)'; e.currentTarget.style.color = 'var(--foreground, #ffffff)' }}
           >
             <span style={{ fontWeight: 600 }}>{t.name}</span>
-            <span style={{ color: 'var(--foreground-2, #94a3b8)' }}>{formatTime(t.start)}-{formatTime(t.end)}</span>
+            <span style={{ opacity: 0.85 }}>{formatTime(t.start)}-{formatTime(t.end)}</span>
           </button>
         ))}
       </div>

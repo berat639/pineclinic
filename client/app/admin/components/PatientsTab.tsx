@@ -545,7 +545,7 @@ export default function PatientsTab() {
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--foreground, #ffffff)', margin: 0 }}>
             Hastalar Yönetimi
           </h2>
-          <span style={{ fontSize: '0.75rem', background: '#334155', color: '#94a3b8', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>
+          <span className="badge-clinic" style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: 12, fontWeight: 600 }}>
             {patients.length} kayıt
           </span>
         </div>
@@ -560,12 +560,10 @@ export default function PatientsTab() {
           />
           <button
             onClick={handleDownloadTemplate}
+            className="btn-clinic-blue"
             style={{
               padding: '8px 14px',
-              background: 'var(--card-bg, #1e293b)',
-              border: '1px solid var(--input-border, #334155)',
               borderRadius: 8,
-              color: 'var(--accent, #60a5fa)',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -579,12 +577,10 @@ export default function PatientsTab() {
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
+            className="btn-clinic-mint"
             style={{
               padding: '8px 14px',
-              background: 'var(--card-bg, #1e293b)',
-              border: '1px solid var(--input-border, #334155)',
               borderRadius: 8,
-              color: 'var(--success, #16a34a)',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -599,12 +595,10 @@ export default function PatientsTab() {
           
           <button
             onClick={() => setShowAddModal(true)}
+            className="btn-clinic-primary"
             style={{
               padding: '8px 16px',
-              background: 'var(--accent, #2563eb)',
-              border: 'none',
               borderRadius: 8,
-              color: '#ffffff',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -656,12 +650,10 @@ export default function PatientsTab() {
             <button
               type="button"
               onClick={() => setSelectedPatientIds([])}
+              className="btn-clinic-blue"
               style={{
-                padding: '6px 12px',
-                background: 'var(--card-inner, #334155)',
-                border: '1px solid var(--input-border, #475569)',
+                padding: '6px 14px',
                 borderRadius: 6,
-                color: 'var(--foreground, #e2e8f0)',
                 fontSize: '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -747,10 +739,8 @@ export default function PatientsTab() {
               <button
                 type="button"
                 onClick={() => setShowAllErrors(!showAllErrors)}
+                className="btn-clinic-blue"
                 style={{
-                  background: 'var(--card-inner, #334155)',
-                  border: '1px solid var(--input-border, #334155)',
-                  color: 'var(--foreground, #e2e8f0)',
                   fontSize: '0.74rem',
                   padding: '4px 10px',
                   borderRadius: 6,
@@ -875,12 +865,10 @@ export default function PatientsTab() {
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(p)}
+                            className="btn-clinic-blue"
                             style={{
                               padding: '4px 10px',
-                              background: 'rgba(59,130,246,0.15)',
-                              border: '1px solid rgba(59,130,246,0.3)',
                               borderRadius: 6,
-                              color: '#60a5fa',
                               fontSize: '0.76rem',
                               fontWeight: 600,
                               cursor: 'pointer',
@@ -944,10 +932,8 @@ export default function PatientsTab() {
                     <button
                       type="button"
                       onClick={() => handleOpenEditModal(profileData.patient)}
+                      className="btn-clinic-blue"
                       style={{
-                        background: 'rgba(59,130,246,0.15)',
-                        border: '1px solid rgba(59,130,246,0.3)',
-                        color: '#60a5fa',
                         borderRadius: 6,
                         padding: '4px 10px',
                         fontSize: '0.76rem',
@@ -1078,8 +1064,8 @@ export default function PatientsTab() {
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button onClick={() => setEditingPatient(null)} style={{ padding: '9px 16px', background: 'transparent', border: '1px solid var(--input-border, #334155)', borderRadius: 8, color: 'var(--foreground, #ffffff)', cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
-              <button onClick={handleSaveEditPatient} style={{ padding: '9px 18px', background: '#2563eb', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Değişiklikleri Kaydet</button>
+              <button onClick={() => setEditingPatient(null)} className="btn-clinic-blue" style={{ padding: '9px 16px', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
+              <button onClick={handleSaveEditPatient} className="btn-clinic-primary" style={{ padding: '9px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Değişiklikleri Kaydet</button>
             </div>
           </div>
         </div>
