@@ -493,9 +493,9 @@ export default function KlinikPersonelTab() {
           }}
           style={{
             ...btnStyle,
-            background: '#1e293b',
-            border: '1px solid #334155',
-            color: '#f8fafc',
+            background: 'var(--card-bg, #1e293b)',
+            border: '1px solid var(--input-border, #334155)',
+            color: 'var(--foreground, #ffffff)',
             display: 'flex',
             alignItems: 'center',
             gap: 6
@@ -1050,9 +1050,9 @@ export default function KlinikPersonelTab() {
               }}
               style={{
                 ...btnStyle,
-                background: '#1e293b',
-                border: '1px solid #334155',
-                color: '#f8fafc',
+                background: 'var(--card-bg, #1e293b)',
+                border: '1px solid var(--input-border, #334155)',
+                color: 'var(--foreground, #ffffff)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6

@@ -562,10 +562,10 @@ export default function PatientsTab() {
             onClick={handleDownloadTemplate}
             style={{
               padding: '8px 14px',
-              background: '#1e293b',
-              border: '1px solid #334155',
+              background: 'var(--card-bg, #1e293b)',
+              border: '1px solid var(--input-border, #334155)',
               borderRadius: 8,
-              color: '#60a5fa',
+              color: 'var(--accent, #60a5fa)',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -581,10 +581,10 @@ export default function PatientsTab() {
             onClick={() => fileInputRef.current?.click()}
             style={{
               padding: '8px 14px',
-              background: '#1e293b',
-              border: '1px solid #334155',
+              background: 'var(--card-bg, #1e293b)',
+              border: '1px solid var(--input-border, #334155)',
               borderRadius: 8,
-              color: '#4ade80',
+              color: 'var(--success, #16a34a)',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -601,10 +601,10 @@ export default function PatientsTab() {
             onClick={() => setShowAddModal(true)}
             style={{
               padding: '8px 16px',
-              background: '#2563eb',
+              background: 'var(--accent, #2563eb)',
               border: 'none',
               borderRadius: 8,
-              color: '#fff',
+              color: '#ffffff',
               fontSize: '0.82rem',
               fontWeight: 600,
               cursor: 'pointer',
@@ -639,8 +639,8 @@ export default function PatientsTab() {
       {selectedPatientIds.length > 0 && (
         <div style={{
           padding: '10px 16px',
-          background: '#1e293b',
-          border: '1px solid #ef4444',
+          background: 'var(--card-bg, #1e293b)',
+          border: '1px solid var(--danger, #ef4444)',
           borderRadius: 8,
           display: 'flex',
           alignItems: 'center',
@@ -648,8 +648,8 @@ export default function PatientsTab() {
           gap: 12,
           flexWrap: 'wrap'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
-            <span style={{ color: '#ef4444', fontWeight: 700 }}>✓</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 600, color: 'var(--foreground, #f8fafc)' }}>
+            <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 700 }}>✓</span>
             <span>Toplam <strong>{selectedPatientIds.length}</strong> hasta seçildi.</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -658,10 +658,10 @@ export default function PatientsTab() {
               onClick={() => setSelectedPatientIds([])}
               style={{
                 padding: '6px 12px',
-                background: '#334155',
-                border: '1px solid #475569',
+                background: 'var(--card-inner, #334155)',
+                border: '1px solid var(--input-border, #475569)',
                 borderRadius: 6,
-                color: '#e2e8f0',
+                color: 'var(--foreground, #e2e8f0)',
                 fontSize: '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -707,29 +707,29 @@ export default function PatientsTab() {
       {excelErrors.length > 0 && (
         <div style={{
           padding: '12px 16px',
-          background: '#1e293b',
-          border: '1px solid #334155',
-          borderLeft: '4px solid #ef4444',
+          background: 'var(--card-bg, #1e293b)',
+          border: '1px solid var(--input-border, #334155)',
+          borderLeft: '4px solid var(--danger, #ef4444)',
           borderRadius: 8,
-          color: '#f8fafc',
+          color: 'var(--foreground, #f8fafc)',
           display: 'flex',
           flexDirection: 'column',
           gap: 8
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AlertCircle size={16} color="#fca5a5" />
-              <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fca5a5' }}>
+              <AlertCircle size={16} color="var(--danger, #ef4444)" />
+              <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--danger, #ef4444)' }}>
                 Excel İçe Aktarma Uyarısı:
               </span>
-              <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)' }}>
                 {excelErrors.length} satır eksik bilgi nedeniyle atlandı.
               </span>
             </div>
             <button
               type="button"
               onClick={() => { setExcelErrors([]); setShowAllErrors(false); }}
-              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px', borderRadius: 4 }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3, #94a3b8)', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px', borderRadius: 4 }}
               title="Kapat"
             >
               ✕
@@ -737,7 +737,7 @@ export default function PatientsTab() {
           </div>
 
           {/* İlk 5 hata */}
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.8rem', color: '#f87171', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.8rem', color: 'var(--danger, #f87171)', display: 'flex', flexDirection: 'column', gap: 3 }}>
             {excelErrors.slice(0, 5).map((err, i) => <li key={i}>{err}</li>)}
           </ul>
 
@@ -748,9 +748,9 @@ export default function PatientsTab() {
                 type="button"
                 onClick={() => setShowAllErrors(!showAllErrors)}
                 style={{
-                  background: '#334155',
-                  border: 'none',
-                  color: '#e2e8f0',
+                  background: 'var(--card-inner, #334155)',
+                  border: '1px solid var(--input-border, #334155)',
+                  color: 'var(--foreground, #e2e8f0)',
                   fontSize: '0.74rem',
                   padding: '4px 10px',
                   borderRadius: 6,
@@ -762,15 +762,23 @@ export default function PatientsTab() {
                 }}
               >
                 {showAllErrors ? (
-                  <>▲ Hataları Gizle</>
+                  <>▲ Hata Listesini Daralt</>
                 ) : (
                   <>▼ Kalan {excelErrors.length - 5} Satır Uyarısını Göster</>
                 )}
               </button>
 
               {showAllErrors && (
-                <div style={{ maxHeight: 180, overflowY: 'auto', marginTop: 8, padding: '8px 12px', background: '#0f172a', borderRadius: 6, border: '1px solid #334155' }}>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.78rem', color: '#f87171', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  padding: '8px 12px',
+                  background: 'var(--input-bg, #0f172a)',
+                  borderRadius: 6,
+                  border: '1px solid var(--input-border, #334155)',
+                  marginTop: 6
+                }}>
+                  <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.8rem', color: 'var(--danger, #f87171)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                     {excelErrors.slice(5).map((err, i) => <li key={i + 5}>{err}</li>)}
                   </ul>
                 </div>
@@ -845,7 +853,7 @@ export default function PatientsTab() {
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>
                           {firstName}
                         </td>
-                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: '#93c5fd' }}>
+                        <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--accent, #3b82f6)' }}>
                           {lastName || '—'}
                         </td>
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>

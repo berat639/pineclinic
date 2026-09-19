@@ -716,9 +716,6 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                         height,
                         left,
                         width,
-                        background: '#1e293b',
-                        border: '1.5px solid #ef4444',
-                        borderLeft: '5px solid #ef4444',
                         borderRadius: 6,
                         zIndex: 35,
                         padding: '4px 8px',
@@ -727,8 +724,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                         overflow: 'hidden',
                         display: 'flex',
                         flexDirection: 'column',
-                        justifyContent: 'center',
-                        boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+                        justifyContent: 'center'
                       }}
                       onClick={(evt) => {
                         evt.stopPropagation();
@@ -742,12 +738,12 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                       }}
                       title={`Dr. ${d.name} İzinli: ${l.startTime} - ${l.endTime}${l.reason ? ` (${l.reason})` : ''}`}
                     >
-                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                         <span>🏖️ İZİNLİ</span>
-                        <span style={{ fontSize: '0.68rem', color: '#f8fafc', fontWeight: 600 }}>({l.startTime} - {l.endTime})</span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--foreground, #ffffff)', fontWeight: 600 }}>({l.startTime} - {l.endTime})</span>
                       </div>
                       {l.reason && (
-                        <div style={{ fontSize: '0.68rem', color: '#cbd5e1', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--foreground-2, #94a3b8)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
                           {l.reason}
                         </div>
                       )}

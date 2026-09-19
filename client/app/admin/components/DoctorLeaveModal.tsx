@@ -190,28 +190,28 @@ export default function DoctorLeaveModal({
     >
       <div
         style={{
-          background: '#1e293b',
-          border: '1px solid #334155',
+          background: 'var(--card-bg, #1e293b)',
+          border: '1px solid var(--input-border, #334155)',
           borderRadius: 14,
           width: 520,
           maxWidth: '96vw',
           maxHeight: '90vh',
           overflowY: 'auto',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
           padding: '1.5rem',
           boxSizing: 'border-box'
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #334155', paddingBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--input-border, #334155)', paddingBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: '1.25rem' }}>🏖️</span>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground, #ffffff)' }}>
                 Hekim İzni & Saat Kapatma
               </h3>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: '#94a3b8' }}>
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)' }}>
                 İzinli saatler takvimde bloklanır ve bu saatlere randevu alınamaz.
               </p>
             </div>
@@ -222,7 +222,7 @@ export default function DoctorLeaveModal({
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
+              color: 'var(--foreground-3, #94a3b8)',
               cursor: 'pointer',
               fontSize: '1.2rem',
               padding: 4
@@ -236,7 +236,7 @@ export default function DoctorLeaveModal({
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* Doctor selection */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
               Hekim (Zorunlu)
             </label>
             <select
@@ -247,9 +247,9 @@ export default function DoctorLeaveModal({
                 width: '100%',
                 padding: '9px 12px',
                 borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#ffffff',
+                border: '1px solid var(--input-border, #334155)',
+                background: 'var(--input-bg, #0f172a)',
+                color: 'var(--foreground, #ffffff)',
                 fontSize: '0.85rem',
                 outline: 'none',
                 boxSizing: 'border-box'
@@ -267,7 +267,7 @@ export default function DoctorLeaveModal({
           {/* Date and Full Day toggle */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
                 Tarih
               </label>
               <input
@@ -279,9 +279,9 @@ export default function DoctorLeaveModal({
                   width: '100%',
                   padding: '8px 12px',
                   borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#0f172a',
-                  color: '#ffffff',
+                  border: '1px solid var(--input-border, #334155)',
+                  background: 'var(--input-bg, #0f172a)',
+                  color: 'var(--foreground, #ffffff)',
                   fontSize: '0.85rem',
                   outline: 'none',
                   boxSizing: 'border-box'
@@ -296,7 +296,7 @@ export default function DoctorLeaveModal({
                   alignItems: 'center',
                   gap: 8,
                   fontSize: '0.82rem',
-                  color: '#e2e8f0',
+                  color: 'var(--foreground, #e2e8f0)',
                   cursor: 'pointer',
                   fontWeight: 500
                 }}
@@ -316,7 +316,7 @@ export default function DoctorLeaveModal({
           {!isFullDay && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 6 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
                   Başlangıç Saati
                 </label>
                 <input
@@ -328,9 +328,9 @@ export default function DoctorLeaveModal({
                     width: '100%',
                     padding: '8px 12px',
                     borderRadius: 8,
-                    border: '1px solid #334155',
-                    background: '#0f172a',
-                    color: '#ffffff',
+                    border: '1px solid var(--input-border, #334155)',
+                    background: 'var(--input-bg, #0f172a)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.85rem',
                     outline: 'none',
                     boxSizing: 'border-box'
@@ -339,7 +339,7 @@ export default function DoctorLeaveModal({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 6 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
                   Bitiş Saati
                 </label>
                 <input
@@ -351,9 +351,9 @@ export default function DoctorLeaveModal({
                     width: '100%',
                     padding: '8px 12px',
                     borderRadius: 8,
-                    border: '1px solid #334155',
-                    background: '#0f172a',
-                    color: '#ffffff',
+                    border: '1px solid var(--input-border, #334155)',
+                    background: 'var(--input-bg, #0f172a)',
+                    color: 'var(--foreground, #ffffff)',
                     fontSize: '0.85rem',
                     outline: 'none',
                     boxSizing: 'border-box'
@@ -365,7 +365,7 @@ export default function DoctorLeaveModal({
 
           {/* Reason */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
               İzin Nedeni
             </label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
@@ -375,14 +375,15 @@ export default function DoctorLeaveModal({
                   type="button"
                   onClick={() => setReason(r)}
                   style={{
-                    padding: '4px 10px',
+                    padding: '5px 12px',
                     borderRadius: 6,
-                    border: reason === r ? '1px solid #3b82f6' : '1px solid #334155',
-                    background: reason === r ? '#1e3a8a' : '#0f172a',
-                    color: reason === r ? '#ffffff' : '#94a3b8',
+                    border: reason === r ? '1px solid var(--accent, #3b82f6)' : '1px solid var(--input-border, #334155)',
+                    background: reason === r ? 'var(--accent, #3b82f6)' : 'var(--card-inner, #0f172a)',
+                    color: reason === r ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                     fontSize: '0.76rem',
                     fontWeight: 600,
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
                   }}
                 >
                   {r}
@@ -392,14 +393,15 @@ export default function DoctorLeaveModal({
                 type="button"
                 onClick={() => setReason('Diğer')}
                 style={{
-                  padding: '4px 10px',
+                  padding: '5px 12px',
                   borderRadius: 6,
-                  border: reason === 'Diğer' ? '1px solid #3b82f6' : '1px solid #334155',
-                  background: reason === 'Diğer' ? '#1e3a8a' : '#0f172a',
-                  color: reason === 'Diğer' ? '#ffffff' : '#94a3b8',
+                  border: reason === 'Diğer' ? '1px solid var(--accent, #3b82f6)' : '1px solid var(--input-border, #334155)',
+                  background: reason === 'Diğer' ? 'var(--accent, #3b82f6)' : 'var(--card-inner, #0f172a)',
+                  color: reason === 'Diğer' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                   fontSize: '0.76rem',
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
                 }}
               >
                 Diğer (Özel)
@@ -417,9 +419,9 @@ export default function DoctorLeaveModal({
                   width: '100%',
                   padding: '8px 12px',
                   borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#0f172a',
-                  color: '#ffffff',
+                  border: '1px solid var(--input-border, #334155)',
+                  background: 'var(--input-bg, #0f172a)',
+                  color: 'var(--foreground, #ffffff)',
                   fontSize: '0.85rem',
                   outline: 'none',
                   boxSizing: 'border-box'
@@ -430,7 +432,7 @@ export default function DoctorLeaveModal({
 
           {/* Notes */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: 4 }}>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 4 }}>
               Ek Not (İsteğe Bağlı)
             </label>
             <input
@@ -442,9 +444,9 @@ export default function DoctorLeaveModal({
                 width: '100%',
                 padding: '8px 12px',
                 borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#ffffff',
+                border: '1px solid var(--input-border, #334155)',
+                background: 'var(--input-bg, #0f172a)',
+                color: 'var(--foreground, #ffffff)',
                 fontSize: '0.85rem',
                 outline: 'none',
                 boxSizing: 'border-box'
@@ -460,9 +462,9 @@ export default function DoctorLeaveModal({
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#94a3b8',
+                border: '1px solid var(--input-border, #334155)',
+                background: 'var(--card-inner, #0f172a)',
+                color: 'var(--foreground-2, #94a3b8)',
                 fontSize: '0.82rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -477,7 +479,7 @@ export default function DoctorLeaveModal({
                 padding: '8px 20px',
                 borderRadius: 8,
                 border: 'none',
-                background: '#2563eb',
+                background: 'var(--accent, #2563eb)',
                 color: '#ffffff',
                 fontSize: '0.82rem',
                 fontWeight: 600,
@@ -491,15 +493,15 @@ export default function DoctorLeaveModal({
 
         {/* Existing leaves section */}
         {selectedDoctorId && (
-          <div style={{ marginTop: '1.5rem', borderTop: '1px solid #334155', paddingTop: 14 }}>
-            <h4 style={{ margin: '0 0 10px 0', fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--input-border, #334155)', paddingTop: 14 }}>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground, #e2e8f0)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>📋</span> Bu Hekimin Kayıtlı İzinleri ({existingLeaves.length})
             </h4>
 
             {loadingLeaves ? (
-              <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Yükleniyor...</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3, #94a3b8)' }}>Yükleniyor...</div>
             ) : existingLeaves.length === 0 ? (
-              <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Kayıtlı aktif izin bulunmuyor.</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3, #64748b)' }}>Kayıtlı aktif izin bulunmuyor.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
                 {existingLeaves.map(l => (
@@ -510,18 +512,18 @@ export default function DoctorLeaveModal({
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '8px 12px',
-                      background: '#0f172a',
+                      background: 'var(--card-inner, #0f172a)',
                       borderRadius: 8,
-                      border: '1px solid #334155',
+                      border: '1px solid var(--input-border, #334155)',
                       fontSize: '0.8rem'
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 600, color: '#f87171' }}>
+                      <div style={{ fontWeight: 600, color: 'var(--danger, #f87171)' }}>
                         📅 {l.date} &nbsp;|&nbsp; ⏰ {l.isFullDay ? 'Tüm Gün' : `${l.startTime} - ${l.endTime}`}
                       </div>
                       {l.reason && (
-                        <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 2 }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--foreground-2, #94a3b8)', marginTop: 2 }}>
                           {l.reason} {l.notes ? `(${l.notes})` : ''}
                         </div>
                       )}
@@ -532,10 +534,10 @@ export default function DoctorLeaveModal({
                       title="İzni Sil / Saati Aç"
                       style={{
                         padding: '4px 8px',
-                        background: '#334155',
-                        border: '1px solid #ef4444',
+                        background: 'var(--card-inner, #334155)',
+                        border: '1px solid var(--danger, #ef4444)',
                         borderRadius: 6,
-                        color: '#f87171',
+                        color: 'var(--danger, #f87171)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',

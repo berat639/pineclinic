@@ -155,6 +155,26 @@
 .rc-empty { font-size: 0.7rem; color: var(--foreground-3); font-style: italic; }
 .rc-more { font-size: 0.65rem; color: var(--accent); font-weight: 600; align-self: center; }
 
+/* Doctor Leaves in Calendar */
+.rc-doctor-leave {
+  background: var(--card-bg, #1e293b);
+  border: 1.5px solid #ef4444;
+  border-left: 5px solid #ef4444;
+  color: var(--foreground);
+}
+[data-theme="light"] .rc-doctor-leave {
+  background: #fef2f2 !important;
+  border-color: #f87171 !important;
+  border-left-color: #ef4444 !important;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.12) !important;
+}
+[data-theme="dark"] .rc-doctor-leave {
+  background: #1e293b !important;
+  border-color: #ef4444 !important;
+  border-left-color: #ef4444 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
 /* ── Reset & Responsive Viewport Protection ─────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
