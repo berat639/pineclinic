@@ -1841,12 +1841,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             {/* DICOM Viewer Upload Block */}
             <div style={{ padding: 16, borderRadius: 8, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', marginBottom: 12 }}>
-                Genel Tedavi Röntgeni Yükle (.dcm)
+                Tedavi görüntüleri
               </div>
 
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
                 <label style={{ display: 'inline-block', cursor: 'pointer', padding: '6px 16px', background: 'var(--accent)', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 500 }}>
-                  Dosya Seç
+                  2D DICOM dosyası seç
                   <input type="file" accept=".dcm" style={{ display: 'none' }} onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file && file.size > 20 * 1024 * 1024) {
@@ -1869,13 +1869,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 )}
               </div>
 
-              {treatmentDcmFile && (
-                <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--glass-border)', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                  <div style={{ flex: 1, position: 'relative' }}>
-                    <DicomViewer dcmUrl={URL.createObjectURL(treatmentDcmFile)} isModal={false} />
-                  </div>
+              <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--glass-border)', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <DicomViewer file={treatmentDcmFile} isModal={false} showOnlyCbctPicker />
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Odontogram Container (2 Modlu: 2D Basit & 3D Anatomik) */}

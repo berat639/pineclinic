@@ -113,6 +113,10 @@ async function runMigrations() {
     ADD COLUMN IF NOT EXISTS extra_fields TEXT
   `
 
+  // Retire the obsolete ATA HSYS integration identifier from databases created
+  // by earlier schema revisions. Safe when the legacy column is absent.
+  await sql`ALTER TABLE appointments DROP COLUMN IF EXISTS ata_hsys_id`
+
   // Generic JSONB data column for flow-based appointments
   await sql`
     ALTER TABLE appointments

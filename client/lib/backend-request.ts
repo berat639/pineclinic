@@ -1,12 +1,15 @@
 function backendBaseUrls(): string[] {
+  const isDev = process.env.NODE_ENV !== 'production'
   return [
     process.env.BACKEND_PROXY_URL,
     process.env.SERVER_URL,
     process.env.NEXT_PUBLIC_BACKEND_URL,
+    ...(isDev ? ['http://localhost:3001'] : []),
     'http://voiceai-pineclinic-gycmpw:3001',
     'https://api.pinecllinic.thinpine.com',
     'http://voiceai-server:3001',
     'http://server:3001',
+    'http://localhost:3001',
   ].filter((url, index, urls): url is string => Boolean(url) && urls.indexOf(url) === index)
 }
 

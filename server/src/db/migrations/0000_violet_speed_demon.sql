@@ -36,7 +36,6 @@ CREATE TABLE "appointments" (
 	"issue_or_request" text,
 	"date" text DEFAULT '' NOT NULL,
 	"time" text DEFAULT '' NOT NULL,
-	"ata_hsys_id" text,
 	"discount_requested" boolean DEFAULT false,
 	"notes" text,
 	"extra_fields" text

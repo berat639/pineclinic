@@ -241,7 +241,7 @@ function buildStereoWav(aiChunks: TimedChunk[], userChunks: TimedChunk[], totalD
 }
 
 // ── Elysia app ────────────────────────────────────────────────────────────────
-const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:3001']
+const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002']
 const corsFromEnv = process.env.CORS_ORIGIN?.split(/[\s,]+/).map(s => s.trim()).filter(Boolean) ?? []
 const corsOrigins = [...new Set([...defaultCorsOrigins, ...corsFromEnv])]
 

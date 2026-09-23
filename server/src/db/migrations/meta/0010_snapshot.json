@@ -343,12 +343,6 @@
           "notNull": true,
           "default": "''"
         },
-        "ata_hsys_id": {
-          "name": "ata_hsys_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "discount_requested": {
           "name": "discount_requested",
           "type": "boolean",
