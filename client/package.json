@@ -20,6 +20,7 @@
     "@fullcalendar/resource-timegrid": "^6.1.15",
     "@fullcalendar/timegrid": "^6.1.15",
     "@google/genai": "^2.10.0",
+    "@kitware/vtk.js": "36.4.1",
     "@xyflow/react": "^12.11.2",
     "daikon": "^1.2.46",
     "date-fns": "^4.4.0",

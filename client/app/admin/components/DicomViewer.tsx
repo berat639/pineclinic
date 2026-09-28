@@ -7,7 +7,7 @@ import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
 import { findLocalCbctSeries } from './dicom/localCbctSeries'
 import CbctMprViewer from './CbctMprViewer'
 
-interface DicomViewerProps { dcmUrl?: string | null; file?: File | null; onClose?: () => void; isModal?: boolean; showOnlyCbctPicker?: boolean }
+interface DicomViewerProps { dcmUrl?: string | null; file?: File | null; onClose?: () => void; isModal?: boolean }
 type ActiveTool = 'windowLevel' | 'pan' | 'zoom' | 'scroll' | 'length' | 'arrow' | 'angle' | 'rectangle' | 'ellipse' | 'freehand' | 'erase'
 
 const toolLabels: Record<ActiveTool, string> = {
@@ -58,7 +58,7 @@ function roiTextLines(data: any, target: string | string[]) {
   return [`Alan: ${Math.round(stats.area * 100) / 100} ${safeUnit(stats.areaUnit, 'px²')}`]
 }
 
-export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal = false, showOnlyCbctPicker = false }: DicomViewerProps) {
+export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal = false }: DicomViewerProps) {
   const reactId = useId().replace(/:/g, '')
   const viewportId = `dicom-2d-viewport-${reactId}`
   const renderingEngineId = `dicom-2d-engine-${reactId}`
@@ -273,9 +273,9 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
     <section style={{ position: isPresentationMode ? 'fixed' : 'relative', inset: isPresentationMode ? 0 : undefined, zIndex: isPresentationMode ? 100000 : undefined, display: 'grid', gridTemplateColumns: isPresentationMode || !metadata ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(240px, 320px)', gap: 12, padding: isPresentationMode ? 0 : 12, borderRadius: isPresentationMode ? 0 : 12, background: isPresentationMode ? 'var(--background)' : 'var(--card-bg)', border: isPresentationMode ? 'none' : '1px solid var(--glass-border)', color: 'var(--foreground)' }}>
       <div style={{ minWidth: 0 }}>
         <input ref={fileInputRef} type="file" accept=".dcm,application/dicom" style={{ display: 'none' }} onChange={(event) => chooseFile(event.target.files?.[0])} />
-        <input ref={folderInputRef} type="file" accept=".dcm,application/dicom" multiple style={{ display: 'none' }} {...({ webkitdirectory: '' } as any)} onChange={(event) => void chooseFolder(event.target.files)} />
+        <input ref={folderInputRef} type="file" multiple style={{ display: 'none' }} {...({ webkitdirectory: '' } as any)} onChange={(event) => { void chooseFolder(event.target.files); event.currentTarget.value = '' }} />
         <div style={isPresentationMode ? { position: 'absolute', top: 20, right: 20, zIndex: 2, display: 'flex', gap: 8 } : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          {!isPresentationMode && (!showOnlyCbctPicker || file) && <>{!showOnlyCbctPicker && <><strong style={{ fontSize: 13 }}>DICOM Görüntüleyici</strong><button type="button" onClick={() => fileInputRef.current?.click()} style={secondaryButtonStyle}>2D dosya seç</button></>}<button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...secondaryButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT klasörü seç</button>{file && <span style={badgeStyle}>{file.name}</span>}</>}
+          {!isPresentationMode && <><div style={pickerButtonsStyle}><button type="button" onClick={() => fileInputRef.current?.click()} style={pickerButtonStyle}>2D DICOM seç</button><button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...pickerButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT seç</button></div>{file && <span style={badgeStyle}>{file.name}</span>}</>}
           {file && <button type="button" onClick={() => { setIsPresentationMode((active) => !active); setShowPresentationTools(true) }} style={toolButtonStyle(isPresentationMode)}>{isPresentationMode ? 'Sunumu kapat' : 'Sunum modu'}</button>}
           {isModal && onClose && <button type="button" onClick={onClose} aria-label="Görüntüleyiciyi kapat" style={{ ...secondaryButtonStyle, marginLeft: isPresentationMode ? 0 : 'auto' }}>Kapat</button>}
         </div>
@@ -284,7 +284,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>{primaryTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}<button type="button" title="Görüntüyü sıfırla" onClick={resetViewport} style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><RotateCcw size={15} />Sıfırla</button><button type="button" title="Çizim ve ölçüm araçları" onClick={() => setShowPresentationTools((visible) => !visible)} style={{ ...toolButtonStyle(showPresentationTools), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><SlidersHorizontal size={15} />Araçlar</button></div>
           {showPresentationTools && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingTop: 8, borderTop: '1px solid var(--input-border)' }}>{presentationTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}<button type="button" title="Tüm çizimleri temizle" onClick={clearAnnotations} style={{ ...secondaryButtonStyle, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Eraser size={15} />Temizle</button></div>}
         </div>}
-        {!file && !isLoading && !error && <div style={{ width: '100%', minHeight: 260, display: 'grid', placeItems: 'center', gap: 10, padding: 24, borderRadius: 8, border: '2px dashed var(--input-border)', background: 'var(--input-bg)' }}><span style={{ color: 'var(--foreground-2)', fontSize: 13 }}>{showOnlyCbctPicker ? 'Yerel CBCT klasörünü seçin' : 'Görüntüleme türünü seçin'}</span><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>{!showOnlyCbctPicker && <button type="button" onClick={() => fileInputRef.current?.click()} style={secondaryButtonStyle}>2D DICOM dosyası seç</button>}<button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...secondaryButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT klasörü seç</button></div><span style={{ maxWidth: 400, textAlign: 'center', color: 'var(--foreground-3)', fontSize: 11, lineHeight: 1.45 }}>3D için ZIP’i önce açın ve içindeki tüm DICOM kesitlerinin bulunduğu klasörü seçin.</span></div>}
+        {!file && !isLoading && !error && <div style={{ width: '100%', minHeight: 260, display: 'grid', placeItems: 'center', gap: 10, padding: 24, borderRadius: 8, border: '2px dashed var(--input-border)', background: 'var(--input-bg)' }}><span style={{ color: 'var(--foreground-2)', fontSize: 13 }}>Görüntüleme türünü seçin</span><div style={pickerButtonsStyle}><button type="button" onClick={() => fileInputRef.current?.click()} style={pickerButtonStyle}>2D DICOM seç</button><button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...pickerButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT seç</button></div><span style={{ maxWidth: 400, textAlign: 'center', color: 'var(--foreground-3)', fontSize: 11, lineHeight: 1.45 }}>3D için ZIP’i önce açın ve içindeki tüm DICOM kesitlerinin bulunduğu klasörü seçin.</span></div>}
         {folderStatus && <div style={messageStyle}>{folderStatus}</div>}
         {isLoading && <div style={messageStyle}>DICOM görüntüsü hazırlanıyor…</div>}
         {error && <div style={{ ...messageStyle, color: 'var(--danger)' }}>⚠️ {error}</div>}
@@ -296,6 +296,8 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
 }
 
 const secondaryButtonStyle = { border: '1px solid var(--input-border)', borderRadius: 6, padding: '6px 9px', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: 11 } as const
+const pickerButtonsStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(130px, 1fr))', gap: 8 } as const
+const pickerButtonStyle = { ...secondaryButtonStyle, minHeight: 38, padding: '8px 14px', textAlign: 'center' } as const
 const toolButtonStyle = (selected: boolean) => ({ ...secondaryButtonStyle, borderColor: selected ? 'var(--accent)' : 'var(--input-border)', color: selected ? 'var(--accent)' : 'var(--foreground-2)', background: selected ? 'var(--card-bg)' : 'var(--input-bg)' })
 const badgeStyle = { border: '1px solid var(--accent)', borderRadius: 999, padding: '4px 8px', background: 'var(--card-bg)', color: 'var(--accent)', fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const
 const messageStyle = { minHeight: 260, display: 'grid', placeItems: 'center', border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground-2)', fontSize: 13 } as const

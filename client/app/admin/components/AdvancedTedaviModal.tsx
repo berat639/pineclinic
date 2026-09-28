@@ -1871,7 +1871,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--glass-border)', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <DicomViewer file={treatmentDcmFile} isModal={false} showOnlyCbctPicker />
+                  <DicomViewer file={treatmentDcmFile} isModal={false} />
                 </div>
               </div>
             </div>

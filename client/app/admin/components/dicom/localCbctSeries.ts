@@ -20,19 +20,28 @@ function numericVector(value: unknown, expectedLength: number): number[] | null 
 export async function findLocalCbctSeries(files: File[]): Promise<LocalCbctSeries | null> {
   // @ts-ignore -- daikon does not publish complete TypeScript declarations.
   const daikon = await import('daikon')
-  const candidates = await Promise.all(files.map(async (file) => {
+  // A directory picker can include unrelated files when the user selects the
+  // MyDentViewer export root. More importantly, reading a full CBCT directory
+  // with Promise.all holds hundreds of ArrayBuffers in memory at once. Parse
+  // only DICOM files one by one so a valid, large local study is not mistaken
+  // for an invalid series under browser memory pressure.
+  const dicomFiles = files.filter((file) => /\.dcm$/i.test(file.name) || /dicom/i.test(file.type))
+  const candidates: Array<{ file: File; seriesUid: string; position: number[]; directions: number[] }> = []
+  for (const file of dicomFiles) {
     try {
       const image = daikon.Series.parseImage(new DataView(await file.arrayBuffer())) as DaikonImage | null
       const seriesUid = String(image?.getSeriesInstanceUID?.() ?? '')
       const position = numericVector(image?.getImagePosition?.(), 3)
       const directions = numericVector(image?.getImageDirections?.(), 6)
-      return seriesUid && position && directions ? { file, seriesUid, position, directions } : null
-    } catch { return null }
-  }))
+      if (seriesUid && position && directions) candidates.push({ file, seriesUid, position, directions })
+    } catch {
+      // A directory may contain a non-DICOM file with a .dcm extension. It
+      // must not prevent the remaining slices from being inspected.
+    }
+  }
 
-  const groups = new Map<string, NonNullable<(typeof candidates)[number]>[]>()
-  candidates.filter(Boolean).forEach((candidate) => {
-    const item = candidate!
+  const groups = new Map<string, (typeof candidates)[number][]>()
+  candidates.forEach((item) => {
     groups.set(item.seriesUid, [...(groups.get(item.seriesUid) || []), item])
   })
   const largest = [...groups.values()].sort((a, b) => b.length - a.length)[0]

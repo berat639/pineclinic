@@ -38,6 +38,10 @@ export function getCornerstoneRuntime(): Promise<any> {
     ]).then(([core, tools, dicomImageLoader, metadata, dcmjs]) => {
       filterKnownInvalidAgeTagWarning(dcmjs)
       if (!core.isCornerstoneInitialized()) core.init()
+      core.volumeLoader.registerVolumeLoader(
+        'cornerstoneStreamingImageVolume',
+        core.cornerstoneStreamingImageVolumeLoader as any,
+      )
       dicomImageLoader.init({ maxWebWorkers: 1 })
       tools.init()
       if (!toolsRegistered) {
