@@ -1844,34 +1844,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 Tedavi görüntüleri
               </div>
 
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-                <label style={{ display: 'inline-block', cursor: 'pointer', padding: '6px 16px', background: 'var(--accent)', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 500 }}>
-                  2D DICOM dosyası seç
-                  <input type="file" accept=".dcm" style={{ display: 'none' }} onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file && file.size > 20 * 1024 * 1024) {
-                      toast.error('Dosya boyutu 20 MB\'dan büyük olamaz');
-                      e.target.value = '';
-                      return;
-                    }
-                    if (file) setTreatmentDcmFile(file);
-                  }} />
-                </label>
-                {treatmentDcmFile && (
-                  <>
-                    <div style={{ background: 'var(--accent)20', color: 'var(--accent)', padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, border: '1px solid var(--accent)40' }}>
-                      {treatmentDcmFile.name}
-                    </div>
-                    <button onClick={() => setTreatmentDcmFile(null)} style={{ marginLeft: 'auto', background: 'var(--danger)', color: '#fff', border: 'none', width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                      <X size={16} strokeWidth={3} />
-                    </button>
-                  </>
-                )}
-              </div>
-
               <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--glass-border)', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <DicomViewer file={treatmentDcmFile} isModal={false} />
+                  <DicomViewer file={treatmentDcmFile} onFileChange={setTreatmentDcmFile} isModal={false} />
                 </div>
               </div>
             </div>

@@ -1,6 +1,5 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
-import * as XLSX from 'xlsx'
 import { toast } from 'react-hot-toast'
 import { Trash2, X, AlertCircle } from 'lucide-react'
 import PatientProfileCard from './PatientProfileCard'
@@ -190,6 +189,10 @@ export default function PatientsTab() {
       const bstr = evt.target?.result
       if (!bstr) return
       try {
+        // SheetJS is browser-only and pulls a Node `process` shim when loaded
+        // at module evaluation time. Keep it out of the panel's initial bundle;
+        // the parser is needed only after the user explicitly picks a file.
+        const XLSX = await import('xlsx')
         const wb = XLSX.read(bstr, { type: 'binary', cellDates: true })
         const wsname = wb.SheetNames[0]
         const ws = wb.Sheets[wsname]
@@ -330,7 +333,8 @@ export default function PatientsTab() {
   }
 
   // Genel kliniklere uygun Excel şablonu indirme
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet([
       {
         'AD': 'Sergen',

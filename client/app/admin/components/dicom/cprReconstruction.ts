@@ -32,6 +32,13 @@ export interface CprResult {
   selectedPositionNormalized: number
 }
 
+/** One panorama per volume/settings; serial-section navigation reuses it. */
+export interface CprPanoramaCache {
+  volume?: CprVolume
+  key?: string
+  image?: ImageData
+}
+
 export interface CprOptions {
   arch?: CprPoint[]
   panoramaWidth?: number
@@ -120,8 +127,16 @@ export function interpolateDentalArch(arch: CprPoint[], samplesPerSegment = 10):
 }
 
 function tangent(arch: SamplePoint[], index: number, sx: number, sy: number) {
-  const before = arch[Math.max(0, index - 1)]
-  const after = arch[Math.min(arch.length - 1, index + 1)]
+  // Derive the section angle across roughly one tooth width. Using immediately
+  // adjacent sub-millimetre samples makes the normal react to tiny spline
+  // variations and produces visibly unstable/tilted serial sections.
+  const halfWindowMm = 2.5
+  let beforeIndex = index
+  let afterIndex = index
+  while (beforeIndex > 0 && arch[index].distanceMm - arch[beforeIndex].distanceMm < halfWindowMm) beforeIndex--
+  while (afterIndex < arch.length - 1 && arch[afterIndex].distanceMm - arch[index].distanceMm < halfWindowMm) afterIndex++
+  const before = arch[beforeIndex]
+  const after = arch[afterIndex]
   const dxMm = (after.x - before.x) * sx
   const dyMm = (after.y - before.y) * sy
   const lengthMm = Math.hypot(dxMm, dyMm) || 1
@@ -148,6 +163,36 @@ export function resampleDentalArch(arch: CprPoint[], sampleCount: number, spacin
     const progress = (target - lengths[segment - 1]) / segmentLength
     return { x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress, distanceMm: target }
   })
+}
+
+/** Finds the anterior apex of a U-shaped arch as a normalized arc position.
+ * The distance from the posterior endpoint chord is rotation-independent and
+ * remains correct for scans exported in either anterior/posterior direction. */
+export function dentalArchApexPosition(
+  arch: CprPoint[],
+  spacing: readonly [number, number],
+  sampleCount = 600,
+): number {
+  if (arch.length < 3) return 0.5
+  const sampled = resampleDentalArch(arch, Math.max(3, sampleCount), spacing)
+  const first = sampled[0]
+  const last = sampled[sampled.length - 1]
+  const chordX = (last.x - first.x) * spacing[0]
+  const chordY = (last.y - first.y) * spacing[1]
+  const chordLength = Math.hypot(chordX, chordY)
+  if (chordLength < 1e-6) return 0.5
+  let apexIndex = Math.floor(sampled.length / 2)
+  let greatestDistance = -1
+  sampled.forEach((point, index) => {
+    const pointX = (point.x - first.x) * spacing[0]
+    const pointY = (point.y - first.y) * spacing[1]
+    const distance = Math.abs(chordX * pointY - chordY * pointX) / chordLength
+    if (distance > greatestDistance) {
+      greatestDistance = distance
+      apexIndex = index
+    }
+  })
+  return apexIndex / Math.max(1, sampled.length - 1)
 }
 
 /** One physical frame shared by CPR sampling and all angle overlays. */
@@ -210,7 +255,7 @@ function imageDataFromSamples(samples: number[], imageWidth: number, imageHeight
 }
 
 /** Produces one panoramic CPR and serial thin sections centred on the selected arc position. */
-export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}): CprResult {
+export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}, cache?: CprPanoramaCache): CprResult {
   const [volumeWidth, volumeHeight, volumeDepth] = volume.dimensions.map(Number)
   if (![volumeWidth, volumeHeight, volumeDepth].every((value) => Number.isInteger(value) && value >= 2)) {
     throw new Error('CPR için geçerli hacim boyutları gerekli.')
@@ -227,6 +272,7 @@ export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}
   const arch = options.arch ?? defaultDentalArch(volumeWidth, volumeHeight, panoramaWidth)
   if (arch.length < 2) throw new Error('CPR eğrisi en az iki noktadan oluşmalıdır.')
   const panoramicPath = resampleDentalArch(arch, panoramaWidth, [sx, sy])
+  const pathDirections = panoramicPath.map((_, index) => tangent(panoramicPath, index, sx, sy))
   const arcLengthMm = panoramicPath[panoramicPath.length - 1]?.distanceMm ?? 0
   const selectedPositionNormalized = clamp(options.selectedPosition ?? 0.5, 0, 1)
   const selectedPositionMm = selectedPositionNormalized * arcLengthMm
@@ -235,23 +281,33 @@ export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}
   const panoramaSampleStepMm = Math.max(0.35, Math.min(sx, sy))
   const panoramaSampleCount = Math.max(1, Math.ceil(panoramaThicknessMm / panoramaSampleStepMm) + 1)
 
-  const panoramaSamples: number[] = []
-  for (let py = 0; py < panoramaHeight; py++) {
-    const z = (1 - py / Math.max(1, panoramaHeight - 1)) * (volumeDepth - 1)
-    for (let px = 0; px < panoramaWidth; px++) {
-      const point = panoramicPath[px]
-      const direction = tangent(panoramicPath, px, sx, sy)
-      const normal = { x: -direction.y, y: direction.x }
-      const ray: Array<number | null> = []
-      for (let sample = 0; sample < panoramaSampleCount; sample++) {
-        const offsetMm = panoramaSampleCount === 1 ? 0 : -panoramaThicknessMm / 2 + sample * panoramaThicknessMm / (panoramaSampleCount - 1)
-        ray.push(scalarAt(volume, point.x + normal.x * offsetMm / sx, point.y + normal.y * offsetMm / sy, z))
+  const panoramaKey = JSON.stringify([arch, panoramaWidth, panoramaHeight, panoramaThicknessMm, panoramaProjection, sx, sy, sz, volumeWidth, volumeHeight, volumeDepth])
+  let panorama = cache?.volume === volume && cache.key === panoramaKey ? cache.image : undefined
+  if (!panorama) {
+    const panoramaSamples: number[] = []
+    for (let py = 0; py < panoramaHeight; py++) {
+      const z = (1 - py / Math.max(1, panoramaHeight - 1)) * (volumeDepth - 1)
+      for (let px = 0; px < panoramaWidth; px++) {
+        const point = panoramicPath[px]
+        const direction = pathDirections[px]
+        const normal = { x: -direction.y, y: direction.x }
+        const ray: Array<number | null> = []
+        for (let sample = 0; sample < panoramaSampleCount; sample++) {
+          const offsetMm = panoramaSampleCount === 1 ? 0 : -panoramaThicknessMm / 2 + sample * panoramaThicknessMm / (panoramaSampleCount - 1)
+          ray.push(scalarAt(volume, point.x + normal.x * offsetMm / sx, point.y + normal.y * offsetMm / sy, z))
+        }
+        panoramaSamples.push(combineSamples(ray, panoramaProjection))
       }
-      panoramaSamples.push(combineSamples(ray, panoramaProjection))
+    }
+
+    const tone = percentileTone(panoramaSamples)
+    panorama = imageDataFromSamples(panoramaSamples, panoramaWidth, panoramaHeight, tone)
+    if (cache) {
+      cache.volume = volume
+      cache.key = panoramaKey
+      cache.image = panorama
     }
   }
-
-  const tone = percentileTone(panoramaSamples)
   const requestedCount = Math.round(clamp(options.crossSectionCount ?? 5, 3, 11))
   const crossSectionCount = requestedCount % 2 === 0 ? requestedCount + 1 : requestedCount
   const crossSectionStepMm = clamp(options.crossSectionStepMm ?? 1.5, 0.2, 10)
@@ -271,7 +327,7 @@ export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}
     const valid = positionMm >= 0 && positionMm <= arcLengthMm
     const pathIndex = Math.round(clamp(positionMm / Math.max(arcLengthMm, 1e-6), 0, 1) * (panoramicPath.length - 1))
     const point = panoramicPath[pathIndex]
-    const direction = tangent(panoramicPath, pathIndex, sx, sy)
+    const direction = pathDirections[pathIndex]
     const normal = { x: -direction.y, y: direction.x }
     const sectionSamples: number[] = []
     for (let py = 0; py < sectionHeight; py++) {
@@ -311,7 +367,7 @@ export function reconstructDentalCpr(volume: CprVolume, options: CprOptions = {}
   }))
 
   return {
-    panorama: imageDataFromSamples(panoramaSamples, panoramaWidth, panoramaHeight, tone),
+    panorama,
     crossSections,
     arcLengthMm,
     selectedPositionMm,

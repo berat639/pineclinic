@@ -7,7 +7,13 @@ import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
 import { findLocalCbctSeries } from './dicom/localCbctSeries'
 import CbctMprViewer from './CbctMprViewer'
 
-interface DicomViewerProps { dcmUrl?: string | null; file?: File | null; onClose?: () => void; isModal?: boolean }
+interface DicomViewerProps {
+  dcmUrl?: string | null
+  file?: File | null
+  onFileChange?: (file: File) => void
+  onClose?: () => void
+  isModal?: boolean
+}
 type ActiveTool = 'windowLevel' | 'pan' | 'zoom' | 'scroll' | 'length' | 'arrow' | 'angle' | 'rectangle' | 'ellipse' | 'freehand' | 'erase'
 
 const toolLabels: Record<ActiveTool, string> = {
@@ -58,7 +64,7 @@ function roiTextLines(data: any, target: string | string[]) {
   return [`Alan: ${Math.round(stats.area * 100) / 100} ${safeUnit(stats.areaUnit, 'px²')}`]
 }
 
-export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal = false }: DicomViewerProps) {
+export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onClose, isModal = false }: DicomViewerProps) {
   const reactId = useId().replace(/:/g, '')
   const viewportId = `dicom-2d-viewport-${reactId}`
   const renderingEngineId = `dicom-2d-engine-${reactId}`
@@ -248,22 +254,30 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
     if (!nextFile) return
     setFile(nextFile)
     setError(null)
+    onFileChange?.(nextFile)
   }
 
-  const chooseFolder = async (selectedFiles: FileList | null) => {
-    if (!selectedFiles?.length) return
+  const chooseFolder = async (selectedFiles: File[]) => {
+    if (!selectedFiles.length) return
     setError(null)
-    setFolderStatus('Klasörde uygun CBCT serisi aranıyor…')
+    setFolderStatus(`Klasörde uygun CBCT serisi aranıyor… (0/${selectedFiles.length})`)
     try {
-      const series = await findLocalCbctSeries(Array.from(selectedFiles))
+      const series = await findLocalCbctSeries(selectedFiles, (scanned, total) => {
+        setFolderStatus(`Klasörde uygun CBCT serisi aranıyor… (${scanned}/${total})`)
+      })
       if (!series) {
         setError('Bu klasörde en az 16 farklı konumlu kesit ve gerekli geometri bilgilerini içeren bir CBCT serisi bulunamadı.')
         return
       }
       setFile(null)
       setCbctFiles(series.files)
-    } catch {
-      setError('Klasördeki DICOM dosyaları okunamadı. CBCT klasörünü seçtiğinizden emin olun.')
+    } catch (folderError) {
+      const detail = folderError instanceof Error
+        ? folderError.message
+        : typeof folderError === 'string'
+          ? folderError
+          : (() => { try { return JSON.stringify(folderError) } catch { return '' } })()
+      setError(detail || `Klasördeki DICOM dosyaları okunamadı (${selectedFiles.length} dosya tarandı). CBCT klasörünü seçtiğinizden emin olun.`)
     } finally { setFolderStatus(null) }
   }
 
@@ -273,7 +287,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
     <section style={{ position: isPresentationMode ? 'fixed' : 'relative', inset: isPresentationMode ? 0 : undefined, zIndex: isPresentationMode ? 100000 : undefined, display: 'grid', gridTemplateColumns: isPresentationMode || !metadata ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(240px, 320px)', gap: 12, padding: isPresentationMode ? 0 : 12, borderRadius: isPresentationMode ? 0 : 12, background: isPresentationMode ? 'var(--background)' : 'var(--card-bg)', border: isPresentationMode ? 'none' : '1px solid var(--glass-border)', color: 'var(--foreground)' }}>
       <div style={{ minWidth: 0 }}>
         <input ref={fileInputRef} type="file" accept=".dcm,application/dicom" style={{ display: 'none' }} onChange={(event) => chooseFile(event.target.files?.[0])} />
-        <input ref={folderInputRef} type="file" multiple style={{ display: 'none' }} {...({ webkitdirectory: '' } as any)} onChange={(event) => { void chooseFolder(event.target.files); event.currentTarget.value = '' }} />
+        <input ref={folderInputRef} type="file" multiple style={{ display: 'none' }} {...({ webkitdirectory: '' } as any)} onChange={(event) => { const selectedFiles = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void chooseFolder(selectedFiles) }} />
         <div style={isPresentationMode ? { position: 'absolute', top: 20, right: 20, zIndex: 2, display: 'flex', gap: 8 } : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           {!isPresentationMode && <><div style={pickerButtonsStyle}><button type="button" onClick={() => fileInputRef.current?.click()} style={pickerButtonStyle}>2D DICOM seç</button><button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...pickerButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT seç</button></div>{file && <span style={badgeStyle}>{file.name}</span>}</>}
           {file && <button type="button" onClick={() => { setIsPresentationMode((active) => !active); setShowPresentationTools(true) }} style={toolButtonStyle(isPresentationMode)}>{isPresentationMode ? 'Sunumu kapat' : 'Sunum modu'}</button>}
@@ -284,7 +298,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onClose, isModal =
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>{primaryTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}<button type="button" title="Görüntüyü sıfırla" onClick={resetViewport} style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><RotateCcw size={15} />Sıfırla</button><button type="button" title="Çizim ve ölçüm araçları" onClick={() => setShowPresentationTools((visible) => !visible)} style={{ ...toolButtonStyle(showPresentationTools), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><SlidersHorizontal size={15} />Araçlar</button></div>
           {showPresentationTools && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingTop: 8, borderTop: '1px solid var(--input-border)' }}>{presentationTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}<button type="button" title="Tüm çizimleri temizle" onClick={clearAnnotations} style={{ ...secondaryButtonStyle, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Eraser size={15} />Temizle</button></div>}
         </div>}
-        {!file && !isLoading && !error && <div style={{ width: '100%', minHeight: 260, display: 'grid', placeItems: 'center', gap: 10, padding: 24, borderRadius: 8, border: '2px dashed var(--input-border)', background: 'var(--input-bg)' }}><span style={{ color: 'var(--foreground-2)', fontSize: 13 }}>Görüntüleme türünü seçin</span><div style={pickerButtonsStyle}><button type="button" onClick={() => fileInputRef.current?.click()} style={pickerButtonStyle}>2D DICOM seç</button><button type="button" onClick={() => folderInputRef.current?.click()} style={{ ...pickerButtonStyle, borderColor: 'var(--accent)', color: 'var(--accent)' }}>3D CBCT seç</button></div><span style={{ maxWidth: 400, textAlign: 'center', color: 'var(--foreground-3)', fontSize: 11, lineHeight: 1.45 }}>3D için ZIP’i önce açın ve içindeki tüm DICOM kesitlerinin bulunduğu klasörü seçin.</span></div>}
+        {!file && !isLoading && !error && <div style={{ width: '100%', minHeight: 260, display: 'grid', placeItems: 'center', gap: 10, padding: 24, borderRadius: 8, border: '2px dashed var(--input-border)', background: 'var(--input-bg)' }}><span style={{ color: 'var(--foreground-2)', fontSize: 13 }}>Yukarıdaki iki seçenekten görüntüleme türünü seçin.</span><span style={{ maxWidth: 400, textAlign: 'center', color: 'var(--foreground-3)', fontSize: 11, lineHeight: 1.45 }}>3D için ZIP’i önce açın ve içindeki tüm DICOM kesitlerinin bulunduğu klasörü seçin.</span></div>}
         {folderStatus && <div style={messageStyle}>{folderStatus}</div>}
         {isLoading && <div style={messageStyle}>DICOM görüntüsü hazırlanıyor…</div>}
         {error && <div style={{ ...messageStyle, color: 'var(--danger)' }}>⚠️ {error}</div>}

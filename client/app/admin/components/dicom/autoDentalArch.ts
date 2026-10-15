@@ -513,10 +513,17 @@ export function estimateDentalArchMipSplineDetailed(volume: Volume, controlPoint
     return { points: estimateDentalArch(volume, controlPointCount, requestedZ), confidence: 0, axialSlice: requestedZ }
   }
   const sz = Math.abs(Number(volume.spacing?.[2])) || 1
-  const offset = Math.max(2, Math.round(10 / sz))
+  // Stay near the displayed dental plane. A wide, confidence-only search
+  // systematically drifts superiorly because dense skull-base structures earn
+  // a stronger skeleton score than crowns (observed on Dentascan exports).
+  const offset = Math.max(2, Math.round(6 / sz))
   const slices = [...new Set([-2, -1, 0, 1, 2].map((step) => Math.round(clamp(requestedZ + step * offset, 0, depth - 1))))]
   const estimates = slices.map((slice) => analyseMipAtSlice(volume, controlPointCount, slice))
-  return estimates.reduce((best, estimate) => estimate.confidence > best.confidence ? estimate : best)
+  const adjustedConfidence = (estimate: DentalArchEstimate) => {
+    const distanceMm = Math.abs(estimate.axialSlice - requestedZ) * sz
+    return estimate.confidence - distanceMm * 0.0025
+  }
+  return estimates.reduce((best, estimate) => adjustedConfidence(estimate) > adjustedConfidence(best) ? estimate : best)
 }
 
 export function estimateDentalArchMipSpline(volume: Volume, controlPointCount = 13, axialSlice?: number): DentalArchPoint[] {

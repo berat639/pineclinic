@@ -10,34 +10,54 @@ export interface LocalCbctSeries {
 }
 
 function numericVector(value: unknown, expectedLength: number): number[] | null {
-  const values = Array.isArray(value) ? value : []
+  const values = Array.isArray(value) || ArrayBuffer.isView(value)
+    ? Array.from(value as ArrayLike<unknown>)
+    : []
   if (values.length !== expectedLength) return null
   const vector = values.map(Number)
   return vector.every(Number.isFinite) ? vector : null
 }
 
 /** Finds one geometrically usable CBCT series without uploading any patient data. */
-export async function findLocalCbctSeries(files: File[]): Promise<LocalCbctSeries | null> {
+export async function findLocalCbctSeries(
+  files: File[],
+  onProgress?: (scanned: number, total: number) => void,
+): Promise<LocalCbctSeries | null> {
   // @ts-ignore -- daikon does not publish complete TypeScript declarations.
-  const daikon = await import('daikon')
+  const daikonModule = await import('daikon')
+  const daikon = (daikonModule as any).default ?? daikonModule
+  if (!daikon?.Series?.parseImage) throw new Error('DICOM okuyucu yüklenemedi.')
   // A directory picker can include unrelated files when the user selects the
   // MyDentViewer export root. More importantly, reading a full CBCT directory
   // with Promise.all holds hundreds of ArrayBuffers in memory at once. Parse
   // only DICOM files one by one so a valid, large local study is not mistaken
   // for an invalid series under browser memory pressure.
-  const dicomFiles = files.filter((file) => /\.dcm$/i.test(file.name) || /dicom/i.test(file.type))
+  const knownNonDicom = /\.(?:jpe?g|png|gif|webp|txt|pdf|xml|json|csv|zip|rar|7z|mp4|mov|avi)$/i
+  // Many PACS exports omit both the .dcm extension and MIME type. Let Daikon
+  // inspect every plausibly binary file and reject non-DICOM entries itself.
+  const dicomFiles = files.filter((file) => file.size >= 132 && !knownNonDicom.test(file.name))
   const candidates: Array<{ file: File; seriesUid: string; position: number[]; directions: number[] }> = []
-  for (const file of dicomFiles) {
+  const parseFile = async (file: File) => {
     try {
       const image = daikon.Series.parseImage(new DataView(await file.arrayBuffer())) as DaikonImage | null
       const seriesUid = String(image?.getSeriesInstanceUID?.() ?? '')
       const position = numericVector(image?.getImagePosition?.(), 3)
       const directions = numericVector(image?.getImageDirections?.(), 6)
-      if (seriesUid && position && directions) candidates.push({ file, seriesUid, position, directions })
+      return seriesUid && position && directions ? { file, seriesUid, position, directions } : null
     } catch {
       // A directory may contain a non-DICOM file with a .dcm extension. It
       // must not prevent the remaining slices from being inspected.
+      return null
     }
+  }
+  // Parse bounded batches so a large export does not hold every ArrayBuffer in
+  // memory while still avoiding the long, apparently-stuck sequential scan.
+  const batchSize = 16
+  for (let start = 0; start < dicomFiles.length; start += batchSize) {
+    const batch = dicomFiles.slice(start, start + batchSize)
+    const parsed = await Promise.all(batch.map(parseFile))
+    parsed.forEach((item) => { if (item) candidates.push(item) })
+    onProgress?.(Math.min(start + batch.length, dicomFiles.length), dicomFiles.length)
   }
 
   const groups = new Map<string, (typeof candidates)[number][]>()

@@ -4,14 +4,16 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Activity, Crosshair, Hand, MousePointer2, Move, Rotate3D, RotateCcw, Ruler, SlidersHorizontal, Target, Triangle, X, ZoomIn } from 'lucide-react'
 import styles from './CbctMprViewer.module.css'
 import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
-import { dentalArchFrameAt, interpolateDentalArch, reconstructDentalCpr, resampleDentalArch, type CprProjection, type CprResult, type CprVolume } from './dicom/cprReconstruction'
+import { dentalArchApexPosition, dentalArchFrameAt, interpolateDentalArch, resampleDentalArch, type CprProjection, type CprResult, type CprVolume } from './dicom/cprReconstruction'
+import { CprWorkerClient } from './dicom/cprWorkerClient'
 import { estimateDentalArch, estimateDentalArchMipSplineDetailed } from './dicom/autoDentalArch'
 import { applyDentalVolumeRendering, type DentalVolumeMode } from './dicom/dentalVolumeRendering'
 import { decodeLocalDicomVolume } from './dicom/localDicomVolume'
+import { runDentalSegmentator } from './dicom/dentalSegmentator'
 
 interface CbctMprViewerProps { files: File[]; onClose: () => void }
 type ViewportName = 'Axial' | 'Coronal' | 'Sagittal' | '3D Hacim'
-type MprTool = 'crosshair' | 'pan' | 'zoom' | 'windowLevel' | 'length'
+type MprTool = 'crosshair' | 'pan' | 'zoom' | 'windowLevel' | 'length' | 'angle'
 type WorkspaceLayout = 'mpr' | 'cpr' | 'focus3d'
 type ClinicalTool = 'crosshair' | 'pan' | 'zoom' | 'windowLevel' | 'length' | 'angle' | 'nerve' | 'implant' | 'tooth'
 type ArchPoint = { x: number; y: number }
@@ -63,6 +65,8 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
   const [loading, setLoading] = useState(true)
   const [loadingMessage, setLoadingMessage] = useState('CBCT çalışma alanı hazırlanıyor…')
   const [error, setError] = useState<string | null>(null)
+  const [cprError, setCprError] = useState<string | null>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [activeViewport, setActiveViewport] = useState(0)
   // Dental CBCT opens in its clinical CPR layout. Generic MPR remains an
   // optional inspection mode rather than the primary workspace.
@@ -80,9 +84,14 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
   const [nerveVisible, setNerveVisible] = useState(false)
   const [implantPlan, setImplantPlan] = useState<ImplantPlan | null>(null)
   const [renderMode, setRenderMode] = useState<DentalVolumeMode>('teeth')
+  const [dentalSegmentatorRunning, setDentalSegmentatorRunning] = useState(false)
+  const [dentalSegmentatorStatus, setDentalSegmentatorStatus] = useState<string | null>(null)
   const cprVolumeRef = useRef<CprVolume | null>(null)
+  const cprWorkerRef = useRef<{ volume: CprVolume; client: CprWorkerClient } | null>(null)
 
   const cleanup = useCallback(() => {
+    cprWorkerRef.current?.client.dispose()
+    cprWorkerRef.current = null
     const session = sessionRef.current
     if (!session) return
     session.observer?.disconnect()
@@ -104,6 +113,8 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
     let disposed = false
     const open = async () => {
       try {
+        setCprError(null)
+        setCprResult(null)
         setLoadingMessage('DICOM motoru hazırlanıyor…')
         const { core, tools } = await getCornerstoneRuntime()
         if (disposed) return
@@ -122,7 +133,7 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
         const toolGroup = tools.ToolGroupManager.createToolGroup(toolGroupId)
         if (!toolGroup) throw new Error('MPR araç grubu oluşturulamadı.')
         viewportIds.slice(0, 3).forEach((viewportId) => toolGroup.addViewport(viewportId, engineId))
-        ;[tools.CrosshairsTool, tools.PanTool, tools.ZoomTool, tools.WindowLevelTool, tools.StackScrollTool, tools.LengthTool].forEach((tool) => toolGroup.addTool(tool.toolName))
+        ;[tools.CrosshairsTool, tools.PanTool, tools.ZoomTool, tools.WindowLevelTool, tools.StackScrollTool, tools.LengthTool, tools.AngleTool].forEach((tool) => toolGroup.addTool(tool.toolName))
         toolGroup.setToolActive(tools.CrosshairsTool.toolName, { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }] })
         toolGroup.setToolActive(tools.StackScrollTool.toolName, { bindings: [{ mouseButton: tools.Enums.MouseBindings.Wheel }] })
         const volumeToolGroup = tools.ToolGroupManager.createToolGroup(volumeToolGroupId)
@@ -192,11 +203,30 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
         setLoadingMessage('Diş arkı otomatik hesaplanıyor…')
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
         if (disposed) return
+        let detectedPoints: ArchPoint[]
+        let detectedAxialSlice = axialIndex?.[2]
         try {
           const estimate = estimateDentalArchMipSplineDetailed(cprVolumeRef.current, 13, axialIndex?.[2])
-          setArchPoints(estimate.points)
+          detectedPoints = estimate.points
+          detectedAxialSlice = estimate.axialSlice
         } catch {
-          setArchPoints(estimateDentalArch(cprVolumeRef.current, 13, axialIndex?.[2]))
+          detectedPoints = estimateDentalArch(cprVolumeRef.current, 13, axialIndex?.[2])
+        }
+        setArchPoints(detectedPoints)
+        setSelectedPosition(dentalArchApexPosition(detectedPoints, [spacing[0], spacing[1]]))
+        // The detector evaluates nearby physical levels and may find the dental
+        // arch away from the volume midpoint. Display that exact DICOM plane;
+        // otherwise a correct curve is projected over unrelated anatomy and its
+        // perpendicular appears to have the wrong angle.
+        if (Number.isFinite(detectedAxialSlice) && axialIndex && axialViewport?.getCamera?.()) {
+          const camera = axialViewport.getCamera()
+          const targetWorld = core.utilities.transformIndexToWorld(volume.imageData, [axialIndex[0], axialIndex[1], Number(detectedAxialSlice)])
+          const delta = targetWorld.map((value: number, axis: number) => value - camera.focalPoint[axis])
+          axialViewport.setCamera({
+            focalPoint: targetWorld,
+            position: camera.position.map((value: number, axis: number) => value + delta[axis]),
+          })
+          axialViewport.render?.()
         }
         const dentalViewport = engine.getViewport(viewportIds[3])
         applyDentalVolumeRendering(dentalViewport, scalarData, 'teeth')
@@ -211,10 +241,20 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
   }, [cleanup, engineId, files, toolGroupId, viewportIds, volumeId, volumeToolGroupId])
 
   useEffect(() => {
-    if (!cprVolumeRef.current || archPoints.length < 2) return
-    const timer = window.setTimeout(() => {
+    if (!cprVolumeRef.current || archPoints.length < 2) {
+      setCprResult(null)
+      return
+    }
+    setCprError(null)
+    let disposed = false
+    const timer = window.setTimeout(async () => {
       try {
-        setCprResult(reconstructDentalCpr(cprVolumeRef.current!, {
+        const volume = cprVolumeRef.current!
+        if (cprWorkerRef.current?.volume !== volume) {
+          cprWorkerRef.current?.client.dispose()
+          cprWorkerRef.current = { volume, client: new CprWorkerClient(volume) }
+        }
+        const result = await cprWorkerRef.current.client.reconstruct({
           arch: archPoints,
           panoramaHeight: Math.min(520, Number(cprVolumeRef.current!.dimensions[2])),
           panoramaThicknessMm,
@@ -223,10 +263,22 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
           crossSectionCount: 5,
           crossSectionStepMm: sectionStepMm,
           crossSectionThicknessMm: sectionThicknessMm,
-        }))
-      } catch { /* transient edit while volume is being disposed */ }
+        })
+        if (disposed) return
+        setCprResult(result)
+      } catch (cprGenerationError) {
+        if (disposed || (cprGenerationError instanceof Error && cprGenerationError.name === 'AbortError')) return
+        // Keep the MPR/3D view usable, but never leave a silent black canvas.
+        // This also makes malformed or unsupported pixel buffers diagnosable.
+        setCprResult(null)
+        setCprError(cprGenerationError instanceof Error ? cprGenerationError.message : 'Panoramik CPR oluşturulamadı.')
+      }
     }, 60)
-    return () => window.clearTimeout(timer)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+      cprWorkerRef.current?.client.cancel()
+    }
   }, [archPoints, panoramaProjection, panoramaThicknessMm, sectionStepMm, sectionThicknessMm, selectedPosition])
 
   useEffect(() => { window.setTimeout(() => sessionRef.current?.engine?.resize(true, true), 0) }, [layout])
@@ -375,11 +427,56 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
     setImplantPlan((plan) => plan ? { ...plan, entryHeight } : plan)
   }
 
+  const runFullDentalSegmentator = async () => {
+    if (dentalSegmentatorRunning) return
+    const session = sessionRef.current
+    const volume = cprVolumeRef.current
+    if (!session?.volume?.imageData || !volume) {
+      setDentalSegmentatorStatus('Önce bir CBCT serisi yükleyin.')
+      return
+    }
+    setDentalSegmentatorRunning(true)
+    setDentalSegmentatorStatus('DentalSegmentator işi başlatılıyor…')
+    try {
+      const focalPoint = session.engine.getViewport(viewportIds[0])?.getCamera?.()?.focalPoint
+      const index = focalPoint ? session.core.utilities.transformWorldToIndex(session.volume.imageData, focalPoint) : null
+      const result = await runDentalSegmentator(files, Number(index?.[2] ?? Math.floor(Number(volume.dimensions[2]) / 2)), {
+        onProgress: (progress) => setDentalSegmentatorStatus(`DentalSegmentator · ${progress}`),
+      })
+      const nextPoints = result.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      if (nextPoints.length < 4) throw new Error('DentalSegmentator geçerli dental arch üretmedi.')
+      setArchPoints(nextPoints)
+      setSelectedPosition(dentalArchApexPosition(nextPoints, [Number(volume.spacing?.[0]) || 1, Number(volume.spacing?.[1]) || 1]))
+      // The service fits the arch on this exact DICOM slice.  Keeping the old
+      // MPR focal plane made a correct result look like a misplaced axial arc.
+      const axialViewport = session.engine.getViewport(viewportIds[0])
+      const camera = axialViewport?.getCamera?.()
+      const targetSlice = Math.min(Number(volume.dimensions[2]) - 1, Math.max(0, Math.round(Number(result.axialSlice))))
+      if (camera && Number.isFinite(targetSlice)) {
+        const currentIndex = session.core.utilities.transformWorldToIndex(session.volume.imageData, camera.focalPoint)
+        const focalPoint = session.core.utilities.transformIndexToWorld(session.volume.imageData, [currentIndex[0], currentIndex[1], targetSlice])
+        const delta = focalPoint.map((value: number, axis: number) => value - camera.focalPoint[axis])
+        axialViewport.setCamera({
+          focalPoint,
+          position: camera.position.map((value: number, axis: number) => value + delta[axis]),
+        })
+        axialViewport.render?.()
+      }
+      setDentalSegmentatorStatus(`DentalSegmentator · ${result.jaw === 'upper' ? 'üst' : 'alt'} çene · ${(result.confidence * 100).toFixed(0)}% · ${Math.round((result.durationMs || 0) / 1000)} sn`)
+      setLayout('cpr')
+      restoreCprAxialOrientation()
+    } catch (segmentatorError) {
+      setDentalSegmentatorStatus(segmentatorError instanceof Error ? segmentatorError.message : 'DentalSegmentator başarısız; mevcut otomatik arch korunuyor.')
+    } finally {
+      setDentalSegmentatorRunning(false)
+    }
+  }
+
   const activateMprTool = (tool: MprTool) => {
     const session = sessionRef.current
     if (!session) return
     const { tools, toolGroup } = session
-    const toolMap = { crosshair: tools.CrosshairsTool, pan: tools.PanTool, zoom: tools.ZoomTool, windowLevel: tools.WindowLevelTool, length: tools.LengthTool }
+    const toolMap = { crosshair: tools.CrosshairsTool, pan: tools.PanTool, zoom: tools.ZoomTool, windowLevel: tools.WindowLevelTool, length: tools.LengthTool, angle: tools.AngleTool }
     Object.values(toolMap).forEach((entry: any) => toolGroup.setToolPassive(entry.toolName, { removeAllBindings: true }))
     toolGroup.setToolActive(toolMap[tool].toolName, { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }] })
     toolGroup.setToolActive(tools.StackScrollTool.toolName, { bindings: [{ mouseButton: tools.Enums.MouseBindings.Wheel }] })
@@ -413,7 +510,7 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
       setImplantPlan((plan) => plan ?? { diameterMm: 4, lengthMm: 10, angleDeg: 0, entryHeight: 0.28 })
     }
     if (tool === 'tooth') setDentalPreset('teeth')
-    if (tool === 'crosshair' || tool === 'pan' || tool === 'zoom' || tool === 'windowLevel' || tool === 'length') activateMprTool(tool)
+    if (tool === 'crosshair' || tool === 'pan' || tool === 'zoom' || tool === 'windowLevel' || tool === 'length' || tool === 'angle') activateMprTool(tool)
   }
 
   const updateArchPoint = (event: React.PointerEvent<SVGCircleElement>, index: number) => {
@@ -487,11 +584,11 @@ export default function CbctMprViewer({ files, onClose }: CbctMprViewerProps) {
   if (error) return <div className={styles.message}>⚠️ {error}<button type="button" onClick={onClose} className={styles.button}>Geri dön</button></div>
   const refs = [axialRef, coronalRef, sagittalRef, volumeRef]
   return <section className={styles.workspace} aria-label="Dental CBCT çalışma alanı">
-    <header className={styles.topbar}><div className={styles.headerActions}><button type="button" onClick={reset} className={styles.iconButton} title="Görünümü sıfırla"><RotateCcw size={14} /></button><button type="button" onClick={onClose} className={styles.iconButton} title="Kapat"><X size={14} /></button></div></header>
+    <header className={styles.topbar}><div className={styles.headerActions}><button type="button" onClick={() => setToolsOpen((open) => !open)} className={`${styles.toolbarToggle} ${toolsOpen ? styles.toolbarToggleActive : ''}`} aria-expanded={toolsOpen} aria-controls={`cbct-tools-${instanceId}`}><SlidersHorizontal size={13} />Araçlar</button><button type="button" onClick={reset} className={styles.iconButton} title="Görünümü sıfırla"><RotateCcw size={14} /></button><button type="button" onClick={onClose} className={styles.iconButton} title="Kapat"><X size={14} /></button></div></header>
     <nav className={styles.moduleTabs} aria-label="Görüntüleme modülleri">{(['MPR', 'Panorama3D', 'CPR', 'Implant'] as const).map((tab) => <button key={tab} type="button" className={`${styles.moduleTab} ${tab === activeModule ? styles.activeTab : ''}`} onClick={() => selectModule(tab)}>{tab}</button>)}</nav>
     {loading && <div className={styles.message}>{loadingMessage}</div>}
-    <div className={`${styles.content} ${loading ? styles.hidden : ''}`}><main className={`${styles.viewportGrid} ${layout === 'cpr' ? styles.cprLayout : ''} ${layout === 'focus3d' ? styles.focus3d : ''}`}>{viewportNames.map((name, index) => <section key={name} className={`${styles.viewportPanel} ${activeViewport === index ? styles.activeViewport : ''} ${index === 3 ? styles.volumePanel : ''}`}><div className={styles.viewportLabel}><span>{layout === 'cpr' && index === 1 ? 'Panoramik CPR' : layout === 'cpr' && index === 2 ? 'Dik dental kesitler' : name}</span><small>{layout === 'cpr' && index === 1 ? `${panoramaProjection} · ${panoramaThicknessMm} mm` : layout === 'cpr' && index === 2 ? `5 kesit · ${sectionStepMm} mm aralık` : index === 3 ? 'Volume rendering' : index === 0 ? 'R / L · A / P' : 'Senkron MPR'}</small></div><div ref={refs[index]} onPointerDown={() => setActiveViewport(index)} className={styles.canvas} tabIndex={0} aria-label={`${name} CBCT viewportu`} />{layout === 'cpr' && index === 0 && archOverlay && <svg className={styles.archOverlay} viewBox={`0 0 ${axialRef.current?.clientWidth ?? 1} ${axialRef.current?.clientHeight ?? 1}`} preserveAspectRatio="none"><polyline points={archOverlay.inner.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archBoundary} /><polyline points={archOverlay.outer.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archBoundary} />{archOverlay.caps.map((cap, capIndex) => <line key={`cap-${capIndex}`} x1={cap.a.x} y1={cap.a.y} x2={cap.b.x} y2={cap.b.y} className={styles.archBoundary} />)}<polyline points={archOverlay.centre.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archLine} />{archOverlay.guides.map((guide, guideIndex) => <g key={guideIndex} className={guide.active ? styles.activeGuideGroup : undefined} onPointerDown={guide.active ? (event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); draggingSectionGuideRef.current = true; updateSectionGuide(event) } : undefined} onPointerMove={guide.active ? (event) => draggingSectionGuideRef.current && updateSectionGuide(event) : undefined} onPointerUp={guide.active ? () => { draggingSectionGuideRef.current = false } : undefined} onPointerCancel={guide.active ? () => { draggingSectionGuideRef.current = false } : undefined}><line x1={guide.a.x} y1={guide.a.y} x2={guide.b.x} y2={guide.b.y} className={guide.active ? styles.activeSectionGuide : styles.sectionGuide} />{guide.active ? <circle cx={guide.centre.x} cy={guide.centre.y} r={7} className={styles.activeGuidePoint} /> : <circle cx={guide.centre.x} cy={guide.centre.y} r={2.5} className={styles.guidePoint} />}</g>)}{archOverlay.controlPoints.map((point, pointIndex) => <circle key={pointIndex} cx={point.x} cy={point.y} r={5} className={styles.archPoint} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setDraggedArchPoint(pointIndex) }} onPointerMove={(event) => draggedArchPoint === pointIndex && updateArchPoint(event, pointIndex)} onPointerUp={() => setDraggedArchPoint(null)} />)}</svg>}{layout === 'cpr' && index === 1 && <canvas ref={panoramaRef} className={styles.cprCanvas} onPointerDown={selectPanoramaPosition} />}{layout === 'cpr' && index === 2 && <canvas ref={crossSectionsRef} className={styles.cprCanvas} onPointerDown={selectImplantEntry} />}{index === 3 && <span className={styles.canvasHint}>Sol: döndür · sağ: zoom</span>}{index === 3 && implantPlan && <span className={styles.implantBadge}>İmplant {implantPlan.diameterMm.toFixed(1)} × {implantPlan.lengthMm.toFixed(1)} mm</span>}{index === 3 && nerveVisible && <span className={styles.nerveBadge}>Sinir aracı aktif</span>}</section>)}</main>
-      <aside className={styles.toolsPanel} aria-label="CBCT araçları"><PanelTitle icon={<MousePointer2 size={15} />} title="Function" /><div className={styles.toolGrid}><ToolButton active={clinicalTool === 'crosshair'} onClick={() => setClinical('crosshair')} icon={<Crosshair size={16} />} label="Kesit" /><ToolButton active={clinicalTool === 'pan'} onClick={() => setClinical('pan')} icon={<Hand size={16} />} label="Kaydır" /><ToolButton active={clinicalTool === 'zoom'} onClick={() => setClinical('zoom')} icon={<ZoomIn size={16} />} label="Zoom" /><ToolButton active={clinicalTool === 'windowLevel'} onClick={() => setClinical('windowLevel')} icon={<SlidersHorizontal size={16} />} label="Image" /><ToolButton active={clinicalTool === 'length'} onClick={() => setClinical('length')} icon={<Ruler size={16} />} label="Mesafe" /><ToolButton active={clinicalTool === 'angle'} onClick={() => setClinical('angle')} icon={<Triangle size={16} />} label="Açı" /><ToolButton active={clinicalTool === 'nerve'} onClick={() => setClinical('nerve')} icon={<Activity size={16} />} label="Sinir" /></div><div className={styles.divider} /><PanelTitle icon={<Rotate3D size={15} />} title="3D Rendering" /><div className={styles.stack}><button type="button" onClick={() => setDentalPreset('teeth')} className={`${styles.button} ${renderMode === 'teeth' ? styles.selected : ''}`}>Teeth</button><button type="button" onClick={() => setDentalPreset('bone')} className={`${styles.button} ${renderMode === 'bone' ? styles.selected : ''}`}>Bone</button><button type="button" onClick={() => setDentalPreset('soft')} className={`${styles.button} ${renderMode === 'soft' ? styles.selected : ''}`}>Soft tissue</button></div><label className={styles.sliderLabel}>Panorama kalınlığı · {panoramaThicknessMm} mm<input type="range" min="2" max="40" step="1" value={panoramaThicknessMm} onChange={(event) => setPanoramaThicknessMm(Number(event.target.value))} /></label><div className={styles.stack}><button type="button" className={`${styles.button} ${panoramaProjection === 'AVG' ? styles.selected : ''}`} onClick={() => setPanoramaProjection('AVG')}>AVG</button><button type="button" className={`${styles.button} ${panoramaProjection === 'MIP' ? styles.selected : ''}`} onClick={() => setPanoramaProjection('MIP')}>MIP</button></div><label className={styles.sliderLabel}>Kesit aralığı · {sectionStepMm.toFixed(1)} mm<input type="range" min="0.5" max="5" step="0.5" value={sectionStepMm} onChange={(event) => setSectionStepMm(Number(event.target.value))} /></label><label className={styles.sliderLabel}>Kesit kalınlığı · {sectionThicknessMm.toFixed(1)} mm<input type="range" min="0" max="3" step="0.2" value={sectionThicknessMm} onChange={(event) => setSectionThicknessMm(Number(event.target.value))} /></label><div className={styles.divider} /><PanelTitle icon={<Move size={15} />} title="Dental CPR" /><p className={styles.note}>Ark, görüntü yüklenirken otomatik hesaplanır. Aksiyeldeki mavi kesit doğrusunu sürükleyerek konumu düzenleyebilirsiniz; beş kesit merkez noktanın iki yanından eşit mm aralıkla üretilir.</p>{implantPlan && <><div className={styles.divider} /><PanelTitle icon={<Target size={15} />} title="İmplant planlama" /><p className={styles.note}>Panoramadan konumu, merkez dik kesitten giriş seviyesini seçin.</p><label className={styles.sliderLabel}>Çap · {implantPlan.diameterMm.toFixed(1)} mm<input type="range" min="2" max="8" step="0.1" value={implantPlan.diameterMm} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, diameterMm: Number(event.target.value) } : plan)} /></label><label className={styles.sliderLabel}>Uzunluk · {implantPlan.lengthMm.toFixed(1)} mm<input type="range" min="6" max="18" step="0.5" value={implantPlan.lengthMm} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, lengthMm: Number(event.target.value) } : plan)} /></label><label className={styles.sliderLabel}>Açı · {implantPlan.angleDeg}°<input type="range" min="-35" max="35" step="1" value={implantPlan.angleDeg} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, angleDeg: Number(event.target.value) } : plan)} /></label><button type="button" className={styles.button} onClick={() => { setImplantPlan(null); setClinicalTool('crosshair') }}>İmplantı kaldır</button></>}</aside></div>
+    <div className={`${styles.content} ${loading ? styles.hidden : ''}`}><main className={`${styles.viewportGrid} ${layout === 'cpr' ? styles.cprLayout : ''} ${layout === 'focus3d' ? styles.focus3d : ''}`}>{viewportNames.map((name, index) => <section key={name} className={`${styles.viewportPanel} ${activeViewport === index ? styles.activeViewport : ''} ${index === 3 ? styles.volumePanel : ''}`}><div className={styles.viewportLabel}><span>{layout === 'cpr' && index === 1 ? 'Panoramik CPR' : layout === 'cpr' && index === 2 ? 'Dik dental kesitler' : name}</span><small>{layout === 'cpr' && index === 1 ? `${panoramaProjection} · ${panoramaThicknessMm} mm` : layout === 'cpr' && index === 2 ? `5 kesit · ${sectionStepMm} mm aralık` : index === 3 ? 'Volume rendering' : index === 0 ? 'R / L · A / P' : 'Senkron MPR'}</small></div><div ref={refs[index]} onPointerDown={() => setActiveViewport(index)} className={styles.canvas} tabIndex={0} aria-label={`${name} CBCT viewportu`} />{layout === 'cpr' && index === 0 && archOverlay && <svg className={styles.archOverlay} viewBox={`0 0 ${axialRef.current?.clientWidth ?? 1} ${axialRef.current?.clientHeight ?? 1}`} preserveAspectRatio="none"><polyline points={archOverlay.inner.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archBoundary} /><polyline points={archOverlay.outer.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archBoundary} />{archOverlay.caps.map((cap, capIndex) => <line key={`cap-${capIndex}`} x1={cap.a.x} y1={cap.a.y} x2={cap.b.x} y2={cap.b.y} className={styles.archBoundary} />)}<polyline points={archOverlay.centre.map((point) => `${point.x},${point.y}`).join(' ')} className={styles.archLine} />{archOverlay.guides.map((guide, guideIndex) => <g key={guideIndex} className={guide.active ? styles.activeGuideGroup : undefined} onPointerDown={guide.active ? (event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); draggingSectionGuideRef.current = true; updateSectionGuide(event) } : undefined} onPointerMove={guide.active ? (event) => draggingSectionGuideRef.current && updateSectionGuide(event) : undefined} onPointerUp={guide.active ? () => { draggingSectionGuideRef.current = false } : undefined} onPointerCancel={guide.active ? () => { draggingSectionGuideRef.current = false } : undefined}><line x1={guide.a.x} y1={guide.a.y} x2={guide.b.x} y2={guide.b.y} className={guide.active ? styles.activeSectionGuide : styles.sectionGuide} />{guide.active ? <circle cx={guide.centre.x} cy={guide.centre.y} r={7} className={styles.activeGuidePoint} /> : <circle cx={guide.centre.x} cy={guide.centre.y} r={2.5} className={styles.guidePoint} />}</g>)}{archOverlay.controlPoints.map((point, pointIndex) => <circle key={pointIndex} cx={point.x} cy={point.y} r={5} className={styles.archPoint} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setDraggedArchPoint(pointIndex) }} onPointerMove={(event) => draggedArchPoint === pointIndex && updateArchPoint(event, pointIndex)} onPointerUp={() => setDraggedArchPoint(null)} />)}</svg>}{layout === 'cpr' && index === 1 && <><canvas ref={panoramaRef} className={styles.cprCanvas} onPointerDown={selectPanoramaPosition} />{!cprResult && <span className={styles.cprStatus}>{cprError ?? 'Panoramik CPR hazırlanıyor…'}</span>}</>}{layout === 'cpr' && index === 2 && <><canvas ref={crossSectionsRef} className={styles.cprCanvas} onPointerDown={selectImplantEntry} />{!cprResult && <span className={styles.cprStatus}>{cprError ?? 'Dik dental kesitler hazırlanıyor…'}</span>}</>}{index === 3 && <span className={styles.canvasHint}>Sol: döndür · sağ: zoom</span>}{index === 3 && implantPlan && <span className={styles.implantBadge}>İmplant {implantPlan.diameterMm.toFixed(1)} × {implantPlan.lengthMm.toFixed(1)} mm</span>}{index === 3 && nerveVisible && <span className={styles.nerveBadge}>Sinir aracı aktif</span>}</section>)}</main>
+      {toolsOpen && <aside id={`cbct-tools-${instanceId}`} className={styles.toolsPanel} aria-label="CBCT araçları"><div className={styles.toolsPanelHeader}><strong>CBCT araçları</strong><button type="button" onClick={() => setToolsOpen(false)} className={styles.iconButton} title="Araçları kapat"><X size={14} /></button></div><PanelTitle icon={<MousePointer2 size={15} />} title="Function" /><div className={styles.toolGrid}><ToolButton active={clinicalTool === 'crosshair'} onClick={() => setClinical('crosshair')} icon={<Crosshair size={16} />} label="Kesit" /><ToolButton active={clinicalTool === 'pan'} onClick={() => setClinical('pan')} icon={<Hand size={16} />} label="Kaydır" /><ToolButton active={clinicalTool === 'zoom'} onClick={() => setClinical('zoom')} icon={<ZoomIn size={16} />} label="Zoom" /><ToolButton active={clinicalTool === 'windowLevel'} onClick={() => setClinical('windowLevel')} icon={<SlidersHorizontal size={16} />} label="Image" /><ToolButton active={clinicalTool === 'length'} onClick={() => setClinical('length')} icon={<Ruler size={16} />} label="Mesafe" /><ToolButton active={clinicalTool === 'angle'} onClick={() => setClinical('angle')} icon={<Triangle size={16} />} label="Açı" /><ToolButton active={clinicalTool === 'nerve'} onClick={() => setClinical('nerve')} icon={<Activity size={16} />} label="Sinir" /><ToolButton active={dentalSegmentatorRunning} onClick={() => { void runFullDentalSegmentator() }} icon={<Target size={16} />} label={dentalSegmentatorRunning ? "Segmentasyon…" : "DentalSegmentator"} /></div>{dentalSegmentatorStatus && <p className={styles.note} role="status">{dentalSegmentatorStatus}</p>}<div className={styles.divider} /><PanelTitle icon={<Rotate3D size={15} />} title="3D Rendering" /><div className={styles.stack}><button type="button" onClick={() => setDentalPreset('teeth')} className={`${styles.button} ${renderMode === 'teeth' ? styles.selected : ''}`}>Teeth</button><button type="button" onClick={() => setDentalPreset('bone')} className={`${styles.button} ${renderMode === 'bone' ? styles.selected : ''}`}>Bone</button><button type="button" onClick={() => setDentalPreset('soft')} className={`${styles.button} ${renderMode === 'soft' ? styles.selected : ''}`}>Soft tissue</button></div><label className={styles.sliderLabel}>Panorama kalınlığı · {panoramaThicknessMm} mm<input type="range" min="2" max="40" step="1" value={panoramaThicknessMm} onChange={(event) => setPanoramaThicknessMm(Number(event.target.value))} /></label><div className={styles.stack}><button type="button" className={`${styles.button} ${panoramaProjection === 'AVG' ? styles.selected : ''}`} onClick={() => setPanoramaProjection('AVG')}>AVG</button><button type="button" className={`${styles.button} ${panoramaProjection === 'MIP' ? styles.selected : ''}`} onClick={() => setPanoramaProjection('MIP')}>MIP</button></div><label className={styles.sliderLabel}>Kesit aralığı · {sectionStepMm.toFixed(1)} mm<input type="range" min="0.5" max="5" step="0.5" value={sectionStepMm} onChange={(event) => setSectionStepMm(Number(event.target.value))} /></label><label className={styles.sliderLabel}>Kesit kalınlığı · {sectionThicknessMm.toFixed(1)} mm<input type="range" min="0" max="3" step="0.2" value={sectionThicknessMm} onChange={(event) => setSectionThicknessMm(Number(event.target.value))} /></label><div className={styles.divider} /><PanelTitle icon={<Move size={15} />} title="Dental CPR" /><p className={styles.note}>Ark, görüntü yüklenirken otomatik hesaplanır. Aksiyeldeki mavi kesit doğrusunu sürükleyerek konumu düzenleyebilirsiniz; beş kesit merkez noktanın iki yanından eşit mm aralıkla üretilir.</p>{implantPlan && <><div className={styles.divider} /><PanelTitle icon={<Target size={15} />} title="İmplant planlama" /><p className={styles.note}>Panoramadan konumu, merkez dik kesitten giriş seviyesini seçin.</p><label className={styles.sliderLabel}>Çap · {implantPlan.diameterMm.toFixed(1)} mm<input type="range" min="2" max="8" step="0.1" value={implantPlan.diameterMm} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, diameterMm: Number(event.target.value) } : plan)} /></label><label className={styles.sliderLabel}>Uzunluk · {implantPlan.lengthMm.toFixed(1)} mm<input type="range" min="6" max="18" step="0.5" value={implantPlan.lengthMm} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, lengthMm: Number(event.target.value) } : plan)} /></label><label className={styles.sliderLabel}>Açı · {implantPlan.angleDeg}°<input type="range" min="-35" max="35" step="1" value={implantPlan.angleDeg} onChange={(event) => setImplantPlan((plan) => plan ? { ...plan, angleDeg: Number(event.target.value) } : plan)} /></label><button type="button" className={styles.button} onClick={() => { setImplantPlan(null); setClinicalTool('crosshair') }}>İmplantı kaldır</button></>}</aside>}</div>
     {!loading && <footer className={styles.footer}><Crosshair size={14} /> Aktif kesit konumu axial, coronal ve sagittal görünümlerde senkronize edilir.</footer>}
   </section>
 }
