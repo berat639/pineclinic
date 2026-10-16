@@ -33,6 +33,25 @@ const STATUS_ICON: Record<VoiceStatus, string> = {
 
 type TranscriptEntry = { id: string; role: 'user' | 'model'; text: string }
 
+function isWebConversationFarewell(text: string): boolean {
+  const normalized = text
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[.,!?;:()[\]{}"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return [
+    /\bhoşça\s*kalın\b/,
+    /\bhoşçakalın\b/,
+    /\bgüle\s*güle\b/,
+    /\biyi\s+(?:günler|akşamlar|geceler)\b/,
+    /\bkendinize\s+iyi\s+bakın\b/,
+    /\bgörüş(?:meyi|memizi)\s+sonlandır/,
+    /\bbaşka\s+bir\s+zaman\s+(?:tekrar\s+)?görüş/,
+    /\bgörüşmek\s+dileğiyle\b/,
+  ].some(pattern => pattern.test(normalized))
+}
+
 export default function Home() {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
@@ -47,7 +66,35 @@ export default function Home() {
   const playerRef = useRef<AudioStreamPlayer | null>(null)
   const micRef = useRef<MicrophoneCapture | null>(null)
   const textBufferRef = useRef('')
+  const farewellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isActive = status !== 'idle' && status !== 'error'
+
+  const stop = useCallback(() => {
+    if (farewellTimerRef.current) {
+      clearTimeout(farewellTimerRef.current)
+      farewellTimerRef.current = null
+    }
+    micRef.current?.stop()
+    micRef.current = null
+    sessionRef.current?.disconnect()
+    sessionRef.current = null
+    playerRef.current?.stop()
+    playerRef.current = null
+    setStatus('idle')
+  }, [])
+
+  const stopAfterPlayback = useCallback(() => {
+    const deadline = Date.now() + 6000
+    const waitForPlayback = () => {
+      const player = playerRef.current
+      if (!player || !player.isPlaying || Date.now() >= deadline) {
+        stop()
+        return
+      }
+      farewellTimerRef.current = setTimeout(waitForPlayback, 100)
+    }
+    waitForPlayback()
+  }, [stop])
 
   // Fetch config on mount (safe, just static DB info)
   useEffect(() => {
@@ -119,10 +166,15 @@ export default function Home() {
         // console.log('[AI Text]', text)
       },
       onTurnComplete: () => {
-        if (textBufferRef.current.trim().length > 0) {
+        const modelText = textBufferRef.current.trim()
+        if (modelText.length > 0) {
           // console.log('[AI Turn]', textBufferRef.current.trim())
-          addTranscript('model', textBufferRef.current.trim())
+          addTranscript('model', modelText)
           textBufferRef.current = ''
+          if (isWebConversationFarewell(modelText)) {
+            stopAfterPlayback()
+            return
+          }
         }
         setStatus('listening')
       },
@@ -193,17 +245,9 @@ export default function Home() {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
-  }, [apiKey, sessionConfig, addTranscript])
+  }, [apiKey, sessionConfig, mode, addTranscript, stop, stopAfterPlayback])
 
-  const stop = useCallback(() => {
-    micRef.current?.stop()
-    micRef.current = null
-    sessionRef.current?.disconnect()
-    sessionRef.current = null
-    playerRef.current?.stop()
-    playerRef.current = null
-    setStatus('idle')
-  }, [])
+  useEffect(() => () => stop(), [stop])
 
   return (
     <main style={{
