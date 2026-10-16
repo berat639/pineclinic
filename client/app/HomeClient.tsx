@@ -67,13 +67,37 @@ export default function Home() {
   const micRef = useRef<MicrophoneCapture | null>(null)
   const textBufferRef = useRef('')
   const farewellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webSilenceCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webMaxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webCloseFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webWarningPendingRef = useRef(false)
+  const webClosingRef = useRef(false)
+  const lastWebSpeechAtRef = useRef(0)
   const isActive = status !== 'idle' && status !== 'error'
+
+  const clearWebTimers = useCallback(() => {
+    for (const timerRef of [
+      webSilenceTimerRef,
+      webSilenceCloseTimerRef,
+      webMaxDurationTimerRef,
+      webCloseFallbackTimerRef,
+    ]) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+    webWarningPendingRef.current = false
+    webClosingRef.current = false
+  }, [])
 
   const stop = useCallback(() => {
     if (farewellTimerRef.current) {
       clearTimeout(farewellTimerRef.current)
       farewellTimerRef.current = null
     }
+    clearWebTimers()
     micRef.current?.stop()
     micRef.current = null
     sessionRef.current?.disconnect()
@@ -81,7 +105,7 @@ export default function Home() {
     playerRef.current?.stop()
     playerRef.current = null
     setStatus('idle')
-  }, [])
+  }, [clearWebTimers])
 
   const stopAfterPlayback = useCallback(() => {
     const deadline = Date.now() + 6000
@@ -95,6 +119,64 @@ export default function Home() {
     }
     waitForPlayback()
   }, [stop])
+
+  const scheduleWebSilenceTimer = useCallback((warningSeconds: number, closeSeconds: number) => {
+    if (mode !== 'audio' || !sessionRef.current || webClosingRef.current) return
+
+    if (webSilenceTimerRef.current) clearTimeout(webSilenceTimerRef.current)
+    if (webSilenceCloseTimerRef.current) clearTimeout(webSilenceCloseTimerRef.current)
+    webWarningPendingRef.current = false
+
+    webSilenceTimerRef.current = setTimeout(() => {
+      if (!sessionRef.current || webClosingRef.current) return
+      webWarningPendingRef.current = true
+      sessionRef.current.sendText(
+        `Sistem bildirimi: Kullanıcı ${warningSeconds} saniyedir konuşmadı. Kısa ve nazik bir sessizlik uyarısı yap, ardından kullanıcının konuşması için bekle.`
+      )
+      webSilenceCloseTimerRef.current = setTimeout(() => {
+        if (!sessionRef.current || !webWarningPendingRef.current) return
+        webClosingRef.current = true
+        sessionRef.current.sendText(
+          `Sistem bildirimi: Sessizlik uyarısından sonra da yanıt gelmedi. Görüşmeyi kısa bir veda cümlesiyle sonlandır ve iyi günler dile.`
+        )
+        webCloseFallbackTimerRef.current = setTimeout(() => {
+          if (webClosingRef.current) stopAfterPlayback()
+        }, 8000)
+      }, closeSeconds * 1000)
+    }, warningSeconds * 1000)
+  }, [mode, stopAfterPlayback])
+
+  const scheduleWebMaxDurationTimer = useCallback((maxSeconds: number) => {
+    if (!sessionRef.current || maxSeconds <= 0) return
+    if (webMaxDurationTimerRef.current) clearTimeout(webMaxDurationTimerRef.current)
+    webMaxDurationTimerRef.current = setTimeout(() => {
+      if (!sessionRef.current || webClosingRef.current) return
+      webClosingRef.current = true
+      sessionRef.current.sendText(
+        `Sistem bildirimi: Görüşme süresi doldu. Görüşmeyi kısa bir veda cümlesiyle sonlandır ve iyi günler dile.`
+      )
+      webCloseFallbackTimerRef.current = setTimeout(() => {
+        if (webClosingRef.current) stopAfterPlayback()
+      }, 8000)
+    }, maxSeconds * 1000)
+  }, [stopAfterPlayback])
+
+  const markWebSpeech = useCallback((warningSeconds: number, closeSeconds: number) => {
+    const now = Date.now()
+    if (now - lastWebSpeechAtRef.current < 250) return
+    lastWebSpeechAtRef.current = now
+    if (webSilenceCloseTimerRef.current) {
+      clearTimeout(webSilenceCloseTimerRef.current)
+      webSilenceCloseTimerRef.current = null
+    }
+    if (webCloseFallbackTimerRef.current) {
+      clearTimeout(webCloseFallbackTimerRef.current)
+      webCloseFallbackTimerRef.current = null
+    }
+    webWarningPendingRef.current = false
+    webClosingRef.current = false
+    scheduleWebSilenceTimer(warningSeconds, closeSeconds)
+  }, [scheduleWebSilenceTimer])
 
   // Fetch config on mount (safe, just static DB info)
   useEffect(() => {
@@ -177,9 +259,16 @@ export default function Home() {
           }
         }
         setStatus('listening')
+        if (!webWarningPendingRef.current && !webClosingRef.current) {
+          scheduleWebSilenceTimer(
+            Math.max(5, sessionConfig.callSilenceTimeout ?? 30),
+            Math.max(5, sessionConfig.callSilenceCloseTimeout ?? 15),
+          )
+        }
       },
       onConnectionChange: (connected) => {
         if (!connected && sessionRef.current) {
+          clearWebTimers()
           micRef.current?.stop()
           micRef.current = null
           playerRef.current?.stop()
@@ -189,6 +278,7 @@ export default function Home() {
         }
       },
       onError: (err) => {
+        clearWebTimers()
         micRef.current?.stop()
         micRef.current = null
         setStatus('error')
@@ -234,18 +324,32 @@ export default function Home() {
         : `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Kısaca "Merhaba, size nasıl yardımcı olabilirim?" diyerek görüşmeyi başlat.`
       session.sendText(greetingPrompt)
 
+      scheduleWebMaxDurationTimer(Math.max(180, sessionConfig.callMaxDuration ?? 600))
+
       if (mode === 'audio') {
         const mic = new MicrophoneCapture()
         micRef.current = mic
+        const startWaitMs = Math.max(0, Math.round((sessionConfig.startWaitSeconds ?? 0.4) * 1000))
+        if (startWaitMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, startWaitMs))
+        }
+        if (sessionRef.current !== session) return
         await mic.start((pcm) => {
           session.sendAudio(pcm)
+        }, (level) => {
+          if (level >= 0.02) {
+            markWebSpeech(
+              Math.max(5, sessionConfig.callSilenceTimeout ?? 30),
+              Math.max(5, sessionConfig.callSilenceCloseTimeout ?? 15),
+            )
+          }
         })
       }
     } catch (err) {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
-  }, [apiKey, sessionConfig, mode, addTranscript, stop, stopAfterPlayback])
+  }, [apiKey, sessionConfig, mode, addTranscript, stop, stopAfterPlayback, clearWebTimers, scheduleWebMaxDurationTimer, scheduleWebSilenceTimer, markWebSpeech])
 
   useEffect(() => () => stop(), [stop])
 

@@ -2056,7 +2056,13 @@ const app = new Elysia()
     const model = await resolveLiveModel()
     const branding = await getBranding()
     const { getSetting } = await import('./db/repositories/settings')
-    const voiceName = await getSetting('ai.voice_name') || 'Aoede'
+    const [voiceName, startWaitSeconds, callSilenceTimeout, callSilenceCloseTimeout, callMaxDuration] = await Promise.all([
+      getSetting('ai.voice_name'),
+      getSetting('ai.start_wait_seconds'),
+      getSetting('ai.call_silence_timeout'),
+      getSetting('ai.call_silence_close_timeout'),
+      getSetting('ai.call_max_duration'),
+    ])
 
     return {
       systemPrompt: systemPrompt + ragContext,
@@ -2064,7 +2070,11 @@ const app = new Elysia()
       model,
       greeting,
       branding,
-      voiceName,
+      voiceName: voiceName || 'Aoede',
+      startWaitSeconds: Number(startWaitSeconds) || 0.4,
+      callSilenceTimeout: Number(callSilenceTimeout) || 30,
+      callSilenceCloseTimeout: Number(callSilenceCloseTimeout) || 15,
+      callMaxDuration: Number(callMaxDuration) || 600,
     }
   })
 

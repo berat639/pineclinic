@@ -26,6 +26,10 @@ export type SessionConfig = {
     logoUrl: string
   }
   voiceName?: string
+  startWaitSeconds?: number
+  callSilenceTimeout?: number
+  callSilenceCloseTimeout?: number
+  callMaxDuration?: number
 }
 
 // ── Tool call → server HTTP ────────────────────────────────────────────────

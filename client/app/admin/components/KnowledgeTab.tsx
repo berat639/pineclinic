@@ -1087,7 +1087,7 @@ export default function KnowledgeTab() {
                     </div>
                   </div>
                   <p style={{ fontSize: 10, color: 'var(--foreground-3)', margin: '8px 0 0' }}>
-                    Bu ayarlar klinik bazında gelen ve giden telefon aramalarında uygulanır. Aktif telefon kapasitesi dolunca yeni çağrılar Asterisk bekleme kuyruğunda tutulur; web görüşmeleri bu sınırdan etkilenmez.
+                    Bekleme, sessizlik ve maksimum görüşme süreleri klinik bazında telefon ve web görüşmelerinde uygulanır. Telefon AI kapasitesi yalnızca telefon çağrılarını sınırlar; kapasite dolunca yeni çağrılar Asterisk bekleme kuyruğunda tutulur, web görüşmeleri bu sınırdan etkilenmez.
                   </p>
                 </div>
 

@@ -43,7 +43,7 @@ class MicProcessor extends AudioWorkletProcessor {
       }
       // If rms < 0.02, int16 stays all zeros (silence)
 
-      this.port.postMessage(int16.buffer, [int16.buffer])
+      this.port.postMessage({ pcmBuffer: int16.buffer, level: rms }, [int16.buffer])
     }
     return true
   }
