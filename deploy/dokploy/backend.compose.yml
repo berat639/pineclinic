@@ -1,7 +1,7 @@
 services:
   server:
     build:
-      context: .
+      context: ../..
       dockerfile: server/Dockerfile
     restart: always
     environment:
