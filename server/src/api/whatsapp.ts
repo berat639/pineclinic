@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
-import { credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, saveWhatsAppConfig } from '../db/repositories/whatsapp'
+import { confirmWhatsAppTest, credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig } from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
 import { evolutionRequest, EvolutionError, parseEvolutionMessages, verifyWebhookSecret } from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
@@ -42,22 +42,20 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
   })
   .get('/:clinicId/status', async ({ params }) => {
     assertCurrentClinic(params.clinicId)
-    const clinic = await ensureEvolutionInstance(params.clinicId)
-    const creds = credentialsFor(clinic)
-    const state = await evolutionRequest<{ instance?: { state?: string } }>(creds, `/instance/connectionState/${encodeURIComponent(creds.instanceName)}`)
-    const connectionState = state.instance?.state || 'unknown'
-    await db.update(clinics).set({ evolutionConnectionState: connectionState }).where(eq(clinics.id, clinic.id))
-    return { connectionState }
+    const config = await refreshWhatsAppConnection(params.clinicId)
+    return { connectionState: config.connectionState, setupStatus: config.setupStatus }
   }, { params: clinicParams })
   .post('/:clinicId/connect', async ({ params }) => {
     assertCurrentClinic(params.clinicId)
     const clinic = await ensureEvolutionInstance(params.clinicId)
+    if (!clinic.whatsappExpectedPhone) throw new Error('Önce merkez panelde klinik WhatsApp telefonu tanımlanmalı.')
     const creds = credentialsFor(clinic)
     const result = await evolutionRequest<{ base64?: string; qrcode?: { base64?: string }; instance?: { state?: string } }>(creds,
       `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
     const qr = result.base64 || result.qrcode?.base64
-    return { qrcode: qr && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(qr) && qr.length < 200_000 ? qr : null,
-      connectionState: result.instance?.state || 'connecting' }
+    const connectionState = result.instance?.state || 'connecting'
+    await db.update(clinics).set({ evolutionConnectionState: connectionState }).where(eq(clinics.id, clinic.id))
+    return { qrcode: qr && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(qr) && qr.length < 200_000 ? qr : null, connectionState }
   }, { params: clinicParams })
   .get('/:clinicId/conversations', async ({ params }) => {
     assertCurrentClinic(params.clinicId)
@@ -122,7 +120,9 @@ export const whatsappPlugin = new Elysia()
           .where(and(eq(whatsappMessages.providerMessageId, id), sql`${whatsappMessages.conversationId} IN (SELECT id FROM whatsapp_conversations WHERE clinic_id = ${clinic.id} AND instance_name = ${clinic.evolutionInstanceName})`))
       }
     } else {
-      for (const message of parseEvolutionMessages(payload)) await recordIncomingMessage(clinic, message)
+      for (const message of parseEvolutionMessages(payload)) {
+        if (!(await confirmWhatsAppTest(clinic, message))) await recordIncomingMessage(clinic, message)
+      }
     }
     // Acknowledge only after the inbox has committed. The worker recovers independently of Redis.
     return { status: 'ok' }

@@ -5,6 +5,14 @@ ALTER TABLE clinics ADD COLUMN IF NOT EXISTS evolution_instance_name text;
 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS evolution_webhook_secret text;
 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS evolution_connection_state text NOT NULL DEFAULT 'unconfigured';
 ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_ai_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_setup_status text NOT NULL DEFAULT 'not_started';
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_expected_phone text;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_phone text;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_code_hash text;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_expires_at timestamptz;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_verified_at timestamptz;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_at timestamptz;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_by uuid REFERENCES users(id);
 CREATE UNIQUE INDEX IF NOT EXISTS wa_clinic_instance ON clinics(evolution_base_url, evolution_instance_name);
 
 ALTER TABLE whatsapp_conversations ALTER COLUMN patient_phone DROP NOT NULL;

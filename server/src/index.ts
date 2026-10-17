@@ -2391,6 +2391,11 @@ app.ws('/ws', {
       await ensureDoctorLeavesTable()
     } catch (e) { console.error('[DoctorLeaves] Startup ensure table error:', e) }
 
+    try {
+      const { ensureWhatsAppSetupSchema } = await import('./db/repositories/whatsapp')
+      await ensureWhatsAppSetupSchema()
+    } catch (e) { console.error('[WhatsApp] Startup ensure schema error:', e) }
+
     // Stale session temizliği — zombi/takılı session'ları periyodik olarak kapat
     setInterval(() => {
       const now = Date.now()

@@ -822,20 +822,17 @@ Opsiyonel `DENTAL_SEGMENTATOR_MAX_UPLOAD_MB`, `DENTAL_SEGMENTATOR_WORKDIR`, `DEN
 
 ### 15.1 Evolution API bu Compose'a dahil değildir
 
-Ana VoiceAI Compose'u Evolution API kurmaz. WhatsApp için erişilebilir bir Evolution API v2 kurulumu gerekir. Aynı Dokploy projesinde **ayrı Compose servisi** olarak çalıştırılabilir; kendi PostgreSQL/Redis ve instance volume'ları VoiceAI'den ayrı tutulmalıdır.
+Ana VoiceAI Compose'u Evolution API kurmaz. WhatsApp için erişilebilir bir Evolution API v2 gerekir. Bu depodaki [`deploy/dokploy/evolution.compose.yml`](../deploy/dokploy/evolution.compose.yml), aynı Dokploy ağında ayrı bir API, PostgreSQL, Redis ve kalıcı instance volume'ları kurar.
 
 Kurulum kaynağı olarak [resmî Evolution API deposunu](https://github.com/evolution-foundation/evolution-api), seçtiğiniz release'in Compose dosyasını ve `.env.example` dosyasını kullanın. Güncel repository image ailesi `evoapicloud/evolution-api` kullanıyor; release/digest'i uyumluluk testinden sonra sabitleyin. [Resmî Compose kaynağı](https://github.com/evolution-foundation/evolution-api/blob/main/docker-compose.yaml).
 
 ### 15.2 Dokploy'da Evolution kurulumu
 
-1. `voiceai` projesine `evolution` adlı ayrı Docker Compose servisi ekleyin.
-2. Resmî repository'nin test edeceğiniz release'ini seçin veya o release'in Compose dosyasını uyarlayın.
-3. API, PostgreSQL, Redis ve instance volume'larının tanımlı olduğunu doğrulayın.
-4. Her kuruluma özgü service/network isimleri kullanın; sabit `container_name` değerlerini çoklu kurulumla çakıştırmayın.
-5. Resmî örnekteki frontend `3000:80` host eşlemesini kaldırın; bu port Dokploy yönetimiyle çakışır. Evolution API'yi Dokploy Domains üzerinden container port 8080'e bağlayın. Manager kullanılıyorsa kendi domaininden container port 80'e yönlendirin.
-6. Evolution'ın kendi Environment alanında aşağıdaki değerleri seçilen release'in örneğiyle eşleştirin.
-7. Deploy edin; PostgreSQL/Redis bağlantısı ve API başlangıç loglarını kontrol edin.
-8. API'yi `https://whatsapp.example.com` üzerinde HTTPS ile yayınlayın.
+1. Ayrı bir Compose servisi oluşturun ve `deploy/dokploy/evolution.compose.yml` dosyasını kullanın.
+2. Servisin ortamına güçlü, benzersiz `EVOLUTION_API_KEY` ve `POSTGRES_PASSWORD` değerlerini ekleyin.
+3. API, PostgreSQL, Redis ve instance volume'larının çalıştığını doğrulayın.
+4. Servisi `dokploy-network` ağına `voiceai-evolution` alias'ıyla bağlayın; API portunu veya Manager'ı public olarak yayınlamayın.
+5. Deploy edin; PostgreSQL/Redis bağlantısı, `/instance/fetchInstances` ve API başlangıç loglarını kontrol edin.
 
 ```dotenv
 # Bunlar Evolution servisinin ortamıdır, VoiceAI ortamı değildir.
@@ -866,9 +863,9 @@ Bu blok minimum bağlantı alanlarını gösterir; seçilen Evolution release'in
 VoiceAI backend'de:
 
 ```dotenv
-EVOLUTION_API_URL=https://whatsapp.example.com
+EVOLUTION_API_URL=http://voiceai-evolution:8080
 EVOLUTION_API_KEY=DEGISTIR_EVOLUTION_ILE_AYNI_API_ANAHTARI
-EVOLUTION_WEBHOOK_BASE_URL=https://api.example.com
+EVOLUTION_WEBHOOK_BASE_URL=http://voiceai-server:3001
 INTEGRATION_ENCRYPTION_KEY=DEGISTIR_KALICI_HEX_64
 ```
 
@@ -877,11 +874,11 @@ INTEGRATION_ENCRYPTION_KEY=DEGISTIR_KALICI_HEX_64
 3. İlgili klinik için bağlantı oluşturun veya mevcut instance bilgilerini tanımlayın.
 4. QR kodu ilgili test/işletme telefonundan okutun.
 5. Bağlantı durumunun `open` olduğunu doğrulayın.
-6. Webhook adresinin `https://api.example.com/api/whatsapp/evolution/<clinic-id>` olduğunu doğrulayın.
+6. Webhook adresinin `http://voiceai-server:3001/api/whatsapp/evolution/<clinic-id>` olduğunu doğrulayın.
 7. `x-voiceai-webhook-secret` doğrulamasını koruyun; VoiceAI'nin oluşturduğu instance/webhook ayarlarını rastgele global webhook ile ezmeyin.
 8. Yönetiminizdeki test numarasıyla gelen mesaj, panelde kayıt ve gerekiyorsa AI yanıtını sınayın.
 
-Evolution'ın backend public URL'sine ulaşabilmesi gerekir. `localhost` webhook adresi, başka container'daki VoiceAI'ye ulaşmaz. Rutin kurulumda n8n, RabbitMQ veya ayrı mesaj worker container'ı zorunlu değildir; VoiceAI WhatsApp worker'ını backend içinde başlatır.
+Evolution aynı Dokploy ağında çalışıyorsa webhook'u doğrudan `voiceai-server` alias'ına iletir; public DNS, port yönlendirmesi veya Manager gerekmez. Farklı bir sunucuda çalışacak Evolution için HTTPS ile erişilebilen backend adresi kullanın. Rutin kurulumda n8n, RabbitMQ veya ayrı mesaj worker container'ı zorunlu değildir; VoiceAI WhatsApp worker'ını backend içinde başlatır.
 
 ### 15.4 SMS ve e-posta
 

@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '../client'
 import { clinics, patients, whatsappConversations, whatsappMessages } from '../schema'
 import { openSecret, sealSecret } from '../../services/integration-secrets'
-import { detectOptOut, evolutionRequest, EvolutionError, normalizePhone, validateEvolutionUrl, type IncomingWhatsAppMessage, type WhatsAppCredentials } from '../../integrations/whatsapp'
+import { detectOptOut, evolutionRequest, EvolutionError, normalizePhone, sendWhatsAppText, validateEvolutionUrl, type IncomingWhatsAppMessage, type WhatsAppCredentials } from '../../integrations/whatsapp'
 
 export type Clinic = typeof clinics.$inferSelect
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -30,6 +30,11 @@ export function publicWhatsAppConfig(clinic: Clinic) {
     instanceName: clinic.evolutionInstanceName || automatic?.instanceName || '', hasApiKey: !!clinic.evolutionApiKey || !!automatic,
     enabled: clinic.whatsappEnabled, aiEnabled: clinic.whatsappAiEnabled,
     connectionState: clinic.evolutionConnectionState,
+    setupStatus: clinic.whatsappSetupStatus,
+    expectedPhone: clinic.whatsappExpectedPhone,
+    testPhone: clinic.whatsappTestPhone,
+    testVerifiedAt: clinic.whatsappTestVerifiedAt?.toISOString() || null,
+    activatedAt: clinic.whatsappActivatedAt?.toISOString() || null,
     evolutionMode: automatic ? 'managed' as const : 'manual' as const,
   }
 }
@@ -48,6 +53,9 @@ export async function saveWhatsAppConfig(id: string, input: { baseUrl: string; i
   }
   const apiKey = input.apiKey?.trim() ? sealSecret(input.apiKey.trim()) : clinic.evolutionApiKey || (automatic ? sealSecret(automatic.apiKey) : null)
   if (!apiKey) throw new Error('Evolution API anahtarını girin.')
+  if (input.enabled && !clinic.whatsappEnabled && clinic.whatsappSetupStatus !== 'active') {
+    throw new Error('Gönderimleri açmak için merkez panelde WhatsApp testini tamamlayın.')
+  }
   const [updated] = await db.update(clinics).set({
     evolutionBaseUrl: baseUrl, evolutionInstanceName: instanceName, evolutionApiKey: apiKey,
     evolutionWebhookSecret: identityChanged || !clinic.evolutionWebhookSecret ? sealSecret(randomBytes(32).toString('hex')) : clinic.evolutionWebhookSecret,
@@ -75,6 +83,107 @@ export async function ensureAutomaticEvolutionConfig(id: string): Promise<Clinic
     }).where(eq(clinics.id, id)).returning()
     return updated
   })
+}
+
+function testCodeHash(code: string): string {
+  return createHash('sha256').update(code, 'utf8').digest('hex')
+}
+
+/** Saves operator-supplied numbers; provider credentials remain platform-owned. */
+export async function configureWhatsAppSetup(id: string, input: { expectedPhone: string, testPhone: string }) {
+  const expectedPhone = normalizePhone(input.expectedPhone)
+  const testPhone = normalizePhone(input.testPhone)
+  const [clinic] = await db.update(clinics).set({
+    whatsappExpectedPhone: expectedPhone,
+    whatsappTestPhone: testPhone,
+    whatsappSetupStatus: 'ready',
+    whatsappEnabled: false,
+    whatsappAiEnabled: false,
+    whatsappTestCodeHash: null,
+    whatsappTestExpiresAt: null,
+    whatsappTestVerifiedAt: null,
+    whatsappActivatedAt: null,
+    whatsappActivatedBy: null,
+  }).where(eq(clinics.id, id)).returning()
+  if (!clinic) throw new Error('Klinik bulunamadı.')
+  return publicWhatsAppConfig(clinic)
+}
+
+/** Reads provider state only. It never creates an instance or rewrites its webhook. */
+export async function refreshWhatsAppConnection(id: string) {
+  const clinic = await ensureAutomaticEvolutionConfig(id)
+  const creds = credentialsFor(clinic)
+  let connectionState = 'unconfigured'
+  try {
+    const state = await evolutionRequest<{ instance?: { state?: string } }>(creds,
+      `/instance/connectionState/${encodeURIComponent(creds.instanceName)}`)
+    connectionState = state.instance?.state || 'unknown'
+  } catch (error) {
+    if (!(error instanceof EvolutionError) || error.status !== 404) throw error
+  }
+  const [updated] = await db.update(clinics).set({ evolutionConnectionState: connectionState })
+    .where(eq(clinics.id, clinic.id)).returning()
+  return publicWhatsAppConfig(updated)
+}
+
+export async function requestWhatsAppTest(id: string) {
+  const clinic = await getWhatsAppClinic(id)
+  if (clinic.evolutionConnectionState !== 'open') throw new Error('Önce klinik WhatsApp telefonunu QR koduyla bağlayın.')
+  if (!clinic.whatsappTestPhone) throw new Error('Önce test telefonu girin.')
+  const code = String(randomInt(100_000, 1_000_000))
+  const expiresAt = new Date(Date.now() + 10 * 60_000)
+  const [prepared] = await db.update(clinics).set({
+    whatsappSetupStatus: 'test_pending',
+    whatsappTestCodeHash: testCodeHash(code),
+    whatsappTestExpiresAt: expiresAt,
+    whatsappTestVerifiedAt: null,
+    whatsappEnabled: false,
+    whatsappAiEnabled: false,
+  }).where(eq(clinics.id, id)).returning()
+  await sendWhatsAppText(prepared.whatsappTestPhone!, credentialsFor(prepared),
+    `VoiceAI WhatsApp bağlantı testi. Bu mesaja yalnızca ${code} kodunu yanıtlayın.`)
+  return { ...publicWhatsAppConfig(prepared), testExpiresAt: expiresAt.toISOString() }
+}
+
+/** Consumes a matching inbound code before it reaches the AI queue. */
+export async function confirmWhatsAppTest(clinic: Clinic, message: IncomingWhatsAppMessage): Promise<boolean> {
+  if (message.fromMe || !message.phone || !clinic.whatsappTestPhone || !clinic.whatsappTestCodeHash || !clinic.whatsappTestExpiresAt) return false
+  if (clinic.whatsappTestExpiresAt.getTime() < Date.now()) {
+    await db.update(clinics).set({ whatsappSetupStatus: 'ready', whatsappTestCodeHash: null, whatsappTestExpiresAt: null })
+      .where(eq(clinics.id, clinic.id))
+    return false
+  }
+  if (message.phone !== clinic.whatsappTestPhone || testCodeHash(message.text.trim()) !== clinic.whatsappTestCodeHash) return false
+  await db.update(clinics).set({
+    whatsappSetupStatus: 'test_verified', whatsappTestCodeHash: null, whatsappTestExpiresAt: null,
+    whatsappTestVerifiedAt: new Date(),
+  }).where(eq(clinics.id, clinic.id))
+  return true
+}
+
+export async function activateWhatsApp(id: string, userId: string) {
+  const clinic = await getWhatsAppClinic(id)
+  if (clinic.evolutionConnectionState !== 'open') throw new Error('WhatsApp bağlantısı açık değil.')
+  if (clinic.whatsappSetupStatus !== 'test_verified' || !clinic.whatsappTestVerifiedAt) {
+    throw new Error('Gönderimleri açmak için mesaj testini doğrulayın.')
+  }
+  const [updated] = await db.update(clinics).set({
+    whatsappSetupStatus: 'active', whatsappEnabled: true, whatsappAiEnabled: false,
+    whatsappActivatedAt: new Date(), whatsappActivatedBy: userId,
+  }).where(eq(clinics.id, id)).returning()
+  return publicWhatsAppConfig(updated)
+}
+
+/** Keeps a delayed migration from turning a WhatsApp setup request into a 500. */
+export async function ensureWhatsAppSetupSchema() {
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_setup_status text NOT NULL DEFAULT 'not_started'`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_expected_phone text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_phone text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_code_hash text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_expires_at timestamptz`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_verified_at timestamptz`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_at timestamptz`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_by uuid REFERENCES users(id)`)
 }
 
 /** Idempotently create the clinic instance and keep its webhook up to date. */

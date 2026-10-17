@@ -76,6 +76,18 @@
 .button:hover { background: var(--clinic-primary-hover); }
 .button:disabled { background: #475569; border-color: #64748b; cursor: wait; }
 
+.secondaryButton {
+  min-height: 42px;
+  padding: 9px 16px;
+  background: var(--clinic-surface);
+  border: 1px solid var(--clinic-border);
+  border-radius: 8px;
+  color: var(--clinic-text);
+  cursor: pointer;
+  font-weight: 700;
+}
+.secondaryButton:disabled { cursor: wait; opacity: .65; }
+
 .notice, .error { padding: 10px 12px; border: 1px solid; border-radius: 8px; font-size: 13px; }
 .notice { background: var(--clinic-success-bg); border-color: var(--clinic-success-border); color: var(--clinic-success-text); }
 .error { background: var(--clinic-danger-bg); border-color: var(--clinic-danger-border); color: var(--clinic-danger-text); }
@@ -97,6 +109,15 @@
 .status { color: #86efac; font-size: 12px; font-weight: 700; }
 .empty { color: var(--clinic-muted); font-size: 13px; }
 
+.setupHeading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.setupGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.field small { color: var(--clinic-muted); font-size: 12px; font-weight: 400; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.connectionText { color: var(--clinic-muted); font-size: 13px; }
+.qr { margin-top: 16px; padding: 16px; background: var(--clinic-surface); border: 1px solid var(--clinic-border); border-radius: 8px; }
+.qr img { display: block; max-width: 100%; height: auto; padding: 8px; background: #fff; border-radius: 4px; }
+
 @media (max-width: 720px) {
   .row { grid-template-columns: 1fr; }
+  .setupGrid { grid-template-columns: 1fr; }
 }
