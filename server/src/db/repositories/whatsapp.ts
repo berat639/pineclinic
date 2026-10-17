@@ -92,6 +92,7 @@ function testCodeHash(code: string): string {
 export async function configureWhatsAppSetup(id: string, input: { expectedPhone: string, testPhone: string }) {
   const expectedPhone = normalizePhone(input.expectedPhone)
   const testPhone = normalizePhone(input.testPhone)
+  if (expectedPhone === testPhone) throw new Error('Test telefonu, klinik WhatsApp telefonundan farklı olmalı.')
   const [clinic] = await db.update(clinics).set({
     whatsappExpectedPhone: expectedPhone,
     whatsappLinkedPhone: null,
