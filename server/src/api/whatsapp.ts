@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
-import { confirmWhatsAppTest, credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig } from '../db/repositories/whatsapp'
+import { credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig } from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
 import { evolutionRequest, EvolutionError, parseEvolutionMessages, verifyWebhookSecret } from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
@@ -121,7 +121,7 @@ export const whatsappPlugin = new Elysia()
       }
     } else {
       for (const message of parseEvolutionMessages(payload)) {
-        if (!(await confirmWhatsAppTest(clinic, message))) await recordIncomingMessage(clinic, message)
+        await recordIncomingMessage(clinic, message)
       }
     }
     // Acknowledge only after the inbox has committed. The worker recovers independently of Redis.
