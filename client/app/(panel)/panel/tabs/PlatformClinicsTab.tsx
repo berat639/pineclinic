@@ -42,7 +42,7 @@ export default function PlatformClinicsTab() {
   }, [])
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if (!selectedId || (!qr && config?.connectionState !== 'connecting' && config?.setupStatus !== 'phone_verifying')) return
+    if (!selectedId || (!qr && config?.connectionState !== 'connecting' && !['phone_verifying', 'test_pending'].includes(config?.setupStatus || ''))) return
     const timer = setInterval(() => { void loadWhatsApp(selectedId, true) }, 5_000)
     return () => clearInterval(timer)
   }, [selectedId, qr, config?.connectionState, loadWhatsApp])
