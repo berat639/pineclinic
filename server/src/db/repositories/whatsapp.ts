@@ -150,7 +150,7 @@ export async function refreshWhatsAppConnection(id: string) {
       whatsappAiEnabled = false
     } else {
       numberVerifiedAt = clinic.whatsappNumberVerifiedAt || new Date()
-      if (['not_started', 'ready', 'phone_verifying', 'phone_mismatch'].includes(setupStatus)) setupStatus = 'phone_verified'
+      if (['not_started', 'ready', 'phone_verifying', 'phone_mismatch', 'test_pending', 'test_verified'].includes(setupStatus)) setupStatus = 'phone_verified'
     }
   }
   const [updated] = await db.update(clinics).set({
