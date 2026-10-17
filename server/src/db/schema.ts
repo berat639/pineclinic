@@ -93,6 +93,8 @@ export const clinics = pgTable('clinics', {
   evolutionConnectionState: text('evolution_connection_state').notNull().default('unconfigured'),
   whatsappSetupStatus: text('whatsapp_setup_status').notNull().default('not_started'),
   whatsappExpectedPhone: text('whatsapp_expected_phone'),
+  whatsappLinkedPhone: text('whatsapp_linked_phone'),
+  whatsappNumberVerifiedAt: timestamp('whatsapp_number_verified_at', { withTimezone: true }),
   whatsappTestPhone: text('whatsapp_test_phone'),
   whatsappTestCodeHash: text('whatsapp_test_code_hash'),
   whatsappTestExpiresAt: timestamp('whatsapp_test_expires_at', { withTimezone: true }),

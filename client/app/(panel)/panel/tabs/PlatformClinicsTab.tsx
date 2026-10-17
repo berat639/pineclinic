@@ -5,11 +5,11 @@ import styles from './PlatformClinicsTab.module.css'
 
 type WhatsAppConfig = {
   clinicId: string; clinicName: string; connectionState: string
-  setupStatus: 'not_started' | 'ready' | 'test_pending' | 'test_verified' | 'active' | string
-  expectedPhone: string | null; testPhone: string | null; enabled: boolean
+  setupStatus: 'not_started' | 'ready' | 'phone_verifying' | 'phone_mismatch' | 'phone_verified' | 'test_pending' | 'test_verified' | 'active' | string
+  expectedPhone: string | null; linkedPhone: string | null; numberVerifiedAt: string | null; testPhone: string | null; enabled: boolean
 }
 type Clinic = { id: string; name: string; hostname: string; isActive: boolean; createdAt: string }
-const setupLabels: Record<string, string> = { not_started: 'Kurulum bekliyor', ready: 'QR bağlantısı bekliyor', test_pending: 'Mesaj testi bekliyor', test_verified: 'Etkinleştirme bekliyor', active: 'Gönderimler açık' }
+const setupLabels: Record<string, string> = { not_started: 'Kurulum bekliyor', ready: 'QR bağlantısı bekliyor', phone_verifying: 'Telefon doğrulanıyor', phone_mismatch: 'Yanlış telefon bağlandı', phone_verified: 'Mesaj testi bekliyor', test_pending: 'Mesaj testi bekliyor', test_verified: 'Etkinleştirme bekliyor', active: 'Gönderimler açık' }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { cache: 'no-store', ...init })
@@ -42,7 +42,7 @@ export default function PlatformClinicsTab() {
   }, [])
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if (!selectedId || (!qr && config?.connectionState !== 'connecting')) return
+    if (!selectedId || (!qr && config?.connectionState !== 'connecting' && config?.setupStatus !== 'phone_verifying')) return
     const timer = setInterval(() => { void loadWhatsApp(selectedId, true) }, 5_000)
     return () => clearInterval(timer)
   }, [selectedId, qr, config?.connectionState, loadWhatsApp])
@@ -85,8 +85,8 @@ export default function PlatformClinicsTab() {
     </section>
     {selectedClinic && <section className={styles.card} aria-labelledby="whatsapp-setup-heading"><div className={styles.setupHeading}><div><h2 className={styles.title} id="whatsapp-setup-heading">{selectedClinic.name} · WhatsApp kurulumu</h2><p className={styles.description}>Her klinik kendi instance’ını ve QR kodunu kullanır.</p></div><span className={styles.status}>{setupLabels[config?.setupStatus || 'not_started'] || 'Kurulum bekliyor'}</span></div>
       <div className={styles.setupGrid}><label className={styles.field}><span>Klinik WhatsApp telefonu</span><input value={expectedPhone} disabled={saving} onChange={event => setExpectedPhone(event.target.value)} placeholder="0555 111 22 33" /><small>QR bu telefonla okutulmalıdır.</small></label><label className={styles.field}><span>Satışçı test telefonu</span><input value={testPhone} disabled={saving} onChange={event => setTestPhone(event.target.value)} placeholder="0555 111 22 33" /><small>Doğrulama kodu bu numaraya gönderilir.</small></label></div>
-      <div className={styles.actions}><button className={styles.button} type="button" onClick={saveSetup} disabled={saving}>1. Numaraları kaydet</button><button className={styles.button} type="button" onClick={connect} disabled={saving || !config?.expectedPhone || !config.testPhone}>2. QR göster</button><button className={styles.secondaryButton} type="button" onClick={() => run(async () => { if (selectedId) await loadWhatsApp(selectedId) })} disabled={saving}>Bağlantıyı kontrol et</button><button className={styles.button} type="button" onClick={sendTest} disabled={saving || config?.connectionState !== 'open'}>3. Mesaj testi gönder</button><button className={styles.button} type="button" onClick={activate} disabled={saving || config?.setupStatus !== 'test_verified'}>4. Gönderimleri etkinleştir</button></div>
-      <p className={styles.connectionText}>Bağlantı: {config?.connectionState === 'open' ? 'Açık' : config?.connectionState === 'connecting' ? 'QR okutulması bekleniyor' : 'Henüz bağlı değil'}. AI otomatik yanıtları bu akışta açılmaz.</p>
+      <div className={styles.actions}><button className={styles.button} type="button" onClick={saveSetup} disabled={saving}>1. Numaraları kaydet</button><button className={styles.button} type="button" onClick={connect} disabled={saving || !config?.expectedPhone || !config.testPhone}>2. QR göster</button><button className={styles.secondaryButton} type="button" onClick={() => run(async () => { if (selectedId) await loadWhatsApp(selectedId) })} disabled={saving}>Bağlantıyı kontrol et</button><button className={styles.button} type="button" onClick={sendTest} disabled={saving || config?.connectionState !== 'open' || !config.numberVerifiedAt}>3. Mesaj testi gönder</button><button className={styles.button} type="button" onClick={activate} disabled={saving || config?.setupStatus !== 'test_verified'}>4. Gönderimleri etkinleştir</button></div>
+      <p className={styles.connectionText}>Bağlantı: {config?.connectionState === 'open' ? 'Açık' : config?.connectionState === 'connecting' ? 'QR okutulması bekleniyor' : 'Henüz bağlı değil'}. {config?.setupStatus === 'phone_mismatch' ? `Bağlanan ${config.linkedPhone || 'telefon'}, seçilen klinik numarasıyla eşleşmiyor.` : config?.linkedPhone ? `Doğrulanan telefon: ${config.linkedPhone}.` : 'AI otomatik yanıtları bu akışta açılmaz.'}</p>
       {qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt={`${selectedClinic.name} WhatsApp bağlantı QR kodu`} /><p>{expectedPhone} numaralı telefonda WhatsApp → Bağlı cihazlar → Cihaz bağla yolunu açıp bu kodu okutun.</p></div>}
     </section>}
   </div>

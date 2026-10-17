@@ -30,6 +30,8 @@ export function publicWhatsAppConfig(clinic: Clinic) {
     connectionState: clinic.evolutionConnectionState,
     setupStatus: clinic.whatsappSetupStatus,
     expectedPhone: clinic.whatsappExpectedPhone,
+    linkedPhone: clinic.whatsappLinkedPhone,
+    numberVerifiedAt: clinic.whatsappNumberVerifiedAt?.toISOString() || null,
     testPhone: clinic.whatsappTestPhone,
     testVerifiedAt: clinic.whatsappTestVerifiedAt?.toISOString() || null,
     activatedAt: clinic.whatsappActivatedAt?.toISOString() || null,
@@ -92,6 +94,8 @@ export async function configureWhatsAppSetup(id: string, input: { expectedPhone:
   const testPhone = normalizePhone(input.testPhone)
   const [clinic] = await db.update(clinics).set({
     whatsappExpectedPhone: expectedPhone,
+    whatsappLinkedPhone: null,
+    whatsappNumberVerifiedAt: null,
     whatsappTestPhone: testPhone,
     whatsappSetupStatus: 'ready',
     whatsappEnabled: false,
@@ -106,6 +110,20 @@ export async function configureWhatsAppSetup(id: string, input: { expectedPhone:
   return publicWhatsAppConfig(clinic)
 }
 
+type EvolutionInstanceInfo = { name?: string, instanceName?: string, number?: string | number | null, ownerJid?: string | null }
+
+function linkedWhatsAppPhone(instance: EvolutionInstanceInfo | undefined): string | null {
+  const candidate = instance?.number ?? instance?.ownerJid?.split('@')[0]
+  if (candidate === undefined || candidate === null) return null
+  try { return normalizePhone(String(candidate)) } catch { return null }
+}
+
+async function resolveLinkedWhatsAppPhone(creds: WhatsAppCredentials): Promise<string | null> {
+  const data = await evolutionRequest<EvolutionInstanceInfo[]>(creds,
+    `/instance/fetchInstances?instanceName=${encodeURIComponent(creds.instanceName)}`)
+  return linkedWhatsAppPhone(data.find(instance => (instance.name || instance.instanceName) === creds.instanceName))
+}
+
 /** Reads provider state only. It never creates an instance or rewrites its webhook. */
 export async function refreshWhatsAppConnection(id: string) {
   const clinic = await ensureAutomaticEvolutionConfig(id)
@@ -118,7 +136,33 @@ export async function refreshWhatsAppConnection(id: string) {
   } catch (error) {
     if (!(error instanceof EvolutionError) || error.status !== 404) throw error
   }
-  const [updated] = await db.update(clinics).set({ evolutionConnectionState: connectionState })
+  let linkedPhone: string | null = null
+  let setupStatus = clinic.whatsappSetupStatus
+  let numberVerifiedAt = clinic.whatsappNumberVerifiedAt
+  let whatsappEnabled = clinic.whatsappEnabled
+  let whatsappAiEnabled = clinic.whatsappAiEnabled
+  if (connectionState === 'open' && clinic.whatsappExpectedPhone) {
+    linkedPhone = await resolveLinkedWhatsAppPhone(creds)
+    if (!linkedPhone) {
+      setupStatus = 'phone_verifying'
+      numberVerifiedAt = null
+      whatsappEnabled = false
+      whatsappAiEnabled = false
+    } else if (linkedPhone !== clinic.whatsappExpectedPhone) {
+      setupStatus = 'phone_mismatch'
+      numberVerifiedAt = null
+      whatsappEnabled = false
+      whatsappAiEnabled = false
+    } else {
+      numberVerifiedAt = clinic.whatsappNumberVerifiedAt || new Date()
+      if (['not_started', 'ready', 'phone_verifying', 'phone_mismatch'].includes(setupStatus)) setupStatus = 'phone_verified'
+    }
+  }
+  const [updated] = await db.update(clinics).set({
+    evolutionConnectionState: connectionState, whatsappLinkedPhone: linkedPhone,
+    whatsappSetupStatus: setupStatus, whatsappNumberVerifiedAt: numberVerifiedAt,
+    whatsappEnabled, whatsappAiEnabled,
+  })
     .where(eq(clinics.id, clinic.id)).returning()
   return publicWhatsAppConfig(updated)
 }
@@ -126,6 +170,7 @@ export async function refreshWhatsAppConnection(id: string) {
 export async function requestWhatsAppTest(id: string) {
   const clinic = await getWhatsAppClinic(id)
   if (clinic.evolutionConnectionState !== 'open') throw new Error('Önce klinik WhatsApp telefonunu QR koduyla bağlayın.')
+  if (!clinic.whatsappNumberVerifiedAt || clinic.whatsappLinkedPhone !== clinic.whatsappExpectedPhone) throw new Error('QR ile bağlanan telefon klinik numarasıyla doğrulanmadı.')
   if (!clinic.whatsappTestPhone) throw new Error('Önce test telefonu girin.')
   const code = String(randomInt(100_000, 1_000_000))
   const expiresAt = new Date(Date.now() + 10 * 60_000)
@@ -175,12 +220,30 @@ export async function activateWhatsApp(id: string, userId: string) {
 export async function ensureWhatsAppSetupSchema() {
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_setup_status text NOT NULL DEFAULT 'not_started'`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_expected_phone text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_linked_phone text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_number_verified_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_phone text`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_code_hash text`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_expires_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_verified_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_by uuid REFERENCES users(id)`)
+}
+
+/** An explicit QR retry replaces a previously mismatched linked device first. */
+export async function prepareWhatsAppQr(id: string): Promise<Clinic> {
+  let clinic = await getWhatsAppClinic(id)
+  if (!clinic.whatsappExpectedPhone) throw new Error('Önce klinik WhatsApp telefonunu kaydedin.')
+  if (clinic.whatsappSetupStatus === 'phone_mismatch') {
+    const creds = credentialsFor(await ensureAutomaticEvolutionConfig(id))
+    await evolutionRequest(creds, `/instance/logout/${encodeURIComponent(creds.instanceName)}`, undefined, 'DELETE')
+    const [updated] = await db.update(clinics).set({
+      evolutionConnectionState: 'close', whatsappSetupStatus: 'ready', whatsappLinkedPhone: null,
+      whatsappNumberVerifiedAt: null, whatsappEnabled: false, whatsappAiEnabled: false,
+    }).where(eq(clinics.id, id)).returning()
+    clinic = updated
+  }
+  return ensureEvolutionInstance(clinic.id)
 }
 
 /** Idempotently create the clinic instance and keep its webhook up to date. */
