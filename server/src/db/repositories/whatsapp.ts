@@ -24,10 +24,8 @@ export function credentialsFor(clinic: Clinic): WhatsAppCredentials {
   return { baseUrl: clinic.evolutionBaseUrl, apiKey: openSecret(clinic.evolutionApiKey), instanceName: clinic.evolutionInstanceName }
 }
 export function publicWhatsAppConfig(clinic: Clinic) {
-  const automatic = automaticEvolutionConfig(clinic)
   return {
-    clinicId: clinic.id, clinicName: clinic.name, baseUrl: clinic.evolutionBaseUrl || automatic?.baseUrl || '',
-    instanceName: clinic.evolutionInstanceName || automatic?.instanceName || '', hasApiKey: !!clinic.evolutionApiKey || !!automatic,
+    clinicId: clinic.id, clinicName: clinic.name,
     enabled: clinic.whatsappEnabled, aiEnabled: clinic.whatsappAiEnabled,
     connectionState: clinic.evolutionConnectionState,
     setupStatus: clinic.whatsappSetupStatus,
@@ -35,7 +33,6 @@ export function publicWhatsAppConfig(clinic: Clinic) {
     testPhone: clinic.whatsappTestPhone,
     testVerifiedAt: clinic.whatsappTestVerifiedAt?.toISOString() || null,
     activatedAt: clinic.whatsappActivatedAt?.toISOString() || null,
-    evolutionMode: automatic ? 'managed' as const : 'manual' as const,
   }
 }
 export async function saveWhatsAppConfig(id: string, input: { baseUrl: string; instanceName: string; apiKey?: string; enabled: boolean; aiEnabled: boolean }) {
