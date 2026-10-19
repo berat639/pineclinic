@@ -4,8 +4,45 @@ import { db } from '../db/client'
 import { shifts, shiftSwapRequests, users } from '../db/schema'
 import { authenticateRequest } from '../middleware/auth'
 import { requireClinicId } from '../tenancy/context'
+import { applyShiftPlan, latestShiftPlanOperation, previewShiftPlan, undoShiftPlan } from '../db/repositories/shift-planning'
 
 export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
+
+  .post('/plan/preview', async ({ body, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    try { return await previewShiftPlan(requireClinicId(), body as any) }
+    catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai önizlemesi oluşturulamadı.' } }
+  })
+
+  .post('/plan/apply', async ({ body, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    const payload = body as any
+    try { return await applyShiftPlan(requireClinicId(), user.id, String(payload.requestId || ''), payload.plan) }
+    catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai planı kaydedilemedi.' } }
+  })
+
+  .get('/plan/latest', async ({ cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    return latestShiftPlanOperation(requireClinicId())
+  })
+
+  .post('/plan/:operationId/undo', async ({ params, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    try { return await undoShiftPlan(requireClinicId(), params.operationId) }
+    catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai işlemi geri alınamadı.' } }
+  })
 
   .get('/', async ({ query, cookie, set }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'

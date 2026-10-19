@@ -424,6 +424,30 @@ async function runMigrations() {
     )
   `
 
+  // ── Reversible staff shift planning ──────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS shift_plan_operations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL,
+      created_by UUID REFERENCES users(id),
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (clinic_id, request_id)
+    )
+  `
+  await sql`
+    CREATE TABLE IF NOT EXISTS shift_plan_operation_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      operation_id UUID NOT NULL REFERENCES shift_plan_operations(id) ON DELETE CASCADE,
+      shift_id UUID REFERENCES shifts(id),
+      action TEXT NOT NULL,
+      before_state JSONB,
+      after_state JSONB NOT NULL
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS shift_plan_operations_clinic_created_idx ON shift_plan_operations(clinic_id, created_at DESC)`
+
   await sql`
     CREATE TABLE IF NOT EXISTS notifications (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

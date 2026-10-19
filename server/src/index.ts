@@ -2392,6 +2392,11 @@ app.ws('/ws', {
     } catch (e) { console.error('[DoctorLeaves] Startup ensure table error:', e) }
 
     try {
+      const { ensureShiftPlanningTables } = await import('./db/repositories/shift-planning')
+      await ensureShiftPlanningTables()
+    } catch (e) { console.error('[ShiftPlanning] Startup ensure table error:', e) }
+
+    try {
       const { ensureWhatsAppSetupSchema } = await import('./db/repositories/whatsapp')
       await ensureWhatsAppSetupSchema()
     } catch (e) { console.error('[WhatsApp] Startup ensure schema error:', e) }

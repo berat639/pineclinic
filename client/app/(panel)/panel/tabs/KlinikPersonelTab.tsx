@@ -5,6 +5,7 @@ import { useAuth } from '../../../../lib/auth-context'
 import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
 import DoctorLeaveModal from '../../../admin/components/DoctorLeaveModal'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
+import ShiftPlanner from './ShiftPlanner'
 import WeeklyTemplateModal from '../../../admin/components/WeeklyTemplateModal'
 import MonthlyTemplateModal from '../../../admin/components/MonthlyTemplateModal'
 import ShiftBatchApplyModal from '../../../admin/components/ShiftBatchApplyModal'
@@ -109,6 +110,7 @@ export default function KlinikPersonelTab() {
   const [showUserForm, setShowUserForm] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' })
   const [error, setError] = useState('')
+  const [workspace, setWorkspace] = useState<'planner' | 'people' | 'templates'>('planner')
 
   // Calendar View & Navigation state
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week')
@@ -474,6 +476,11 @@ export default function KlinikPersonelTab() {
 
   return (
     <div style={{ width: '100%' }}>
+      <nav aria-label="Klinik personeli bölümleri" style={{ display: 'flex', gap: 4, marginBottom: 18, padding: 4, width: 'fit-content', borderRadius: 10, background: 'var(--card-inner)', border: '1px solid var(--input-border)' }}>
+        {([['planner', 'Mesai Planı'], ['people', 'Personeller'], ['templates', 'Şablonlar']] as const).map(([id, text]) => <button key={id} onClick={() => setWorkspace(id)} aria-pressed={workspace === id} style={{ minHeight: 40, padding: '0 14px', border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700, background: workspace === id ? 'var(--accent)' : 'var(--input-bg)', color: workspace === id ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-2)' }}>{text}</button>)}
+      </nav>
+      {workspace === 'planner' && <ShiftPlanner users={users} shifts={shifts} onChanged={fetchData} />}
+      {workspace === 'people' && <>
       {/* ── Personel Listesi ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Klinik Personeli</h2>
@@ -939,9 +946,10 @@ export default function KlinikPersonelTab() {
           onClose={() => setConfirmDeleteUser(null)}
         />
       )}
+      </>}
 
       {/* ── Shift Takvimi Bölümü ── */}
-      <div style={{ marginTop: 24, padding: 18, background: 'var(--glass-bg)', borderRadius: 14, border: '1px solid var(--glass-border)' }}>
+      <div style={{ display: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           {/* Sol Başlık ve Görünüm Seçimi */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -1320,27 +1328,27 @@ export default function KlinikPersonelTab() {
       </div>
 
       {/* ── VARDIYA ŞABLONLARI YÖNETİM BÖLÜMÜ ── */}
-      <div style={{ marginTop: 28, padding: 20, background: 'var(--glass-bg)', borderRadius: 14, border: '1px solid var(--glass-border)' }}>
+      <div style={{ display: workspace === 'templates' ? undefined : 'none', marginTop: 0, padding: 20, background: 'var(--card-bg)', borderRadius: 14, border: '1px solid var(--input-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           <div>
             <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sparkles size={16} color="var(--accent)" /> Vardiya Şablonları & Program Düzeni
+              <Sparkles size={16} color="var(--accent)" /> Mesai Şablonları
             </h3>
             <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
-              Günlük saat blokları, 7 günlük haftalık programlar ve aylık rotasyon şablonları
+              Günlük saat blokları, haftalık planlar ve aylık mesai şablonları
             </div>
           </div>
 
           {/* Sub Tabs */}
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+          <div style={{ display: 'flex', background: 'var(--card-inner)', padding: 3, borderRadius: 8, border: '1px solid var(--input-border)' }}>
             <button
               onClick={() => setTemplatesTab('weekly')}
               style={{
                 padding: '6px 14px',
                 borderRadius: 6,
                 border: 'none',
-                background: templatesTab === 'weekly' ? 'var(--accent, #3b82f6)' : 'transparent',
-                color: templatesTab === 'weekly' ? '#fff' : 'var(--foreground-3)',
+                background: templatesTab === 'weekly' ? 'var(--accent)' : 'var(--input-bg)',
+                color: templatesTab === 'weekly' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -1357,8 +1365,8 @@ export default function KlinikPersonelTab() {
                 padding: '6px 14px',
                 borderRadius: 6,
                 border: 'none',
-                background: templatesTab === 'monthly' ? '#a855f7' : 'transparent',
-                color: templatesTab === 'monthly' ? '#fff' : 'var(--foreground-3)',
+                background: templatesTab === 'monthly' ? 'var(--accent)' : 'var(--input-bg)',
+                color: templatesTab === 'monthly' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -1375,8 +1383,8 @@ export default function KlinikPersonelTab() {
                 padding: '6px 14px',
                 borderRadius: 6,
                 border: 'none',
-                background: templatesTab === 'daily' ? '#10b981' : 'transparent',
-                color: templatesTab === 'daily' ? '#fff' : 'var(--foreground-3)',
+                background: templatesTab === 'daily' ? 'var(--accent)' : 'var(--input-bg)',
+                color: templatesTab === 'daily' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 cursor: 'pointer',

@@ -413,6 +413,24 @@ export const shifts = pgTable('shifts', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+export const shiftPlanOperations = pgTable('shift_plan_operations', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  requestId: text('request_id').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const shiftPlanOperationItems = pgTable('shift_plan_operation_items', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  operationId: uuid('operation_id').notNull().references(() => shiftPlanOperations.id, { onDelete: 'cascade' }),
+  shiftId: uuid('shift_id').references(() => shifts.id),
+  action: text('action').notNull(),
+  beforeState: jsonb('before_state'),
+  afterState: jsonb('after_state').notNull(),
+})
+
 export const shiftSwapRequests = pgTable('shift_swap_requests', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').references(() => clinics.id),
