@@ -133,6 +133,19 @@ export default function MiniCalendar({ currentDate, onDateSelect, customHolidays
           user-select: none;
           outline: none;
         }
+        .rdp-nav_button {
+          width: 32px;
+          height: 32px;
+          border: 1px solid var(--input-border) !important;
+          border-radius: 8px;
+          background: var(--input-bg) !important;
+          color: var(--foreground) !important;
+          transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .rdp-nav_button:hover:not([disabled]) {
+          background: var(--card-inner) !important;
+          border-color: var(--accent) !important;
+        }
         .rdp-button, .rdp-nav_button, .rdp-button:focus, .rdp-button:focus-visible {
           outline: none !important;
           box-shadow: none !important;

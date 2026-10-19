@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
-import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings } from 'lucide-react'
+import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DoctorLeaveModal, { DoctorLeaveItem } from './DoctorLeaveModal'
 import DentalCalendar from './DentalCalendar'
@@ -589,12 +589,23 @@ export default function CalendarTab() {
   }
 
   const goDate = (offset: number) => {
-    const d = new Date(currentDate)
+    const d = new Date(`${currentDate}T12:00:00`)
     if (view === 'day') d.setDate(d.getDate() + offset)
     else if (view === 'week') d.setDate(d.getDate() + offset * 7)
-    else d.setMonth(d.getMonth() + offset)
-    setCurrentDate(d.toISOString().slice(0, 10))
+    else {
+      const selectedDay = d.getDate()
+      d.setDate(1)
+      d.setMonth(d.getMonth() + offset)
+      d.setDate(Math.min(selectedDay, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))
+    }
+    setCurrentDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
   }
+
+  const navigationCopy = view === 'day'
+    ? { previous: 'Önceki gün', next: 'Sonraki gün', current: 'Günlük görünüm' }
+    : view === 'week'
+      ? { previous: 'Önceki hafta', next: 'Sonraki hafta', current: 'Haftalık görünüm' }
+      : { previous: 'Önceki ay', next: 'Sonraki ay', current: 'Aylık görünüm' }
 
   const searchResults = useMemo(() => {
     const q = patientSearchQuery.trim().toLowerCase();
@@ -931,11 +942,32 @@ export default function CalendarTab() {
 
       {/* Left Sidebar */}
       <div className={`cal-sidebar ${mobileSidebarOpen ? 'is-open' : ''}`}>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-          <button 
-            onClick={() => { setView('day'); setCurrentDate(new Date().toISOString().slice(0, 10)); }} 
-            style={{ padding: '6px 16px', fontSize: '0.8rem', fontWeight: 600, border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', flex: 1 }}>
+        <div aria-label={`${navigationCopy.current} tarih gezinmesi`} style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr) 40px', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => goDate(-1)}
+            aria-label={navigationCopy.previous}
+            title={navigationCopy.previous}
+            style={{ height: 38, border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+          >
+            <ChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => { setView('day'); setCurrentDate(new Date().toISOString().slice(0, 10)); }}
+            title="Bugüne dön ve günlük görünümü aç"
+            style={{ height: 38, padding: '0 12px', fontSize: '0.8rem', fontWeight: 700, border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer' }}
+          >
             Bugün
+          </button>
+          <button
+            type="button"
+            onClick={() => goDate(1)}
+            aria-label={navigationCopy.next}
+            title={navigationCopy.next}
+            style={{ height: 38, border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+          >
+            <ChevronRight size={18} aria-hidden="true" />
           </button>
         </div>
 
@@ -1217,40 +1249,9 @@ export default function CalendarTab() {
                 </button>
               ))}
             </div>
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap' }}>
-              {view === 'day' ? 'Günlük Randevu Takvimi' : view === 'week' ? 'Haftalık Randevu Takvimi' : 'Aylık Randevu Takvimi'}
-            </h3>
           </div>
 
           <div className="cal-header-controls">
-            {/* Navigation */}
-            <div className="cal-nav-group">
-              <button onClick={() => goDate(-1)} style={{ width: 34, height: 34, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>◀</button>
-              <button 
-                onClick={() => { setView('day'); setCurrentDate(new Date().toISOString().slice(0, 10)); }} 
-                style={{ padding: '0 10px', height: 34, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--input-border)', borderRadius: 6, background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', flexShrink: 0 }}>
-                Bugün
-              </button>
-              <input
-                type="date"
-                value={currentDate}
-                onChange={(e) => setCurrentDate(e.target.value)}
-                style={{
-                  padding: '6px 10px',
-                  height: 34,
-                  width: 135,
-                  borderRadius: 6,
-                  border: '1px solid var(--input-border)',
-                  background: 'var(--input-bg)',
-                  color: 'var(--foreground)',
-                  fontSize: '0.82rem',
-                  minWidth: 0,
-                  boxSizing: 'border-box'
-                }}
-              />
-              <button onClick={() => goDate(1)} style={{ width: 34, height: 34, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>▶</button>
-            </div>
-
             {/* Action buttons */}
             <div className="cal-actions-group">
               <button
