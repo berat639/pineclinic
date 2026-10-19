@@ -85,6 +85,7 @@ Format:
 {
   "globalIntent": "NONE", // veya "CONFIRM"
   "selectIntent": "NONE", // "SELECT_ALL", "SELECT_MAXILLA", "SELECT_MANDIBLE", "SELECT_Q1", "SELECT_Q2", "SELECT_Q3", "SELECT_Q4", "SELECT_ANTERIOR", "SELECT_POSTERIOR", "CLEAR_SELECTION", "SELECT_TEETH" veya "NONE"
+  "targetTeeth": [], // SELECT_TEETH için zorunlu diş numaraları; diğer durumlarda []
   "treatments": [
     {
       "procedureName": "İşlem Tam Adı", // veya null
@@ -111,16 +112,19 @@ Format:
 }
 
 Örnek 1: "36 MOD kompozit dolgu ekle"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"surfaces":["M","O","D"],"section":"crown","intent":"ADD"}]}
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["36"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"surfaces":["M","O","D"],"section":"crown","intent":"ADD"}]}
 
 Örnek 2: "tüm üst çeneyi seç"
-{"globalIntent":"NONE","selectIntent":"SELECT_MAXILLA","treatments":[]}
+{"globalIntent":"NONE","selectIntent":"SELECT_MAXILLA","targetTeeth":[],"treatments":[]}
 
 Örnek 3: "21 kuron zirkonyum kaplama"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["21"],"section":"crown","surfaces":[],"intent":"ADD"}]}
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["21"],"treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["21"],"section":"crown","surfaces":[],"intent":"ADD"}]}
 
 Örnek 4: "seçimleri temizle"
-{"globalIntent":"NONE","selectIntent":"CLEAR_SELECTION","treatments":[]}`
+{"globalIntent":"NONE","selectIntent":"CLEAR_SELECTION","targetTeeth":[],"treatments":[]}
+
+Örnek 5: "16 ve 26"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["16","26"],"treatments":[]}`
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
     let data: any

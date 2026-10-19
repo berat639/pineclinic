@@ -37,8 +37,6 @@ import {
   Layers,
   Sliders,
   Plus,
-  ChevronLeft,
-  ChevronRight,
   Filter,
   Sparkles,
   RotateCcw
@@ -1060,57 +1058,6 @@ export default function KlinikPersonelTab() {
               🏖️ İzin / Kapalı Saat
             </button>
 
-            {/* Navigasyon */}
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center', background: 'var(--glass-bg)', padding: '2px 4px', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
-              <button
-                onClick={() => {
-                  if (calendarView === 'week') setWeekOffset(w => w - 1)
-                  else setMonthOffset(m => m - 1)
-                }}
-                style={{ background: 'transparent', border: 'none', padding: '4px 6px', color: 'var(--foreground)', cursor: 'pointer' }}
-                title="Önceki"
-              >
-                <ChevronLeft size={14} />
-              </button>
-
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', minWidth: calendarView === 'week' ? 140 : 110, textAlign: 'center' }}>
-                {calendarView === 'week' ? (
-                  `${new Date(weekDays[0]! + 'T00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })} – ${new Date(weekDays[6]! + 'T00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })}`
-                ) : (
-                  activeMonthDate.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })
-                )}
-              </span>
-
-              <button
-                onClick={() => {
-                  if (calendarView === 'week') setWeekOffset(w => w + 1)
-                  else setMonthOffset(m => m + 1)
-                }}
-                style={{ background: 'transparent', border: 'none', padding: '4px 6px', color: 'var(--foreground)', cursor: 'pointer' }}
-                title="Sonraki"
-              >
-                <ChevronRight size={14} />
-              </button>
-
-              <button
-                onClick={() => {
-                  if (calendarView === 'week') setWeekOffset(0)
-                  else setMonthOffset(0)
-                }}
-                style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: 'none',
-                  borderRadius: 4,
-                  padding: '2px 6px',
-                  color: 'var(--foreground-2)',
-                  cursor: 'pointer',
-                  fontSize: '0.68rem',
-                  marginLeft: 4
-                }}
-              >
-                Bugün
-              </button>
-            </div>
           </div>
         </div>
 

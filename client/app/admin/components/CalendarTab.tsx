@@ -1210,9 +1210,6 @@ export default function CalendarTab() {
         {/* Header */}
         <div className="cal-header-bar">
           <div className="cal-header-top-row">
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap' }}>
-              {view === 'day' ? 'Günlük Randevu Takvimi' : view === 'week' ? 'Haftalık Randevu Takvimi' : 'Aylık Randevu Takvimi'}
-            </h3>
             <div className="cal-view-tabs">
               {(['day', 'week', 'month'] as const).map(v => (
                 <button key={v} onClick={() => setView(v)} style={{ padding: '6px 14px', fontSize: '0.75rem', fontWeight: 600, border: 'none', background: view === v ? 'var(--accent)' : 'var(--input-bg)', color: view === v ? 'white' : 'var(--foreground-2)', cursor: 'pointer', borderRight: v !== 'month' ? '1px solid var(--input-border)' : 'none' }}>
@@ -1220,6 +1217,9 @@ export default function CalendarTab() {
                 </button>
               ))}
             </div>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, whiteSpace: 'nowrap' }}>
+              {view === 'day' ? 'Günlük Randevu Takvimi' : view === 'week' ? 'Haftalık Randevu Takvimi' : 'Aylık Randevu Takvimi'}
+            </h3>
           </div>
 
           <div className="cal-header-controls">

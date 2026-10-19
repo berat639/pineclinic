@@ -41,6 +41,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [isQuickSelectOpen, setIsQuickSelectOpen] = useState(false);
   const [isVoiceBarDragOver, setIsVoiceBarDragOver] = useState(false);
   const [assistantPendingProcedure, setAssistantPendingProcedure] = useState<any | null>(null);
+  const assistantPendingProcedureRef = useRef<any | null>(null);
   const [odontogramMode, setOdontogramMode] = useState<'2d' | '3d'>('2d');
   const [toothSurfaces, setToothSurfaces] = useState<Record<number, string[]>>({});
   const [toothSections, setToothSections] = useState<Record<number, string>>({});
@@ -373,6 +374,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         return;
       }
       setAssistantPendingProcedure(proc);
+      assistantPendingProcedureRef.current = proc;
       if (!isListening) {
         toggleListening();
       }
@@ -654,6 +656,24 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     });
   };
 
+  const stopListening = () => {
+    isListeningRef.current = false;
+    setIsListening(false);
+    if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
+    if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
+    triggerDebounceRef.current = null;
+    silenceDebounceRef.current = null;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+    }
+    setTranscript('');
+  };
+
+  const handleModalClose = () => {
+    stopListening();
+    onClose();
+  };
+
   const processAICommand = async (text: string) => {
     if (!text || !text.trim() || isAnalyzingRef.current) return;
     const cleanText = text.trim();
@@ -737,9 +757,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               executedAny = true;
               break;
             case 'SELECT_TEETH':
-              if (targetTeeth && targetTeeth.length > 0) {
-                setSelectedTeeth(targetTeeth.map(Number));
-                toast.success(`🦷 Dişler seçildi: ${targetTeeth.join(', ')}`);
+              const selectedByCommand = targetTeeth?.length
+                ? targetTeeth
+                : (treatments || []).flatMap((t: any) => t.toothNumbers || []);
+              if (selectedByCommand.length > 0) {
+                setSelectedTeeth(selectedByCommand.map(Number));
+                toast.success(`🦷 Dişler seçildi: ${selectedByCommand.join(', ')}`);
                 executedAny = true;
               }
               break;
@@ -747,7 +770,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         }
 
         // 2. Sesli Asistana Sürüklenmiş Bekleyen Tedavi Varsa ve Diş Belirtildiyse
-        if (assistantPendingProcedure) {
+        const pendingProcedure = assistantPendingProcedureRef.current;
+        if (pendingProcedure) {
           let resolvedTeeth: number[] = [];
           if (targetTeeth && targetTeeth.length > 0) {
             resolvedTeeth = targetTeeth.map(Number);
@@ -758,9 +782,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           }
 
           if (resolvedTeeth.length > 0) {
-            handleDropTreatment(resolvedTeeth, assistantPendingProcedure);
-            toast.success(`✅ Sürüklenen "${assistantPendingProcedure.name}" ${resolvedTeeth.map(t => '#' + t).join(', ')} dişlerine atandı.`);
+            handleDropTreatment(resolvedTeeth, pendingProcedure);
+            toast.success(`✅ Sürüklenen "${pendingProcedure.name}" ${resolvedTeeth.map(t => '#' + t).join(', ')} dişlerine atandı.`);
             setAssistantPendingProcedure(null);
+            assistantPendingProcedureRef.current = null;
             executedAny = true;
           }
         }
@@ -788,6 +813,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
         if (!executedAny) {
           toast.error(`"${cleanText}" için işlem veya diş tespit edilemedi.`);
+        } else if ((treatments && treatments.length > 0) || pendingProcedure) {
+          stopListening();
+          toast.success('Taslak güncellendi, dinleme kapatıldı.');
         }
       } else {
         toast.error("Komut çözümlenemedi.");
@@ -870,14 +898,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
   const toggleListening = () => {
     if (isListeningRef.current) {
-      isListeningRef.current = false;
-      setIsListening(false);
-      if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
-      if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-      }
-      setTranscript("");
+      stopListening();
       return;
     }
 
@@ -919,14 +940,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
         // 1. Kullanıcı "asistanı kapat" / "dinlemeyi kapat" dediyse anında dinlemeyi sonlandır
         if (checkCloseTrigger(activeText)) {
-          if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
-          if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
-          isListeningRef.current = false;
-          setIsListening(false);
-          if (recognitionRef.current) {
-            try { recognitionRef.current.stop(); } catch {}
-          }
-          setTranscript("");
+          stopListening();
           toast('🛑 Sesli asistan dinlemeyi kapattı.', { icon: '🎙️' });
           return;
         }
@@ -1221,8 +1235,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000 }}>
       <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '95%', maxWidth: 1800, maxHeight: '98vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', position: 'relative' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, position: 'relative', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
             <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>
               {editingGroup ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}
             </h3>
@@ -1230,11 +1244,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             {/* 1. Instant Mic/Voice Listening Button (Does not force-open panel) */}
             <button
               onClick={toggleListening}
+              aria-pressed={isListening}
+              aria-label={isListening ? 'Sesli komut dinlemeyi durdur' : 'Sesli komut dinlemeyi başlat'}
               style={{
-                background: isListening ? '#dc2626' : '#2563eb',
-                border: `1px solid ${isListening ? '#ef4444' : '#3b82f6'}`,
-                color: '#ffffff',
-                padding: '7px 15px',
+                background: isListening ? 'var(--danger)' : 'var(--btn-clinic-primary-bg)',
+                border: `1px solid ${isListening ? 'var(--danger)' : 'var(--btn-clinic-primary-bg)'}`,
+                color: 'var(--btn-clinic-primary-fg)',
+                padding: '8px 14px',
                 borderRadius: 8,
                 cursor: 'pointer',
                 fontSize: '0.85rem',
@@ -1242,13 +1258,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: isListening ? '0 0 14px rgba(220,38,38,0.7)' : 'none',
-                transition: 'all 0.2s ease'
+                minHeight: 40,
+                transition: 'background 0.2s ease, border-color 0.2s ease'
               }}
               title={isListening ? "Dinlemeyi Durdur (veya 'asistanı kapat' deyin)" : "Sesli komut ile diş ve tedavi eklemek için tıklayın"}
             >
               {isListening ? <MicOff size={17} /> : <Mic size={17} />}
-              <span>{isListening ? '🔴 Dinliyor (Durdur)' : '🎙️ Sesli Komut'}</span>
+              <span>{isListening ? 'Dinlemeyi Durdur' : 'Sesli Komut'}</span>
             </button>
 
             {/* 2. Live Voice Assistant Bar & Drag-and-Drop Target */}
@@ -1261,60 +1277,62 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 onDragLeave={() => setIsVoiceBarDragOver(false)}
                 onDrop={handleDropOnVoiceAssistant}
                 style={{
-                  background: isVoiceBarDragOver ? '#064e3b' : (assistantPendingProcedure ? '#78350f' : 'var(--background, #0f172a)'),
-                  border: `1.5px ${isVoiceBarDragOver ? 'dashed #10b981' : (assistantPendingProcedure ? 'solid #f59e0b' : (checkActionTrigger(transcript) ? 'solid #22c55e' : (isListening ? 'solid #ef4444' : 'dashed var(--border, #334155)')))}`,
+                  background: assistantPendingProcedure ? 'var(--card-inner)' : 'var(--input-bg)',
+                  border: `1px ${isVoiceBarDragOver ? 'solid var(--success)' : (assistantPendingProcedure ? 'solid var(--warning)' : (isListening ? 'solid var(--danger)' : 'dashed var(--input-border)'))}`,
                   borderRadius: 8,
-                  padding: '5px 12px',
+                  padding: '8px 12px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  maxWidth: 520,
+                  minHeight: 40,
+                  maxWidth: 560,
                   overflow: 'hidden',
-                  transition: 'all 0.2s ease',
-                  boxShadow: isVoiceBarDragOver ? '0 0 12px rgba(16, 185, 129, 0.4)' : (assistantPendingProcedure ? '0 0 10px rgba(245, 158, 11, 0.3)' : 'none')
+                  transition: 'background 0.2s ease, border-color 0.2s ease'
                 }}
                 title="İşlem şablonunu buraya sürükleyip ardından sesle diş numaralarını söyleyebilirsiniz"
+                aria-live="polite"
               >
                 <span style={{
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  background: isVoiceBarDragOver ? '#10b981' : (assistantPendingProcedure ? '#f59e0b' : (checkActionTrigger(transcript) ? '#22c55e' : (isListening ? '#ef4444' : '#64748b'))),
+                  background: isVoiceBarDragOver ? 'var(--success)' : (assistantPendingProcedure ? 'var(--warning)' : (isListening ? 'var(--danger)' : 'var(--muted)')),
                   display: 'inline-block',
                   flexShrink: 0
                 }} />
 
                 {assistantPendingProcedure ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden' }}>
-                    <span style={{ background: '#f59e0b', color: '#000000', fontSize: '0.7rem', fontWeight: 800, padding: '1px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-                      📥 ATANACAK:
+                    <span style={{ background: 'var(--badge-clinic-bg)', color: 'var(--badge-clinic-fg)', border: '1px solid var(--badge-clinic-border)', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+                      ATANACAK
                     </span>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {assistantPendingProcedure.name}
                     </span>
-                    <span style={{ fontSize: '0.75rem', color: '#93c5fd', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      → Diş söyleyin!
+                    <span style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      Diş numarasını söyleyin
                     </span>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         setAssistantPendingProcedure(null);
+                        assistantPendingProcedureRef.current = null;
                       }}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2, display: 'flex', marginLeft: 'auto' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 2, display: 'flex', marginLeft: 'auto' }}
                       title="İptal et"
                     >
                       <X size={13} />
                     </button>
                   </div>
                 ) : isVoiceBarDragOver ? (
-                  <span style={{ color: '#34d399', fontWeight: 700, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-                    🎯 Buraya bırakın (ardından dişleri sesle söyleyin)
+                  <span style={{ color: 'var(--success)', fontWeight: 700, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                    Buraya bırakın, ardından dişleri söyleyin
                   </span>
                 ) : isListening ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
-                    <span style={{ color: checkActionTrigger(transcript) ? '#4ade80' : '#ef4444', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                      {checkActionTrigger(transcript) ? '⚡ İŞLENİYOR:' : 'DİNLENİYOR:'}
+                    <span style={{ color: isAnalyzing ? 'var(--accent)' : 'var(--danger)', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                      {isAnalyzing ? 'ANALİZ EDİLİYOR:' : 'DİNLENİYOR:'}
                     </span>
                     <span style={{ color: 'var(--foreground)', fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {transcript || "Konuşun ('18 dolgu ekle', 'üst çeneyi seç')..."}
@@ -1322,7 +1340,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   </div>
                 ) : (
                   <span style={{ color: 'var(--foreground-3, #94a3b8)', fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    📥 İşlemi buraya sürükleyin veya <b style={{ color: 'var(--foreground-2, #cbd5e1)' }}>Sesli Komut</b> verin
+                    İşlemi buraya sürükleyin veya sesli komut verin
                   </span>
                 )}
               </div>
@@ -1332,10 +1350,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             <button
               onClick={() => setAssistantPanelOpen(prev => !prev)}
               style={{
-                background: assistantPanelOpen ? 'var(--brand, #2563eb)' : 'var(--background)',
-                border: `1px solid ${assistantPanelOpen ? 'var(--brand, #3b82f6)' : 'var(--border)'}`,
-                color: assistantPanelOpen ? '#ffffff' : 'var(--foreground-2)',
-                padding: '7px 14px',
+                background: assistantPanelOpen ? 'var(--btn-clinic-primary-bg)' : 'var(--input-bg)',
+                border: `1px solid ${assistantPanelOpen ? 'var(--btn-clinic-primary-bg)' : 'var(--input-border)'}`,
+                color: assistantPanelOpen ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-2)',
+                padding: '8px 12px',
                 borderRadius: 8,
                 cursor: 'pointer',
                 fontSize: '0.82rem',
@@ -1343,16 +1361,17 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 display: 'flex',
                 alignItems: 'center',
                 gap: 7,
-                transition: 'all 0.2s ease'
+                minHeight: 40,
+                transition: 'background 0.2s ease, border-color 0.2s ease'
               }}
               title="Komut geçmişi ve manuel komut giriş panelini aç/kapat"
             >
               <Bot size={16} />
-              <span>{assistantPanelOpen ? '📋 Paneli Gizle' : '📋 Komut Paneli'}</span>
+              <span>{assistantPanelOpen ? 'Paneli Gizle' : 'Komut Paneli'}</span>
               {commandHistory.length > 0 && (
                 <span style={{
-                  background: assistantPanelOpen ? 'rgba(255,255,255,0.2)' : 'var(--border)',
-                  color: assistantPanelOpen ? '#ffffff' : 'var(--foreground-2)',
+                  background: assistantPanelOpen ? 'var(--badge-clinic-bg)' : 'var(--card-inner)',
+                  color: assistantPanelOpen ? 'var(--badge-clinic-fg)' : 'var(--foreground-2)',
                   fontSize: '0.72rem',
                   fontWeight: 700,
                   padding: '2px 7px',
@@ -1364,7 +1383,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               {assistantPanelOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
+          <button onClick={handleModalClose} aria-label="Tedavi planını kapat" style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
 
           {/* Expanded Assistant Panel */}
           {assistantPanelOpen && (
@@ -3067,7 +3086,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                   Yazdır
                 </button>
-                <button onClick={onClose} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 600 }}>İptal</button>
+                <button onClick={handleModalClose} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 600 }}>İptal</button>
                 <button onClick={handleSave} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
               </div>
             </div>
