@@ -16,6 +16,11 @@ export type ShiftPlanInput = {
 type ShiftSnapshot = { userId: string; date: string; startTime: string; endTime: string; shiftType: string; notes: string | null }
 type PlanCandidate = ShiftSnapshot & { existingId?: string; state: 'create' | 'same' | 'existing' | 'leave'; leaveReason?: string | null }
 
+function snapshotFrom(value: unknown): ShiftSnapshot {
+  if (typeof value === 'string') return JSON.parse(value) as ShiftSnapshot
+  return value as ShiftSnapshot
+}
+
 export async function ensureShiftPlanningTables() {
   await db.execute(sql`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS clinic_id uuid REFERENCES clinics(id)`)
   await db.execute(sql`
@@ -140,13 +145,13 @@ export async function undoShiftPlan(clinicId: string, operationId: string) {
     for (const item of items) {
       const [linked] = item.shiftId ? await tx.select({ id: shiftSwapRequests.id }).from(shiftSwapRequests).where(or(eq(shiftSwapRequests.shiftId, item.shiftId), eq(shiftSwapRequests.targetShiftId, item.shiftId))).limit(1) : []
       const [current] = item.shiftId ? await tx.select().from(shifts).where(and(eq(shifts.id, item.shiftId), eq(shifts.clinicId, clinicId))).limit(1) : []
-      const after = item.afterState as ShiftSnapshot
+      const after = snapshotFrom(item.afterState)
       if (linked || !current || current.userId !== after.userId || current.date !== after.date || current.startTime !== after.startTime || current.endTime !== after.endTime || current.shiftType !== after.shiftType) throw new Error('Mesai kayıtları sonradan değiştiği için bu işlem güvenle geri alınamaz.')
     }
     for (const item of items) {
       if (item.action === 'created') await tx.delete(shifts).where(and(eq(shifts.id, item.shiftId!), eq(shifts.clinicId, clinicId)))
       else {
-        const before = item.beforeState as ShiftSnapshot
+        const before = snapshotFrom(item.beforeState)
         await tx.update(shifts).set({ startTime: before.startTime, endTime: before.endTime, shiftType: before.shiftType, notes: before.notes }).where(and(eq(shifts.id, item.shiftId!), eq(shifts.clinicId, clinicId)))
       }
     }

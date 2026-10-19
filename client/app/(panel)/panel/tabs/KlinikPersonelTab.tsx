@@ -479,7 +479,7 @@ export default function KlinikPersonelTab() {
       <nav aria-label="Klinik personeli bölümleri" style={{ display: 'flex', gap: 4, marginBottom: 18, padding: 4, width: 'fit-content', borderRadius: 10, background: 'var(--card-inner)', border: '1px solid var(--input-border)' }}>
         {([['planner', 'Mesai Planı'], ['people', 'Personeller'], ['templates', 'Şablonlar']] as const).map(([id, text]) => <button key={id} onClick={() => setWorkspace(id)} aria-pressed={workspace === id} style={{ minHeight: 40, padding: '0 14px', border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700, background: workspace === id ? 'var(--accent)' : 'var(--input-bg)', color: workspace === id ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-2)' }}>{text}</button>)}
       </nav>
-      {workspace === 'planner' && <ShiftPlanner users={users} shifts={shifts} onChanged={fetchData} />}
+      {workspace === 'planner' && <ShiftPlanner users={users} shifts={shifts} onChanged={fetchData} onOpenLeave={(userId, date) => { setLeaveDoctorId(userId || users[0]?.id); setLeaveDate(date); setIsLeaveModalOpen(true) }} />}
       {workspace === 'people' && <>
       {/* ── Personel Listesi ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
