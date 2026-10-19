@@ -2,6 +2,22 @@
 import { timingSafeEqual } from 'node:crypto'
 
 export interface WhatsAppCredentials { baseUrl: string; apiKey: string; instanceName: string }
+export interface EvolutionQrResponse {
+  base64?: unknown
+  qrcode?: { base64?: unknown }
+  instance?: { state?: unknown; status?: unknown }
+  error?: unknown
+}
+
+export interface EvolutionQrResult {
+  qrcode: string | null
+  connectionState: string
+}
+
+const QR_DATA_URL_PREFIX = 'data:image/png;base64,'
+const QR_DATA_URL_MAX_LENGTH = 200_000
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
 export class EvolutionError extends Error {
   constructor(public status: number, public uncertain = false) {
     super(uncertain ? 'Gönderim sonucu doğrulanamadı; kontrol gerekli.' : `Evolution API hatası (${status}).`)
@@ -49,6 +65,43 @@ export async function evolutionRequest<T>(creds: WhatsAppCredentials, path: stri
   if (!res.ok) throw new EvolutionError(res.status, res.status >= 500)
   try { return await res.json() as T } catch { throw new EvolutionError(res.status, method !== 'GET') }
 }
+
+/** Accept Evolution's documented data URL and compatible raw PNG Base64 responses. */
+export function normalizeEvolutionQr(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const candidate = value.trim().replace(/\s/g, '')
+  const encoded = candidate.startsWith(QR_DATA_URL_PREFIX) ? candidate.slice(QR_DATA_URL_PREFIX.length) : candidate
+  if (!encoded || encoded.length + QR_DATA_URL_PREFIX.length >= QR_DATA_URL_MAX_LENGTH || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) return null
+  const png = Buffer.from(encoded, 'base64')
+  if (png.length < PNG_SIGNATURE.length || !png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) return null
+  return `${QR_DATA_URL_PREFIX}${encoded}`
+}
+
+export function evolutionConnectionState(result: EvolutionQrResponse, fallback = 'connecting'): string {
+  const state = result.instance?.state ?? result.instance?.status
+  return typeof state === 'string' && state.trim() ? state : fallback
+}
+
+/**
+ * QR generation is asynchronous in Evolution/WhatsApp-Baileys. A newly created
+ * or re-opened instance can therefore answer before its PNG has been encoded.
+ */
+export async function requestEvolutionQr(creds: WhatsAppCredentials, attempts = 4): Promise<EvolutionQrResult> {
+  let connectionState = 'connecting'
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const result = await evolutionRequest<EvolutionQrResponse>(creds, `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
+    if (result.error === true) {
+      if (attempt === attempts - 1) throw new Error('Evolution instance bağlantısı henüz hazır değil. Birkaç saniye sonra yeniden deneyin.')
+    } else {
+      connectionState = evolutionConnectionState(result)
+      const qrcode = normalizeEvolutionQr(result.base64) || normalizeEvolutionQr(result.qrcode?.base64)
+      if (qrcode || connectionState === 'open') return { qrcode, connectionState }
+    }
+    if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, 800))
+  }
+  return { qrcode: null, connectionState }
+}
+
 export async function sendWhatsAppText(to: string, creds: WhatsAppCredentials, text: string): Promise<{ messageId: string }> {
   const number = /^(\d+)(@s\.whatsapp\.net|@lid)$/.test(to) ? to : normalizePhone(to).slice(1)
   const data = await evolutionRequest<{ key?: { id?: string } }>(creds,

@@ -7,8 +7,8 @@ import {
 } from '../db/repositories/platform-clinics'
 import { hasMatchingRequestOrigin, isPlatformAdminRequest } from '../platform/access'
 import { activateWhatsApp, configureWhatsAppSetup, prepareWhatsAppQr, publicWhatsAppConfig, refreshWhatsAppConnection } from '../db/repositories/whatsapp'
-import { evolutionRequest } from '../integrations/whatsapp'
 import { credentialsFor } from '../db/repositories/whatsapp'
+import { requestEvolutionQr } from '../integrations/whatsapp'
 
 const clinicParams = t.Object({ clinicId: t.String({ format: 'uuid' }) })
 
@@ -40,10 +40,9 @@ export const platformPlugin = new Elysia({ prefix: '/api/platform' })
     if (!(await requirePlatformAdmin(cookie, request, set))) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
     try {
       const clinic = await prepareWhatsAppQr(params.clinicId)
-      const result = await evolutionRequest<{ base64?: string; qrcode?: { base64?: string }; instance?: { state?: string } }>(credentialsFor(clinic), `/instance/connect/${encodeURIComponent(clinic.evolutionInstanceName!)}`)
-      const qrcode = result.base64 || result.qrcode?.base64
-      if (!qrcode || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(qrcode) || qrcode.length >= 200_000) throw new Error('Evolution geçerli bir QR kodu döndürmedi.')
-      return { clinic: publicWhatsAppConfig(clinic), qrcode, connectionState: result.instance?.state || 'connecting' }
+      const qr = await requestEvolutionQr(credentialsFor(clinic))
+      const current = qr.connectionState === 'open' ? await refreshWhatsAppConnection(clinic.id) : publicWhatsAppConfig(clinic)
+      return { clinic: current, qrcode: qr.qrcode, connectionState: qr.connectionState }
     } catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'QR kodu hazırlanamadı.' } }
   }, { params: clinicParams })
   .post('/clinics/:clinicId/whatsapp/activate', async ({ params, cookie, request, set }) => {

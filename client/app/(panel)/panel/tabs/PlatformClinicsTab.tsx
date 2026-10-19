@@ -63,8 +63,9 @@ export default function PlatformClinicsTab() {
   })
   const connect = () => run(async () => {
     if (!selectedId || !config?.expectedPhone) throw new Error('Önce klinik WhatsApp telefonunu kaydedin.')
-    const result = await request<{ clinic: WhatsAppConfig; qrcode: string; connectionState: string }>(`/api/platform/clinics/${selectedId}/whatsapp/connect`, { method: 'POST' })
-    setQr(result.qrcode); setConfig(current => current ? { ...current, connectionState: result.connectionState } : result.clinic); setNotice('QR yalnız seçili klinik için oluşturuldu.')
+    const result = await request<{ clinic: WhatsAppConfig; qrcode: string | null; connectionState: string }>(`/api/platform/clinics/${selectedId}/whatsapp/connect`, { method: 'POST' })
+    setQr(result.qrcode); setConfig(current => current ? { ...current, connectionState: result.connectionState } : result.clinic)
+    setNotice(result.qrcode ? 'QR yalnız seçili klinik için oluşturuldu.' : result.connectionState === 'open' ? 'WhatsApp zaten bağlı; yeni QR koduna gerek yok.' : 'QR hazırlanıyor. Birkaç saniye sonra yeniden deneyin veya bağlantıyı kontrol edin.')
   })
   const activate = () => run(async () => { if (!selectedId) return; setConfig(await request<WhatsAppConfig>(`/api/platform/clinics/${selectedId}/whatsapp/activate`, { method: 'POST' })); setNotice('WhatsApp gönderimleri etkinleştirildi. AI otomatik yanıtları kapalı bırakıldı.') })
   const selectedClinic = clinics.find(clinic => clinic.id === selectedId)

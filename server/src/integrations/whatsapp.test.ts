@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { detectLocationRequest, detectOptOut, normalizePhone, parseEvolutionMessages, verifyWebhookSecret } from './whatsapp'
+import { detectLocationRequest, detectOptOut, evolutionConnectionState, normalizeEvolutionQr, normalizePhone, parseEvolutionMessages, verifyWebhookSecret } from './whatsapp'
 
 const now = Date.now()
 const payload = (overrides: Record<string, unknown> = {}) => ({
@@ -35,6 +35,19 @@ describe('Evolution webhook normalization', () => {
 })
 
 describe('WhatsApp safety helpers', () => {
+  test('normalizes valid Evolution QR payloads and rejects non-PNG data', () => {
+    const png = 'iVBORw0KGgo='
+    expect(normalizeEvolutionQr(`data:image/png;base64,${png}`)).toBe(`data:image/png;base64,${png}`)
+    expect(normalizeEvolutionQr(png)).toBe(`data:image/png;base64,${png}`)
+    expect(normalizeEvolutionQr('data:image/jpeg;base64,/9j/4AAQ')).toBeNull()
+    expect(normalizeEvolutionQr('not-a-qr')).toBeNull()
+  })
+
+  test('recognizes both Evolution connection-state response shapes', () => {
+    expect(evolutionConnectionState({ instance: { state: 'open' } })).toBe('open')
+    expect(evolutionConnectionState({ instance: { status: 'close' } })).toBe('close')
+  })
+
   test('normalizes Turkish and international telephone formats', () => {
     expect(normalizePhone('0555 111 22 33')).toBe('+905551112233')
     expect(normalizePhone('+49 151 23456789')).toBe('+4915123456789')

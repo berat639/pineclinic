@@ -4,7 +4,7 @@ import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
 import { credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig } from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
-import { evolutionRequest, EvolutionError, parseEvolutionMessages, verifyWebhookSecret } from '../integrations/whatsapp'
+import { evolutionRequest, EvolutionError, parseEvolutionMessages, requestEvolutionQr, verifyWebhookSecret } from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
 import { requireClinicId } from '../tenancy/context'
 
@@ -50,12 +50,13 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
     const clinic = await ensureEvolutionInstance(params.clinicId)
     if (!clinic.whatsappExpectedPhone) throw new Error('Önce merkez panelde klinik WhatsApp telefonu tanımlanmalı.')
     const creds = credentialsFor(clinic)
-    const result = await evolutionRequest<{ base64?: string; qrcode?: { base64?: string }; instance?: { state?: string } }>(creds,
-      `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
-    const qr = result.base64 || result.qrcode?.base64
-    const connectionState = result.instance?.state || 'connecting'
-    await db.update(clinics).set({ evolutionConnectionState: connectionState }).where(eq(clinics.id, clinic.id))
-    return { qrcode: qr && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(qr) && qr.length < 200_000 ? qr : null, connectionState }
+    const qr = await requestEvolutionQr(creds)
+    if (qr.connectionState === 'open') {
+      const current = await refreshWhatsAppConnection(clinic.id)
+      return { qrcode: null, connectionState: current.connectionState }
+    }
+    await db.update(clinics).set({ evolutionConnectionState: qr.connectionState }).where(eq(clinics.id, clinic.id))
+    return qr
   }, { params: clinicParams })
   .get('/:clinicId/conversations', async ({ params }) => {
     assertCurrentClinic(params.clinicId)
