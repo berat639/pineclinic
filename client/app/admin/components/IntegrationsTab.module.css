@@ -133,6 +133,51 @@
   line-height: 1.55;
 }
 
+.integrationStatus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.integrationStatus p {
+  margin: 0;
+  color: var(--integration-text-muted) !important;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.statusSuccess {
+  background: var(--integration-success-bg);
+  border-color: var(--integration-success-border);
+  color: var(--integration-success-text) !important;
+}
+
+.statusWarning {
+  background: var(--integration-warning-bg);
+  border-color: var(--integration-warning-border);
+  color: var(--integration-warning-text) !important;
+}
+
+.statusDanger {
+  background: var(--integration-danger-bg);
+  border-color: var(--integration-danger-border);
+  color: var(--integration-danger-text) !important;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));

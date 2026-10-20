@@ -6,6 +6,11 @@ import styles from './IntegrationsTab.module.css'
 
 type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
 type ClinicPhone = { id: string; phoneNumber: string; label: string | null; isActive: boolean; isPrimary: boolean }
+type IntegrationTest = { status: string; confirmed_at?: string | null; message?: string | null } | null
+type IntegrationState = { configured: boolean; enabled: boolean; health: string; checkedAt: string | null; test: IntegrationTest; numbers: string[]; callerId: string | null; senderId: string | null; fromAddress: string | null }
+type IntegrationOverview = { phone: IntegrationState; sms: IntegrationState; smtp: IntegrationState }
+const emptyIntegrationState = (): IntegrationState => ({ configured: false, enabled: false, health: 'unknown', checkedAt: null, test: null, numbers: [], callerId: null, senderId: null, fromAddress: null })
+const emptyIntegrationOverview = (): IntegrationOverview => ({ phone: emptyIntegrationState(), sms: emptyIntegrationState(), smtp: emptyIntegrationState() })
 
 const roleTabs = [
   { id: 'calendar', label: 'Takvim' },
@@ -33,6 +38,33 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Spinner() {
   return <div className={styles.spinner} aria-label="Yükleniyor" />
+}
+
+function statusFor(service: 'phone' | 'sms' | 'smtp', state: IntegrationState) {
+  if (!state.configured) return { label: 'Yapılandırılmadı', detail: 'Satış ekibinden kurulum talep edebilirsiniz.', tone: 'warning' as const, attention: true }
+  if (!state.enabled) return { label: 'Etkin değil', detail: 'Ayarlar kaydedilmiş; test ve etkinleştirme bekleniyor.', tone: 'warning' as const, attention: true }
+  if (service === 'phone') {
+    if (state.health === 'registered') return { label: 'Etkin · Bağlı', detail: state.callerId ? `Birincil numara: ${state.callerId}` : 'SIP kaydı aktif.', tone: 'success' as const, attention: false }
+    if (state.health === 'unregistered') return { label: 'Etkin · Bağlantı koptu', detail: 'SIP kaydı alınamadı. Satış ekibinin bağlantıyı kontrol etmesi gerekiyor.', tone: 'danger' as const, attention: true }
+    return { label: 'Etkin · Durum kontrol ediliyor', detail: 'Son SIP bağlantı kontrolü güncel değil.', tone: 'warning' as const, attention: true }
+  }
+  if (state.test?.status === 'failed') return { label: 'Etkin · Son test başarısız', detail: state.test.message || 'Sağlayıcı bağlantısını kontrol edin.', tone: 'danger' as const, attention: true }
+  if (state.test?.status === 'confirmed') return { label: 'Etkin · Test doğrulandı', detail: service === 'sms' ? `Başlık: ${state.senderId || '—'}` : `Gönderici: ${state.fromAddress || '—'}`, tone: 'success' as const, attention: false }
+  return { label: 'Etkin · Test doğrulaması bekleniyor', detail: 'Son test sonucu satış ekibi tarafından doğrulanmalı.', tone: 'warning' as const, attention: true }
+}
+
+function ManagedIntegrationCard({ title, service, state, numbers, onRequest }: { title: string; service: 'phone' | 'sms' | 'smtp'; state: IntegrationState; numbers?: boolean; onRequest: () => void }) {
+  const status = statusFor(service, state)
+  const detail = numbers && state.numbers.length
+    ? `Atanmış: ${state.numbers.join(', ')}${state.callerId ? ` · Birincil: ${state.callerId}` : ''}`
+    : status.detail
+  return <SettingsCard title={title} description="Bu entegrasyon satış ekibi tarafından Klinikler ekranından yönetilir. Burada yalnızca durum görüntülenir.">
+    <div className={styles.integrationStatus}>
+      <span className={`${styles.statusBadge} ${styles[`status${status.tone[0].toUpperCase()}${status.tone.slice(1)}`]}`}>{status.label}</span>
+      <p>{detail}</p>
+    </div>
+    {status.attention && <button type="button" className={styles.saveButton} onClick={onRequest}>Talep oluştur</button>}
+  </SettingsCard>
 }
 
 export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' }: { apiPrefix?: string }) {
@@ -70,6 +102,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   })
 
   const [loading, setLoading] = useState(true)
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationOverview>(emptyIntegrationOverview)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -82,6 +115,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
     fetch(apiPrefix)
       .then(res => res.json())
       .then(data => {
+        if (data.phone && data.sms && data.smtp) setIntegrationStatus(data as IntegrationOverview)
         if (data.voipProvider) setVoipProvider(data.voipProvider as CloudProvider)
         if (data.voipLabel) setVoipLabel(data.voipLabel)
         if (data.voipBaseUrl) setVoipBaseUrl(data.voipBaseUrl)
@@ -211,7 +245,12 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         </div>
       </SettingsCard>
 
-      {['Çağrı Merkezi / Santral (VoIP)', 'Klinik Telefon Numaraları', 'SMS Ayarları (NetGSM)', 'E-Posta (SMTP)'].map(title => <SettingsCard key={title} title={title} description="Bu entegrasyon satış ekibi tarafından Klinikler ekranından yönetilir. Burada yalnızca durum görüntülenir."><button type="button" className={styles.saveButton} onClick={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')}>Talep oluştur</button></SettingsCard>)}
+      <>
+        <ManagedIntegrationCard title="Çağrı Merkezi / Santral (VoIP)" service="phone" state={integrationStatus.phone} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="Klinik Telefon Numaraları" service="phone" state={integrationStatus.phone} numbers onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="SMS Ayarları (NetGSM)" service="sms" state={integrationStatus.sms} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="E-Posta (SMTP)" service="smtp" state={integrationStatus.smtp} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+      </>
 
       <EvolutionWhatsAppCard />
 
