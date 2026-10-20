@@ -65,8 +65,11 @@ export async function beginTest(id: string, service: Service, body: Record<strin
       } finally { transport.close() }
     }
     await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id}`)
-  } catch {
-    await db.execute(sql`UPDATE integration_tests SET status='failed',message='Test tamamlanamadı. Bağlantı bilgilerini ve sağlayıcı erişimini kontrol edin.' WHERE id=${created.id}`)
+  } catch (error) {
+    const message = error instanceof SetupError ? error.message : 'Test tamamlanamadı. Bağlantı bilgilerini ve sağlayıcı erişimini kontrol edin.'
+    // Keep credentials and provider frames out of records; retain the actionable error in server logs.
+    console.error(`[Integrations] ${service}/${kind} test failed for clinic ${id}:`, error instanceof Error ? error.message : 'Bilinmeyen hata')
+    await db.execute(sql`UPDATE integration_tests SET status='failed',message=${message} WHERE id=${created.id}`)
   }
   return testInfo(id,service,created.id)
 }
