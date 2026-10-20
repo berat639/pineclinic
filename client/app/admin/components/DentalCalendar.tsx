@@ -45,7 +45,7 @@ interface Props {
   view?: 'day' | 'week' | 'month'
   onHeaderContextMenu?: (e: React.MouseEvent, doctorId: string) => void
   onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void
-  onEventUpdate?: (updatedEvent: CalendarEvent) => void
+  onEventUpdate?: (updatedEvent: CalendarEvent, options?: { requiresAssignmentConfirmation?: boolean; keepUnassigned?: boolean }) => void
 }
 
 const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
@@ -218,11 +218,13 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     originalTop: '', originalHeight: '', originalLeft: '', originalZIndex: '', originalOpacity: ''
   });
   const hasDraggedRef = useRef(false);
+  const [isUnassignedDrag, setIsUnassignedDrag] = useState(false)
 
   const startInteraction = (evt: React.MouseEvent, e: CalendarEvent, type: 'move' | 'resize-top' | 'resize-bottom', initialColIdx: number) => {
     if (evt.button !== 0) return;
     evt.stopPropagation();
     hasDraggedRef.current = false;
+    setIsUnassignedDrag(!e.doctorId && type === 'move')
     
     const element = (evt.currentTarget as HTMLElement).closest('.rc-event') as HTMLElement;
     if (!element) return;
@@ -350,6 +352,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       
       let newDoctorId = targetEvent ? targetEvent.doctorId : null;
       let newDate = targetEvent ? targetEvent.startTime.slice(0, 10) : currentDate;
+      const keepUnassigned = Boolean(!targetEvent?.doctorId && (e.shiftKey || e.altKey));
 
       if (gridRef.current && state.type === 'move') {
         const gridRect = gridRef.current.getBoundingClientRect();
@@ -359,7 +362,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
         if (mouseXRelative < -10 || mouseXRelative > availableWidth + 10 || e.clientY < gridRect.top - 10 || e.clientY > gridRect.bottom + 10) {
           newDoctorId = null; // Unassign if dropped outside
         } else {
-          if (view === 'day') {
+          if (view === 'day' && !keepUnassigned) {
             const numCols = displayDoctors.length || 1;
             const colWidthPx = availableWidth / numCols;
             const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
@@ -382,6 +385,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       state.element.style.opacity = state.originalOpacity;
       state.element.style.transition = '';
       document.body.style.userSelect = '';
+      setIsUnassignedDrag(false)
       
       const wasDragged = hasDraggedRef.current;
       if (wasDragged) {
@@ -479,6 +483,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             startTime: newStartTime.toISOString(),
             endTime: newEndTime.toISOString(),
             doctorId: newDoctorId
+          }, {
+            requiresAssignmentConfirmation: Boolean(!targetEvent.doctorId && newDoctorId),
+            keepUnassigned,
           });
         }
       }
@@ -536,7 +543,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     const cols = displayDoctors.length || 1
     const minDayWidth = cols <= 1 ? '100%' : `${cols * 220 + 56}px`
     return (
-      <div className="rc-scroll-container">
+      <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
         <div className="rc-wrap" style={{ minWidth: minDayWidth, width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" />
@@ -564,8 +571,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 onContextMenu={(e) => { e.preventDefault(); if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
                 onClick={(e) => { if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
               >
-                <div className="rc-col-title" style={{ color: '#9ca3af', fontSize: '0.8rem', margin: 0 }}>⚠️ Atanmamış</div>
-                <div className="rc-col-sub" style={{ margin: 0 }}>({globalUnassigned.length} bekliyor)</div>
+                <div className="rc-col-title" style={{ color: 'var(--foreground-2)', fontSize: '0.8rem', margin: 0 }}>⚠️ Atama bekliyor</div>
+                <div className="rc-col-sub" style={{ margin: 0 }}>({globalUnassigned.length} bekliyor · Shift/Alt: atamasız taşı)</div>
               </div>
             </>
           )}
@@ -779,8 +786,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               >
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', 0)} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, minWidth: 0, overflow: 'hidden' }}>
-                  <span style={{ fontSize: '0.6rem', padding: '1px 5px', borderRadius: 4, background: '#f59e0b', color: '#181c24', fontWeight: 800, letterSpacing: '0.3px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    ⚠️ DOKTOR ATANMADI
+                  <span className="rc-unassigned-badge">
+                    ⠿ ATAMA BEKLİYOR
                   </span>
                 </div>
                 <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--foreground)' }}>{e.title}</span>
@@ -800,7 +807,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     const weekDays = getWeekDays(currentDate)
     const cols = weekDays.length
     return (
-      <div className="rc-scroll-container">
+      <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
         <div className="rc-wrap" style={{ minWidth: '840px', width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" style={{ position: 'relative' }}>
@@ -898,7 +905,18 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
           {weekDays.map((day, colIdx) => {
             const dayEvents = events.filter(e => getLocalYMD(e.startTime) === day.date);
             const layout = calculateEventLayout(dayEvents);
-            return layout.map(({ event: e, col, maxCol }) => {
+            const leaveBlocks = (doctorLeaves || []).filter(l => l.date === day.date).map(l => {
+              const start = `${l.date}T${l.isFullDay ? '00:00' : l.startTime}:00+03:00`
+              const end = `${l.date}T${l.isFullDay ? '23:59' : l.endTime}:00+03:00`
+              const { top, height } = eventPosition(start, end, 0)
+              const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`
+              const width = `calc((100% - 56px) / ${cols} - 4px)`
+              return <div key={`week-leave-${l.id}`} className="rc-doctor-leave" style={{ position: 'absolute', top, height, left, width, zIndex: 3, padding: '5px 7px', overflow: 'hidden', cursor: 'not-allowed' }} title={`Dr. ${l.doctorName || 'Hekim'} izinli: ${l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}`}>
+                <span className="rc-ev-title">Kapalı · {l.doctorName || 'Hekim'}</span>
+                <span className="rc-ev-time">{l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}</span>
+              </div>
+            })
+            const eventBlocks = layout.map(({ event: e, col, maxCol }) => {
               const { top, height } = eventPosition(e.startTime, e.endTime, 0)
               const doc = doctors.find(d => d.id === e.doctorId)
               const docColor = doc?.color || '#3b82f6'
@@ -938,6 +956,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 </div>
               )
             })
+            return <React.Fragment key={day.date}>{leaveBlocks}{eventBlocks}</React.Fragment>
           })}
         </div>
         </div>
@@ -965,7 +984,13 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
           <div key={week.startDate} className="rc-week-row">
             <div className="rc-week-label">{week.label}</div>
             <div className="rc-week-events">
-              {weekEvents.length === 0 && (!shifts || shifts.filter(s => s.date >= week.startDate && s.date <= week.endDate).length === 0) && <span className="rc-empty">Randevu/Vardiya yok</span>}
+              {weekEvents.length === 0 && (!shifts || shifts.filter(s => s.date >= week.startDate && s.date <= week.endDate).length === 0) && <span className="rc-empty">Randevu/Vardiya/İzin yok</span>}
+              {(doctorLeaves || []).filter(l => l.date >= week.startDate && l.date <= week.endDate).map(l => (
+                <div key={`month-leave-${l.id}`} className="rc-month-ev rc-doctor-leave" title="İzinli / kapalı saat">
+                  <span className="rc-ev-title">⛔ İzinli: {l.doctorName || 'Hekim'}</span>
+                  <span className="rc-ev-time">{new Date(`${l.date}T00:00:00`).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} · {l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}</span>
+                </div>
+              ))}
               {shifts && shifts.filter(s => s.date >= week.startDate && s.date <= week.endDate).map(s => (
                 <div key={`shift-${s.id}`} className="rc-month-ev" style={{ background: 'rgba(16,185,129,0.1)', borderLeftColor: '#10b981' }} title="Vardiya">
                   <span className="rc-ev-title">👨‍⚕️ Vardiya: {s.userName}</span>

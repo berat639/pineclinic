@@ -242,6 +242,9 @@ export const dentalAppointments = pgTable('dental_appointments', {
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Kept explicitly because the patient sidebar is ordered by the latest
+  // appointment operation, not the appointment's scheduled time.
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
 export const doctorLeaves = pgTable('doctor_leaves', {

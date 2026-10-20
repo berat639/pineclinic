@@ -56,6 +56,12 @@
   --modal-header-bg: #132238;
   --modal-section-bg: #132238;
   --modal-shadow: #050a14;
+  --calendar-leave-bg: #111827;
+  --calendar-leave-border: #475569;
+  --calendar-leave-fg: #cbd5e1;
+  --calendar-leave-stripe: #0f172a;
+  --calendar-unassigned-bg: #3b2a11;
+  --calendar-unassigned-border: #f59e0b;
 
   /* ── Clinical Health Design System (Dark) ────────────────────────── */
   --btn-clinic-primary-bg: #2563eb;
@@ -132,6 +138,12 @@
   --modal-header-bg: #e0f2fe;
   --modal-section-bg: #eff6ff;
   --modal-shadow: #64748b;
+  --calendar-leave-bg: #dbe2ea;
+  --calendar-leave-border: #94a3b8;
+  --calendar-leave-fg: #334155;
+  --calendar-leave-stripe: #cbd5e1;
+  --calendar-unassigned-bg: #fff3d6;
+  --calendar-unassigned-border: #b45309;
 
   /* ── Clinical Health Design System (Light) ───────────────────────── */
   --btn-clinic-primary-bg: #1d4ed8;
@@ -407,6 +419,27 @@
 .rc-event { position: absolute; padding: 4px 8px; border-radius: 7px; border-left: 3px solid #3b82f6; cursor: pointer; overflow: hidden; transition: transform 0.1s, box-shadow 0.1s; z-index: 5; user-select: none; }
 .rc-event:hover { transform: scale(1.015); box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 10; }
 .rc-event-unassigned:hover { transform: none; }
+.rc-unassigned-drag .rc-col-head {
+  outline: 2px dashed var(--calendar-unassigned-border);
+  outline-offset: -4px;
+  background: var(--calendar-unassigned-bg);
+}
+.rc-unassigned-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--calendar-unassigned-border);
+  color: #ffffff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rc-ev-title { display: block; font-size: 0.78rem; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-ev-time { display: block; font-size: 0.68rem; color: var(--foreground-2); font-weight: 500; }
 .rc-ev-doc { display: block; font-size: 0.65rem; color: var(--foreground-3); font-style: italic; }
@@ -422,22 +455,22 @@
 
 /* Doctor Leaves in Calendar */
 .rc-doctor-leave {
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-left: 4px solid var(--foreground-3);
-  color: var(--foreground-2);
-  opacity: 0.82;
+  background: var(--calendar-leave-bg);
+  border: 1px solid var(--calendar-leave-border);
+  border-left: 4px solid var(--calendar-leave-border);
+  color: var(--calendar-leave-fg);
   box-shadow: none;
+  background-image: repeating-linear-gradient(-45deg, var(--calendar-leave-bg) 0 8px, var(--calendar-leave-stripe) 8px 10px);
 }
 [data-theme="light"] .rc-doctor-leave {
-  background: var(--input-bg) !important;
-  border-color: var(--input-border) !important;
-  border-left-color: var(--foreground-3) !important;
+  background: var(--calendar-leave-bg) !important;
+  border-color: var(--calendar-leave-border) !important;
+  border-left-color: var(--calendar-leave-border) !important;
 }
 [data-theme="dark"] .rc-doctor-leave {
-  background: var(--input-bg) !important;
-  border-color: var(--input-border) !important;
-  border-left-color: var(--foreground-3) !important;
+  background: var(--calendar-leave-bg) !important;
+  border-color: var(--calendar-leave-border) !important;
+  border-left-color: var(--calendar-leave-border) !important;
 }
 
 /* ── Reset & Responsive Viewport Protection ─────────────────────────────────── */

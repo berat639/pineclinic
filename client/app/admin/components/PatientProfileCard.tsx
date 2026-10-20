@@ -3,9 +3,11 @@ import React from 'react'
 interface PatientProfileCardProps {
   profile: any
   onEdit?: (patient: any) => void
+  calendarHistoryMode?: boolean
+  onConsentChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void
 }
 
-export default function PatientProfileCard({ profile, onEdit }: PatientProfileCardProps) {
+export default function PatientProfileCard({ profile, onEdit, calendarHistoryMode = false, onConsentChange }: PatientProfileCardProps) {
   if (!profile) return (
     <div style={{ padding: 24, textAlign: 'center', color: 'var(--foreground-3)' }}>
       Yükleniyor...
@@ -84,18 +86,9 @@ export default function PatientProfileCard({ profile, onEdit }: PatientProfileCa
       <div style={cardStyle}>
         <div style={headerStyle}>🛡️ İletişim İzinleri (KVKK)</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>💬 SMS:</span>
-            {patient.smsOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>📧 E-posta:</span>
-            {patient.emailOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>🟢 WhatsApp:</span>
-            {patient.whatsappOptOut ? <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ Reddedildi</span> : <span style={{ color: '#10b981', fontWeight: 600 }}>✔️ İzinli</span>}
-          </div>
+          <ConsentRow label="💬 SMS" field="smsOptOut" optedOut={patient.smsOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
+          <ConsentRow label="📧 E-posta" field="emailOptOut" optedOut={patient.emailOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
+          <ConsentRow label="🟢 WhatsApp" field="whatsappOptOut" optedOut={patient.whatsappOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
         </div>
       </div>
 
@@ -179,7 +172,7 @@ export default function PatientProfileCard({ profile, onEdit }: PatientProfileCa
       )}
 
       {/* Randevular */}
-      {appointments && appointments.length > 0 && (
+      {!calendarHistoryMode && appointments && appointments.length > 0 && (
         <div style={cardStyle}>
           <div style={headerStyle}>📅 Ziyaret Tarihleri ({appointments.length})</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -193,7 +186,7 @@ export default function PatientProfileCard({ profile, onEdit }: PatientProfileCa
       )}
 
       {/* Tedavi Planları */}
-      {treatments && treatments.length > 0 && (
+      {!calendarHistoryMode && treatments && treatments.length > 0 && (
         <div style={cardStyle}>
           <div style={headerStyle}>🦷 Tedavi Planları ({treatments.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -243,4 +236,15 @@ export default function PatientProfileCard({ profile, onEdit }: PatientProfileCa
       
     </div>
   )
+}
+
+function ConsentRow({ label, field, optedOut, editable, onChange }: { label: string; field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut'; optedOut: boolean; editable: boolean; onChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void }) {
+  const allowed = !optedOut
+  return <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <span>{label}:</span>
+    {editable ? <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: allowed ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
+      <input type="checkbox" checked={allowed} onChange={event => onChange?.(field, !event.target.checked)} />
+      {allowed ? 'İzinli' : 'Reddedildi'}
+    </label> : <span style={{ color: allowed ? '#10b981' : '#ef4444', fontWeight: 600 }}>{allowed ? '✔️ İzinli' : '❌ Reddedildi'}</span>}
+  </div>
 }

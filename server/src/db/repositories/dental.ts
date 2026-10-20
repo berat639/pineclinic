@@ -39,6 +39,9 @@ export function ensureAiAppointmentReviewSchema(): Promise<void> {
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id)`)
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`)
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`)
+    await db.execute(sql`UPDATE dental_appointments SET updated_at = COALESCE(updated_at, created_at, now()) WHERE updated_at IS NULL`)
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dental_appointments_patient_activity_idx ON dental_appointments (clinic_id, patient_id, updated_at DESC)`)
     await db.execute(sql`CREATE INDEX IF NOT EXISTS dental_appointments_review_status_idx ON dental_appointments (clinic_id, review_status, start_time)`)
   })().catch(error => { aiReviewSchemaPromise = null; throw error })
   return aiReviewSchemaPromise
@@ -471,7 +474,37 @@ export async function getPatientFullProfile(patientId: string) {
 }
 
 export async function listPatients() {
-  return db.select().from(patients).where(eq(patients.clinicId, requireClinicId())).orderBy(desc(patients.createdAt))
+  const clinicId = requireClinicId()
+  await ensureAiAppointmentReviewSchema()
+  return db.select({
+    id: patients.id,
+    clinicId: patients.clinicId,
+    name: patients.name,
+    phone: patients.phone,
+    email: patients.email,
+    tcIdentity: patients.tcIdentity,
+    gender: patients.gender,
+    birthDate: patients.birthDate,
+    birthYear: patients.birthYear,
+    balance: patients.balance,
+    whatsappOptOut: patients.whatsappOptOut,
+    smsOptOut: patients.smsOptOut,
+    emailOptOut: patients.emailOptOut,
+    createdAt: patients.createdAt,
+    lastAppointmentActivityAt: sql<Date | null>`(
+      SELECT max(${dentalAppointments.updatedAt})
+      FROM ${dentalAppointments}
+      WHERE ${dentalAppointments.clinicId} = ${clinicId}
+        AND ${dentalAppointments.patientId} = ${patients.id}
+    )`,
+  }).from(patients)
+    .where(eq(patients.clinicId, clinicId))
+    .orderBy(sql`(
+      SELECT max(${dentalAppointments.updatedAt})
+      FROM ${dentalAppointments}
+      WHERE ${dentalAppointments.clinicId} = ${clinicId}
+        AND ${dentalAppointments.patientId} = ${patients.id}
+    ) DESC NULLS LAST`, desc(patients.createdAt))
 }
 
 export async function createPatient(data: { name: string; phone?: string; balance?: number; email?: string; tcIdentity?: string; gender?: string; birthDate?: string; birthYear?: number }) {
@@ -1064,7 +1097,7 @@ export async function updateDentalAppointment(id: string, data: {
   if (data.complaint !== undefined) values.complaint = data.complaint
   if (Object.keys(values).length === 0) return null
   const [row] = await db.update(dentalAppointments)
-    .set(values)
+    .set({ ...values, updatedAt: new Date() })
     .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId)))
     .returning()
   return row ?? null
@@ -1132,7 +1165,7 @@ export async function approveAiAppointment(id: string, data: {
       complaint: data.complaint ?? appointment.complaint, notes: data.complaint ?? appointment.notes,
       status: data.doctorId ? 'scheduled' : 'pending_assignment', type: 'kontrol', timeConfirmed: true,
       reviewStatus: 'approved', reviewedBy: data.reviewedBy, reviewedAt: new Date(), rejectionReason: null,
-      title: `${appointment.intakePatientName || appointment.title.split(' - ')[0]} - kontrol`,
+      title: `${appointment.intakePatientName || appointment.title.split(' - ')[0]} - kontrol`, updatedAt: new Date(),
     }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
     if (!updated) throw new Error('Randevu aynı anda başka bir kullanıcı tarafından işlendi.')
     return updated
@@ -1143,7 +1176,7 @@ export async function rejectAiAppointment(id: string, reason: string, reviewedBy
   const clinicId = requireClinicId()
   if (!reason.trim()) throw new Error('İptal nedeni zorunludur.')
   const [row] = await db.update(dentalAppointments).set({
-    status: 'cancelled', reviewStatus: 'rejected', rejectionReason: reason.trim(), reviewedBy, reviewedAt: new Date(),
+    status: 'cancelled', reviewStatus: 'rejected', rejectionReason: reason.trim(), reviewedBy, reviewedAt: new Date(), updatedAt: new Date(),
   }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.status, 'pending_review'), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
   if (!row) throw new Error('Bu AI talebi zaten sonuçlandırılmış veya bulunamadı.')
   return row

@@ -563,7 +563,18 @@ export default function CalendarTab() {
     setPatientInfo(null)
     if (event.patientId) {
       fetch(`/api/dental/patients/${event.patientId}`).then(r => r.ok ? r.json() : null).then(d => d && setPatientInfo(d)).catch(() => { })
-      fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : { treatments: [], groups: [] }).then(d => { setPatientTreatments(d?.treatments || []); setTreatmentGroups(d?.groups || []); }).catch(() => { })
+      // The right panel is appointment-scoped: retain only the treatments
+      // linked to the selected appointment. Full history lives in the left
+      // patient accordion.
+      Promise.all([
+        fetch(`/api/dental/patients/${event.patientId}/treatments`).then(r => r.ok ? r.json() : { treatments: [], groups: [] }),
+        fetch(`/api/dental/appointments/${event.id}/treatments`).then(r => r.ok ? r.json() : []),
+      ]).then(([d, linkedSessions]) => {
+        const linkedIds = new Set((linkedSessions || []).map((session: any) => session.treatmentPlanId))
+        const appointmentTreatments = (d?.treatments || []).filter((t: any) => linkedIds.has(t.id))
+        setPatientTreatments(appointmentTreatments)
+        setTreatmentGroups((d?.groups || []).filter((group: any) => (group.treatments || []).some((t: any) => linkedIds.has(t.id))))
+      }).catch(() => { })
       fetch(`/api/dental/patients/${event.patientId}/payments`).then(r => r.ok ? r.json() : []).then(setPatientPayments).catch(() => { })
     }
     const docQuery = event.doctorId ? `?doctorId=${event.doctorId}` : ''
@@ -1443,24 +1454,45 @@ export default function CalendarTab() {
           onEmptySlotSelect={(start, end, doctorId, x, y) => {
             setQuickCreateMenu({ start, end, doctorId, x, y })
           }}
-          onEventUpdate={async (updatedEvent) => {
-            console.log("Event updated via drag/resize", updatedEvent);
-            try {
-              const newStatus = updatedEvent.doctorId ? 'scheduled' : 'pending_assignment';
-              await fetch(`/api/dental/appointments/${updatedEvent.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  startTime: updatedEvent.startTime,
-                  endTime: updatedEvent.endTime,
-                  doctorId: updatedEvent.doctorId || null,
-                  status: newStatus
-                })
-              });
-              fetchData();
-            } catch (e) {
-              console.error("Failed to update event", e);
+          onEventUpdate={async (updatedEvent, options) => {
+            const persistMove = async () => {
+              try {
+                const newStatus = updatedEvent.doctorId ? 'scheduled' : 'pending_assignment';
+                const response = await fetch(`/api/dental/appointments/${updatedEvent.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    startTime: updatedEvent.startTime,
+                    endTime: updatedEvent.endTime,
+                    doctorId: updatedEvent.doctorId || null,
+                    status: newStatus
+                  })
+                });
+                const body = await response.json().catch(() => ({}))
+                if (!response.ok) throw new Error(body.error || 'Randevu taşınamadı')
+                toast.success(options?.keepUnassigned ? 'Atanmamış randevu taşındı' : 'Randevu güncellendi')
+                fetchData();
+              } catch (error: any) {
+                toast.error(error.message || 'Randevu güncellenemedi')
+              }
             }
+
+            if (options?.requiresAssignmentConfirmation && updatedEvent.doctorId) {
+              const doctor = doctors.find(d => d.id === updatedEvent.doctorId)
+              const start = new Date(updatedEvent.startTime).toLocaleString('tr-TR', { dateStyle: 'medium', timeStyle: 'short' })
+              setConfirmModal({
+                isOpen: true,
+                title: 'Doktor atamasını onayla',
+                message: `${updatedEvent.title} randevusunu ${doctor?.name || 'seçilen hekim'} için ${start} saatine atamak istiyor musunuz? Vardiya ve izin uygunluğu doğrulandı.`,
+                confirmText: 'Atamayı Onayla',
+                cancelText: 'Vazgeç',
+                variant: 'primary',
+                onConfirm: persistMove,
+              })
+              return
+            }
+
+            await persistMove()
           }}
           onEventClick={handleEventClick}
           view={view}
@@ -2941,6 +2973,30 @@ export default function CalendarTab() {
         isOpen={patientPanelOpen}
         onClose={() => setPatientPanelOpen(false)}
         patients={patients}
+        doctors={doctors}
+        shifts={shifts}
+        onFocusAppointment={(appointmentId, startTime) => {
+          const event = events.find(candidate => candidate.id === appointmentId)
+          if (!event) { toast.error('Bağlı randevu bulunamadı'); return }
+          setPatientPanelOpen(false)
+          handleEventClick(appointmentId, event)
+          focusAppointmentOnCalendar(appointmentId, startTime)
+        }}
+        onPlanTreatment={(treatment, patient) => {
+          const startTime = treatment.plannedDate || `${currentDate}T10:00:00+03:00`
+          setPatientInfo(patient)
+          setSelectedEvent({
+            id: `draft-${treatment.id}`,
+            patientId: patient.id,
+            doctorId: treatment.doctorId || null,
+            title: `${patient.name} - ${treatment.procedureName}`,
+            startTime,
+            endTime: new Date(new Date(startTime).getTime() + 30 * 60000).toISOString(),
+            status: 'pending_assignment',
+            type: 'Tedavi',
+          })
+          setFastScheduleTreatment(treatment)
+        }}
       />
 
       <DoctorLeaveModal
