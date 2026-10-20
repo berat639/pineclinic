@@ -34,11 +34,14 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# outputFileTracingRoot is the repository root, so Next preserves the client
+# directory inside the standalone bundle. Keep runtime assets beside that
+# generated server entrypoint.
+COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
 
 USER nextjs
 EXPOSE 3002
 
-CMD ["node", "server.js"]
+CMD ["node", "app/server.js"]
