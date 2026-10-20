@@ -33,6 +33,7 @@
     "react-day-picker": "8.10.1",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.6.0",
+    "react-imask": "^7.6.1",
     "react-odontogram": "^0.5.6",
     "recharts": "^3.10.1",
     "three": "^0.185.1",

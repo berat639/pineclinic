@@ -114,10 +114,22 @@
 .field small { color: var(--clinic-muted); font-size: 12px; font-weight: 400; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .connectionText { color: var(--clinic-muted); font-size: 13px; }
+.phoneList { display: grid; gap: 8px; }
+.phoneRow { display: flex; gap: 8px; align-items: center; }
+.phoneRow input { min-width: 0; flex: 1; }
+.removeButton { min-height: 38px; padding: 7px 10px; background: var(--clinic-danger-bg); border: 1px solid var(--clinic-danger-border); border-radius: 8px; color: var(--clinic-danger-text); cursor: pointer; font: inherit; font-weight: 700; }
+.steps { display: grid; gap: 10px; margin-top: 18px; }
+.step { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px; background: var(--clinic-surface); border: 1px solid var(--clinic-border); border-radius: 9px; }
+.step strong { display: block; color: var(--clinic-text); font-size: 13px; }
+.step p { margin: 4px 0 0; color: var(--clinic-muted); font-size: 12px; line-height: 1.45; }
+.stepComplete { background: var(--clinic-success-bg); border-color: var(--clinic-success-border); }
+.stepComplete strong { color: var(--clinic-success-text); }
 .qr { margin-top: 16px; padding: 16px; background: var(--clinic-surface); border: 1px solid var(--clinic-border); border-radius: 8px; }
 .qr img { display: block; max-width: 100%; height: auto; padding: 8px; background: #fff; border-radius: 4px; }
 
 @media (max-width: 720px) {
   .row { grid-template-columns: 1fr; }
   .setupGrid { grid-template-columns: 1fr; }
+  .step { align-items: flex-start; flex-direction: column; }
+  .step button { width: 100%; }
 }
