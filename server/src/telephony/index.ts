@@ -570,6 +570,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             waitCount++
           }
           if (!state.clinicId || !state.hostname) throw new Error('Çağrı için klinik domaini eşleştirilemedi')
+          const { recordCallConnected } = await import('../integrations/managed/routing')
+          await recordCallConnected(state.callerChannel || '', state.clinicId)
           info.clinicId = state.clinicId
           info.hostname = state.hostname
           await runWithTenantContext({ clinicId: state.clinicId, hostname: state.hostname }, async () => {

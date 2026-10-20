@@ -175,6 +175,33 @@ export async function activateWhatsApp(id: string, userId: string) {
   return publicWhatsAppConfig(updated)
 }
 
+/** Updates clinic-controlled delivery preferences without exposing provider credentials. */
+export async function updateWhatsAppPreferences(id: string, input: { enabled: boolean; aiEnabled: boolean }) {
+  const state = await refreshWhatsAppConnection(id)
+  const clinic = await getWhatsAppClinic(id)
+  if ((input.enabled || input.aiEnabled) && (state.connectionState !== 'open' || !clinic.whatsappNumberVerifiedAt || clinic.whatsappLinkedPhone !== clinic.whatsappExpectedPhone)) {
+    throw new Error('Bu ayarları açmak için doğrulanmış bir WhatsApp bağlantısı gerekli.')
+  }
+  const [updated] = await db.update(clinics).set({
+    whatsappEnabled: input.enabled,
+    whatsappAiEnabled: input.enabled && input.aiEnabled,
+  }).where(eq(clinics.id, id)).returning()
+  return publicWhatsAppConfig(updated)
+}
+
+/** Logs out the linked device but retains the clinic instance for a later QR reconnect. */
+export async function disconnectWhatsApp(id: string) {
+  const clinic = await ensureAutomaticEvolutionConfig(id)
+  const creds = credentialsFor(clinic)
+  try { await evolutionRequest(creds, `/instance/logout/${encodeURIComponent(creds.instanceName)}`, undefined, 'DELETE') }
+  catch (error) { if (!(error instanceof EvolutionError) || error.status !== 404) throw error }
+  const [updated] = await db.update(clinics).set({
+    evolutionConnectionState: 'close', whatsappSetupStatus: 'ready', whatsappLinkedPhone: null,
+    whatsappNumberVerifiedAt: null, whatsappEnabled: false, whatsappAiEnabled: false,
+  }).where(eq(clinics.id, id)).returning()
+  return publicWhatsAppConfig(updated)
+}
+
 /** Keeps a delayed migration from turning a WhatsApp setup request into a 500. */
 export async function ensureWhatsAppSetupSchema() {
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_setup_status text NOT NULL DEFAULT 'not_started'`)

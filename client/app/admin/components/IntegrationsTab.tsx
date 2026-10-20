@@ -111,10 +111,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       .then(r => r.json())
       .then(data => { if (data.logoUrl) setBrandingLogoUrl(data.logoUrl) })
       .catch(() => {})
-    fetch('/api/yonetici/telephony-numbers')
-      .then(r => r.ok ? r.json() : [])
-      .then(data => setClinicPhones(Array.isArray(data) ? data : []))
-      .catch(() => {})
   }, [apiPrefix])
 
   const addClinicPhone = async () => {
@@ -141,24 +137,14 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await fetch(apiPrefix, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          voipProvider, voipLabel, voipBaseUrl, voipTrunkHost,
-          smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
-          smsUsercode, smsPassword, smsSenderId,
-        })
-      })
-      
       const rolesRes = await fetch('/api/admin/settings/roles', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rolePermissions)
       })
 
-      if (!res.ok || !rolesRes.ok) throw new Error('Kaydedilemedi')
-      showToast('success', 'Entegrasyon ve rol ayarları başarıyla kaydedildi')
+      if (!rolesRes.ok) throw new Error('Kaydedilemedi')
+      showToast('success', 'Rol ayarları başarıyla kaydedildi')
     } catch (err: any) {
       showToast('error', err.message || 'Hata oluştu')
     } finally {
@@ -225,62 +211,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         </div>
       </SettingsCard>
 
-      {/* VoIP Card */}
-      <SettingsCard title="Çağrı Merkezi / Santral (VoIP)" description="Yapay zeka asistanının aramaları karşılayıp arama yapabilmesi için SIP Trunk ayarları.">
-        <div className={styles.grid}>
-          <Field label="Sağlayıcı">
-            <select value={voipProvider} onChange={e => setVoipProvider(e.target.value as CloudProvider)}>
-              <option value="netgsm">NetGSM</option>
-              <option value="twilio">Twilio</option>
-              <option value="vonage">Vonage</option>
-              <option value="custom">Diğer (Özel)</option>
-            </select>
-          </Field>
-          <Field label="Görünen Ad"><input value={voipLabel} onChange={e => setVoipLabel(e.target.value)} placeholder="Örn. NetGSM Santral" /></Field>
-          <Field label="API Base URL"><input value={voipBaseUrl} onChange={e => setVoipBaseUrl(e.target.value)} placeholder="https://api.netgsm.com.tr/voice/v1/" /></Field>
-          <Field label="SIP Trunk Host"><input value={voipTrunkHost} onChange={e => setVoipTrunkHost(e.target.value)} placeholder="sip.netgsm.com.tr" /></Field>
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Klinik Telefon Numaraları" description="Bu kliniğe gelen Netgsm numaralarını ekleyin. Gelen çağrının DID bilgisiyle doğru klinik otomatik seçilir.">
-        <div className={styles.grid}>
-          <Field label="Telefon numarası"><input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="08503096119" /></Field>
-          <Field label="Etiket"><input value={newPhoneLabel} onChange={e => setNewPhoneLabel(e.target.value)} placeholder="Ana hat" /></Field>
-          <div style={{ display: 'flex', alignItems: 'end' }}><button type="button" className={styles.saveButton} onClick={addClinicPhone}>Numara Ekle</button></div>
-        </div>
-        {clinicPhones.length > 0 && <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
-          {clinicPhones.map(phone => <div key={phone.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}>
-            <span>{phone.phoneNumber}{phone.label ? ` — ${phone.label}` : ''}{phone.isPrimary ? ' (ana hat)' : ''}</span>
-            <button type="button" className={styles.saveButton} onClick={() => toggleClinicPhone(phone)}>{phone.isActive ? 'Aktif' : 'Pasif'}</button>
-          </div>)}
-        </div>}
-      </SettingsCard>
-
-      {/* SMS Card */}
-      <SettingsCard title="SMS Ayarları (NetGSM)" description="Hastalara randevu hatırlatıcılarını SMS ile göndermek için NetGSM API bilgileri.">
-        <div className={styles.grid}>
-          <Field label="NetGSM Kullanıcı Kodu"><input value={smsUsercode} onChange={e => setSmsUsercode(e.target.value)} placeholder="850xxxxxxx veya 53xxxxxxxx" /></Field>
-          <Field label="NetGSM API Şifresi"><input type="password" value={smsPassword} onChange={e => setSmsPassword(e.target.value)} placeholder="••••••••" /></Field>
-          <Field label="Onaylı Mesaj Başlığı (Sender ID)"><input value={smsSenderId} onChange={e => setSmsSenderId(e.target.value)} placeholder="Örn. CLINIC" /></Field>
-        </div>
-      </SettingsCard>
-
-      {/* SMTP Card */}
-      <SettingsCard title="E-Posta (SMTP) Ayarları" description="Sistem üzerinden hastalarınıza bilgilendirme e-postaları göndermek için SMTP ayarları.">
-        <div className={styles.grid}>
-          <Field label="SMTP Sunucu (Host)"><input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" /></Field>
-          <Field label="SMTP Port"><input value={smtpPort} onChange={e => setSmtpPort(e.target.value)} placeholder="587 veya 465" /></Field>
-          <Field label="Kullanıcı Adı (Email)"><input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="ornek@firma.com" /></Field>
-          <Field label="Şifre"><input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="••••••••" /></Field>
-          <Field label="Şifreleme Türü">
-            <select value={smtpSecure} onChange={e => setSmtpSecure(e.target.value)}>
-              <option value="none">Yok (veya Otomatik)</option>
-              <option value="ssl">SSL (Port 465)</option>
-              <option value="tls">TLS / STARTTLS (Port 587)</option>
-            </select>
-          </Field>
-        </div>
-      </SettingsCard>
+      {['Çağrı Merkezi / Santral (VoIP)', 'Klinik Telefon Numaraları', 'SMS Ayarları (NetGSM)', 'E-Posta (SMTP)'].map(title => <SettingsCard key={title} title={title} description="Bu entegrasyon satış ekibi tarafından Klinikler ekranından yönetilir. Burada yalnızca durum görüntülenir."><button type="button" className={styles.saveButton} onClick={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')}>Talep oluştur</button></SettingsCard>)}
 
       <EvolutionWhatsAppCard />
 

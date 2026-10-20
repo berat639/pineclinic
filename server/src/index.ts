@@ -1,3 +1,4 @@
+import { platformIntegrations } from './api/platform-integrations'
 import { whatsappPlugin } from './api/whatsapp'
 import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, resolveLiveModel, buildSystemPrompt } from './services/assistant-config'
 import { Elysia } from 'elysia'
@@ -275,6 +276,7 @@ const app = new Elysia()
     }
   })
   .use(cors({ origin: corsOrigins }))
+  .use(platformIntegrations)
   .get('/uploads/*', async ({ params, set }) => {
     const clinicId = currentClinicId()
     if (!clinicId) {
@@ -526,6 +528,35 @@ const app = new Elysia()
       set.status = 400; return { error: err.message || 'Randevu güncellenemedi' }
     }
   })
+  .post('/api/dental/appointments/:id/approve-ai', async ({ params, body, set, cookie }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    const b = body as any
+    try {
+      const { approveAiAppointment } = await import('./db/repositories/dental')
+      return await approveAiAppointment(params.id, {
+        patientId: b.patientId || undefined,
+        patient: b.newPatient ? { name: String(b.newPatient.name || ''), phone: b.newPatient.phone ? String(b.newPatient.phone) : undefined } : undefined,
+        patientUpdate: b.patientUpdate ? { name: String(b.patientUpdate.name || ''), phone: b.patientUpdate.phone === undefined ? undefined : String(b.patientUpdate.phone) } : undefined,
+        doctorId: b.doctorId || null,
+        startTime: new Date(b.startTime), endTime: new Date(b.endTime),
+        complaint: typeof b.complaint === 'string' ? b.complaint : undefined,
+        reviewedBy: user.id,
+      })
+    } catch (err: any) {
+      set.status = 400; return { error: err.message || 'AI randevusu onaylanamadı' }
+    }
+  })
+  .post('/api/dental/appointments/:id/reject-ai', async ({ params, body, set, cookie }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    try {
+      const { rejectAiAppointment } = await import('./db/repositories/dental')
+      return await rejectAiAppointment(params.id, String((body as any)?.reason || ''), user.id)
+    } catch (err: any) {
+      set.status = 400; return { error: err.message || 'AI randevusu iptal edilemedi' }
+    }
+  })
   .get('/api/dental/appointments/:id/treatments', async ({ params }) => {
     const { getAppointmentTreatments } = await import('./db/repositories/dental')
     return await getAppointmentTreatments(params.id)
@@ -586,6 +617,11 @@ const app = new Elysia()
     const { createPatient } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.name) { set.status = 400; return { error: 'Name required' } }
+    const birthYear = b.birthYear === undefined || b.birthYear === null ? undefined : Number(b.birthYear)
+    if (birthYear !== undefined && (!Number.isInteger(birthYear) || birthYear < 1900 || birthYear > new Date().getFullYear())) {
+      set.status = 400
+      return { error: 'Geçersiz doğum yılı' }
+    }
     return await createPatient({ 
       name: b.name, 
       phone: b.phone, 
@@ -593,6 +629,7 @@ const app = new Elysia()
       tcIdentity: b.tcIdentity,
       gender: b.gender,
       birthDate: b.birthDate,
+      birthYear,
       balance: b.balance 
     })
   })
@@ -627,6 +664,14 @@ const app = new Elysia()
     if (b.gender !== undefined) updateData.gender = b.gender || null
     if (b.birthDate !== undefined) {
       updateData.birthDate = b.birthDate ? new Date(b.birthDate) : null
+      if (b.birthDate) updateData.birthYear = null
+    }
+    if (b.birthYear !== undefined) {
+      const birthYear = Number(b.birthYear)
+      if (Number.isInteger(birthYear) && birthYear >= 1900 && birthYear <= new Date().getFullYear()) {
+        updateData.birthYear = birthYear
+        updateData.birthDate = null
+      }
     }
     if (b.whatsappOptOut !== undefined) updateData.whatsappOptOut = Boolean(b.whatsappOptOut)
     if (b.smsOptOut !== undefined) updateData.smsOptOut = Boolean(b.smsOptOut)
@@ -1298,26 +1343,31 @@ const app = new Elysia()
     return { success: true }
   })
 
-  .get('/api/telephony/register', async ({ query }) => {
-    const uuid = query.uuid as string | undefined
-    const caller = query.caller as string | undefined
-    const channel = query.channel as string | undefined
-    const direction = (query.direction as string) || 'inbound'
-    // Asterisk reaches the backend over the private Docker network, so its
-    // Host header is not a public clinic domain. The dialplan supplies the
-    // clinic hostname explicitly and we resolve it against clinic_domains.
-    let tenant = (query.hostname ? await findTenantByHostname(String(query.hostname)) : null) ?? currentTenant()
-    if (query.did) {
-      const { findClinicByPhoneNumber } = await import('./db/repositories/clinic-phone-numbers')
-      const clinicId = await findClinicByPhoneNumber(String(query.did))
-      if (clinicId) {
-        const { db } = await import('./db/client')
-        const { clinicDomains } = await import('./db/schema')
-        const { eq, and } = await import('drizzle-orm')
-        const [domain] = await db.select({ hostname: clinicDomains.hostname }).from(clinicDomains)
-          .where(and(eq(clinicDomains.clinicId, clinicId), eq(clinicDomains.isPrimary, true), eq(clinicDomains.isActive, true))).limit(1)
-        if (domain) tenant = { clinicId, hostname: domain.hostname }
-      }
+  .get('/api/telephony/transfer-result', async ({query,set}) => {
+    const {verifyCallSignature} = await import('./integrations/managed/routing')
+    if (!verifyCallSignature(query)) {set.status=403;return {ok:false}}
+    if(query.did==='ANSWER') {
+      const {db}=await import('./db/client')
+      const {sql}=await import('drizzle-orm')
+      await db.execute(sql`UPDATE integration_tests SET evidence=evidence || '{"transferred":true}'::jsonb WHERE clinic_id=${String(query.clinicId)} AND service='phone' AND kind='transfer' AND evidence->>'channel'=${String(query.channel)} AND expires_at>now()`)
+    }
+    return {ok:true}
+  })
+
+  .get('/api/telephony/register', async ({ query, set }) => {
+    const { resolveCall } = await import('./integrations/managed/routing')
+    let resolved
+    try { resolved = await resolveCall(query) }
+    catch { set.status=403; return {ok:false,error:'Çağrı yetkilendirilemedi'} }
+    const uuid = String(query.uuid)
+    const caller = resolved.caller
+    const channel = String(query.channel || '')
+    const direction = query.direction === 'outbound' ? 'outbound' : 'inbound'
+    const tenant = {clinicId:resolved.clinicId,hostname:resolved.hostname}
+    if (resolved.testId) {
+      const { db } = await import('./db/client')
+      const { sql } = await import('drizzle-orm')
+      await db.execute(sql`UPDATE integration_tests SET evidence=evidence || ${JSON.stringify({channel})}::jsonb WHERE id=${resolved.testId}`)
     }
     let maxActiveCalls = 3
     let queueGroup = 'clinic_default'
@@ -1335,7 +1385,7 @@ const app = new Elysia()
       setTimeout(() => callerRegistry.delete(uuid), 5 * 60 * 1000)
     }
     return tenant
-      ? { ok: true, maxActiveCalls, queueGroup }
+      ? { ok: true, maxActiveCalls, queueGroup, clinicId: tenant.clinicId }
       : { ok: false, error: 'Klinik domaini tanımlı değil', maxActiveCalls: 3, queueGroup }
   })
 
@@ -1345,9 +1395,9 @@ const app = new Elysia()
     const phone = b.phone || b.to || b.target
     if (!phone) { set.status = 400; return { error: 'phone numarası zorunludur' } }
     const { getSetting } = await import('./db/repositories/settings')
-    const callerId = await getSetting('outbound_caller_id') || '08503096119'
+    const clinicId = requireClinicId()
     const { initiateOutboundCall } = await import('./services/asterisk-ami')
-    const res = await initiateOutboundCall(phone, callerId)
+    const res = await initiateOutboundCall(phone, clinicId)
     if (!res.success) { set.status = 500; return { error: res.message } }
     return { success: true, message: 'Dış arama başlatıldı' }
   })
@@ -2030,7 +2080,74 @@ const app = new Elysia()
     }
     const { saveFlow } = await import('./db/repositories/flows')
     const flow = await saveFlow(nodes as any[], edges as any[], direction)
-    return { success: true, flow }
+    const { validateConversationFlow } = await import('./db/repositories/flows')
+    return { success: true, flow, issues: validateConversationFlow(flow.nodes, flow.edges) }
+  })
+
+  .get('/api/admin/flow/runtime', async () => {
+    const { getSetting } = await import('./db/repositories/settings')
+    const value = await getSetting('ai.flow_runtime_mode')
+    return { mode: value === 'active' || value === 'observe' ? value : 'legacy' }
+  })
+
+  .put('/api/admin/flow/runtime', async ({ body, set }) => {
+    const mode = (body as { mode?: string } | undefined)?.mode
+    if (!['legacy', 'observe', 'active'].includes(String(mode))) {
+      set.status = 400
+      return { error: 'Geçerli bir çalışma biçimi seçin.' }
+    }
+    const { setSetting } = await import('./db/repositories/settings')
+    await setSetting('ai.flow_runtime_mode', String(mode))
+    return { success: true, mode }
+  })
+
+  // Direct web audio keeps media in the browser; only the small flow state crosses this API.
+  .post('/api/flow-sessions', async ({ body, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const direction = (body as { direction?: string } | undefined)?.direction === 'outbound' ? 'outbound' : 'inbound'
+    const { createWebFlowSession } = await import('./services/flow-engine')
+    const session = await createWebFlowSession(clinicId, direction)
+    if (!session) { set.status = 409; return { error: 'Akışla çalışma bu görüşmede kullanılamıyor.' } }
+    return session
+  })
+
+  .post('/api/flow-sessions/:id/events', async ({ params, body, request, set }) => {
+    const { getAuthorizedWebFlowEngine } = await import('./services/flow-engine')
+    const engine = getAuthorizedWebFlowEngine(params.id, request.headers.get('x-flow-session-key') || undefined)
+    if (!engine) { set.status = 404; return { error: 'Görüşme bulunamadı veya süresi doldu.' } }
+    const event = (body || {}) as { id?: string; revision?: number; fields?: Record<string, unknown>; intent?: 'continue' | 'end' | 'new_person' }
+    return engine.accept(event)
+  })
+
+  .post('/api/flow-sessions/:id/actions', async ({ params, body, request, set }) => {
+    const { getAuthorizedWebFlowEngine } = await import('./services/flow-engine')
+    const engine = getAuthorizedWebFlowEngine(params.id, request.headers.get('x-flow-session-key') || undefined)
+    if (!engine) { set.status = 404; return { success: false, message: 'Görüşme bulunamadı veya süresi doldu.' } }
+    const input = (body || {}) as { name?: string; args?: Record<string, unknown> }
+    const args = input.args || {}
+    if (input.name !== 'randevuOlustur') { set.status = 400; return { success: false, message: 'Bu işlem bu görüşmede kullanılamaz.' } }
+    const step = await engine.accept({ fields: args })
+    const action = engine.expectedAction()
+    if (!step.success || !action || !['save_appointment_pending', 'randevuOlustur'].includes(action.action)) {
+      return { success: false, message: step.message || step.next?.prompt || 'Randevu için gerekli bilgiler henüz tamamlanmadı.' }
+    }
+    try {
+      const { createAssistantAppointment } = await import('./services/assistant-appointments')
+      const appointment = await createAssistantAppointment(args, { sessionId: params.id, clinicId: currentClinicId() || undefined, source: 'web_ai' })
+      await engine.completeAction(action.nodeId, true)
+      return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı.` }
+    } catch (error) {
+      await engine.completeAction(action.nodeId, false)
+      return { success: false, message: 'Randevu oluşturulamadı. Ad, telefon, tarih ve saati kontrol edin.' }
+    }
+  })
+
+  .delete('/api/flow-sessions/:id', async ({ params, request, set }) => {
+    const { getAuthorizedWebFlowEngine, closeFlowEngine } = await import('./services/flow-engine')
+    if (!getAuthorizedWebFlowEngine(params.id, request.headers.get('x-flow-session-key') || undefined)) { set.status = 404; return { error: 'Görüşme bulunamadı.' } }
+    await closeFlowEngine(params.id)
+    return { success: true }
   })
 
   // ── Direct Mode: Session Config ──────────────────────────────────────────────
@@ -2068,6 +2185,9 @@ const app = new Elysia()
       systemPrompt: systemPrompt + ragContext,
       toolDeclarations,
       model,
+      // Live models only produce audio. Written chat uses the normal Gemini
+      // content API with this safe default instead of requesting TEXT from Live.
+      textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
       greeting,
       branding,
       voiceName: voiceName || 'Aoede',
@@ -2106,8 +2226,21 @@ const app = new Elysia()
     const digits = telefon.replace(/\D/g, '')
     if (digits.length < 10) return { sonuc: 'Geçerli bir telefon numarası değil. En az 10 hane gerekli.' }
     try {
-      const customer = await getCustomerByPhone(telefon)
+      const { findPatientByPhone, getPatientDoctorHistory } = await import('./db/repositories/dental')
+      const [customer, patient] = await Promise.all([
+        getCustomerByPhone(telefon),
+        findPatientByPhone(telefon),
+      ])
       if (!customer) {
+        if (patient) {
+          const doktorGecmisi = await getPatientDoctorHistory(telefon)
+          return {
+            kayitli: true,
+            musteri_adi: patient.name,
+            doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+            sonuc: `Ad Soyad: ${patient.name}\nTelefon: ${patient.phone || telefon}${doktorGecmisi.length > 0 ? `\nDoktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}` : ''}`,
+          }
+        }
         const knowledgeCustomer = await findCustomerDocByPhone(telefon)
         if (knowledgeCustomer) {
           return { kayitli: true, musteri_adi: knowledgeCustomer.name, sonuc: `Ad Soyad: ${knowledgeCustomer.name}\n${knowledgeCustomer.content}` }
@@ -2140,29 +2273,13 @@ const app = new Elysia()
     if (!tarih || !saat) return { success: false, message: 'Tarih ve saat zorunludur.' }
 
     try {
-      const { createFlowAppointment } = await import('./db/repositories/appointments')
-      const appointment = await createFlowAppointment(
+      const { createAssistantAppointment } = await import('./services/assistant-appointments')
+      const appointment = await createAssistantAppointment(
         { ...args, musteri_adi: name, telefon: phone, tarih, saat },
-        `direct-${randomUUID().slice(0, 8)}`,
+        { sessionId: `direct-${randomUUID().slice(0, 8)}`, clinicId: currentClinicId() || undefined, source: 'web_ai' },
       )
       console.log('[Tools/Appointment]', appointment.id, appointment.customerName)
-
-      // Dental calendar sync
-      void (async () => {
-        try {
-          const { createDentalAppointmentFromVoice } = await import('./db/repositories/dental')
-          await createDentalAppointmentFromVoice({
-            customerName: name,
-            phone,
-            type,
-            date: tarih,
-            time: saat,
-            doctorId: args.doktor_id || null,
-          })
-        } catch (e) { console.error('[Tools/Appointment:CalendarSync]', e) }
-      })()
-
-      return { success: true, message: `Randevu ${tarih} ${saat} için kaydedildi.`, id: appointment.id }
+      return { success: true, message: `Kontrol randevusu talebiniz alındı; klinik onayı bekleniyor.`, id: appointment.id }
     } catch (err) {
       console.error('[Tools/Appointment]', err)
       set.status = 500
@@ -2287,7 +2404,7 @@ app.ws('/ws', {
             sessions.delete(shortId)
             notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
           },
-        }, { dbSessionId: shortId, systemPrompt, model, voiceName })
+        }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'inbound', appointmentSource: 'web_ai' })
 
         info.session = session
         ;(ws.data as any).sessionId = shortId
@@ -2439,6 +2556,12 @@ app.ws('/ws', {
     }
     console.log('')
     
+    try {
+      const { importLegacyIntegrations } = await import('./integrations/managed/legacy')
+      await importLegacyIntegrations()
+      const { startIntegrationReconciler } = await import('./integrations/managed/asterisk')
+      startIntegrationReconciler()
+    } catch { console.error('[Integrations] Başlangıç eşitlemesi tamamlanamadı; mevcut kayıtlar korundu.') }
     // Start Cron Jobs
     startReminderCron()
     const { startWhatsAppWorker } = await import('./queue/whatsapp-queue')

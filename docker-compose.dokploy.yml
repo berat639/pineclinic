@@ -259,6 +259,7 @@ services:
         condition: service_healthy
     volumes:
       - asterisk_logs:/var/log/asterisk
+      - asterisk_managed:/etc/asterisk/managed
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'pjsip show endpoints' >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -281,6 +282,7 @@ services:
           - voiceai-asterisk
 
 volumes:
+  asterisk_managed:
   postgres_data:
   redis_data:
   server_data:

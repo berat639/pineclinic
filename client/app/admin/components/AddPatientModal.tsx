@@ -1,6 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { UserRoundPlus, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
@@ -86,63 +86,42 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-        zIndex: 99999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px'
-      }}
+      className="reference-modal-overlay"
       {...backdropDismiss}
     >
       <div
+        className="reference-modal reference-modal--patient"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--card-bg, #1e293b)',
-          padding: '1.5rem',
-          borderRadius: 14,
-          border: '1px solid var(--input-border, #334155)',
-          width: 440,
-          maxWidth: '92vw',
-          boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column'
-        }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-          <h3 style={{ margin: 0, color: 'var(--foreground, #ffffff)', fontSize: '1.1rem', fontWeight: 700 }}>
-            Yeni Hasta Ekle
-          </h3>
+        <div className="reference-modal-header">
+          <div className="reference-modal-heading">
+            <span className="reference-modal-icon"><UserRoundPlus size={26} /></span>
+            <div>
+              <h3>Yeni Hasta Ekle</h3>
+              <p>Hasta bilgilerini kaydedin</p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--foreground-3, #94a3b8)',
-              cursor: 'pointer',
-              padding: 4,
-              borderRadius: 6,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
+            className="reference-modal-close"
+            aria-label="Modalı kapat"
           >
-            <X size={18} />
+            <X size={24} />
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div className="reference-modal-body">
+          <section className="reference-modal-section">
+            <div className="reference-section-title">
+              <span>1</span>
+              <h4>Hasta Bilgileri</h4>
+            </div>
+            <div className="reference-modal-fields">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div>
               <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
-                Ad <span style={{ color: '#ef4444' }}>*</span>
+                Ad <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
               <input
                 type="text"
@@ -164,7 +143,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             </div>
             <div>
               <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
-                Soyad <span style={{ color: '#ef4444' }}>*</span>
+                Soyad <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
               <input
                 type="text"
@@ -297,6 +276,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
           </div>
 
           <div
+            className="reference-consent-card"
             style={{
               padding: '12px',
               borderRadius: 8,
@@ -336,20 +316,17 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
               WhatsApp ile bilgilendirilmek istiyorum
             </label>
           </div>
+            </div>
+          </section>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+        <div className="reference-modal-footer">
           <button
             type="button"
             onClick={onClose}
             disabled={loading}
             className="btn-clinic-blue"
-            style={{
-              padding: '9px 16px',
-              borderRadius: 8,
-              cursor: 'pointer',
-              fontSize: '0.85rem'
-            }}
+            style={{ cursor: 'pointer' }}
           >
             İptal
           </button>
@@ -358,14 +335,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             onClick={handleAddPatient}
             disabled={loading}
             className="btn-clinic-primary"
-            style={{
-              padding: '9px 18px',
-              borderRadius: 8,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.7 : 1,
-              fontWeight: 600,
-              fontSize: '0.85rem'
-            }}
+            style={{ cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}
           >
             {loading ? 'Kaydediliyor...' : 'Kaydet'}
           </button>

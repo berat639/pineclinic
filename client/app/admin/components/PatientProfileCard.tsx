@@ -74,6 +74,7 @@ export default function PatientProfileCard({ profile, onEdit }: PatientProfileCa
           {patient.email && <div><span style={{ color: 'var(--foreground-3)' }}>E-posta:</span> {patient.email}</div>}
           {patient.gender && <div><span style={{ color: 'var(--foreground-3)' }}>Cinsiyet:</span> {patient.gender === 'E' ? 'Erkek' : patient.gender === 'K' ? 'Kadın' : patient.gender}</div>}
           {patient.birthDate && <div><span style={{ color: 'var(--foreground-3)' }}>D. Tarihi:</span> {formatDate(patient.birthDate)}</div>}
+          {!patient.birthDate && patient.birthYear && <div><span style={{ color: 'var(--foreground-3)' }}>D. Yılı:</span> {patient.birthYear}</div>}
           <div><span style={{ color: 'var(--foreground-3)' }}>Kayıt:</span> {formatDate(patient.createdAt)}</div>
           {payments && payments.length > 0 && <div><span style={{ color: 'var(--foreground-3)' }}>Son Ödeme:</span> {formatDate(payments[0].date)}</div>}
         </div>

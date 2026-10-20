@@ -1,3 +1,4 @@
+import { requireClinicId } from '../tenancy/context'
 import { Elysia, t } from 'elysia'
 import { eq, desc, sql } from 'drizzle-orm'
 import { db } from '../db/client'
@@ -373,32 +374,12 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
 
   // ── Integrations ───────────────────────────────────────────────────────────
   .get('/integrations', async () => {
-    const { getIntegrations } = await import('../db/repositories/integrations')
-    return await getIntegrations()
+    const { integrationView } = await import('../integrations/managed/store')
+    return integrationView(requireClinicId())
   })
 
-  .put('/integrations', async ({ body }) => {
-    const { updateIntegrations } = await import('../db/repositories/integrations')
-    await updateIntegrations(body as any)
-    return { success: true }
-  }, {
-    body: t.Object({
-      voipProvider: t.Optional(t.Union([t.String(), t.Null()])),
-      voipLabel: t.Optional(t.Union([t.String(), t.Null()])),
-      voipBaseUrl: t.Optional(t.Union([t.String(), t.Null()])),
-      voipTrunkHost: t.Optional(t.Union([t.String(), t.Null()])),
-      smtpHost: t.Optional(t.Union([t.String(), t.Null()])),
-      smtpPort: t.Optional(t.Union([t.String(), t.Null()])),
-      smtpUser: t.Optional(t.Union([t.String(), t.Null()])),
-      smtpPass: t.Optional(t.Union([t.String(), t.Null()])),
-      smtpSecure: t.Optional(t.Union([t.String(), t.Null()])),
-      smsUsercode: t.Optional(t.Union([t.String(), t.Null()])),
-      smsPassword: t.Optional(t.Union([t.String(), t.Null()])),
-      smsSenderId: t.Optional(t.Union([t.String(), t.Null()])),
-    })
-  })
+  .put('/integrations', ({ set }) => { set.status = 403; return { error: 'Entegrasyonlar yalnız platform Klinikler ekranından yönetilir.' } })
 
-  // ── Knowledge Base ─────────────────────────────────────────────────────────
   .get('/knowledge', async () => {
     return listDocuments()
   })

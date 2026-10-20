@@ -3,6 +3,7 @@ import { db } from '../client'
 import { conversationFlows } from '../schema'
 import { requireClinicId } from '../../tenancy/context'
 import { getTransferConfirmationQuestion } from '../../services/transfer-triggers'
+export { validateConversationFlow, type FlowValidationIssue } from '../../services/flow-validation'
 
 export interface FlowNode {
   id: string
@@ -49,6 +50,52 @@ export interface ConversationFlow {
   updatedAt: string
 }
 
+/**
+ * Legacy Flow Builder releases used display-oriented field names. The runtime
+ * and appointment service use these stable canonical names exclusively.
+ */
+const LEGACY_FIELD_ALIASES: Record<string, string> = {
+  ad_soyad: 'musteri_adi',
+  hasta_adi: 'musteri_adi',
+  hastaadisoyadi: 'musteri_adi',
+  hastaAdiSoyadi: 'musteri_adi',
+  hastatelefonu: 'telefon',
+  hastaTelefonu: 'telefon',
+  hastasikayeti: 'sikayet',
+  hastaSikayeti: 'sikayet',
+  randevutarihi: 'tarih',
+  randevuTarihi: 'tarih',
+  randevusaati: 'saat',
+  randevuSaati: 'saat',
+}
+
+const LEGACY_CONDITION_ALIASES: Record<string, string> = {
+  is_registered: 'kayitli',
+}
+
+function normalizeFlowNodes(nodes: FlowNode[]): { nodes: FlowNode[]; changed: boolean } {
+  let changed = false
+  const normalized = nodes.map(node => {
+    const data = { ...node.data }
+    if (node.type === 'FIELD' && data.fieldName) {
+      const canonical = LEGACY_FIELD_ALIASES[data.fieldName] ?? LEGACY_FIELD_ALIASES[data.fieldName.toLowerCase()]
+      if (canonical && canonical !== data.fieldName) {
+        data.fieldName = canonical
+        changed = true
+      }
+    }
+    if (node.type === 'CONDITION' && data.conditionField) {
+      const canonical = LEGACY_CONDITION_ALIASES[data.conditionField] ?? LEGACY_CONDITION_ALIASES[data.conditionField.toLowerCase()]
+      if (canonical && canonical !== data.conditionField) {
+        data.conditionField = canonical
+        changed = true
+      }
+    }
+    return changed || data !== node.data ? { ...node, data } : node
+  })
+  return { nodes: normalized, changed }
+}
+
 function getTransferPromptConfig(data: Record<string, unknown>) {
   const target = String(data.transferNumber || '')
   const keywords = String(data.triggerKeywords || '')
@@ -73,8 +120,8 @@ function toIso(d: Date | null | undefined): string {
   return d ? d.toISOString() : ''
 }
 
-export async function getActiveFlow(direction: string = 'inbound'): Promise<ConversationFlow | null> {
-  const clinicId = requireClinicId()
+export async function getActiveFlow(direction: string = 'inbound', explicitClinicId?: string): Promise<ConversationFlow | null> {
+  const clinicId = explicitClinicId ?? requireClinicId()
   const rows = await db
     .select()
     .from(conversationFlows)
@@ -83,10 +130,18 @@ export async function getActiveFlow(direction: string = 'inbound'): Promise<Conv
     .limit(1)
   if (rows.length === 0) return null
   const r = rows[0]
+  const normalized = normalizeFlowNodes(r.nodes as FlowNode[])
+  // Self-heal flows that were saved by older Flow Builder versions. This is
+  // deliberately idempotent and preserves the graph and user-authored text.
+  if (normalized.changed) {
+    await db.update(conversationFlows)
+      .set({ nodes: normalized.nodes, updatedAt: new Date() })
+      .where(eq(conversationFlows.id, r.id))
+  }
   return {
     id: r.id,
     name: r.name,
-    nodes: r.nodes as FlowNode[],
+    nodes: normalized.nodes,
     edges: r.edges as FlowEdge[],
     isActive: r.isActive,
     createdAt: toIso(r.createdAt),
@@ -96,6 +151,8 @@ export async function getActiveFlow(direction: string = 'inbound'): Promise<Conv
 
 export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: string = 'inbound'): Promise<ConversationFlow> {
   const clinicId = requireClinicId()
+  const normalized = normalizeFlowNodes(nodes)
+  nodes = normalized.nodes
   const existing = await getActiveFlow(direction)
   // Eski sürümlerde aynı klinik/yön için birden fazla aktif kayıt oluşabiliyordu.
   // Kaydetme sırasında yalnızca bu akışı aktif bırak; çalışma zamanı da en son

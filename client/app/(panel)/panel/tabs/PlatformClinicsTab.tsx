@@ -1,93 +1,28 @@
 'use client'
-
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import styles from './PlatformClinicsTab.module.css'
 
-type WhatsAppConfig = {
-  clinicId: string; clinicName: string; connectionState: string
-  setupStatus: 'not_started' | 'ready' | 'phone_verifying' | 'phone_mismatch' | 'phone_verified' | 'active' | string
-  expectedPhone: string | null; linkedPhone: string | null; numberVerifiedAt: string | null; enabled: boolean
-}
-type Clinic = { id: string; name: string; hostname: string; isActive: boolean; createdAt: string }
-const setupLabels: Record<string, string> = { not_started: 'Kurulum bekliyor', ready: 'QR bağlantısı bekliyor', phone_verifying: 'Telefon doğrulanıyor', phone_mismatch: 'Yanlış telefon bağlandı', phone_verified: 'Etkinleştirme bekliyor', active: 'Gönderimler açık' }
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { cache: 'no-store', ...init })
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error || 'İşlem tamamlanamadı.')
-  return data as T
-}
-
-export default function PlatformClinicsTab() {
-  const [clinics, setClinics] = useState<Clinic[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [config, setConfig] = useState<WhatsAppConfig | null>(null)
-  const [name, setName] = useState(''); const [hostname, setHostname] = useState(''); const [timezone, setTimezone] = useState('Europe/Istanbul')
-  const [expectedPhone, setExpectedPhone] = useState(''); const [qr, setQr] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [notice, setNotice] = useState(''); const [error, setError] = useState('')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setClinics(await request<Clinic[]>('/api/platform/clinics')) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Klinikler alınamadı.') }
-    finally { setLoading(false) }
-  }, [])
-  const loadWhatsApp = useCallback(async (clinicId: string, quiet = false) => {
-    try {
-      const next = await request<WhatsAppConfig>(`/api/platform/clinics/${clinicId}/whatsapp`)
-      setConfig(next); setExpectedPhone(next.expectedPhone || '')
-      if (next.connectionState === 'open') setQr(null)
-      return next
-    } catch (cause) { if (!quiet) setError(cause instanceof Error ? cause.message : 'WhatsApp durumu alınamadı.'); return null }
-  }, [])
-  useEffect(() => { void load() }, [load])
-  useEffect(() => {
-    if (!selectedId || (!qr && config?.connectionState !== 'connecting' && config?.setupStatus !== 'phone_verifying')) return
-    const timer = setInterval(() => { void loadWhatsApp(selectedId, true) }, 5_000)
-    return () => clearInterval(timer)
-  }, [selectedId, qr, config?.connectionState, loadWhatsApp])
-
-  const run = async (operation: () => Promise<void>) => {
-    setSaving(true); setError(''); setNotice('')
-    try { await operation() } catch (cause) { setError(cause instanceof Error ? cause.message : 'İşlem tamamlanamadı.') } finally { setSaving(false) }
-  }
-  const selectClinic = (clinicId: string) => { setSelectedId(clinicId); setConfig(null); setQr(null); setError(''); setNotice(''); void loadWhatsApp(clinicId) }
-  const createClinic = async (event: FormEvent) => { event.preventDefault(); await run(async () => {
-    const clinic = await request<Clinic>('/api/platform/clinics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, hostname, timezone }) })
-    setClinics(current => [clinic, ...current]); setName(''); setHostname(''); setNotice(`${clinic.name} oluşturuldu.`); selectClinic(clinic.id)
-  }) }
-  const saveSetup = () => run(async () => {
-    if (!selectedId) return
-    const next = await request<WhatsAppConfig>(`/api/platform/clinics/${selectedId}/whatsapp`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedPhone }) })
-    setConfig(next); setQr(null); setNotice('Klinik telefonu kaydedildi. QR kodunu hazırlayabilirsiniz.')
-  })
-  const connect = () => run(async () => {
-    if (!selectedId || !config?.expectedPhone) throw new Error('Önce klinik WhatsApp telefonunu kaydedin.')
-    const result = await request<{ clinic: WhatsAppConfig; qrcode: string | null; connectionState: string }>(`/api/platform/clinics/${selectedId}/whatsapp/connect`, { method: 'POST' })
-    setQr(result.qrcode); setConfig(current => current ? { ...current, connectionState: result.connectionState } : result.clinic)
-    setNotice(result.qrcode ? 'QR yalnız seçili klinik için oluşturuldu.' : result.connectionState === 'open' ? 'WhatsApp zaten bağlı; yeni QR koduna gerek yok.' : 'QR hazırlanıyor. Birkaç saniye sonra yeniden deneyin veya bağlantıyı kontrol edin.')
-  })
-  const activate = () => run(async () => { if (!selectedId) return; setConfig(await request<WhatsAppConfig>(`/api/platform/clinics/${selectedId}/whatsapp/activate`, { method: 'POST' })); setNotice('WhatsApp gönderimleri etkinleştirildi. AI otomatik yanıtları kapalı bırakıldı.') })
-  const selectedClinic = clinics.find(clinic => clinic.id === selectedId)
-
-  return <div className={styles.page}>
-    <section className={styles.card}><h2 className={styles.title}>Yeni Klinik</h2><p className={styles.description}>Klinik, domain eşlemesi ve başlangıç ayarları tek işlemde oluşturulur.</p>
-      <form className={styles.form} onSubmit={createClinic}>
-        <label className={styles.field}><span>Klinik adı</span><input value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={120} required placeholder="Örnek Diş Kliniği" /></label>
-        <label className={styles.field}><span>Hostname / subdomain</span><input value={hostname} onChange={event => setHostname(event.target.value.toLowerCase())} minLength={3} maxLength={253} required placeholder="ornek.voiceai.com" /></label>
-        <label className={styles.field}><span>Saat dilimi</span><input value={timezone} onChange={event => setTimezone(event.target.value)} required /></label>
-        <button className={styles.button} type="submit" disabled={saving}>{saving ? 'Kaydediliyor…' : 'Kliniği oluştur'}</button>
-      </form>
-    </section>
-    {notice && <div className={styles.notice} role="status">{notice}</div>}{error && <div className={styles.error} role="alert">{error}</div>}
-    <section className={styles.card}><h2 className={styles.title}>Klinikler ve WhatsApp kurulumu</h2><p className={styles.description}>Kliniği seçin; merkezi altyapı için sunucu adresi veya API anahtarı girmeniz gerekmez.</p>
-      {loading ? <p className={styles.empty}>Klinikler yükleniyor…</p> : <div className={styles.list}>{clinics.length === 0 && <p className={styles.empty}>Henüz klinik bulunmuyor.</p>}{clinics.map(clinic => <div className={styles.row} key={clinic.id}><div><strong>{clinic.name}</strong><small>{clinic.id}</small></div><div className={styles.domain}>{clinic.hostname || 'Birincil domain tanımlı değil'}</div><button className={styles.secondaryButton} type="button" onClick={() => selectClinic(clinic.id)} disabled={saving}>{selectedId === clinic.id ? 'Seçildi' : 'WhatsApp kur'}</button></div>)}</div>}
-    </section>
-    {selectedClinic && <section className={styles.card} aria-labelledby="whatsapp-setup-heading"><div className={styles.setupHeading}><div><h2 className={styles.title} id="whatsapp-setup-heading">{selectedClinic.name} · WhatsApp kurulumu</h2><p className={styles.description}>Her klinik kendi instance’ını ve QR kodunu kullanır.</p></div><span className={styles.status}>{setupLabels[config?.setupStatus || 'not_started'] || 'Kurulum bekliyor'}</span></div>
-      <div className={styles.setupGrid}><label className={styles.field}><span>Klinik WhatsApp telefonu</span><input value={expectedPhone} disabled={saving} onChange={event => setExpectedPhone(event.target.value)} placeholder="0555 111 22 33" /><small>QR bu telefonla okutulur; sistem bağlı numarayı otomatik doğrular.</small></label></div>
-      <div className={styles.actions}><button className={styles.button} type="button" onClick={saveSetup} disabled={saving}>1. Klinik telefonunu kaydet</button><button className={styles.button} type="button" onClick={connect} disabled={saving || !config?.expectedPhone}>2. QR göster</button><button className={styles.secondaryButton} type="button" onClick={() => run(async () => { if (selectedId) await loadWhatsApp(selectedId) })} disabled={saving}>Bağlantıyı kontrol et</button><button className={styles.button} type="button" onClick={activate} disabled={saving || config?.connectionState !== 'open' || !config.numberVerifiedAt}>3. Gönderimleri etkinleştir</button></div>
-      <p className={styles.connectionText}>Bağlantı: {config?.connectionState === 'open' ? 'Açık' : config?.connectionState === 'connecting' ? 'QR okutulması bekleniyor' : 'Henüz bağlı değil'}. {config?.setupStatus === 'phone_mismatch' ? `Bağlanan ${config.linkedPhone || 'telefon'}, seçilen klinik numarasıyla eşleşmiyor.` : config?.linkedPhone ? `Doğrulanan telefon: ${config.linkedPhone}.` : 'AI otomatik yanıtları bu akışta açılmaz.'}</p>
-      {qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt={`${selectedClinic.name} WhatsApp bağlantı QR kodu`} /><p>{expectedPhone} numaralı telefonda WhatsApp → Bağlı cihazlar → Cihaz bağla yolunu açıp bu kodu okutun.</p></div>}
-    </section>}
-  </div>
+type Clinic={id:string;name:string;hostname:string}; type Test={id:string;status:string;message:string|null}; type State={configured:boolean;enabled:boolean;revision:number;health:string;test:Test|null;config?:Record<string,unknown>}; type Integrations={phone:State;sms:State;smtp:State;connection:{ip:string;port:number;protocol:string}}
+type Wa={connectionState:string;setupStatus:string;expectedPhone:string|null;linkedPhone:string|null;numberVerifiedAt:string|null}
+const input=(value:string,onChange:(value:string)=>void,type='text')=><input type={type} value={value} onChange={e=>onChange(e.target.value)}/>
+async function api<T>(url:string,init?:RequestInit){const r=await fetch(url,{cache:'no-store',...init});const d=await r.json();if(!r.ok)throw new Error(d.error||'İşlem tamamlanamadı');return d as T}
+function Status({state}:{state:State}){return <p className={styles.connectionText}>Durum: {state.enabled?'Etkin':state.configured?'Taslak / test bekliyor':'Yapılandırılmadı'} · Bağlantı: {state.health==='registered'?'Kayıtlı':state.health==='unregistered'?'Kayıt yok':'Kontrol edilmedi'}{state.test?` · Son test: ${state.test.status}`:''}</p>}
+function Card({title,state,children,save,test,confirm,toggle,busy}:{title:string;state:State;children:ReactNode;save:()=>void;test:()=>void;confirm:()=>void;toggle:()=>void;busy:boolean}){return <section className={styles.card}><h2 className={styles.title}>{title}</h2><Status state={state}/><div className={styles.setupGrid}>{children}</div><div className={styles.actions}><button className={styles.button} onClick={save} disabled={busy}>Kaydet</button><button className={styles.secondaryButton} onClick={test} disabled={busy}>Test gönder</button><button className={styles.secondaryButton} onClick={confirm} disabled={busy||!state.test}>Teslimatı / sesi doğrula</button><button className={styles.button} onClick={toggle} disabled={busy}>{state.enabled?'Devre dışı bırak':'Etkinleştir'}</button></div></section>}
+export default function PlatformClinicsTab(){
+ const [clinics,setClinics]=useState<Clinic[]>([]),[selected,setSelected]=useState<string|null>(null),[ints,setInts]=useState<Integrations|null>(null),[wa,setWa]=useState<Wa|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),[name,setName]=useState(''),[host,setHost]=useState(''),[zone,setZone]=useState('Europe/Istanbul'),[waPhone,setWaPhone]=useState(''),[qr,setQr]=useState<string|null>(null)
+ const [phone,setPhone]=useState({username:'',password:'',numbers:'',callerId:'',transferNumber:'',target:''}),[sms,setSms]=useState({username:'',password:'',senderId:'',target:''}),[smtp,setSmtp]=useState({host:'',port:'587',username:'',password:'',secure:'tls',fromName:'',fromAddress:'',target:''}); const serial=useRef(0)
+ const run=async(fn:()=>Promise<void>)=>{setBusy(true);setError('');setNotice('');try{await fn()}catch(e){setError(e instanceof Error?e.message:'İşlem tamamlanamadı')}finally{setBusy(false)}}
+ const load=useCallback(async()=>{setClinics(await api<Clinic[]>('/api/platform/clinics'))},[])
+ const loadClinic=useCallback(async(id:string)=>{const request=++serial.current;const [i,w]=await Promise.all([api<Integrations>(`/api/platform/clinics/${id}/integrations`),api<Wa>(`/api/platform/clinics/${id}/whatsapp`)]);if(request!==serial.current)return;setInts(i);setWa(w);setWaPhone(w.expectedPhone||'');const p=i.phone.config||{},s=i.sms.config||{},m=i.smtp.config||{};setPhone(x=>({...x,username:String(p.username||''),numbers:Array.isArray(p.numbers)?p.numbers.join(', '):'',callerId:String(p.callerId||''),transferNumber:String(p.transferNumber||'')}));setSms(x=>({...x,username:String(s.username||''),senderId:String(s.senderId||'')}));setSmtp(x=>({...x,host:String(m.host||''),port:String(m.port||587),username:String(m.username||''),secure:String(m.secure||'tls'),fromName:String(m.fromName||''),fromAddress:String(m.fromAddress||'')}))},[])
+ useEffect(()=>{void load().catch(e=>setError(e.message))},[load]); const choose=(id:string)=>{setSelected(id);setInts(null);setQr(null);void loadClinic(id).catch(e=>setError(e.message))}; const id=selected
+ const create=(e:FormEvent)=>{e.preventDefault();void run(async()=>{const c=await api<Clinic>('/api/platform/clinics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,hostname:host,timezone:zone})});setClinics(v=>[c,...v]);setName('');setHost('');choose(c.id);setNotice('Klinik oluşturuldu.')})}
+ const save=async(service:'phone'|'sms'|'smtp',body:Record<string,unknown>)=>{if(!id||!ints)return;await api(`/api/platform/clinics/${id}/integrations/${service}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,revision:ints[service].revision})});await loadClinic(id);setNotice('Taslak kaydedildi; etkinleşmesi için test gerekir.')}
+ const test=async(service:'phone'|'sms'|'smtp',target:string,kind='delivery')=>{if(!id||!ints)return;const r=await api<Test>(`/api/platform/clinics/${id}/integrations/${service}/test`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:ints[service].revision,target,kind,operationId:crypto.randomUUID()})});await loadClinic(id);setNotice(r.message||'Test başlatıldı.')}
+ const confirm=async(service:'phone'|'sms'|'smtp')=>{if(!id||!ints?.[service].test)return;await api(`/api/platform/clinics/${id}/integrations/${service}/tests/${ints[service].test!.id}/confirm`,{method:'POST'});await loadClinic(id);setNotice('Test doğrulandı.')}; const toggle=async(service:'phone'|'sms'|'smtp')=>{if(!id||!ints)return;const active=!ints[service].enabled;await api(`/api/platform/clinics/${id}/integrations/${service}/${active?'activate':'deactivate'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:ints[service].revision})});await loadClinic(id);setNotice(active?'Etkinleştirildi.':'Yeni kullanım kapatıldı.')}
+ const selectedClinic=clinics.find(c=>c.id===id)
+ return <div className={styles.page}><section className={styles.card}><h2 className={styles.title}>Yeni Klinik</h2><form className={styles.form} onSubmit={create}><label className={styles.field}><span>Klinik adı</span>{input(name,setName)}</label><label className={styles.field}><span>Hostname / subdomain</span>{input(host,v=>setHost(v.toLowerCase()))}</label><label className={styles.field}><span>Saat dilimi</span>{input(zone,setZone)}</label><button className={styles.button} disabled={busy}>Kliniği oluştur</button></form></section>{notice&&<div className={styles.notice}>{notice}</div>}{error&&<div className={styles.error}>{error}</div>}<section className={styles.card}><h2 className={styles.title}>Klinikler</h2><div className={styles.list}>{clinics.map(c=><div className={styles.row} key={c.id}><div><strong>{c.name}</strong><small>{c.hostname}</small></div><button className={styles.secondaryButton} onClick={()=>choose(c.id)}>{selected===c.id?'Seçildi':'Kurulumu aç'}</button></div>)}</div></section>
+ {id&&ints&&<><Card title={`${selectedClinic?.name} · Netgsm telefon`} state={ints.phone} busy={busy} save={()=>void run(()=>save('phone',{...phone,numbers:phone.numbers.split(',').map(x=>x.trim()).filter(Boolean)}))} test={()=>void run(()=>test('phone',phone.target,'outbound'))} confirm={()=>void run(()=>confirm('phone'))} toggle={()=>void run(()=>toggle('phone'))}><p className={styles.description}>Netgsm paneline: {ints.connection.ip||'IP yapılandırılmamış'} · {ints.connection.port} · {ints.connection.protocol}</p><label className={styles.field}><span>SIP kullanıcı adı</span>{input(phone.username,v=>setPhone({...phone,username:v}))}</label><label className={styles.field}><span>SIP parolası {(ints.phone.config?.hasPassword as boolean)?'(kayıtlı)':''}</span>{input(phone.password,v=>setPhone({...phone,password:v}),'password')}</label><label className={styles.field}><span>Gelen numaralar</span>{input(phone.numbers,v=>setPhone({...phone,numbers:v}))}</label><label className={styles.field}><span>Çıkış numarası</span>{input(phone.callerId,v=>setPhone({...phone,callerId:v}))}</label><label className={styles.field}><span>Aktarım numarası</span>{input(phone.transferNumber,v=>setPhone({...phone,transferNumber:v}))}</label><label className={styles.field}><span>Test numarası</span>{input(phone.target,v=>setPhone({...phone,target:v}))}</label><button className={styles.secondaryButton} disabled={busy} onClick={()=>void run(()=>test('phone',phone.target,'inbound'))}>Gelen çağrı testi başlat</button>{phone.transferNumber&&<button className={styles.secondaryButton} disabled={busy} onClick={()=>void run(()=>test('phone',phone.target,'transfer'))}>Aktarım testi başlat</button>}</Card>
+ <Card title="SMS / Netgsm" state={ints.sms} busy={busy} save={()=>void run(()=>save('sms',sms))} test={()=>void run(()=>test('sms',sms.target))} confirm={()=>void run(()=>confirm('sms'))} toggle={()=>void run(()=>toggle('sms'))}><label className={styles.field}><span>API kullanıcı kodu</span>{input(sms.username,v=>setSms({...sms,username:v}))}</label><label className={styles.field}><span>API parolası {(ints.sms.config?.hasPassword as boolean)?'(kayıtlı)':''}</span>{input(sms.password,v=>setSms({...sms,password:v}),'password')}</label><label className={styles.field}><span>Başlık</span>{input(sms.senderId,v=>setSms({...sms,senderId:v}))}</label><label className={styles.field}><span>Test alıcısı</span>{input(sms.target,v=>setSms({...sms,target:v}))}</label></Card>
+ <Card title="E-posta / SMTP" state={ints.smtp} busy={busy} save={()=>void run(()=>save('smtp',{...smtp,port:Number(smtp.port)}))} test={()=>void run(()=>test('smtp',smtp.target))} confirm={()=>void run(()=>confirm('smtp'))} toggle={()=>void run(()=>toggle('smtp'))}><label className={styles.field}><span>Sunucu</span>{input(smtp.host,v=>setSmtp({...smtp,host:v}))}</label><label className={styles.field}><span>Port</span>{input(smtp.port,v=>setSmtp({...smtp,port:v}))}</label><label className={styles.field}><span>Kullanıcı</span>{input(smtp.username,v=>setSmtp({...smtp,username:v}))}</label><label className={styles.field}><span>Parola {(ints.smtp.config?.hasPassword as boolean)?'(kayıtlı)':''}</span>{input(smtp.password,v=>setSmtp({...smtp,password:v}),'password')}</label><label className={styles.field}><span>Gönderici adı</span>{input(smtp.fromName,v=>setSmtp({...smtp,fromName:v}))}</label><label className={styles.field}><span>Gönderici e-posta</span>{input(smtp.fromAddress,v=>setSmtp({...smtp,fromAddress:v}))}</label><label className={styles.field}><span>Test alıcısı</span>{input(smtp.target,v=>setSmtp({...smtp,target:v}))}</label></Card>
+ <section className={styles.card}><h2 className={styles.title}>WhatsApp kurulumu</h2><p className={styles.description}>Mevcut QR ve aktivasyon akışı korunur.</p><label className={styles.field}><span>Klinik WhatsApp telefonu</span>{input(waPhone,setWaPhone)}</label><div className={styles.actions}><button className={styles.button} onClick={()=>void run(async()=>{if(!id)return;setWa(await api<Wa>(`/api/platform/clinics/${id}/whatsapp`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedPhone:waPhone})}));setNotice('Telefon kaydedildi.')} )}>Telefonu kaydet</button><button className={styles.button} onClick={()=>void run(async()=>{if(!id)return;const r=await api<{qrcode:string|null}>(`/api/platform/clinics/${id}/whatsapp/connect`,{method:'POST'});setQr(r.qrcode)})}>QR göster</button><button className={styles.button} disabled={wa?.connectionState!=='open'||!wa?.numberVerifiedAt} onClick={()=>void run(async()=>{if(!id)return;setWa(await api<Wa>(`/api/platform/clinics/${id}/whatsapp/activate`,{method:'POST'}));setNotice('WhatsApp etkinleştirildi.')} )}>Gönderimleri etkinleştir</button></div>{qr&&<div className={styles.qr}><img src={qr} width={240} height={240} alt="WhatsApp QR"/></div>}</section><section className={styles.card}><h2 className={styles.title}>Klinik entegrasyon durumu</h2><p className={styles.description}>Klinik kullanıcıları parolaları görmez; talep akışı henüz bağlı değildir.</p><button className={styles.secondaryButton} onClick={()=>setNotice('Talep oluşturma özelliği henüz kullanıma açık değil.')}>Talep oluştur</button></section></>}</div>
 }

@@ -1,4 +1,4 @@
-import { getAiModel, getAllPromptSections } from '../db/repositories/settings'
+import { getAiModel, getAllPromptSections, getSetting } from '../db/repositories/settings'
 import { PROMPT_SECTION_KEYS, getDefaultPromptValue } from '../data/default-prompts'
 
 export const ALLOWED_LIVE_MODELS = [
@@ -24,10 +24,12 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
   const parts: string[] = []
   let activeFlow: import('../db/repositories/flows').ConversationFlow | null = null
   let minimalFlow = false
+  let flowRuntimeActive = false
   try {
     const flows = await import('../db/repositories/flows')
     activeFlow = await flows.getActiveFlow(direction)
     minimalFlow = Boolean(activeFlow && flows.isMinimalGreetingEndFlow(activeFlow))
+    flowRuntimeActive = (await getSetting('ai.flow_runtime_mode')) === 'active'
   } catch {}
   for (const key of PROMPT_SECTION_KEYS) {
     // Minimal Flow Builder akışında varsayılan randevu senaryosu devreye
@@ -54,7 +56,9 @@ Ardından konuşma akışındaki adımları sırasıyla uygula.`
   // Inject conversation flow as prompt text
   try {
     const { flowToPromptText } = await import('../db/repositories/flows')
-    if (activeFlow) {
+    // The runtime sends only the active task through its tool result. Keeping
+    // the whole graph out of the Live instruction avoids charging it every turn.
+    if (activeFlow && !flowRuntimeActive) {
       const flowText = flowToPromptText(activeFlow)
       if (flowText) parts.push(flowText)
     }

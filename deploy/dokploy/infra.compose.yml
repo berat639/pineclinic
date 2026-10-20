@@ -81,11 +81,13 @@ services:
       - "10000-10200:10000-10200/udp"
     volumes:
       - asterisk_logs:/var/log/asterisk
+      - asterisk_managed:/etc/asterisk/managed
     networks:
       dokploy-network:
         aliases: [voiceai-asterisk]
 
 volumes:
+  asterisk_managed:
   postgres_data:
     external: true
     name: voiceai-vfdp7y_postgres_data

@@ -75,6 +75,7 @@ export default function Home() {
   const webClosingRef = useRef(false)
   const lastWebSpeechAtRef = useRef(0)
   const isActive = status !== 'idle' && status !== 'error'
+  const isTextAssistantOpen = mode === 'text' && isActive
 
   const clearWebTimers = useCallback(() => {
     for (const timerRef of [
@@ -200,6 +201,11 @@ export default function Home() {
     setErrorMsg('')
     setTranscript([])
 
+    // Create and resume the actual playback context while this click still has
+    // browser user-activation. Network setup below contains awaits.
+    const player = new AudioStreamPlayer(24000)
+    playerRef.current = player
+
     let currentApiKey = apiKey
     if (!currentApiKey) {
       try {
@@ -212,6 +218,8 @@ export default function Home() {
           throw new Error('API Key alınamadı')
         }
       } catch (err) {
+        player.stop()
+        if (playerRef.current === player) playerRef.current = null
         setStatus('error')
         setErrorMsg('Bağlantı kurulamadı (API Key hatası).')
         return
@@ -219,10 +227,25 @@ export default function Home() {
     }
 
     if (!currentApiKey || !sessionConfig) {
+      player.stop()
+      playerRef.current = null
       setStatus('error')
       setErrorMsg('API key veya oturum ayarları bulunamadı. Server ayarlarını kontrol edin.')
       return
     }
+
+    let liveConfig = sessionConfig
+    try {
+      const response = await fetch('/api/flow-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'inbound' }) })
+      if (response.ok) {
+        const flowSession = await response.json()
+        liveConfig = {
+          ...sessionConfig,
+          flowSession,
+          systemPrompt: `${sessionConfig.systemPrompt}\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.`,
+        }
+      }
+    } catch { /* Akış motoru kapalı veya ulaşılamıyor; mevcut görüşme yolu korunur. */ }
 
     try {
       // iOS AudioContext unlock
@@ -235,12 +258,11 @@ export default function Home() {
       setTimeout(() => unlockCtx.close(), 100)
     } catch { /* ignore */ }
 
-    const player = new AudioStreamPlayer(24000)
-    playerRef.current = player
-
     const callbacks: LiveChatCallbacks = {
       onAudioChunk: (data) => {
-        player.addChunk(data)
+        // Resolve the player at delivery time so a replaced or cleared turn
+        // can never receive PCM through a stale captured reference.
+        playerRef.current?.addChunk(data)
         setStatus('speaking')
       },
       onText: (text) => {
@@ -286,10 +308,7 @@ export default function Home() {
       },
       onInterrupted: () => {
         setStatus('listening')
-        if (playerRef.current) {
-          playerRef.current.stop()
-          playerRef.current = new AudioStreamPlayer(24000)
-        }
+        playerRef.current?.clear()
       },
     }
 
@@ -297,7 +316,7 @@ export default function Home() {
     sessionRef.current = session
 
     try {
-      await session.connect(currentApiKey, sessionConfig, mode)
+      await session.connect(currentApiKey, liveConfig, mode)
 
       // Wait briefly to confirm session is stable (AI may close immediately on errors)
       await new Promise<void>((resolve, reject) => {
@@ -346,6 +365,8 @@ export default function Home() {
         })
       }
     } catch (err) {
+      player.stop()
+      if (playerRef.current === player) playerRef.current = null
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
@@ -488,8 +509,48 @@ export default function Home() {
           </button>
         </div>
 
+        {mode === 'text' && (
+          <section
+            aria-label="Yazılı asistan kontrolü"
+            style={{
+              width: '100%',
+              padding: '1rem',
+              borderRadius: 14,
+              background: 'var(--card-bg)',
+              border: '1px solid var(--input-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+            }}
+          >
+            <div>
+              <div style={{ color: 'var(--foreground)', fontWeight: 700, fontSize: '0.95rem' }}>Yazılı Asistan</div>
+              <div style={{ color: 'var(--foreground-2)', fontSize: '0.8rem', marginTop: 4 }}>
+                {isTextAssistantOpen ? 'Asistan açık, mesajınızı yazabilirsiniz.' : 'Randevu ve klinik sorularınız için sohbeti başlatın.'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={isTextAssistantOpen ? stop : start}
+              style={{
+                minWidth: 126,
+                padding: '0.65rem 0.85rem',
+                borderRadius: 9,
+                border: `1px solid ${isTextAssistantOpen ? 'var(--danger)' : 'var(--btn-clinic-primary-bg)'}`,
+                background: isTextAssistantOpen ? 'var(--card-bg)' : 'var(--btn-clinic-primary-bg)',
+                color: isTextAssistantOpen ? 'var(--danger)' : 'var(--btn-clinic-primary-fg)',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              {isTextAssistantOpen ? 'Sohbeti Kapat' : 'Asistanı Aç'}
+            </button>
+          </section>
+        )}
+
         {/* Voice Button */}
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {mode === 'audio' && <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {/* Pulse rings */}
           {(status === 'listening' || status === 'speaking') && (
             <>
@@ -554,7 +615,7 @@ export default function Home() {
           >
             {STATUS_ICON[status]}
           </button>
-        </div>
+        </div>}
 
         {/* Status */}
         <div style={{
@@ -593,11 +654,11 @@ export default function Home() {
         )}
 
         {/* Text Input */}
-        {mode === 'text' && isActive && (
+        {mode === 'text' && isTextAssistantOpen && (
           <form
             onSubmit={(e) => {
               e.preventDefault()
-              if (!textInput.trim() || !sessionRef.current) return
+              if (!textInput.trim() || !sessionRef.current?.connected) return
               sessionRef.current.sendText(textInput.trim())
               addTranscript('user', textInput.trim())
               setTextInput('')
@@ -613,22 +674,22 @@ export default function Home() {
                 flex: 1,
                 padding: '0.75rem 1rem',
                 borderRadius: '12px',
-                border: '1px solid rgba(255,255,255,0.1)',
-                background: 'rgba(15, 23, 42, 0.6)',
-                color: '#fff',
+                border: '1px solid var(--input-border)',
+                background: 'var(--input-bg)',
+                color: 'var(--foreground)',
                 outline: 'none',
               }}
             />
             <button
               type="submit"
-              disabled={!textInput.trim()}
+              disabled={!textInput.trim() || status === 'connecting'}
               style={{
                 padding: '0 1.25rem',
                 borderRadius: '12px',
-                background: textInput.trim() ? '#3b82f6' : '#334155',
-                color: '#fff',
-                border: 'none',
-                cursor: textInput.trim() ? 'pointer' : 'not-allowed',
+                background: textInput.trim() && status !== 'connecting' ? 'var(--btn-clinic-primary-bg)' : 'var(--card-inner)',
+                color: textInput.trim() && status !== 'connecting' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
+                border: '1px solid var(--input-border)',
+                cursor: textInput.trim() && status !== 'connecting' ? 'pointer' : 'not-allowed',
                 fontWeight: 600,
               }}
             >
@@ -638,17 +699,25 @@ export default function Home() {
         )}
 
         {/* Transcript */}
-        {transcript.length > 0 && (
-          <div className="glass-card" style={{
+        {(mode === 'text' || transcript.length > 0) && (
+          <div aria-live="polite" style={{
             width: '100%',
-            maxHeight: 300,
+            maxHeight: mode === 'text' ? 360 : 300,
             overflowY: 'auto',
             padding: '1rem',
             display: 'flex',
             flexDirection: 'column',
             gap: '0.6rem',
             animation: 'fadeIn 0.3s ease',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 14,
           }}>
+            {mode === 'text' && transcript.length === 0 && (
+              <div style={{ color: 'var(--foreground-2)', fontSize: '0.875rem', textAlign: 'center', padding: '1.25rem 0.5rem' }}>
+                {isTextAssistantOpen ? 'Asistanın karşılama mesajı hazırlanıyor…' : 'Sohbeti başlatmak için “Asistanı Aç” düğmesine basın.'}
+              </div>
+            )}
             {transcript.map((entry) => (
               <div
                 key={entry.id}
@@ -662,13 +731,13 @@ export default function Home() {
                 <span style={{
                   display: 'inline-block',
                   background: entry.role === 'model'
-                    ? 'rgba(30,41,59,0.95)'
-                    : 'rgba(59,130,246,0.9)',
-                  color: '#f8fafc',
+                    ? 'var(--card-inner)'
+                    : 'var(--btn-clinic-primary-bg)',
+                  color: entry.role === 'model' ? 'var(--foreground)' : 'var(--btn-clinic-primary-fg)',
                   padding: '0.45rem 0.85rem',
                   borderRadius: entry.role === 'model' ? '4px 14px 14px 14px' : '14px 4px 14px 14px',
                   maxWidth: '88%',
-                  border: `1px solid ${entry.role === 'model' ? 'rgba(167,139,250,0.15)' : 'rgba(96,165,250,0.15)'}`,
+                  border: `1px solid ${entry.role === 'model' ? 'var(--input-border)' : 'var(--btn-clinic-primary-bg)'}`,
                 }}>
                   {entry.text}
                 </span>

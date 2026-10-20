@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { toast } from 'react-hot-toast'
-import { X, Trash2 } from 'lucide-react'
+import { CalendarOff, X, Trash2 } from 'lucide-react'
 
 export interface DoctorLeaveItem {
   id: string
@@ -176,64 +176,40 @@ export default function DoctorLeaveModal({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        zIndex: 100005,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16
-      }}
+      className="reference-modal-overlay"
       onClick={onClose}
     >
       <div
-        style={{
-          background: 'var(--card-bg, #1e293b)',
-          border: '1px solid var(--input-border, #334155)',
-          borderRadius: 14,
-          width: 520,
-          maxWidth: '96vw',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
-          padding: '1.5rem',
-          boxSizing: 'border-box'
-        }}
+        className="reference-modal reference-modal--leave"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--input-border, #334155)', paddingBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '1.25rem' }}>🏖️</span>
+        <div className="reference-modal-header">
+          <div className="reference-modal-heading">
+            <span className="reference-modal-icon"><CalendarOff size={26} /></span>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground, #ffffff)' }}>
-                Hekim İzni & Saat Kapatma
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)' }}>
-                İzinli saatler takvimde bloklanır ve bu saatlere randevu alınamaz.
-              </p>
+              <h3>Hekim İzni & Saat Kapatma</h3>
+              <p>İzinli saatler randevuya kapatılır</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--foreground-3, #94a3b8)',
-              cursor: 'pointer',
-              fontSize: '1.2rem',
-              padding: 4
-            }}
+            className="reference-modal-close"
+            aria-label="Modalı kapat"
           >
-            <X size={20} />
+            <X size={24} />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="reference-modal-body">
+          <section className="reference-modal-section">
+            <div className="reference-section-title">
+              <span>1</span>
+              <h4>İzin Bilgileri</h4>
+            </div>
+            {/* Form */}
+            <form onSubmit={handleSave} className="reference-modal-fields">
           {/* Doctor selection */}
           <div>
             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
@@ -305,7 +281,7 @@ export default function DoctorLeaveModal({
                   type="checkbox"
                   checked={isFullDay}
                   onChange={e => setIsFullDay(e.target.checked)}
-                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#3b82f6' }}
+                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--btn-clinic-primary-bg)' }}
                 />
                 Tüm Gün İzinli
               </label>
@@ -451,7 +427,7 @@ export default function DoctorLeaveModal({
           </div>
 
           {/* Action buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+          <div className="reference-modal-footer reference-modal-footer--inside">
             <button
               type="button"
               onClick={onClose}
@@ -481,11 +457,12 @@ export default function DoctorLeaveModal({
               {saving ? 'Kaydediliyor...' : 'İzni Kaydet & Saatleri Kapat'}
             </button>
           </div>
-        </form>
+            </form>
+          </section>
 
         {/* Existing leaves section */}
         {selectedDoctorId && (
-          <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--input-border, #334155)', paddingTop: 14 }}>
+          <section className="reference-modal-section reference-leave-history">
             <h4 style={{ margin: '0 0 10px 0', fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground, #e2e8f0)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>📋</span> Bu Hekimin Kayıtlı İzinleri ({existingLeaves.length})
             </h4>
@@ -544,8 +521,9 @@ export default function DoctorLeaveModal({
                 ))}
               </div>
             )}
-          </div>
+          </section>
         )}
+        </div>
       </div>
     </div>
   )

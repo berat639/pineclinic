@@ -133,6 +133,34 @@
   margin: 12px 0;
 }
 
+.preferences {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.preferences label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: var(--card-inner);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.preferences input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+.preferences input:disabled { cursor: not-allowed; }
+.preferences span { display: grid; gap: 3px; }
+.preferences strong { color: var(--foreground); font-size: 13px; }
+.preferences small { color: var(--foreground-2); font-size: 12px; line-height: 1.45; }
+
+.card .danger { background: var(--danger); border-color: var(--danger); color: var(--btn-clinic-primary-fg) !important; }
+.confirm { margin-top: 16px; padding: 14px; background: var(--card-bg); border: 1px solid var(--danger); border-radius: 8px; }
+.confirm strong { color: var(--foreground); }
+.confirm p { margin: 6px 0 0; color: var(--foreground-2) !important; }
+
 .card button {
   min-height: 38px;
   padding: 9px 12px;

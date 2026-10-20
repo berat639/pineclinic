@@ -39,10 +39,16 @@ const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
   const endMM = String(range[1] % 60).padStart(2, '0');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--foreground)', fontSize: '0.85rem', fontWeight: 600 }}>
-        <span>Başlangıç: <span style={{ color: 'var(--accent, #3b82f6)', fontWeight: 700 }}>{startHH}:{startMM}</span></span>
-        <span>Bitiş: <span style={{ color: 'var(--accent, #3b82f6)', fontWeight: 700 }}>{endHH}:{endMM}</span></span>
+    <div style={{ marginTop: 6, padding: '18px 16px', background: 'var(--card-inner)', borderRadius: 10, border: '1px solid var(--input-border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18, padding: '0 4px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Başlangıç</span>
+          <span style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--foreground)' }}>{startHH}:{startMM}</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Bitiş</span>
+          <span style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--foreground)' }}>{endHH}:{endMM}</span>
+        </div>
       </div>
       <div style={{ padding: '0 6px' }}>
         <Slider
@@ -60,19 +66,19 @@ const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
             onSave(sh, sm, eh, em);
           }}
           allowCross={false}
-          pushable={15}
+          pushable={30}
           styles={{
-            track: { backgroundColor: 'var(--accent, #3b82f6)', height: 6 },
-            rail: { backgroundColor: 'rgba(156,163,175,0.25)', height: 6 },
+            track: { backgroundColor: 'var(--accent)', height: 8, borderRadius: 4 },
+            rail: { backgroundColor: 'var(--input-border)', height: 8, borderRadius: 4 },
             handle: {
-              borderColor: 'transparent',
-              backgroundColor: 'var(--accent, #3b82f6)',
+              border: '3px solid var(--accent)',
+              backgroundColor: 'var(--card-bg)',
               opacity: 1,
-              width: 12,
-              height: 20,
-              marginTop: -7,
-              borderRadius: 4,
-              boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+              width: 18,
+              height: 18,
+              marginTop: -5,
+              borderRadius: '50%',
+              boxShadow: 'none'
             }
           }}
         />
@@ -88,6 +94,7 @@ const STATUS_LABELS: Record<string, string> = {
   completed: '✓ Tamamlandı',
   cancelled: '❌ İptal',
   pending_assignment: '⚠️ Atama Bekliyor',
+  pending_review: '⚠️ Randevu Doğrulaması Bekliyor',
   postponed: '⏳ Ertelendi',
   no_show: '🚫 Gelmedi',
 }
@@ -103,7 +110,7 @@ interface Doctor {
 
 interface CalendarEvent {
   id: string
-  patientId: string
+  patientId: string | null
   doctorId: string | null
   title: string
   startTime: string
@@ -113,6 +120,10 @@ interface CalendarEvent {
   notes?: string
   timeConfirmed?: boolean
   complaint?: string
+  intakeSource?: string | null
+  intakePatientName?: string | null
+  intakePatientPhone?: string | null
+  reviewStatus?: string | null
 }
 
 interface Patient {
@@ -442,6 +453,18 @@ export default function CalendarTab() {
   const [paymentIdBeingEdited, setPaymentIdBeingEdited] = useState<string | null>(null)
   const [treatmentDeleteError, setTreatmentDeleteError] = useState<string | null>(null)
   const [patients, setPatients] = useState<any[]>([])
+  const [aiReviewModal, setAiReviewModal] = useState<CalendarEvent | null>(null)
+  const [aiReviewPatientId, setAiReviewPatientId] = useState('')
+  const [aiReviewPatientQuery, setAiReviewPatientQuery] = useState('')
+  const [aiReviewName, setAiReviewName] = useState('')
+  const [aiReviewPhone, setAiReviewPhone] = useState('')
+  const [aiReviewComplaint, setAiReviewComplaint] = useState('')
+  const [aiReviewDoctorId, setAiReviewDoctorId] = useState('')
+  const [aiReviewStart, setAiReviewStart] = useState('')
+  const [aiReviewEnd, setAiReviewEnd] = useState('')
+  const [aiReviewCreatePatient, setAiReviewCreatePatient] = useState(false)
+  const [aiReviewRejectReason, setAiReviewRejectReason] = useState('')
+  const [aiReviewSaving, setAiReviewSaving] = useState(false)
 
   // Doctor form state
   const [docName, setDocName] = useState('')
@@ -545,6 +568,59 @@ export default function CalendarTab() {
     }
     const docQuery = event.doctorId ? `?doctorId=${event.doctorId}` : ''
 
+  }
+
+  const openAiReview = (event: CalendarEvent) => {
+    setAiReviewModal(event)
+    setAiReviewPatientId('')
+    setAiReviewPatientQuery('')
+    setAiReviewName(event.intakePatientName || event.title.split(' - ')[0] || '')
+    setAiReviewPhone(event.intakePatientPhone || '')
+    setAiReviewComplaint(event.complaint || '')
+    setAiReviewDoctorId(event.doctorId || '')
+    setAiReviewStart(new Date(event.startTime).toISOString().slice(0, 16))
+    setAiReviewEnd(new Date(event.endTime).toISOString().slice(0, 16))
+    setAiReviewCreatePatient(false)
+    setAiReviewRejectReason('')
+  }
+
+  const approveAiReview = async () => {
+    if (!aiReviewModal || (!aiReviewPatientId && !aiReviewCreatePatient)) {
+      toast.error('Mevcut bir hasta seçin veya yeni hasta oluşturun')
+      return
+    }
+    setAiReviewSaving(true)
+    try {
+      const res = await fetch(`/api/dental/appointments/${aiReviewModal.id}/approve-ai`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: aiReviewCreatePatient ? undefined : aiReviewPatientId,
+          newPatient: aiReviewCreatePatient ? { name: aiReviewName, phone: aiReviewPhone } : undefined,
+          patientUpdate: !aiReviewCreatePatient && aiReviewPatientId ? { name: aiReviewName, phone: aiReviewPhone } : undefined,
+          doctorId: aiReviewDoctorId || null, startTime: new Date(aiReviewStart).toISOString(), endTime: new Date(aiReviewEnd).toISOString(), complaint: aiReviewComplaint,
+        }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Onay kaydedilemedi')
+      toast.success(aiReviewDoctorId ? 'AI randevusu onaylandı ve planlandı' : 'AI randevusu onaylandı; doktor ataması bekliyor')
+      setAiReviewModal(null); setPanelOpen(false); setSelectedEvent(null); fetchData()
+    } catch (error: any) { toast.error(error.message || 'Onay sırasında hata oluştu') }
+    finally { setAiReviewSaving(false) }
+  }
+
+  const rejectAiReview = async () => {
+    if (!aiReviewModal || !aiReviewRejectReason.trim()) { toast.error('İptal nedeni zorunludur'); return }
+    setAiReviewSaving(true)
+    try {
+      const res = await fetch(`/api/dental/appointments/${aiReviewModal.id}/reject-ai`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: aiReviewRejectReason }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'İptal kaydedilemedi')
+      toast.success('AI randevu talebi iptal edildi')
+      setAiReviewModal(null); setPanelOpen(false); setSelectedEvent(null); fetchData()
+    } catch (error: any) { toast.error(error.message || 'İptal sırasında hata oluştu') }
+    finally { setAiReviewSaving(false) }
   }
 
   const handleDeleteEvent = () => {
@@ -1464,6 +1540,12 @@ export default function CalendarTab() {
                 </div>
 
                 {/* ── Doktor Atanmadı Uyarısı ── */}
+                {selectedEvent.status === 'pending_review' && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--card-inner)', border: '1px solid var(--accent)', color: 'var(--foreground)', fontSize: '0.8rem', fontWeight: 700 }}>
+                    ⚠️ Randevu Doğrulaması Bekliyor
+                    <div style={{ fontSize: '0.72rem', fontWeight: 500, color: 'var(--foreground-2)', marginTop: 3 }}>Bu talep geçici olarak rezerve edildi. Hasta kaydı ve randevu bilgileri desk tarafından doğrulanmalıdır.</div>
+                  </div>
+                )}
                 {!selectedEvent.doctorId && (
                   <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(245, 158, 11, 0.14)', border: '1.5px solid #f59e0b', color: '#f59e0b', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }}>
                     <span style={{ fontSize: '1.2rem' }}>⚠️</span>
@@ -1533,6 +1615,7 @@ export default function CalendarTab() {
                       <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Tür</div>
                       <select
                         value={selectedEvent.type || 'general'}
+                        disabled={selectedEvent.status === 'pending_review'}
                         onChange={async (e) => {
                           const val = e.target.value;
                           const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
@@ -1547,6 +1630,7 @@ export default function CalendarTab() {
                         }}
                         style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--foreground)' }}
                       >
+                        <option value="kontrol">Kontrol</option>
                         <option value="general">Normal</option>
 
                         <option value="urgent">Acil</option>
@@ -1557,6 +1641,7 @@ export default function CalendarTab() {
                       <div style={{ fontSize: '0.6rem', color: 'var(--foreground-3)', marginBottom: 2 }}>Durum</div>
                       <select
                         value={selectedEvent.status}
+                        disabled={selectedEvent.status === 'pending_review'}
                         onChange={async (e) => {
                           const status = e.target.value
                           try {
@@ -1574,6 +1659,7 @@ export default function CalendarTab() {
                         }}
                         style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', borderRadius: 4, border: '1px solid var(--glass-border)', background: 'var(--background)', color: 'var(--foreground)' }}
                       >
+                        <option value="pending_review">⚠️ Randevu Doğrulaması Bekliyor</option>
                         <option value="scheduled">📅 Planlandı</option>
                         <option value="in_progress">🔄 Devam Ediyor</option>
                         <option value="completed">✓ Tamamlandı</option>
@@ -1607,6 +1693,11 @@ export default function CalendarTab() {
                     />
                   </div>
                   {selectedEvent.notes && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 8, borderTop: '1px solid var(--glass-border)', paddingTop: 6 }}>📝 Randevu Notu: {selectedEvent.notes}</div>}
+                  {selectedEvent.status === 'pending_review' && (
+                    <button onClick={() => openAiReview(selectedEvent)} style={{ marginTop: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--accent)', background: 'var(--accent)', color: 'var(--button-text, #ffffff)', fontWeight: 700, cursor: 'pointer' }}>
+                      Randevuyu Doğrula
+                    </button>
+                  )}
                 </div>
 
                 {/* ── Tedavi Planı & Odontogram ── */}
@@ -2799,6 +2890,50 @@ export default function CalendarTab() {
                 window.location.reload()
               }}
             />
+          </div>
+        )}
+
+        {aiReviewModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 10050, background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div role="dialog" aria-modal="true" style={{ width: 'min(560px, 100%)', maxHeight: '92vh', overflowY: 'auto', background: 'var(--card-bg)', border: '1px solid var(--input-border)', borderRadius: 12, padding: 20, boxShadow: '0 12px 32px rgba(15, 23, 42, 0.22)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', marginBottom: 16 }}>
+                <div><div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--foreground)' }}>Randevu Doğrulama</div><div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 3 }}>Alınan bilgileri kontrol edin, hastayı eşleştirin ve geçici rezervasyonu doğrulayın.</div></div>
+                <button onClick={() => setAiReviewModal(null)} aria-label="Kapat" style={{ border: '1px solid var(--input-border)', background: 'var(--card-inner)', color: 'var(--foreground)', borderRadius: 6, cursor: 'pointer', padding: '4px 8px' }}>✕</button>
+              </div>
+              <div style={{ padding: 10, border: '1px solid var(--input-border)', background: 'var(--card-inner)', borderRadius: 8, marginBottom: 14, fontSize: '0.78rem', color: 'var(--foreground-2)' }}>
+                Kaynak: <strong style={{ color: 'var(--foreground)' }}>{aiReviewModal.intakeSource || 'AI'}</strong> · Tür: <strong style={{ color: 'var(--foreground)' }}>Kontrol</strong>
+              </div>
+              <div style={{ display: 'grid', gap: 10 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground)' }}>Hasta eşleştir</label>
+                <input value={aiReviewPatientQuery} onChange={e => setAiReviewPatientQuery(e.target.value)} placeholder="Ad veya telefon ile ara" style={{ ...inputStyle, width: '100%' }} />
+                <select value={aiReviewCreatePatient ? '__new__' : aiReviewPatientId} onChange={e => {
+                  const value = e.target.value; setAiReviewCreatePatient(value === '__new__'); setAiReviewPatientId(value === '__new__' ? '' : value)
+                  const patient = patients.find(p => p.id === value); if (patient) { setAiReviewName(patient.name || ''); setAiReviewPhone(patient.phone || '') }
+                }} style={{ ...inputStyle, width: '100%' }}>
+                  <option value="">Hasta seçin</option>
+                  <option value="__new__">+ Yeni hasta oluştur</option>
+                  {patients.filter(p => {
+                    const query = aiReviewPatientQuery.trim().toLocaleLowerCase('tr-TR')
+                    return !query || `${p.name || ''} ${p.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query)
+                  }).map(p => <option key={p.id} value={p.id}>{p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
+                </select>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Ad soyad<input value={aiReviewName} onChange={e => setAiReviewName(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Telefon<input value={aiReviewPhone} onChange={e => setAiReviewPhone(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Başlangıç<input type="datetime-local" value={aiReviewStart} onChange={e => setAiReviewStart(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Bitiş<input type="datetime-local" value={aiReviewEnd} onChange={e => setAiReviewEnd(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+                </div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Doktor (opsiyonel)<select value={aiReviewDoctorId} onChange={e => setAiReviewDoctorId(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }}><option value="">Atama bekliyor</option>{doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Hasta şikâyeti / talebi<textarea value={aiReviewComplaint} onChange={e => setAiReviewComplaint(e.target.value)} style={{ ...inputStyle, width: '100%', minHeight: 60, marginTop: 4, resize: 'vertical' }} /></label>
+                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>İptal nedeni <input value={aiReviewRejectReason} onChange={e => setAiReviewRejectReason(e.target.value)} placeholder="Yalnızca iptal edilecekse zorunlu" style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 18 }}>
+                <button disabled={aiReviewSaving} onClick={rejectAiReview} style={{ padding: '9px 12px', borderRadius: 7, border: '1px solid var(--danger)', background: 'var(--card-bg)', color: 'var(--danger)', cursor: 'pointer', fontWeight: 700 }}>İptal Et</button>
+                <div style={{ display: 'flex', gap: 8 }}><button onClick={() => setAiReviewModal(null)} style={{ padding: '9px 12px', borderRadius: 7, border: '1px solid var(--input-border)', background: 'var(--card-inner)', color: 'var(--foreground)', cursor: 'pointer' }}>Vazgeç</button><button disabled={aiReviewSaving} onClick={approveAiReview} style={{ padding: '9px 12px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--accent)', color: 'var(--button-text, #ffffff)', cursor: 'pointer', fontWeight: 700 }}>Onayla</button></div>
+              </div>
+            </div>
           </div>
         )}
 

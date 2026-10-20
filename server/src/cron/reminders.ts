@@ -2,6 +2,7 @@ import { db } from '../db/client'
 import { treatmentPlans, patients, clinics, notificationTemplates } from '../db/schema'
 import { eq, and, lte } from 'drizzle-orm'
 import { sendSMS } from '../services/netgsm'
+import { activeConfig } from '../integrations/managed/store'
 import { enqueueWhatsAppNotification } from '../db/repositories/whatsapp'
 
 export function startReminderCron() {
@@ -55,7 +56,11 @@ async function processReminders() {
     const sendSms = notifType === 'sms' || notifType === 'both' || notifType === 'whatsapp_sms'
 
     if (sendSms) {
-      if (!clinic.netgsmUsercode || !clinic.netgsmPassword || !clinic.smsSenderId) {
+      const managedSms = await activeConfig(clinic.id, 'sms')
+      const smsUsercode = managedSms?.username || clinic.netgsmUsercode
+      const smsPassword = managedSms?.password || clinic.netgsmPassword
+      const smsSenderId = managedSms?.senderId || clinic.smsSenderId
+      if (!smsUsercode || !smsPassword || !smsSenderId) {
         console.log(`[CRON] ${clinic.name} kliniğinin SMS bilgileri eksik, SMS atlanıyor.`)
       } else {
         // Şablon varsa DB'den çek, yoksa default mesaj kullan
@@ -74,9 +79,9 @@ async function processReminders() {
 
         console.log(`[SMS] Sending to ${patient.name} (${patient.phone}) via NetGSM...`)
         const res = await sendSMS({
-          usercode: clinic.netgsmUsercode,
-          password: clinic.netgsmPassword,
-          senderId: clinic.smsSenderId,
+          usercode: smsUsercode,
+          password: smsPassword,
+          senderId: smsSenderId,
           phone: patient.phone,
           message
         })

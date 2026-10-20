@@ -20,7 +20,7 @@ const nodes: FlowNode[] = [
   { id: 'action_existing', type: 'ACTION', position: { x: 150, y: 760 }, data: { action: 'randevuOlustur' } },
   { id: 'end_existing', type: 'END', position: { x: 150, y: 860 }, data: { label: 'Son' } },
   // New customer branch (false)
-  { id: 'field_ad_soyad', type: 'FIELD', position: { x: 650, y: 360 }, data: { fieldName: 'ad_soyad', description: 'Adınız ve soyadınız?', required: false, fieldType: 'text' } },
+  { id: 'field_musteri_adi', type: 'FIELD', position: { x: 650, y: 360 }, data: { fieldName: 'musteri_adi', description: 'Adınızı ve soyadınızı?', required: false, fieldType: 'text' } },
   { id: 'field_tarih_new', type: 'FIELD', position: { x: 650, y: 460 }, data: { fieldName: 'tarih', description: 'Hangi tarihe randevu almak istersiniz? (YYYY-MM-DD)', required: true, fieldType: 'date' } },
   { id: 'field_saat_new', type: 'FIELD', position: { x: 650, y: 560 }, data: { fieldName: 'saat', description: 'Saat kaçı tercih edersiniz? (HH:MM)', required: true, fieldType: 'time' } },
   { id: 'action_new', type: 'ACTION', position: { x: 650, y: 660 }, data: { action: 'randevuOlustur' } },
@@ -38,8 +38,8 @@ const edges: FlowEdge[] = [
   { id: 'e7', source: 'field_saat_existing', target: 'action_existing' },
   { id: 'e8', source: 'action_existing', target: 'end_existing' },
   // False branch (new customer)
-  { id: 'e9', source: 'cond_kayitli', target: 'field_ad_soyad', sourceHandle: 'false' },
-  { id: 'e10', source: 'field_ad_soyad', target: 'field_tarih_new' },
+  { id: 'e9', source: 'cond_kayitli', target: 'field_musteri_adi', sourceHandle: 'false' },
+  { id: 'e10', source: 'field_musteri_adi', target: 'field_tarih_new' },
   { id: 'e11', source: 'field_tarih_new', target: 'field_saat_new' },
   { id: 'e12', source: 'field_saat_new', target: 'action_new' },
   { id: 'e13', source: 'action_new', target: 'end_new' },

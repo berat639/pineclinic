@@ -13,7 +13,7 @@ interface Doctor {
 
 interface CalendarEvent {
   id: string
-  patientId: string
+  patientId: string | null
   doctorId: string | null
   title: string
   startTime: string
@@ -55,6 +55,7 @@ const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
   completed: { bg: 'rgba(99,102,241,0.12)', border: '#6366f1' },
   cancelled: { bg: 'rgba(239,68,68,0.1)', border: '#ef4444' },
   pending_assignment: { bg: 'rgba(156,163,175,0.18)', border: '#9ca3af' },
+  pending_review: { bg: 'var(--card-inner)', border: 'var(--accent)' },
 }
 
 const TIME_WARNING_STYLE = { bg: 'rgba(245,158,11,0.2)', border: '#f59e0b' }
@@ -699,8 +700,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 })}
                 {/* Doctor Leaves (İzinli / Kapalı Saatler) */}
                 {docLeaves.map(l => {
-                  const lStart = `${l.date}T${l.startTime}:00+03:00`;
-                  const lEnd = `${l.date}T${l.endTime}:00+03:00`;
+                  const lStart = `${l.date}T${l.isFullDay ? '00:00' : l.startTime}:00+03:00`;
+                  const lEnd = `${l.date}T${l.isFullDay ? '23:59' : l.endTime}:00+03:00`;
                   const { top, height } = eventPosition(lStart, lEnd, 0);
                   const colWidth = `((100% - 56px) / ${cols})`;
                   const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`;
@@ -717,14 +718,16 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                         left,
                         width,
                         borderRadius: 6,
-                        zIndex: 35,
-                        padding: '4px 8px',
+                        // Header (25) ve saat cetvelinin (15) altında kalır; kaydırırken başlıkları kapatmaz.
+                        zIndex: 4,
+                        padding: '6px 8px',
                         boxSizing: 'border-box',
                         cursor: 'not-allowed',
                         overflow: 'hidden',
                         display: 'flex',
                         flexDirection: 'column',
-                        justifyContent: 'center'
+                        justifyContent: 'flex-start',
+                        pointerEvents: 'auto'
                       }}
                       onClick={(evt) => {
                         evt.stopPropagation();
@@ -738,9 +741,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                       }}
                       title={`Dr. ${d.name} İzinli: ${l.startTime} - ${l.endTime}${l.reason ? ` (${l.reason})` : ''}`}
                     >
-                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
-                        <span>🏖️ İZİNLİ</span>
-                        <span style={{ fontSize: '0.68rem', color: 'var(--foreground, #ffffff)', fontWeight: 600 }}>({l.startTime} - {l.endTime})</span>
+                      <div style={{ fontWeight: 700, fontSize: '0.72rem', color: 'var(--foreground-2)', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                        <span>Kapalı · İzinli</span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--foreground-3)', fontWeight: 600 }}>({l.isFullDay ? 'Tüm gün' : `${l.startTime} - ${l.endTime}`})</span>
                       </div>
                       {l.reason && (
                         <div style={{ fontSize: '0.68rem', color: 'var(--foreground-2, #94a3b8)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>

@@ -12,7 +12,7 @@ export async function sendSMS({
   message: string
 }) {
   // Telefon numarasından gereksiz karakterleri temizle (sadece rakam kalsın)
-  const cleanPhone = phone.replace(/\\D/g, '')
+  const cleanPhone = phone.replace(/\D/g, '')
   
   // NetGSM HTTP GET API Endpoint
   const url = `https://api.netgsm.com.tr/sms/send/get/?usercode=${encodeURIComponent(

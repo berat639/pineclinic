@@ -69,6 +69,21 @@ export const conversationFlows = pgTable('conversation_flows', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).default(sql`now()`),
 })
 
+/** Durable checkpoints only; PCM and transcript chunks are intentionally never stored here. */
+export const flowSessions = pgTable('flow_sessions', {
+  id: uuid('id').primaryKey(),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  direction: text('direction').notNull(),
+  channel: text('channel').notNull(),
+  flowId: uuid('flow_id').references(() => conversationFlows.id),
+  status: text('status').notNull().default('active'),
+  revision: integer('revision').notNull().default(0),
+  state: jsonb('state').notNull().default({}),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => [index('flow_sessions_expiry_idx').on(t.expiresAt)])
+
 export const businessSettings = pgTable('business_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
@@ -197,6 +212,7 @@ export const patients = pgTable('patients', {
   tcIdentity: text('tc_identity'),
   gender: text('gender'),
   birthDate: timestamp('birth_date', { withTimezone: true }),
+  birthYear: integer('birth_year'),
   balance: integer('balance').notNull().default(0),
   whatsappOptOut: boolean('whatsapp_opt_out').notNull().default(false), // Hasta WA bildirimlerini kapattı mı?
   smsOptOut: boolean('sms_opt_out').notNull().default(false), // Hasta SMS bildirimlerini kapattı mı?
@@ -207,7 +223,8 @@ export const patients = pgTable('patients', {
 export const dentalAppointments = pgTable('dental_appointments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').references(() => clinics.id),
-  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  // AI talepleri desk tarafından doğrulanana kadar gerçek bir hastaya bağlı değildir.
+  patientId: uuid('patient_id').references(() => patients.id),
   doctorId: uuid('doctor_id').references(() => users.id),
   title: text('title').notNull(),
   startTime: timestamp('start_time', { withTimezone: true }).notNull(),
@@ -217,6 +234,13 @@ export const dentalAppointments = pgTable('dental_appointments', {
   complaint: text('complaint'),
   notes: text('notes'),
   timeConfirmed: boolean('time_confirmed').notNull().default(true),
+  intakeSource: text('intake_source'),
+  intakePatientName: text('intake_patient_name'),
+  intakePatientPhone: text('intake_patient_phone'),
+  reviewStatus: text('review_status'),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 

@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
-import { credentialsFor, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig } from '../db/repositories/whatsapp'
+import { credentialsFor, disconnectWhatsApp, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig, updateWhatsAppPreferences } from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
 import { evolutionRequest, EvolutionError, parseEvolutionMessages, requestEvolutionQr, verifyWebhookSecret } from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
@@ -57,6 +57,14 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
     }
     await db.update(clinics).set({ evolutionConnectionState: qr.connectionState }).where(eq(clinics.id, clinic.id))
     return qr
+  }, { params: clinicParams })
+  .patch('/:clinicId/preferences', async ({ params, body }) => {
+    assertCurrentClinic(params.clinicId)
+    return updateWhatsAppPreferences(params.clinicId, body)
+  }, { params: clinicParams, body: t.Object({ enabled: t.Boolean(), aiEnabled: t.Boolean() }) })
+  .delete('/:clinicId/disconnect', async ({ params }) => {
+    assertCurrentClinic(params.clinicId)
+    return disconnectWhatsApp(params.clinicId)
   }, { params: clinicParams })
   .get('/:clinicId/conversations', async ({ params }) => {
     assertCurrentClinic(params.clinicId)

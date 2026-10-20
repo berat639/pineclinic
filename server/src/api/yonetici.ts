@@ -31,34 +31,12 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     return listClinicPhoneNumbers()
   })
 
-  .post('/telephony-numbers', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    try {
-      const { addClinicPhoneNumber } = await import('../db/repositories/clinic-phone-numbers')
-      return await addClinicPhoneNumber(body as { phoneNumber: string; label?: string; isPrimary?: boolean })
-    } catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Telefon eklenemedi' } }
-  })
+  .post('/telephony-numbers', ({ set }) => { set.status = 403; return { error: 'Telefon numaraları yalnız platform Klinikler ekranından yönetilir.' } })
 
-  .put('/telephony-numbers/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    try {
-      const { updateClinicPhoneNumber } = await import('../db/repositories/clinic-phone-numbers')
-      const row = await updateClinicPhoneNumber(params.id, body as { phoneNumber?: string; label?: string; isActive?: boolean; isPrimary?: boolean })
-      if (!row) { set.status = 404; return { error: 'Telefon bulunamadı' } }
-      return row
-    } catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Telefon güncellenemedi' } }
-  })
+  .put('/telephony-numbers/:id', ({ set }) => { set.status = 403; return { error: 'Telefon numaraları yalnız platform Klinikler ekranından yönetilir.' } })
 
-  .delete('/telephony-numbers/:id', async ({ params, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-    const { deleteClinicPhoneNumber } = await import('../db/repositories/clinic-phone-numbers')
-    return { ok: await deleteClinicPhoneNumber(params.id) }
-  })
+  .delete('/telephony-numbers/:id', ({ set }) => { set.status = 403; return { error: 'Telefon numaraları yalnız platform Klinikler ekranından yönetilir.' } })
 
-  // ── Finance ────────────────────────────────────────────────────────────────
   .get('/finance/revenue', async ({ query, cookie, set }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
@@ -694,15 +672,8 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
-    const { getIntegrations } = await import('../db/repositories/integrations')
-    return await getIntegrations()
+    const { integrationView } = await import('../integrations/managed/store')
+    return integrationView(requireClinicId())
   })
 
-  .put('/integrations', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
-
-    const { updateIntegrations } = await import('../db/repositories/integrations')
-    await updateIntegrations(body as any)
-    return { success: true }
-  })
+  .put('/integrations', ({ set }) => { set.status = 403; return { error: 'Entegrasyonlar yalnız platform Klinikler ekranından yönetilir.' } })

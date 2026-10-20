@@ -7,11 +7,17 @@ export class AudioStreamPlayer {
   private nextStartTime = 0;
   private isActive = true;
   private gainNode: GainNode;
+  private pendingChunks: Float32Array[] = [];
+  private activeSources = new Set<AudioBufferSourceNode>();
+  private readonly maxScheduledAheadSeconds = 1.5;
 
   constructor(sampleRate = 24000) {
     this.audioContext = new AudioContext({ sampleRate });
     this.gainNode = this.audioContext.createGain();
     this.gainNode.connect(this.audioContext.destination);
+    // This constructor runs from the Start button handler. Resuming here keeps
+    // mobile browsers from leaving playback suspended after async setup work.
+    void this.audioContext.resume().then(() => this.drainQueue()).catch(() => {});
   }
 
   /**
@@ -23,29 +29,27 @@ export class AudioStreamPlayer {
     const float32 = this.base64ToFloat32(base64Data);
     if (float32.length === 0) return;
 
-    const buffer = this.audioContext.createBuffer(
-      1,
-      float32.length,
-      this.audioContext.sampleRate
-    );
-    buffer.getChannelData(0).set(float32);
-
-    const source = this.audioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(this.gainNode);
-
-    const now = this.audioContext.currentTime;
-    const startTime = Math.max(now, this.nextStartTime);
-    source.start(startTime);
-    this.nextStartTime = startTime + buffer.duration;
+    this.pendingChunks.push(float32);
+    this.drainQueue();
   }
 
   get isPlaying(): boolean {
-    return this.audioContext.currentTime < this.nextStartTime;
+    return this.pendingChunks.length > 0 || this.activeSources.size > 0 || this.audioContext.currentTime < this.nextStartTime;
+  }
+
+  /** Discard the current assistant turn without losing the user-unlocked context. */
+  clear() {
+    this.pendingChunks = [];
+    for (const source of this.activeSources) {
+      try { source.stop() } catch { /* already ended */ }
+    }
+    this.activeSources.clear();
+    this.nextStartTime = this.audioContext.currentTime;
   }
 
   stop() {
     this.isActive = false;
+    this.clear();
     try {
       this.audioContext.close();
     } catch {
@@ -65,6 +69,40 @@ export class AudioStreamPlayer {
       float32[i] = int16[i] / 32768;
     }
     return float32;
+  }
+
+  private drainQueue() {
+    if (!this.isActive || this.audioContext.state !== 'running') return;
+
+    const now = this.audioContext.currentTime;
+    if (this.nextStartTime < now) this.nextStartTime = now;
+
+    // Do not hand the browser an unbounded timeline of AudioBufferSourceNodes.
+    // Gemini can stream faster than the speaker consumes audio; remaining PCM
+    // stays in this queue and is discarded cleanly on interruption.
+    while (
+      this.pendingChunks.length > 0 &&
+      this.nextStartTime < now + this.maxScheduledAheadSeconds
+    ) {
+      const float32 = this.pendingChunks.shift();
+      if (!float32) break;
+
+      const buffer = this.audioContext.createBuffer(1, float32.length, this.audioContext.sampleRate);
+      buffer.getChannelData(0).set(float32);
+
+      const source = this.audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.gainNode);
+      source.onended = () => {
+        this.activeSources.delete(source);
+        this.drainQueue();
+      };
+
+      const startTime = Math.max(now + 0.02, this.nextStartTime);
+      source.start(startTime);
+      this.nextStartTime = startTime + buffer.duration;
+      this.activeSources.add(source);
+    }
   }
 }
 

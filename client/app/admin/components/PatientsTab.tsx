@@ -15,6 +15,7 @@ interface Patient {
   tcIdentity: string | null
   gender: string | null
   birthDate: string | null
+  birthYear: number | null
   balance: number
   createdAt: string
   smsOptOut?: boolean
@@ -152,21 +153,27 @@ export default function PatientsTab() {
     })
   }
 
+  const isMeaningfulCellValue = (value: any) => {
+    if (value === null || value === undefined) return false
+    const text = String(value).trim().toLowerCase()
+    return text !== '' && text !== '—' && text !== '-' && text !== 'null' && text !== 'undefined'
+  }
+
   // Safe date parser: supports JS Date, Excel date serials, DD.MM.YYYY, DD/MM/YYYY, ISO strings
   const parseSafeDate = (raw: any): string | null => {
-    if (!raw) return null
+    if (!isMeaningfulCellValue(raw)) return null
+    const currentYear = new Date().getFullYear()
+    const isValidDate = (date: Date) => !isNaN(date.getTime()) && date.getFullYear() >= 1900 && date.getFullYear() <= currentYear
     if (raw instanceof Date) {
-      return !isNaN(raw.getTime()) ? raw.toISOString() : null
+      return isValidDate(raw) ? raw.toISOString() : null
     }
     // Excel date serial number (e.g. 44197 -> 2021-01-01)
     if (typeof raw === 'number' && raw > 10000 && raw < 100000) {
       const jsDate = new Date(Math.round((raw - 25569) * 86400 * 1000))
-      return !isNaN(jsDate.getTime()) ? jsDate.toISOString() : null
+      return isValidDate(jsDate) ? jsDate.toISOString() : null
     }
     const str = String(raw).trim()
-    if (!str || str === '—' || str === '-' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
-      return null
-    }
+    if (/^\d{4}$/.test(str)) return null
     // Match Turkish date format DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
     const dmy = str.match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$/)
     if (dmy) {
@@ -174,10 +181,18 @@ export default function PatientsTab() {
       const month = parseInt(dmy[2], 10) - 1
       const year = parseInt(dmy[3], 10)
       const d = new Date(year, month, day)
-      return !isNaN(d.getTime()) ? d.toISOString() : null
+      return isValidDate(d) && d.getFullYear() === year && d.getMonth() === month && d.getDate() === day ? d.toISOString() : null
     }
     const d = new Date(str)
-    return !isNaN(d.getTime()) ? d.toISOString() : null
+    return isValidDate(d) ? d.toISOString() : null
+  }
+
+  const parseBirthYear = (raw: any): number | null => {
+    if (!isMeaningfulCellValue(raw)) return null
+    const text = String(raw).trim()
+    if (!/^\d{4}$/.test(text)) return null
+    const year = Number(text)
+    return year >= 1900 && year <= new Date().getFullYear() ? year : null
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -261,7 +276,26 @@ export default function PatientsTab() {
           const rawBirthDate = findRowValue(row, [
             'DOĞUM TARİHİ', 'Doğum Tarihi', 'Dogum Tarihi', 'Doğum Tarih', 'D.Tarihi', 'BirthDate', 'Birth Date'
           ])
-          const birthDate = parseSafeDate(rawBirthDate)
+          const rawBirthYear = findRowValue(row, [
+            'DOĞUM YILI', 'Doğum Yılı', 'Dogum Yili', 'D. Yılı', 'D.Yılı', 'BirthYear', 'Birth Year'
+          ])
+          let birthDate: string | null | undefined
+          let birthYear: number | null | undefined
+          if (isMeaningfulCellValue(rawBirthDate)) {
+            birthDate = parseSafeDate(rawBirthDate)
+            if (birthDate) {
+              birthYear = null
+            } else {
+              errors.push(`${index + 2}. satır: Geçersiz doğum tarihi`)
+            }
+          } else if (isMeaningfulCellValue(rawBirthYear)) {
+            birthYear = parseBirthYear(rawBirthYear)
+            if (birthYear) {
+              birthDate = null
+            } else {
+              errors.push(`${index + 2}. satır: Geçersiz doğum yılı`)
+            }
+          }
 
           const rawCreatedAt = findRowValue(row, [
             'KAYIT', 'Kayıt', 'Kayıt Tarihi', 'KAYIT TARİHİ', 'Kayit Tarihi', 'Registration Date', 'Tarih', 'CreatedAt'
@@ -272,7 +306,7 @@ export default function PatientsTab() {
           // If there is no name:
           if (!name || name === '—' || name === '-' || name.toLowerCase() === 'null') {
             // Only report error if the row has some other meaningful data (phone, tc, email, birthDate)
-            const hasOtherData = Boolean(phone || tcIdentity || email || birthDate)
+            const hasOtherData = Boolean(phone || tcIdentity || email || birthDate || birthYear)
             if (hasOtherData) {
               errors.push(`${index + 2}. Satır: İletişim/Kimlik bilgisi var ancak Ad Soyad eksik`)
             }
@@ -286,7 +320,8 @@ export default function PatientsTab() {
             tcIdentity,
             email,
             gender,
-            birthDate,
+            ...(birthDate !== undefined || birthYear !== undefined ? { birthDate, birthYear } : {}),
+            sourceRow: index + 2,
             ...(createdAt ? { createdAt } : {})
           })
         })
@@ -306,17 +341,20 @@ export default function PatientsTab() {
 
         if (res.ok) {
           const result = await res.json()
+          const importErrors = Array.isArray(result?.errors) ? result.errors : []
+          if (importErrors.length > 0) setExcelErrors([...errors, ...importErrors])
           const ins = result?.insertedCount ?? mappedPatients.length
           const upd = result?.updatedCount ?? 0
           if (ins > 0 && upd > 0) {
-            toast.success(`${ins} yeni hasta eklendi, ${upd} mevcut hastanın eksik bilgileri güncellendi!`)
+            toast.success(`${ins} yeni hasta eklendi, ${upd} mevcut hasta güncellendi!`)
           } else if (ins > 0) {
             toast.success(`${ins} yeni hasta başarıyla eklendi!`)
           } else if (upd > 0) {
-            toast.success(`${upd} mevcut hastanın eksik bilgileri güncellendi (mükerrer kopya eklenmedi).`)
+            toast.success(`${upd} mevcut hasta güncellendi (mükerrer kopya eklenmedi).`)
           } else {
             toast.success('Kayıtlar incelendi; tüm hastalar zaten güncel olarak mevcut.')
           }
+          if (importErrors.length > 0) toast.error(`${importErrors.length} satır güvenlik nedeniyle içe aktarılmadı.`)
           loadPatients()
         } else {
           const err = await res.json()
@@ -425,6 +463,8 @@ export default function PatientsTab() {
       return '—'
     }
   }
+
+  const fmtBirthInfo = (patient: Patient) => patient.birthDate ? fmtDate(patient.birthDate) : patient.birthYear ? String(patient.birthYear) : '—'
 
   // Selection toggle
   const toggleSelectPatient = (id: string) => {
@@ -811,7 +851,7 @@ export default function PatientsTab() {
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>TC Kimlik</th>
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Telefon</th>
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Cinsiyet</th>
-                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Doğum Tarihi</th>
+                    <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Doğum Bilgisi</th>
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Kayıt</th>
                     <th style={{ padding: '0.8rem 1rem', textAlign: 'right', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>İşlemler</th>
                   </tr>
@@ -860,7 +900,7 @@ export default function PatientsTab() {
                           {p.gender === 'E' ? 'Erkek' : p.gender === 'K' ? 'Kadın' : p.gender || '—'}
                         </td>
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
-                          {fmtDate(p.birthDate)}
+                          {fmtBirthInfo(p)}
                         </td>
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.84rem', color: 'var(--foreground-3, #94a3b8)' }}>
                           {fmtDate(p.createdAt)}

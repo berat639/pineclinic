@@ -47,7 +47,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       if (done) return { ...done.result as Record<string, unknown>, tekrar: true, bilgi: 'Bu mesaj için işlem zaten yapıldı; kaydedilen sonuç döndürüldü.' }
       let result: Record<string, unknown>
       if (name === 'randevuOlustur') {
-        const created = await createAssistantAppointment({ ...args, telefon: context.phone }, { sessionId: `wa_${context.messageId}`, clinicId: context.clinicId }, tx)
+        const created = await createAssistantAppointment({ ...args, telefon: context.phone }, { sessionId: `wa_${context.messageId}`, clinicId: context.clinicId, source: 'whatsapp_ai' }, tx)
         result = { success: true, id: created.id, message: `${created.date} ${created.time} için randevu talebi alındı; klinik onayı bekleniyor.` }
       } else if (name === 'randevuGuncelle') {
         result = await updateWhatsAppAppointment(tx, args, context.clinicId, context.phone!)

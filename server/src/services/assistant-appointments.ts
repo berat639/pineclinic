@@ -1,8 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { appointments, dentalAppointments, patients, users } from '../db/schema'
+import { appointments, dentalAppointments } from '../db/schema'
 import { createFlowAppointment } from '../db/repositories/appointments'
-import { patientPhoneMatches, type DbTransaction } from '../db/repositories/whatsapp'
+import { ensureAiAppointmentReviewSchema } from '../db/repositories/dental'
+import { type DbTransaction } from '../db/repositories/whatsapp'
 import { normalizePhone } from '../integrations/whatsapp'
 import { broadcastSSE } from '../events'
 
@@ -14,7 +15,14 @@ export function appointmentTime(date: string, time: string): Date {
 }
 
 /** Shared booking operation for voice and WhatsApp; both calendar records commit together. */
-export async function createAssistantAppointment(fields: Record<string, unknown>, context: { sessionId: string; clinicId?: string }, transaction?: DbTransaction) {
+export type AiAppointmentSource = 'web_ai' | 'phone_ai' | 'whatsapp_ai'
+
+/**
+ * Stores an AI booking as a tentative calendar reservation.  It intentionally
+ * does not create a patient: the desk must match or create the real record.
+ */
+export async function createAssistantAppointment(fields: Record<string, unknown>, context: { sessionId: string; clinicId?: string; source: AiAppointmentSource }, transaction?: DbTransaction) {
+  await ensureAiAppointmentReviewSchema()
   const run = async (tx: DbTransaction) => {
     const name = String(fields.musteri_adi || '').trim()
     const phone = normalizePhone(String(fields.telefon || ''))
@@ -24,25 +32,23 @@ export async function createAssistantAppointment(fields: Record<string, unknown>
     if (name.length < 3 || /\[|\]|placeholder|örnek isim/i.test(name)) throw new Error('Gerçek hasta adı ve soyadı gerekli.')
     if (start.getTime() < Date.now() - 60_000) throw new Error('Geçmiş bir tarih için randevu oluşturulamaz.')
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${context.clinicId || 'voice'}:${phone}`}, 0))`)
-    const [existingPatient] = await tx.select().from(patients).where(and(patientPhoneMatches(phone), context.clinicId ? eq(patients.clinicId, context.clinicId) : undefined)).limit(1)
-    const patient = existingPatient || (await tx.insert(patients).values({ name, phone, clinicId: context.clinicId }).returning())[0]
-    let doctorId: string | null = null
-    if (fields.doktor_id) {
-      const id = String(fields.doktor_id)
-      if (!/^[a-f\d-]{36}$/i.test(id)) throw new Error('Geçerli hekim seçilmeli.')
-      const [doctor] = await tx.select({ id: users.id }).from(users).where(and(eq(users.id, id), eq(users.role, 'hekim'), eq(users.active, true)))
-      if (!doctor) throw new Error('Seçilen hekim bulunamadı.')
-      doctorId = doctor.id
-    }
-    const type = String(fields.randevu_turu || fields.islem_turu || 'kontrol')
+    const end = new Date(start.getTime() + 15 * 60_000)
+    const conflicts = await tx.select({ id: dentalAppointments.id }).from(dentalAppointments).where(and(
+      context.clinicId ? eq(dentalAppointments.clinicId, context.clinicId) : sql`${dentalAppointments.clinicId} IS NULL`,
+      sql`${dentalAppointments.status} <> 'cancelled'`,
+      sql`${dentalAppointments.startTime} < ${end}`,
+      sql`${dentalAppointments.endTime} > ${start}`,
+    )).limit(1)
+    if (conflicts.length) throw new Error('Seçilen saat geçici veya planlanmış başka bir randevu ile dolu.')
     const complaint = String(fields.sikayet || fields.sorun_veya_talep || '')
     const [dental] = await tx.insert(dentalAppointments).values({
-      clinicId: context.clinicId,
-      patientId: patient.id, doctorId, title: `${name} - ${type}`, startTime: start,
-      endTime: new Date(start.getTime() + 15 * 60_000), status: doctorId ? 'scheduled' : 'pending_assignment',
-      type, complaint: complaint || null, notes: complaint || null, timeConfirmed: false,
+      clinicId: context.clinicId, patientId: null, doctorId: null,
+      title: `${name} - kontrol`, startTime: start, endTime: end,
+      status: 'pending_review', type: 'kontrol', complaint: complaint || null, notes: complaint || null,
+      timeConfirmed: false, intakeSource: context.source, intakePatientName: name, intakePatientPhone: phone,
+      reviewStatus: 'pending',
     }).returning()
-    const cleanFields = Object.fromEntries(Object.entries(fields).filter(([key]) => !key.startsWith('_')))
+    const cleanFields = { ...Object.fromEntries(Object.entries(fields).filter(([key]) => !key.startsWith('_'))), randevu_turu: 'kontrol', ai_kaynak: context.source }
     return createFlowAppointment({ ...cleanFields, musteri_adi: name, telefon: phone, tarih: date, saat: time,
       _clinicId: context.clinicId, _dentalAppointmentId: dental.id }, context.sessionId, undefined, tx)
   }

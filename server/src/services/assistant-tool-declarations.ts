@@ -49,6 +49,17 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
 
   const tools: FunctionDeclaration[] = [
     {
+      name: 'akisBilgisiGuncelle',
+      description: 'Akışla yürütülen görüşmede müşterinin yeni veya düzeltilmiş bilgilerini kaydeder ve sıradaki kısa görevi alır. Müşteriden yeni bir bilgi aldığında, işlem çağırmadan önce kullan.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          bilgiler: { type: Type.OBJECT, description: 'Müşterinin açıkça verdiği alanlar. Örnek: musteri_adi, telefon, tarih, saat, sikayet.' },
+          yeni_kisi: { type: Type.BOOLEAN, description: 'Müşteri başka kişi için yeni işlem istiyorsa true.' },
+        },
+      },
+    },
+    {
       name: 'randevuOlustur',
       description: 'Müşteri randevu almak istediğinde randevu oluşturur ve kaydeder. Aynı arama içinde birden fazla kişi için sırayla birden fazla kez çağrılabilir.',
       parameters: {

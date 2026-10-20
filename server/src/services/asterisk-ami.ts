@@ -19,143 +19,77 @@ function getAmiConfig(): AmiConfig {
 /**
  * Execute a command/action on Asterisk AMI with timeout
  */
-export async function sendAmiAction(action: Record<string, string>, timeoutMs = 5000): Promise<{ success: boolean; message: string; raw?: string }> {
+export async function sendAmiAction(action: Record<string, string>, timeoutMs = 10000): Promise<{ success: boolean; message: string; raw?: string }> {
   const config = getAmiConfig()
-
-  return new Promise((resolve) => {
-    let resolved = false
+  const actionId = crypto.randomUUID()
+  if (Object.values(action).some(value => /[\r\n]/.test(value))) return { success: false, message: 'Geçersiz AMI parametresi' }
+  return new Promise(resolve => {
     const socket = new net.Socket()
-    let buffer = ''
-    let loggedIn = false
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        socket.destroy()
-        resolve({ success: false, message: 'AMI bağlantı zaman aşımı' })
-      }
-    }, timeoutMs)
-
-    function finish(result: { success: boolean; message: string; raw?: string }) {
-      if (!resolved) {
-        resolved = true
-        clearTimeout(timer)
-        socket.end()
-        resolve(result)
-      }
+    let buffer = '', loggedIn = false, sentLogin = false, raw = '', done = false
+    const finish = (success: boolean, message: string) => {
+      if (done) return
+      done = true; clearTimeout(timer); socket.destroy(); resolve({ success, message, raw })
     }
-
-    socket.connect(config.port, config.host, () => {
-      // Wait for Asterisk banner
-    })
-
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf-8')
-
-      // Check for Asterisk banner
-      if (!loggedIn && buffer.includes('Asterisk Call Manager')) {
-        // Send Login
-        const loginAction = `Action: Login\r\nUsername: ${config.username}\r\nSecret: ${config.secret}\r\nEvents: off\r\n\r\n`
-        socket.write(loginAction)
-        buffer = ''
-        return
+    const write = (values: Record<string,string>) => socket.write(Object.entries(values).map(([k,v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n')
+    const timer = setTimeout(() => finish(false, 'AMI bağlantı zaman aşımı'), timeoutMs)
+    socket.connect(config.port, config.host)
+    socket.on('data', chunk => {
+      buffer += chunk.toString()
+      if (!sentLogin && buffer.includes('Asterisk Call Manager')) {
+        const end = buffer.indexOf('\r\n'); if (end < 0) return
+        buffer = buffer.slice(end + 2); sentLogin = true
+        write({ Action: 'Login', Username: config.username, Secret: config.secret, Events: 'on', ActionID: 'login' })
       }
-
-      // Check for Login Response
-      if (!loggedIn && buffer.includes('Response: Success')) {
-        loggedIn = true
-        buffer = ''
-
-        // Format and send main Action
-        let actionStr = ''
-        for (const [k, v] of Object.entries(action)) {
-          actionStr += `${k}: ${v}\r\n`
+      let end: number
+      while ((end = buffer.indexOf('\r\n\r\n')) >= 0) {
+        const frame = buffer.slice(0,end); buffer = buffer.slice(end+4)
+        if (!loggedIn) {
+          if (frame.includes('Response: Error')) { finish(false, 'AMI kimlik doğrulama hatası'); return }
+          if (frame.includes('Response: Success')) { loggedIn = true; write({ ...action, ActionID: actionId }) }
+          continue
         }
-        actionStr += '\r\n'
-        socket.write(actionStr)
-        return
-      }
-
-      if (!loggedIn && (buffer.includes('Response: Error') || buffer.includes('Authentication failed'))) {
-        finish({ success: false, message: 'AMI kimlik doğrulama hatası', raw: buffer })
-        return
-      }
-
-      // If logged in and response received for action
-      if (loggedIn && buffer.includes('Response:')) {
-        const isSuccess = buffer.includes('Response: Success')
-        const messageMatch = buffer.match(/Message:\s*([^\r\n]+)/i)
-        const msg = messageMatch ? messageMatch[1] : (isSuccess ? 'İşlem başarılı' : 'İşlem başarısız')
-
-        // Logoff nicely
-        try { socket.write('Action: Logoff\r\n\r\n') } catch { }
-        finish({ success: isSuccess, message: msg, raw: buffer })
+        if (!frame.includes(`ActionID: ${actionId}`)) continue
+        raw += frame + '\r\n\r\n'
+        if (frame.includes('Response: Error')) { finish(false,'Asterisk işlemi reddetti'); return }
+        if (frame.includes('EventList: Complete') || frame.includes('EventList: complete')) { finish(true,'Tamamlandı'); return }
+        if (/Response: (Success|Follows)/.test(frame) && !/EventList: start/i.test(frame)) { finish(true,'Tamamlandı'); return }
       }
     })
-
-    socket.on('error', (err) => {
-      finish({ success: false, message: `AMI soket hatası: ${err.message}` })
-    })
-
-    socket.on('close', () => {
-      if (!resolved) {
-        finish({ success: false, message: 'AMI bağlantısı kapandı' })
-      }
-    })
+    socket.on('error', () => finish(false,'AMI bağlantısı kurulamadı'))
+    socket.on('close', () => finish(false,'AMI bağlantısı kapandı'))
   })
 }
 
 /**
  * Redirect an active call to target extension/number in dynamic-forward context
  */
-export async function transferCall(channel: string, targetNumber: string): Promise<{ success: boolean; message: string }> {
-  console.log(`[AMI] Çağrı aktarılıyor: channel=${channel} -> target=${targetNumber}`)
-
-  let cleanNumber = targetNumber.replace(/\D/g, '')
-  if (cleanNumber.startsWith('90') && cleanNumber.length === 12) {
-    cleanNumber = '0' + cleanNumber.slice(2)
+export async function transferCall(channel: string, targetNumber: string, clinicId?: string): Promise<{ success: boolean; message: string }> {
+  const { requireClinicId } = await import('../tenancy/context')
+  const { activeConfig, decrypt, getRow } = await import('../integrations/managed/store')
+  const { endpointId, phone } = await import('../integrations/managed/model')
+  const { db } = await import('../db/client')
+  const { sql } = await import('drizzle-orm')
+  const id = clinicId || requireClinicId()
+  const [test] = await db.execute(sql`SELECT * FROM integration_tests WHERE clinic_id=${id} AND service='phone' AND kind='transfer' AND evidence->>'channel'=${channel} AND expires_at>now() AND status='accepted' LIMIT 1`)
+  const row = test ? await getRow(id,'phone') : null
+  const config = row && row.revision===test?.revision ? decrypt(row.draft as import('../integrations/managed/model').Config) : await activeConfig(id,'phone')
+  if (!config) return {success:false,message:'Telefon bağlantısı etkin değil'}
+  const expected = await sendAmiAction({Action:'Getvar',Channel:channel,Variable:'VOICEAI_CLINIC_ID'})
+  if (!expected.success || !expected.raw?.includes(`Value: ${id}\r\n`)) return {success:false,message:'Çağrı kliniği doğrulanamadı'}
+  const target = test ? config.transferNumber : phone(targetNumber)
+  if (!target) return {success:false,message:'Aktarım numarası tanımlı değil'}
+  for (const [Variable,Value] of Object.entries({VOICEAI_ENDPOINT:endpointId(id),VOICEAI_CALLER_ID:config.callerId!.replace('+','')})) {
+    const result=await sendAmiAction({Action:'Setvar',Channel:channel,Variable,Value})
+    if(!result.success)return result
   }
-  if (!cleanNumber.startsWith('0') && cleanNumber.length === 10) {
-    cleanNumber = '0' + cleanNumber
-  }
-  if (!cleanNumber) {
-    return { success: false, message: 'Geçersiz hedef telefon numarası' }
-  }
-
-  const res = await sendAmiAction({
-    Action: 'Redirect',
-    Channel: channel,
-    Context: 'dynamic-forward',
-    Exten: cleanNumber,
-    Priority: '1',
-  })
-
-  console.log(`[AMI] Aktarım sonucu:`, res)
-  return res
+  return sendAmiAction({Action:'Redirect',Channel:channel,Context:'dynamic-forward',Exten:target.replace('+',''),Priority:'1'})
 }
 
-/**
- * Initiate an outbound call to a customer via Netgsm and bridge it to outbound-ai
- */
-export async function initiateOutboundCall(customerNumber: string, callerId: string): Promise<{ success: boolean; message: string }> {
-  console.log(`[AMI] Dış arama başlatılıyor: heden=${customerNumber}, callerId=${callerId}`)
-
-  const cleanNumber = customerNumber.replace(/\D/g, '')
-  if (!cleanNumber) {
-    return { success: false, message: 'Geçersiz müşteri telefon numarası' }
-  }
-
-  const res = await sendAmiAction({
-    Action: 'Originate',
-    Channel: `PJSIP/${cleanNumber}@netgsm-endpoint`,
-    Context: 'outbound-ai',
-    Exten: 's',
-    Priority: '1',
-    CallerID: `Pine Klinik <${callerId}>`,
-    Variable: `CUSTOMER_NUMBER=${cleanNumber}`,
-    Async: 'true',
-  })
-
-  console.log(`[AMI] Dış arama sonucu:`, res)
-  return res
+export async function initiateOutboundCall(customerNumber: string, clinicId: string): Promise<{ success: boolean; message: string }> {
+  const { activeConfig } = await import('../integrations/managed/store')
+  const { endpointId, phone } = await import('../integrations/managed/model')
+  const config=await activeConfig(clinicId,'phone')
+  if(!config)return {success:false,message:'Klinik telefon bağlantısı etkin değil'}
+  const number=phone(customerNumber)
+  return sendAmiAction({Action:'Originate',Channel:`PJSIP/${number.replace('+','')}@${endpointId(clinicId)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:config.callerId!.replace('+',''),Variable:`CUSTOMER_NUMBER=${number},VOICEAI_CLINIC_ID=${clinicId}`,Async:'true'})
 }

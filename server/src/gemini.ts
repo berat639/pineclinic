@@ -30,6 +30,7 @@ import {
   resolveTransferPhonebookTarget,
   type AutomaticTransferRule,
 } from './services/transfer-triggers'
+import { FlowEngine } from './services/flow-engine'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -79,6 +80,7 @@ export async function createLiveSession(
     enableGoogleSearch?: boolean
     automaticTransferRules?: readonly AutomaticTransferRule[]
     enforceConfiguredTransferRules?: boolean
+    appointmentSource?: 'web_ai' | 'phone_ai'
   }
 ) {
   // Track last phone used in musteriSorgula so randevuOlustur can reuse it
@@ -95,17 +97,46 @@ export async function createLiveSession(
     reason: string
     question: string
   } | null = null
+  const flowEngine = options.clinicId
+    ? await FlowEngine.create({
+      clinicId: options.clinicId,
+      direction: options.direction || 'inbound',
+      channel: options.telephonyChannel ? 'phone' : 'web_socket',
+    })
+    : null
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
 
+    if (name === 'akisBilgisiGuncelle') {
+      if (!flowEngine) return { success: false, message: 'Akışla çalışma bu görüşmede açık değil.' }
+      const fields = (args.bilgiler && typeof args.bilgiler === 'object') ? args.bilgiler as Record<string, unknown> : {}
+      const result = await flowEngine.accept({ fields, intent: args.yeni_kisi === true ? 'new_person' : 'continue' })
+      return {
+        success: result.success,
+        message: result.message || result.next?.prompt || (result.completed ? 'Görüşmeyi kısa ve nazikçe tamamla.' : 'Müşterinin yanıtını dinle.'),
+        sonraki_adim: result.next?.type,
+        revision: result.revision,
+      }
+    }
+
     if (name === 'randevuOlustur') {
       if (!args.telefon && lastPhoneUsed) args.telefon = lastPhoneUsed
+      let flowActionId: string | undefined
+      if (flowEngine) {
+        const step = await flowEngine.accept({ fields: args })
+        if (!step.success || step.next?.type !== 'ACTION') {
+          return { success: false, message: step.message || step.next?.prompt || 'Randevu için gerekli bilgileri önce tamamlayın.' }
+        }
+        flowActionId = step.next.nodeId
+      }
       try {
         const { createAssistantAppointment } = await import('./services/assistant-appointments')
-        const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId })
+        const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId, source: options.appointmentSource || 'phone_ai' })
+        if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, true)
         return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı. Başka bir konuda yardımcı olabilir miyim?` }
       } catch {
+        if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, false)
         return { success: false, message: 'Randevu oluşturulamadı. Ad, telefon, tarih ve saati kontrol edin.' }
       }
     }
@@ -228,7 +259,7 @@ export async function createLiveSession(
         if (options.telephonyChannel) {
           // Açık kullanıcı onayından sonra doğrudan AMI yönlendirmesini başlat.
           const { transferCall } = await import('./services/asterisk-ami')
-          const result = await transferCall(options.telephonyChannel, targetNumber)
+          const result = await transferCall(options.telephonyChannel, targetNumber, options.clinicId)
           console.log(`[PERF] transfer_call: ${Date.now() - transferStartedAt}ms`)
           if (result.success) {
             return {
@@ -310,8 +341,11 @@ export async function createLiveSession(
       console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
         const customer = await getCustomerByPhone(rawPhone, options.clinicId)
-        const { getPatientDoctorHistory } = await import('./db/repositories/dental')
-        const doktorGecmisi = await getPatientDoctorHistory(rawPhone)
+        const { findPatientByPhone, getPatientDoctorHistory } = await import('./db/repositories/dental')
+        const [dentalPatient, doktorGecmisi] = await Promise.all([
+          findPatientByPhone(rawPhone, options.clinicId),
+          getPatientDoctorHistory(rawPhone, options.clinicId),
+        ])
 
         if (!customer) {
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
@@ -321,6 +355,14 @@ export async function createLiveSession(
               musteri_adi: knowledgeCustomer.name,
               doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
               sonuc: `Hasta Adı: ${knowledgeCustomer.name}`,
+            }
+          }
+          if (dentalPatient) {
+            return {
+              kayitli: true,
+              musteri_adi: dentalPatient.name,
+              doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+              sonuc: `Hasta Adı: ${dentalPatient.name}\nTelefon: ${dentalPatient.phone || rawPhone}${doktorGecmisi.length > 0 ? `\nDoktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}` : ''}`,
             }
           }
           if (doktorGecmisi.length > 0) {
@@ -509,7 +551,8 @@ export async function createLiveSession(
     }
   }
 
-  const toolDeclarations = await buildToolDeclarations(options.direction)
+  const toolDeclarations = (await buildToolDeclarations(options.direction))
+    .filter(tool => flowEngine || tool.name !== 'akisBilgisiGuncelle')
 
   const isMaleVoice = ['Puck', 'Charon', 'Fenrir'].includes(options.voiceName || '')
   const genderInstruction = isMaleVoice
@@ -518,7 +561,9 @@ export async function createLiveSession(
 
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt + '\n\n' + genderInstruction,
+    systemInstruction: options.systemPrompt + '\n\n' + genderInstruction + (flowEngine
+      ? '\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.'
+      : ''),
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
@@ -957,6 +1002,7 @@ export async function createLiveSession(
     },
     close: () => {
       closedByUser = true
+      if (flowEngine) void flowEngine.close()
       try { activeSession?.close() } catch {}
     },
   }

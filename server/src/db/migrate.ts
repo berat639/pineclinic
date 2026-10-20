@@ -1,3 +1,4 @@
+import { integrationDDL } from '../integrations/managed/schema'
 /**
  * Database migration — raw SQL CREATE TABLE IF NOT EXISTS.
  * No generated files needed. Safe to run multiple times.
@@ -154,6 +155,36 @@ async function runMigrations() {
 
   await sql`ALTER TABLE conversation_flows ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'inbound'`
 
+  // Normalize field names emitted by retired Flow Builder versions. This keeps
+  // saved graphs intact while removing stale aliases from every clinic's flow.
+  await sql`
+    UPDATE conversation_flows
+    SET nodes = (
+      SELECT COALESCE(jsonb_agg(
+        CASE
+          WHEN node->>'type' = 'FIELD' AND node->'data'->>'fieldName' IN ('ad_soyad', 'hasta_adi', 'hastaadisoyadi', 'hastaAdiSoyadi')
+            THEN jsonb_set(node, '{data,fieldName}', '"musteri_adi"'::jsonb, true)
+          WHEN node->>'type' = 'FIELD' AND node->'data'->>'fieldName' IN ('hastatelefonu', 'hastaTelefonu')
+            THEN jsonb_set(node, '{data,fieldName}', '"telefon"'::jsonb, true)
+          WHEN node->>'type' = 'FIELD' AND node->'data'->>'fieldName' IN ('hastasikayeti', 'hastaSikayeti')
+            THEN jsonb_set(node, '{data,fieldName}', '"sikayet"'::jsonb, true)
+          WHEN node->>'type' = 'FIELD' AND node->'data'->>'fieldName' IN ('randevutarihi', 'randevuTarihi')
+            THEN jsonb_set(node, '{data,fieldName}', '"tarih"'::jsonb, true)
+          WHEN node->>'type' = 'FIELD' AND node->'data'->>'fieldName' IN ('randevusaati', 'randevuSaati')
+            THEN jsonb_set(node, '{data,fieldName}', '"saat"'::jsonb, true)
+          WHEN node->>'type' = 'CONDITION' AND node->'data'->>'conditionField' = 'is_registered'
+            THEN jsonb_set(node, '{data,conditionField}', '"kayitli"'::jsonb, true)
+          ELSE node
+        END
+        ORDER BY ordinal
+      ), '[]'::jsonb)
+      FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(nodes) = 'array' THEN nodes ELSE '[]'::jsonb END
+      ) WITH ORDINALITY AS flow_node(node, ordinal)
+    ), updated_at = NOW()
+    WHERE nodes::text ~ '(ad_soyad|hasta_adi|hastaadi|hastaTelefonu|hastatelefonu|hastaSikayeti|hastasikayeti|randevuTarihi|randevutarihi|randevuSaati|randevusaati|is_registered)'
+  `
+
   await sql`
     CREATE TABLE IF NOT EXISTS business_settings (
       key        TEXT PRIMARY KEY,
@@ -282,6 +313,23 @@ async function runMigrations() {
       created_at      TIMESTAMPTZ DEFAULT now()
     )
   `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS flow_sessions (
+      id UUID PRIMARY KEY,
+      clinic_id UUID NOT NULL REFERENCES clinics(id),
+      direction TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      flow_id UUID REFERENCES conversation_flows(id),
+      status TEXT NOT NULL DEFAULT 'active',
+      revision INTEGER NOT NULL DEFAULT 0,
+      state JSONB NOT NULL DEFAULT '{}'::jsonb,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS flow_sessions_expiry_idx ON flow_sessions (expires_at)`
 
   await sql`
     CREATE TABLE IF NOT EXISTS notification_templates (
@@ -666,6 +714,7 @@ async function runMigrations() {
   // Extend patients table
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS birth_date TEXT`
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS birth_year INTEGER`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS email TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS gender TEXT`
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS tc_identity TEXT`
@@ -706,6 +755,17 @@ async function runMigrations() {
 
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS time_confirmed BOOLEAN NOT NULL DEFAULT true`
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS complaint TEXT`
+  // AI intake review fields.  All changes are deliberately repeatable so an
+  // interrupted Dokploy deploy can heal itself on the next startup.
+  await sql`ALTER TABLE dental_appointments ALTER COLUMN patient_id DROP NOT NULL`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_source TEXT`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_patient_name TEXT`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_patient_phone TEXT`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS review_status TEXT`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id)`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
+  await sql`CREATE INDEX IF NOT EXISTS dental_appointments_review_status_idx ON dental_appointments (clinic_id, review_status, start_time)`
 
   await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed'`
   await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS due_date TEXT`
@@ -983,6 +1043,8 @@ async function runMigrations() {
       ON CONFLICT (hostname) DO NOTHING
     `
   }
+
+  for (const ddl of integrationDDL) await sql.unsafe(ddl)
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()

@@ -52,6 +52,10 @@
   --flow-success-bg: #052e16;
   --calendar-checkbox-bg: #0a1220;
   --card-bg: #1e293b;
+  --modal-overlay: rgba(5, 10, 20, 0.7);
+  --modal-header-bg: #132238;
+  --modal-section-bg: #132238;
+  --modal-shadow: #050a14;
 
   /* ── Clinical Health Design System (Dark) ────────────────────────── */
   --btn-clinic-primary-bg: #2563eb;
@@ -124,6 +128,10 @@
   --flow-success-bg: #dcfce7;
   --calendar-checkbox-bg: #e2e8f0;
   --card-bg: #ffffff;
+  --modal-overlay: rgba(30, 41, 59, 0.42);
+  --modal-header-bg: #e0f2fe;
+  --modal-section-bg: #eff6ff;
+  --modal-shadow: #64748b;
 
   /* ── Clinical Health Design System (Light) ───────────────────────── */
   --btn-clinic-primary-bg: #1d4ed8;
@@ -143,6 +151,225 @@
   --badge-clinic-bg: #e0f2fe;
   --badge-clinic-border: #bae6fd;
   --badge-clinic-fg: #0369a1;
+}
+
+/* ── Appointment-reference modal layout ─────────────────────────────────── */
+.reference-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100005;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--modal-overlay);
+}
+
+.reference-modal {
+  width: 560px;
+  max-width: 96vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--card-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 22px;
+  box-shadow: 0 20px 40px var(--modal-shadow);
+}
+
+.reference-modal--patient { width: 520px; }
+
+.reference-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 26px 30px;
+  background: var(--modal-header-bg);
+  border-bottom: 1px solid var(--input-border);
+}
+
+.reference-modal-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.reference-modal-icon {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--btn-clinic-primary-fg);
+  background: var(--btn-clinic-primary-bg);
+  border-radius: 14px;
+}
+
+.reference-modal-heading h3,
+.reference-modal-heading p,
+.reference-section-title h4 {
+  margin: 0;
+}
+
+.reference-modal-heading h3 {
+  color: var(--foreground);
+  font-size: 1.35rem;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+.reference-modal-heading p {
+  margin-top: 5px;
+  color: var(--foreground-2);
+  font-size: 0.82rem;
+}
+
+.reference-modal-close {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  color: var(--foreground);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+}
+
+.reference-modal-close:hover { background: var(--card-inner); }
+
+.reference-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 30px;
+  background: var(--card-bg);
+}
+
+.reference-modal-section {
+  padding: 22px;
+  background: var(--modal-section-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 16px;
+}
+
+.reference-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.reference-section-title > span {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--btn-clinic-primary-fg);
+  background: var(--btn-clinic-primary-bg);
+  border-radius: 50%;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.reference-section-title h4 {
+  color: var(--foreground);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.reference-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reference-modal .reference-modal-fields label {
+  color: var(--foreground-2) !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+}
+
+.reference-modal .reference-modal-fields input:not([type="checkbox"]),
+.reference-modal .reference-modal-fields select {
+  min-height: 44px;
+  padding: 10px 12px !important;
+  color: var(--foreground) !important;
+  background: var(--input-bg) !important;
+  border: 1px solid var(--input-border) !important;
+  border-radius: 10px !important;
+  font-size: 0.9rem !important;
+}
+
+.reference-modal .reference-modal-fields input[type="checkbox"] {
+  width: 17px !important;
+  height: 17px !important;
+  accent-color: var(--btn-clinic-primary-bg) !important;
+}
+
+.reference-modal .reference-modal-fields input:focus,
+.reference-modal .reference-modal-fields select:focus {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 1px;
+}
+
+.reference-consent-card {
+  padding: 16px !important;
+  background: var(--card-bg) !important;
+  border: 1px solid var(--input-border) !important;
+  border-radius: 12px !important;
+}
+
+.reference-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 30px;
+  background: var(--modal-header-bg);
+  border-top: 1px solid var(--input-border);
+}
+
+.reference-modal-footer--inside {
+  margin: 8px -22px -22px;
+  padding: 18px 22px 0;
+  background: transparent;
+  border-top: 1px solid var(--input-border);
+}
+
+.reference-modal-footer .btn-clinic-primary,
+.reference-modal-footer .btn-clinic-blue {
+  min-height: 46px;
+  padding: 10px 22px !important;
+  border-radius: 11px !important;
+  font-size: 0.9rem !important;
+  font-weight: 800 !important;
+}
+
+.reference-leave-history {
+  margin-top: 18px;
+}
+
+.reference-leave-history h4 {
+  color: var(--foreground) !important;
+  font-size: 0.9rem !important;
+}
+
+@media (max-width: 560px) {
+  .reference-modal-overlay { padding: 12px; }
+  .reference-modal-header { padding: 20px; }
+  .reference-modal-body { padding: 16px; }
+  .reference-modal-section { padding: 16px; }
+  .reference-modal-footer { padding: 16px 20px; }
+  .reference-modal-heading h3 { font-size: 1.12rem; }
+  .reference-modal-heading p { font-size: 0.75rem; }
 }
 
 /* ── React Flow Controls ────────────────────────────────────────────────────── */
@@ -195,22 +422,22 @@
 
 /* Doctor Leaves in Calendar */
 .rc-doctor-leave {
-  background: var(--card-bg, #1e293b);
-  border: 1.5px solid #ef4444;
-  border-left: 5px solid #ef4444;
-  color: var(--foreground);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-left: 4px solid var(--foreground-3);
+  color: var(--foreground-2);
+  opacity: 0.82;
+  box-shadow: none;
 }
 [data-theme="light"] .rc-doctor-leave {
-  background: #fef2f2 !important;
-  border-color: #f87171 !important;
-  border-left-color: #ef4444 !important;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.12) !important;
+  background: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+  border-left-color: var(--foreground-3) !important;
 }
 [data-theme="dark"] .rc-doctor-leave {
-  background: #1e293b !important;
-  border-color: #ef4444 !important;
-  border-left-color: #ef4444 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  background: var(--input-bg) !important;
+  border-color: var(--input-border) !important;
+  border-left-color: var(--foreground-3) !important;
 }
 
 /* ── Reset & Responsive Viewport Protection ─────────────────────────────────── */

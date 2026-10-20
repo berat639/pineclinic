@@ -26,6 +26,24 @@ import {
 } from '../schema'
 import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
+let aiReviewSchemaPromise: Promise<void> | null = null
+
+/** Lightweight runtime safety net when a deployment starts before its migration. */
+export function ensureAiAppointmentReviewSchema(): Promise<void> {
+  if (!aiReviewSchemaPromise) aiReviewSchemaPromise = (async () => {
+    await db.execute(sql`ALTER TABLE dental_appointments ALTER COLUMN patient_id DROP NOT NULL`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_source TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_patient_name TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS intake_patient_phone TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS review_status TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id)`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dental_appointments_review_status_idx ON dental_appointments (clinic_id, review_status, start_time)`)
+  })().catch(error => { aiReviewSchemaPromise = null; throw error })
+  return aiReviewSchemaPromise
+}
+
 // ── Doctors (hekim users) ────────────────────────────────────────────────────
 
 export async function listDoctors() {
@@ -204,6 +222,7 @@ export async function checkDoctorLeaveConflict(
 // ── Dental Appointments ──────────────────────────────────────────────────────
 
 export async function listDentalAppointments(dateStr?: string) {
+  await ensureAiAppointmentReviewSchema()
   const clinicId = requireClinicId()
   let appts: any[] = [];
   if (dateStr) {
@@ -276,6 +295,23 @@ export async function getPatient(id: string) {
   const clinicId = requireClinicId()
   const [row] = await db.select().from(patients).where(and(eq(patients.id, id), eq(patients.clinicId, clinicId))).limit(1)
   return row ?? null
+}
+
+/**
+ * Finds a clinical patient card by telephone number. Phone numbers are stored
+ * in more than one human-friendly format, so equality alone is not reliable.
+ */
+export async function findPatientByPhone(phone: string, explicitClinicId?: string) {
+  const clinicId = explicitClinicId ?? requireClinicId()
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length < 10) return null
+
+  const rows = await db.select({ id: patients.id, name: patients.name, phone: patients.phone })
+    .from(patients)
+    .where(and(eq(patients.clinicId, clinicId), sql`${patients.phone} IS NOT NULL`))
+
+  const lastTenDigits = digits.slice(-10)
+  return rows.find(patient => patient.phone?.replace(/\D/g, '').endsWith(lastTenDigits)) ?? null
 }
 
 export async function getPatientFullProfile(patientId: string) {
@@ -438,7 +474,7 @@ export async function listPatients() {
   return db.select().from(patients).where(eq(patients.clinicId, requireClinicId())).orderBy(desc(patients.createdAt))
 }
 
-export async function createPatient(data: { name: string; phone?: string; balance?: number; email?: string; tcIdentity?: string; gender?: string; birthDate?: string }) {
+export async function createPatient(data: { name: string; phone?: string; balance?: number; email?: string; tcIdentity?: string; gender?: string; birthDate?: string; birthYear?: number }) {
   const [row] = await db.insert(patients).values({
     clinicId: requireClinicId(),
     name: data.name,
@@ -447,6 +483,7 @@ export async function createPatient(data: { name: string; phone?: string; balanc
     tcIdentity: data.tcIdentity ?? null,
     gender: data.gender ?? null,
     birthDate: data.birthDate ? new Date(data.birthDate) : null,
+    birthYear: data.birthDate ? null : (data.birthYear ?? null),
     balance: data.balance ?? 0,
   }).returning()
   return row
@@ -962,8 +999,7 @@ export async function markPatientNoteRead(id: string) {
 
 export async function getPatientDoctorHistory(phone: string, explicitClinicId?: string) {
   const clinicId = explicitClinicId ?? requireClinicId()
-  const [patient] = await db.select().from(patients)
-    .where(and(eq(patients.clinicId, clinicId), eq(patients.phone, phone))).limit(1)
+  const patient = await findPatientByPhone(phone, clinicId)
   if (!patient) return []
 
   const appts = await db
@@ -1005,6 +1041,11 @@ export async function updateDentalAppointment(id: string, data: {
   complaint?: string
 }) {
   const clinicId = requireClinicId()
+  const [existing] = await db.select({ status: dentalAppointments.status, reviewStatus: dentalAppointments.reviewStatus })
+    .from(dentalAppointments).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).limit(1)
+  if (existing?.status === 'pending_review' && existing.reviewStatus === 'pending' && (data.status !== undefined || data.type !== undefined)) {
+    throw new Error('AI onay bekleyen randevu yalnızca Desk Onay ekranından sonuçlandırılabilir.')
+  }
   if (data.doctorId && data.startTime && data.endTime) {
     const { conflict, leave } = await checkDoctorLeaveConflict(data.doctorId, data.startTime, data.endTime)
     if (conflict) {
@@ -1027,6 +1068,85 @@ export async function updateDentalAppointment(id: string, data: {
     .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId)))
     .returning()
   return row ?? null
+}
+
+/** Confirm a tentative AI appointment and bind it to a real patient atomically. */
+export async function approveAiAppointment(id: string, data: {
+  patientId?: string
+  patient?: { name: string; phone?: string }
+  patientUpdate?: { name?: string; phone?: string }
+  doctorId?: string | null
+  startTime: Date
+  endTime: Date
+  complaint?: string
+  reviewedBy: string
+}) {
+  const clinicId = requireClinicId()
+  if (!data.patientId && !data.patient?.name?.trim()) throw new Error('Onay için hasta seçilmeli veya yeni hasta oluşturulmalı.')
+  if (!(data.startTime instanceof Date) || !Number.isFinite(data.startTime.getTime()) || !(data.endTime instanceof Date) || data.endTime <= data.startTime) {
+    throw new Error('Geçerli randevu tarih ve saati gerekli.')
+  }
+
+  return db.transaction(async (tx) => {
+    const [appointment] = await tx.select().from(dentalAppointments)
+      .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).for('update')
+    if (!appointment) throw new Error('Randevu bulunamadı.')
+    if (appointment.status !== 'pending_review' || appointment.reviewStatus !== 'pending') throw new Error('Bu AI talebi zaten sonuçlandırılmış.')
+
+    let patientId = data.patientId
+    if (patientId) {
+      const [patient] = await tx.select({ id: patients.id }).from(patients)
+        .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId))).limit(1)
+      if (!patient) throw new Error('Seçilen hasta bu kliniğe ait değil.')
+      if (data.patientUpdate && (data.patientUpdate.name?.trim() || data.patientUpdate.phone !== undefined)) {
+        await tx.update(patients).set({
+          ...(data.patientUpdate.name?.trim() ? { name: data.patientUpdate.name.trim() } : {}),
+          ...(data.patientUpdate.phone !== undefined ? { phone: data.patientUpdate.phone.trim() || null } : {}),
+        }).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
+      }
+    } else {
+      const [patient] = await tx.insert(patients).values({
+        clinicId, name: data.patient!.name.trim(), phone: data.patient!.phone?.trim() || null, balance: 0,
+      }).returning({ id: patients.id })
+      patientId = patient.id
+    }
+
+    if (data.doctorId) {
+      const [doctor] = await tx.select({ id: users.id }).from(users)
+        .innerJoin(clinicMemberships, eq(clinicMemberships.userId, users.id))
+        .where(and(eq(users.id, data.doctorId), eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'hekim'), eq(clinicMemberships.active, true))).limit(1)
+      if (!doctor) throw new Error('Seçilen hekim bu klinikte aktif değil.')
+    }
+
+    const conflicts = await tx.select({ id: dentalAppointments.id }).from(dentalAppointments).where(and(
+      eq(dentalAppointments.clinicId, clinicId),
+      sql`${dentalAppointments.id} <> ${id}`,
+      sql`${dentalAppointments.status} <> 'cancelled'`,
+      sql`${dentalAppointments.startTime} < ${data.endTime}`,
+      sql`${dentalAppointments.endTime} > ${data.startTime}`,
+    )).limit(1)
+    if (conflicts.length) throw new Error('Seçilen saat geçici veya planlanmış başka bir randevu ile çakışıyor.')
+
+    const [updated] = await tx.update(dentalAppointments).set({
+      patientId, doctorId: data.doctorId || null, startTime: data.startTime, endTime: data.endTime,
+      complaint: data.complaint ?? appointment.complaint, notes: data.complaint ?? appointment.notes,
+      status: data.doctorId ? 'scheduled' : 'pending_assignment', type: 'kontrol', timeConfirmed: true,
+      reviewStatus: 'approved', reviewedBy: data.reviewedBy, reviewedAt: new Date(), rejectionReason: null,
+      title: `${appointment.intakePatientName || appointment.title.split(' - ')[0]} - kontrol`,
+    }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
+    if (!updated) throw new Error('Randevu aynı anda başka bir kullanıcı tarafından işlendi.')
+    return updated
+  })
+}
+
+export async function rejectAiAppointment(id: string, reason: string, reviewedBy: string) {
+  const clinicId = requireClinicId()
+  if (!reason.trim()) throw new Error('İptal nedeni zorunludur.')
+  const [row] = await db.update(dentalAppointments).set({
+    status: 'cancelled', reviewStatus: 'rejected', rejectionReason: reason.trim(), reviewedBy, reviewedAt: new Date(),
+  }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.status, 'pending_review'), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
+  if (!row) throw new Error('Bu AI talebi zaten sonuçlandırılmış veya bulunamadı.')
+  return row
 }
 
 // ── Consultations ────────────────────────────────────────────────────────────
@@ -1111,105 +1231,153 @@ export async function getClinicConsultationAutocomplete(clinicId: string) {
   }
 }
 
-export async function createPatientsBulk(patientList: {
+type BulkPatientInput = {
   name: string
   phone?: string | null
   tcIdentity?: string | null
   email?: string | null
   gender?: string | null
   birthDate?: string | null
+  birthYear?: number | null
   createdAt?: string | null
-}[]) {
-  const clinicId = requireClinicId()
-  if (!patientList || patientList.length === 0) return { success: true, insertedCount: 0, updatedCount: 0, totalProcessed: 0 }
-  const { patients } = await import('../schema')
-  const { and, eq } = await import('drizzle-orm')
-  
-  // Mevcut hastaları çekiyoruz (akıllı birleştirme ve eksik alan tamamlama için)
-  const existingRows = await db.select().from(patients).where(eq(patients.clinicId, clinicId))
-  
-  // TC ve Telefon üzerinden hızlı erişim haritaları
-  const existingByTc = new Map<string, typeof existingRows[0]>()
-  const existingByPhone = new Map<string, typeof existingRows[0]>()
-  for (const row of existingRows) {
-    if (row.tcIdentity?.trim()) existingByTc.set(row.tcIdentity.trim(), row)
-    if (row.phone?.trim()) existingByPhone.set(row.phone.trim(), row)
+  sourceRow?: number
+}
+
+const currentYear = () => new Date().getFullYear()
+
+const isImportValue = (value: unknown): value is string | number => {
+  if (value === null || value === undefined) return false
+  const text = String(value).trim().toLowerCase()
+  return text !== '' && text !== 'null' && text !== '—' && text !== '-'
+}
+
+const normalizePhoneForMatch = (value: string | null | undefined) => {
+  if (!isImportValue(value)) return null
+  let digits = String(value).replace(/\D/g, '')
+  if (digits.startsWith('90') && digits.length === 12) digits = `0${digits.slice(2)}`
+  else if (digits.length === 10) digits = `0${digits}`
+  return digits || null
+}
+
+const normalizeTcForMatch = (value: string | null | undefined) => {
+  if (!isImportValue(value)) return null
+  const digits = String(value).replace(/\D/g, '')
+  return digits || null
+}
+
+const normalizeEmailForMatch = (value: string | null | undefined) => {
+  if (!isImportValue(value)) return null
+  return String(value).trim().toLowerCase()
+}
+
+const parseBulkBirth = (patient: BulkPatientInput): { birthDate: Date | null, birthYear: number | null } | null => {
+  if (patient.birthDate !== undefined && patient.birthDate !== null) {
+    const value = String(patient.birthDate).trim()
+    if (!/^\d{4}$/.test(value)) {
+      const date = new Date(value)
+      if (!isNaN(date.getTime()) && date.getUTCFullYear() >= 1900 && date.getUTCFullYear() <= currentYear()) {
+        return { birthDate: date, birthYear: null }
+      }
+    }
   }
 
-  const uniqueList: {
-    name: string
-    phone: string | null
-    tcIdentity: string | null
-    email: string | null
-    gender: string | null
-    birthDate?: string | null
-    createdAt?: string | null
-  }[] = []
+  if (patient.birthYear !== undefined && patient.birthYear !== null) {
+    const year = Number(patient.birthYear)
+    if (Number.isInteger(year) && year >= 1900 && year <= currentYear()) {
+      return { birthDate: null, birthYear: year }
+    }
+  }
+
+  return null
+}
+
+export async function createPatientsBulk(patientList: BulkPatientInput[]) {
+  const clinicId = requireClinicId()
+  if (!patientList || patientList.length === 0) return { success: true, insertedCount: 0, updatedCount: 0, totalProcessed: 0, errors: [] }
+  
+  const existingRows = await db.select().from(patients).where(eq(patients.clinicId, clinicId))
+
+  type ExistingPatient = typeof existingRows[number]
+  const addToIndex = (index: Map<string, ExistingPatient[]>, key: string | null, patient: ExistingPatient) => {
+    if (!key) return
+    const values = index.get(key) || []
+    values.push(patient)
+    index.set(key, values)
+  }
+  const existingByTc = new Map<string, ExistingPatient[]>()
+  const existingByPhone = new Map<string, ExistingPatient[]>()
+  const existingByEmail = new Map<string, ExistingPatient[]>()
+  for (const row of existingRows) {
+    addToIndex(existingByTc, normalizeTcForMatch(row.tcIdentity), row)
+    addToIndex(existingByPhone, normalizePhoneForMatch(row.phone), row)
+    addToIndex(existingByEmail, normalizeEmailForMatch(row.email), row)
+  }
+
+  const uniqueList: BulkPatientInput[] = []
   
   const currentTcs = new Set<string>()
   const currentPhones = new Set<string>()
+  const currentEmails = new Set<string>()
   let updatedCount = 0
+  const errors: string[] = []
 
   for (const p of patientList) {
     const name = p.name ? String(p.name).trim() : ''
     if (!name) continue
 
-    const tc = p.tcIdentity ? String(p.tcIdentity).trim() : null
-    const ph = p.phone ? String(p.phone).trim() : null
-    const em = p.email ? String(p.email).trim() : null
-    const validTc = tc && tc !== 'null' && tc !== '—' && tc !== '-' ? tc : null
-    const validPh = ph && ph !== 'null' && ph !== '—' && ph !== '-' ? ph : null
-    const validEm = em && em !== 'null' && em !== '—' && em !== '-' ? em : null
-    const validGender = p.gender && p.gender.trim() !== '' && p.gender !== 'null' && p.gender !== '—' ? p.gender.trim() : null
+    const validTc = isImportValue(p.tcIdentity) ? String(p.tcIdentity).trim() : null
+    const validPh = isImportValue(p.phone) ? String(p.phone).trim() : null
+    const validEm = isImportValue(p.email) ? String(p.email).trim() : null
+    const validGender = isImportValue(p.gender) ? String(p.gender).trim() : null
+    const tcKey = normalizeTcForMatch(validTc)
+    const phoneKey = normalizePhoneForMatch(validPh)
+    const emailKey = normalizeEmailForMatch(validEm)
+    const matches = new Map<string, ExistingPatient>()
+    for (const match of [
+      ...(tcKey ? existingByTc.get(tcKey) || [] : []),
+      ...(phoneKey ? existingByPhone.get(phoneKey) || [] : []),
+      ...(emailKey ? existingByEmail.get(emailKey) || [] : [])
+    ]) matches.set(match.id, match)
 
-    let parsedBirthDate: Date | null = null
-    if (p.birthDate) {
-      const d = new Date(p.birthDate)
-      if (!isNaN(d.getTime())) parsedBirthDate = d
+    if (matches.size > 1) {
+      errors.push(`${p.sourceRow || 'Bilinmeyen'}. satır: TC, telefon veya e-posta farklı mevcut hastalarla eşleşti; kayıt güncellenmedi.`)
+      continue
     }
 
-    // 1. Mevcut kayıtlarda eşleşme var mı kontrol et (TC veya Telefon ile)
-    const existingPatient = (validTc ? existingByTc.get(validTc) : null) || (validPh ? existingByPhone.get(validPh) : null)
+    const existingPatient = matches.values().next().value as ExistingPatient | undefined
+    const birth = parseBulkBirth(p)
 
     if (existingPatient) {
-      // Mükerrer kayıt: YENİ KOPYA EKLENMEZ.
-      // Ancak mevcut kayıtta OLMAYAN (boş/null) alanlar Excel'de varsa o alanlar GÜNCELLENİR.
-      const fieldsToUpdate: any = {}
-
-      if (!existingPatient.tcIdentity && validTc) {
-        fieldsToUpdate.tcIdentity = validTc
-        existingPatient.tcIdentity = validTc
+      const fieldsToUpdate: Record<string, unknown> = {}
+      if (name && name !== existingPatient.name) fieldsToUpdate.name = name
+      if (validTc && validTc !== existingPatient.tcIdentity) fieldsToUpdate.tcIdentity = validTc
+      if (validPh && validPh !== existingPatient.phone) fieldsToUpdate.phone = validPh
+      if (validEm && validEm !== existingPatient.email) fieldsToUpdate.email = validEm
+      if (validGender && validGender !== existingPatient.gender) fieldsToUpdate.gender = validGender
+      if (birth && (birth.birthDate?.getTime() !== existingPatient.birthDate?.getTime() || birth.birthYear !== existingPatient.birthYear)) {
+        fieldsToUpdate.birthDate = birth.birthDate
+        fieldsToUpdate.birthYear = birth.birthYear
       }
-      if (!existingPatient.phone && validPh) {
-        fieldsToUpdate.phone = validPh
-        existingPatient.phone = validPh
-      }
-      if (!existingPatient.email && validEm) {
-        fieldsToUpdate.email = validEm
-        existingPatient.email = validEm
-      }
-      if (!existingPatient.gender && validGender) {
-        fieldsToUpdate.gender = validGender
-        existingPatient.gender = validGender
-      }
-      if (!existingPatient.birthDate && parsedBirthDate) {
-        fieldsToUpdate.birthDate = parsedBirthDate
-        existingPatient.birthDate = parsedBirthDate
+      if (p.createdAt) {
+        const createdAt = new Date(p.createdAt)
+        if (!isNaN(createdAt.getTime()) && createdAt.getTime() !== existingPatient.createdAt?.getTime()) fieldsToUpdate.createdAt = createdAt
       }
 
       if (Object.keys(fieldsToUpdate).length > 0) {
         await db.update(patients).set(fieldsToUpdate).where(and(eq(patients.id, existingPatient.id), eq(patients.clinicId, clinicId)))
         updatedCount++
-        // Haritaları da güncelle
-        if (existingPatient.tcIdentity) existingByTc.set(existingPatient.tcIdentity, existingPatient)
-        if (existingPatient.phone) existingByPhone.set(existingPatient.phone, existingPatient)
+        Object.assign(existingPatient, fieldsToUpdate)
+        addToIndex(existingByTc, normalizeTcForMatch(existingPatient.tcIdentity), existingPatient)
+        addToIndex(existingByPhone, normalizePhoneForMatch(existingPatient.phone), existingPatient)
+        addToIndex(existingByEmail, normalizeEmailForMatch(existingPatient.email), existingPatient)
       }
       continue
     }
 
-    // 2. Dosya içinde daha önceki satırlarda zaten eklendiyse kopya ekleme
-    if (validTc && currentTcs.has(validTc)) continue
-    if (validPh && currentPhones.has(validPh)) continue
+    if ((tcKey && currentTcs.has(tcKey)) || (phoneKey && currentPhones.has(phoneKey)) || (emailKey && currentEmails.has(emailKey))) {
+      errors.push(`${p.sourceRow || 'Bilinmeyen'}. satır: Dosya içinde aynı kimlik bilgileriyle tekrar eden kayıt atlandı.`)
+      continue
+    }
 
     uniqueList.push({
       ...p,
@@ -1219,18 +1387,15 @@ export async function createPatientsBulk(patientList: {
       email: validEm,
       gender: validGender
     })
-    if (validTc) currentTcs.add(validTc)
-    if (validPh) currentPhones.add(validPh)
+    if (tcKey) currentTcs.add(tcKey)
+    if (phoneKey) currentPhones.add(phoneKey)
+    if (emailKey) currentEmails.add(emailKey)
   }
 
   let insertedCount = 0
   if (uniqueList.length > 0) {
     const mapped = uniqueList.map(p => {
-      let birthDate: Date | null = null
-      if (p.birthDate) {
-        const d = new Date(p.birthDate)
-        if (!isNaN(d.getTime())) birthDate = d
-      }
+      const birth = parseBulkBirth(p)
       let createdAt: Date | undefined = undefined
       if (p.createdAt) {
         const d = new Date(p.createdAt)
@@ -1243,7 +1408,8 @@ export async function createPatientsBulk(patientList: {
         tcIdentity: p.tcIdentity,
         email: p.email,
         gender: p.gender,
-        birthDate,
+        birthDate: birth?.birthDate || null,
+        birthYear: birth?.birthYear || null,
         ...(createdAt ? { createdAt } : {})
       }
     })
@@ -1255,7 +1421,8 @@ export async function createPatientsBulk(patientList: {
     success: true,
     insertedCount,
     updatedCount,
-    totalProcessed: patientList.length
+    totalProcessed: patientList.length,
+    errors
   }
 }
 

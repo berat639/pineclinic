@@ -1,10 +1,12 @@
 import type { NextConfig } from 'next'
+import path from 'path'
 
 // Server-side proxy her zaman localhost:3001 — ngrok sadece client-side (WS/direct) için
 const BACKEND_PROXY_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:3001'
 
 const config: NextConfig = {
   output: 'standalone',
+  outputFileTracingRoot: path.resolve(__dirname, '..'),
 
   webpack: (config, { isServer }) => {
     if (!isServer) {

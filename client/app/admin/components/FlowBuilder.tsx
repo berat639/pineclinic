@@ -77,25 +77,24 @@ function StartNode() {
 }
 
 const PATIENT_FIELDS = [
-  { value: 'hastaAdiSoyadi', label: 'Hasta Adı ve Soyadı', type: 'text', desc: 'Adınızı ve soyadınızı alabilir miyim?' },
-  { value: 'hastaTelefonu', label: 'Telefon Numarası', type: 'text', desc: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?' },
-  { value: 'hastaSikayeti', label: 'Şikayet / Endikasyon', type: 'text', desc: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?' },
-  { value: 'randevuTarihi', label: 'Randevu Tarihi', type: 'date', desc: 'Hangi tarihe randevu oluşturmak istersiniz?' },
-  { value: 'randevuSaati', label: 'Randevu Saati', type: 'time', desc: 'Saat kaç için randevu istersiniz?' },
+  { value: 'musteri_adi', label: 'Hasta Adı ve Soyadı', type: 'text', desc: 'Adınızı ve soyadınızı alabilir miyim?' },
+  { value: 'telefon', label: 'Telefon Numarası', type: 'text', desc: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?' },
+  { value: 'sikayet', label: 'Şikayet / Endikasyon', type: 'text', desc: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?' },
+  { value: 'tarih', label: 'Randevu Tarihi', type: 'date', desc: 'Hangi tarihe randevu oluşturmak istersiniz?' },
+  { value: 'saat', label: 'Randevu Saati', type: 'time', desc: 'Saat kaç için randevu istersiniz?' },
   { value: 'doktor_id', label: 'Doktor Seçimi', type: 'user', desc: 'Hangi doktora gelmek istersiniz?' },
 ];
 
 function FieldNode({ data }: { data: FieldData }) {
   const fieldInfo = PATIENT_FIELDS.find(f => f.value === data.fieldName);
-  const isCustomField = data.fieldName && !fieldInfo;
   const displayLabel = fieldInfo ? fieldInfo.label : (data.fieldName || 'Alan Seçilmedi');
 
   return (
-    <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--flow-node-field)', border: isCustomField ? '1px solid #ef4444' : '1px solid var(--flow-node-field-border)', minWidth: 220 }}>
+    <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--flow-node-field)', border: '1px solid var(--flow-node-field-border)', minWidth: 220 }}>
       <Handle type="target" position={Position.Top} style={{ background: 'var(--flow-node-field-border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <code style={{ fontSize: 11, fontWeight: 600, color: isCustomField ? 'var(--danger)' : 'var(--accent)', background: 'var(--flow-panel-bg)', border: '1px solid var(--flow-panel-border)', padding: '1px 6px', borderRadius: 4 }}>
-          {isCustomField ? `⚠️ ${displayLabel}` : displayLabel}
+        <code style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'var(--flow-panel-bg)', border: '1px solid var(--flow-panel-border)', padding: '1px 6px', borderRadius: 4 }}>
+          {displayLabel}
         </code>
         {data.required && <span style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', borderRadius: 8, color: '#fb923c', fontWeight: 600 }}>zorunlu</span>}
         {data.fieldType !== 'text' && <span style={{ fontSize: 9, padding: '1px 5px', background: '#312e81', borderRadius: 8, color: '#a78bfa' }}>{data.fieldType}</span>}
@@ -107,7 +106,6 @@ function FieldNode({ data }: { data: FieldData }) {
 }
 function ConditionNode({ data }: { data: ConditionData }) {
   const labels: Record<string, string> = {
-    'is_registered': 'Hasta kayıtlı mı?',
     'kayitli': 'Hasta kayıtlı mı?',
     'user_intent': 'Kullanıcı Niyeti',
   }
@@ -176,6 +174,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [phonebook, setPhonebook] = useState<Array<{ label: string; number: string }>>([])
+  const [flowIssues, setFlowIssues] = useState<Array<{ nodeId?: string; level: 'error' | 'warning'; message: string }>>([])
+  const [runtimeMode, setRuntimeMode] = useState<'legacy' | 'observe' | 'active'>('legacy')
   
   // Sidebar state
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -190,6 +190,20 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    fetch('/api/admin/flow/runtime').then(response => response.json()).then(data => {
+      if (data.mode === 'observe' || data.mode === 'active' || data.mode === 'legacy') setRuntimeMode(data.mode)
+    }).catch(() => {})
+  }, [])
+
+  const updateRuntimeMode = async (mode: 'legacy' | 'observe' | 'active') => {
+    setRuntimeMode(mode)
+    try {
+      const response = await fetch('/api/admin/flow/runtime', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) })
+      if (!response.ok) throw new Error()
+    } catch { setRuntimeMode('legacy') }
+  }
 
   // Field names for condition dropdown
   const fieldNames = useMemo(() => {
@@ -270,13 +284,13 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       
       const waNodes: Node[] = [
         { id: 'start', type: 'startNode', position: { x: 250, y: 0 }, data: { label: 'Mesaj Geldi' } },
-        { id: 'cond_kayitli', type: 'conditionNode', position: { x: 250, y: 120 }, data: { conditionField: 'is_registered', operator: 'equals', conditionValue: 'true', label: 'Kayıtlı mı?' } },
+        { id: 'cond_kayitli', type: 'conditionNode', position: { x: 250, y: 120 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Kayıtlı mı?' } },
         
         // Hayır
-        { id: 'field_adsoyad', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'hastaAdiSoyadi', fieldType: 'text', description: 'Merhabalar, size nasıl hitap edebilirim?', required: true } },
+        { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'musteri_adi', fieldType: 'text', description: 'Merhabalar, size nasıl hitap edebilirim?', required: true } },
         
         // Evet
-        { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'hastaSikayeti', fieldType: 'text', description: 'Size nasıl yardımcı olabilirim?', required: false } },
+        { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'sikayet', fieldType: 'text', description: 'Size nasıl yardımcı olabilirim?', required: false } },
         
         { id: 'action_randevu', type: 'actionNode', position: { x: 250, y: 400 }, data: { action: 'save_appointment_pending', label: 'Randevu Talebi Oluştur' } },
         { id: 'end', type: 'endNode', position: { x: 250, y: 550 }, data: { label: 'Bitti' } }
@@ -284,9 +298,9 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
       const waEdges: Edge[] = [
         { id: 'e_s_c', source: 'start', target: 'cond_kayitli', markerEnd: { type: MarkerType.ArrowClosed } },
-        { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_adsoyad', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi', markerEnd: { type: MarkerType.ArrowClosed } },
         { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
-        { id: 'e_ad_act', source: 'field_adsoyad', target: 'action_randevu', markerEnd: { type: MarkerType.ArrowClosed } },
+        { id: 'e_ad_act', source: 'field_musteri_adi', target: 'action_randevu', markerEnd: { type: MarkerType.ArrowClosed } },
         { id: 'e_sik_act', source: 'field_sikayet', target: 'action_randevu', markerEnd: { type: MarkerType.ArrowClosed } },
         { id: 'e_act_end', source: 'action_randevu', target: 'end', markerEnd: { type: MarkerType.ArrowClosed } }
       ];
@@ -300,16 +314,16 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     
     const sampleNodes: Node[] = [
       { id: 'start', type: 'startNode', position: { x: 250, y: 0 }, data: { label: 'Başla' } },
-      { id: 'cond_kayitli', type: 'conditionNode', position: { x: 250, y: 120 }, data: { conditionField: 'is_registered', operator: 'equals', conditionValue: 'true', label: 'Kayıtlı mı?' } },
+      { id: 'cond_kayitli', type: 'conditionNode', position: { x: 250, y: 120 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Kayıtlı mı?' } },
       
       // Hayır (Kayıtlı değil) dalı
-      { id: 'field_adsoyad', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'hastaAdiSoyadi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
-      { id: 'field_tel', type: 'fieldNode', position: { x: 50, y: 380 }, data: { fieldName: 'hastaTelefonu', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
+      { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 50, y: 250 }, data: { fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
+      { id: 'field_tel', type: 'fieldNode', position: { x: 50, y: 380 }, data: { fieldName: 'telefon', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
       
       // Evet dalı veya kayıt sonrası
-      { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'hastaSikayeti', fieldType: 'text', description: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?', required: false } },
-      { id: 'field_tarih', type: 'fieldNode', position: { x: 450, y: 380 }, data: { fieldName: 'randevuTarihi', fieldType: 'date', description: 'Hangi tarihe randevu oluşturmak istersiniz?', required: true } },
-      { id: 'field_saat', type: 'fieldNode', position: { x: 450, y: 510 }, data: { fieldName: 'randevuSaati', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
+      { id: 'field_sikayet', type: 'fieldNode', position: { x: 450, y: 250 }, data: { fieldName: 'sikayet', fieldType: 'text', description: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?', required: false } },
+      { id: 'field_tarih', type: 'fieldNode', position: { x: 450, y: 380 }, data: { fieldName: 'tarih', fieldType: 'date', description: 'Hangi tarihe randevu oluşturmak istersiniz?', required: true } },
+      { id: 'field_saat', type: 'fieldNode', position: { x: 450, y: 510 }, data: { fieldName: 'saat', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
       
       // İşlem ve bitiş
       { id: 'action_randevu', type: 'actionNode', position: { x: 250, y: 640 }, data: { action: 'save_appointment_pending', label: 'Randevu Talebi Oluştur (Onay Bekler)' } },
@@ -318,8 +332,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     
     const sampleEdges: Edge[] = [
       { id: 'e_s_c', source: 'start', target: 'cond_kayitli', markerEnd: { type: MarkerType.ArrowClosed } },
-      { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_adsoyad', markerEnd: { type: MarkerType.ArrowClosed } },
-      { id: 'e_ad_tel', source: 'field_adsoyad', target: 'field_tel', markerEnd: { type: MarkerType.ArrowClosed } },
+      { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi', markerEnd: { type: MarkerType.ArrowClosed } },
+      { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel', markerEnd: { type: MarkerType.ArrowClosed } },
       { id: 'e_tel_sik', source: 'field_tel', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
       
       { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet', markerEnd: { type: MarkerType.ArrowClosed } },
@@ -345,11 +359,13 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         position: n.position,
         data: n.data,
       }))
-      await fetch(`/api/admin/flow?direction=${direction}`, {
+      const response = await fetch(`/api/admin/flow?direction=${direction}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: serverNodes, edges }),
       })
+      const result = await response.json()
+      setFlowIssues(Array.isArray(result.issues) ? result.issues : [])
     } catch { /* ignore */ }
     setSaving(false)
   }
@@ -369,7 +385,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       newNode = {
         id, type: 'conditionNode',
         position: { x: 100, y: nodes.length * 80 + 20 },
-        data: { label: 'Koşul', conditionField: 'is_registered', operator: 'equals', conditionValue: 'true' } as ConditionData,
+        data: { label: 'Koşul', conditionField: 'kayitli', operator: 'equals', conditionValue: 'true' } as ConditionData,
       }
     } else {
       newNode = {
@@ -414,6 +430,14 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       {/* Toolbar */}
       <div style={{ background: 'var(--flow-panel-bg)', border: '1px solid var(--flow-panel-border)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>🔀 Konuşma Akışı</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--foreground-2)' }}>
+          Görüşme çalışma biçimi
+          <select value={runtimeMode} onChange={event => updateRuntimeMode(event.target.value as 'legacy' | 'observe' | 'active')} style={{ ...inputStyle, width: 'auto', padding: '6px 8px' }}>
+            <option value="legacy">Mevcut çalışma biçimi</option>
+            <option value="observe">Deneme — görüşmeye müdahale etmez</option>
+            <option value="active">Akışa göre çalış</option>
+          </select>
+        </label>
         <div style={{ flex: 1 }} />
         <button onClick={autoLayout} style={{ padding: '6px 14px', borderRadius: 6, background: 'var(--flow-toolbar-button-bg)', border: '1px solid var(--flow-node-field-border)', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
           📐 Otomatik Hizala
@@ -425,15 +449,22 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
           {saving ? '⏳ Kaydediliyor...' : '💾 Değişiklikleri Kaydet'}
         </button>
       </div>
+      {flowIssues.length > 0 && (
+        <div style={{ background: 'var(--card-inner)', border: '1px solid var(--input-border)', color: 'var(--foreground)', padding: 12, borderRadius: 8, fontSize: 12 }}>
+          {flowIssues.map((issue, index) => <div key={`${issue.nodeId || 'akış'}-${index}`} style={{ marginBottom: index === flowIssues.length - 1 ? 0 : 6 }}>
+            {issue.level === 'error' ? 'Düzeltilmesi gerekiyor: ' : 'Bilgi: '}{issue.message}
+          </div>)}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, minHeight: 600 }}>
         {/* Canvas */}
         <div style={{ background: 'var(--flow-panel-bg)', border: '1px solid var(--flow-panel-border)', flex: '1 1 300px', minHeight: 400, padding: 0, overflow: 'hidden', borderRadius: 12, position: 'relative' }}>
           {/* Quick Add Toolbar */}
           <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 8, background: 'var(--flow-panel-bg)', padding: 8, borderRadius: 8, border: '1px solid var(--flow-panel-border)', flexWrap: 'wrap' }}>
-            <button onClick={() => addNode('field')} style={{ padding: '6px 12px', background: '#1e3a8a', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #2563eb', cursor: 'pointer' }}>+ Alan Düğümü</button>
-            <button onClick={() => addNode('condition')} style={{ padding: '6px 12px', background: '#78350f', color: '#fbbf24', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #b45309', cursor: 'pointer' }}>+ Koşul Düğümü</button>
-            <button onClick={() => addNode('action')} style={{ padding: '6px 12px', background: '#3b0764', color: '#c084fc', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid #7e22ce', cursor: 'pointer' }}>+ İşlem Düğümü</button>
+            <button onClick={() => addNode('field')} style={{ padding: '6px 12px', background: 'var(--flow-toolbar-button-bg)', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--flow-node-field-border)', cursor: 'pointer' }}>+ Bilgi al</button>
+            <button onClick={() => addNode('condition')} style={{ padding: '6px 12px', background: 'var(--flow-toolbar-button-bg)', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--flow-node-cond-border)', cursor: 'pointer' }}>+ Yanıta göre yönlendir</button>
+            <button onClick={() => addNode('action')} style={{ padding: '6px 12px', background: 'var(--flow-toolbar-button-bg)', color: 'var(--accent)', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--flow-node-action-border)', cursor: 'pointer' }}>+ İşlem yap</button>
           </div>
           
           <ReactFlow
@@ -499,7 +530,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
           {selectedNode?.type === 'fieldNode' && (() => {
             const d = selectedNode.data as FieldData;
-            const isCustomField = d.fieldName && !PATIENT_FIELDS.some(f => f.value === d.fieldName);
+            const isAdditionalField = d.fieldName && !PATIENT_FIELDS.some(f => f.value === d.fieldName);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
@@ -518,17 +549,12 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                     style={inputStyle}
                   >
                     <option value="">Bir alan seçin...</option>
-                    {isCustomField && <option value={d.fieldName}>{d.fieldName} (Özel/Eski Alan)</option>}
+                    {isAdditionalField && <option value={d.fieldName}>{d.fieldName} (Ek Alan)</option>}
                     {PATIENT_FIELDS.map(f => (
                       <option key={f.value} value={f.value}>{f.label} ({f.value})</option>
                     ))}
                   </select>
                 </div>
-                {isCustomField && (
-                  <div style={{ padding: '10px 12px', background: 'var(--flow-danger-bg)', border: '1px solid #dc2626', borderRadius: 8, fontSize: 11, color: 'var(--danger)' }}>
-                    ⚠️ Bu alan (<strong>{d.fieldName}</strong>) eski bir özel alan. Yeni sistemde özel alan kullanımı kısıtlanmıştır. Lütfen listeden geçerli bir alan seçin.
-                  </div>
-                )}
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>AI Sorusu (Kullanıcıya sorulacak metin)</label>
                   <textarea value={d.description} onChange={e => updateSelectedNode({ description: e.target.value })} placeholder="Adınızı öğrenebilir miyim?" rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
@@ -573,7 +599,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   <select value={d.conditionField} onChange={e => updateSelectedNode({ conditionField: e.target.value, operator: e.target.value === 'user_intent' ? 'intent' : 'equals' })} style={inputStyle}>
                     <option value="">Bir alan seçin...</option>
                     <option value="user_intent">🎯 Özel Niyet / İstek Algılama (user_intent)</option>
-                    <option value="is_registered">Hasta Kayıtlı Mı? (is_registered)</option>
+                    <option value="kayitli">Hasta Kayıtlı Mı? (kayitli)</option>
                     {PATIENT_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label} ({f.value})</option>)}
                   </select>
                 </div>

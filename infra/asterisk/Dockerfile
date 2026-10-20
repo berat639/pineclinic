@@ -4,9 +4,9 @@ USER root
 
 RUN set -eux; \
     if command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache gettext bash ca-certificates curl; \
+        apk add --no-cache gettext bash ca-certificates curl openssl; \
     elif command -v apt-get >/dev/null 2>&1; then \
-        apt-get update && apt-get install -y --no-install-recommends gettext-base bash ca-certificates curl && rm -rf /var/lib/apt/lists/*; \
+        apt-get update && apt-get install -y --no-install-recommends gettext-base bash ca-certificates curl openssl && rm -rf /var/lib/apt/lists/*; \
     fi
 
 COPY templates/ /etc/asterisk-templates/

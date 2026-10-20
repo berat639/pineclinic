@@ -78,3 +78,16 @@ tos_audio=ef
 type=identify
 endpoint=netgsm-endpoint
 match=${NETGSM_SIP_HOST},185.88.7.0/24,sip.netgsm.com.tr
+
+; Provider ingress only; DID ownership is enforced by the signed backend resolver.
+[netgsm-ingress]
+type=endpoint
+context=from-netgsm
+disallow=all
+allow=alaw,ulaw
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+
+#include managed/clinics.conf
