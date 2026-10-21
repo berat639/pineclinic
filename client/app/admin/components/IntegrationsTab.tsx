@@ -1,6 +1,7 @@
 'use client'
 
 import EvolutionWhatsAppCard from './EvolutionWhatsAppCard'
+import BillingIntegrationsCard from './BillingIntegrationsCard'
 import { useEffect, useState, type ReactNode } from 'react'
 import styles from './IntegrationsTab.module.css'
 
@@ -253,6 +254,8 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </>
 
       <EvolutionWhatsAppCard />
+
+      <BillingIntegrationsCard />
 
       {/* Role-based Tab Permissions */}
       <section className={styles.card}>

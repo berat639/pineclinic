@@ -388,7 +388,10 @@ export default function KnowledgeTab() {
         fetch('/api/knowledge'),
         fetch('/api/admin/categories'),
       ])
-      if (!r.ok) throw new Error()
+      if (!r.ok) {
+        const result = await r.json().catch(() => ({}))
+        throw new Error(result.error || 'Belge kaydedilemedi')
+      }
       const data = await r.json()
       setDocs(data.docs || [])
       setTotalEmbedded(data.totalEmbedded || 0)
@@ -430,8 +433,8 @@ export default function KnowledgeTab() {
       setModal({ open: false, doc: null })
       await load()
       showToast(isEdit ? '✅ Belge güncellendi ve yeniden gömüldü' : '✅ Belge eklendi ve gömüldü')
-    } catch {
-      showToast('Kayıt başarısız', 'error')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Kayıt başarısız', 'error')
     }
     setSaving(false)
   }

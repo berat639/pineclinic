@@ -1294,8 +1294,14 @@ const app = new Elysia()
     const { category, title, content, callDirection, active } = body as any
     if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
     try {
-      let embedding: number[] = []
-      try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
+      let embedding: number[]
+      try {
+        embedding = await embedText(content)
+      } catch (e) {
+        console.error('[RAG] Admin embedding hatası:', e)
+        set.status = 502
+        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+      }
       const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
     } catch (e) { set.status = 500; return { error: String(e) } }
@@ -1311,7 +1317,13 @@ const app = new Elysia()
     const { category, title, content, callDirection, active } = body as any
     let newEmbedding: number[] | undefined
     if (content) {
-      try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Admin Re-embed hatası:', e); newEmbedding = [] }
+      try {
+        newEmbedding = await embedText(content)
+      } catch (e) {
+        console.error('[RAG] Admin re-embed hatası:', e)
+        set.status = 502
+        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+      }
     }
     const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
     if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
@@ -1519,8 +1531,14 @@ const app = new Elysia()
     const { category, title, content, callDirection, active } = body as any
     if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
     try {
-      let embedding: number[] = []
-      try { embedding = await embedText(content) } catch (e) { console.error('[RAG] Embedding hatası:', e) }
+      let embedding: number[]
+      try {
+        embedding = await embedText(content)
+      } catch (e) {
+        console.error('[RAG] Embedding hatası:', e)
+        set.status = 502
+        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+      }
       const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
     } catch (e) { set.status = 500; return { error: String(e) } }
@@ -1530,7 +1548,13 @@ const app = new Elysia()
     const { category, title, content, callDirection, active } = body as any
     let newEmbedding: number[] | undefined
     if (content) {
-      try { newEmbedding = await embedText(content) } catch (e) { console.error('[RAG] Re-embed hatası:', e); newEmbedding = [] }
+      try {
+        newEmbedding = await embedText(content)
+      } catch (e) {
+        console.error('[RAG] Re-embed hatası:', e)
+        set.status = 502
+        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+      }
     }
     const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
     if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
