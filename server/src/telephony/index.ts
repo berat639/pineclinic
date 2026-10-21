@@ -286,14 +286,13 @@ interface CallState {
   userSpeechEndTime?: number
   micBuffer: Buffer[]
   firstAudioSent: boolean
-  aiVoiceFrames: number
-  lowPitchFrames: number
   silenceWarnMs: number
   silenceCloseMs: number
   voiceName: string
   aiSpeaking: boolean
   outputTurnActive: boolean
   outputTurnComplete: boolean
+  interactionInProgress: boolean
   playbackReady: boolean
   outputUnderruns: number
   outputTranscript: string
@@ -302,40 +301,6 @@ interface CallState {
   startWaitMs: number
   micOpenTimer?: ReturnType<typeof setTimeout>
   greetingTimeoutTimer?: ReturnType<typeof setTimeout>
-}
-
-// ── Pitch Detection (Erkek Sesini Algılama) ──────────────────────────────────
-// Gemini'den dönen ses (24 kHz PCM) üzerinde otokorelasyon ile temel frekans (F0) bulur.
-// Kadın sesi genelde 165-255 Hz, Erkek sesi genelde 85-155 Hz arasındadır.
-function estimatePitch(pcm: Buffer, sampleRate: number = 24000): number {
-  const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2)
-  // İnsan sesi için 70 Hz ile 300 Hz arası periyotları (lag) arayacağız
-  const minLag = Math.floor(sampleRate / 300)
-  const maxLag = Math.floor(sampleRate / 70)
-
-  if (samples.length < maxLag * 2) return 0
-
-  let maxVal = 0
-  let bestLag = 0
-
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    let sum = 0
-    // Perform integer arithmetic for maximum V8 performance (no floating-point division)
-    for (let i = 0; i < samples.length - lag; i++) {
-      sum += samples[i] * samples[i + lag]
-    }
-    if (sum > maxVal) {
-      maxVal = sum
-      bestLag = lag
-    }
-  }
-
-  // Güvenilirlik eşiği (RMS yeterince yüksek mi?)
-  let energy = 0
-  for (let i = 0; i < samples.length; i++) energy += Math.abs(samples[i])
-  if (energy / samples.length < 500) return 0 // Çok sessiz
-
-  return bestLag > 0 ? sampleRate / bestLag : 0
 }
 
 /** Timer'ları temizle. */
@@ -356,7 +321,7 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
   // eder; aksi halde closeTimer kesintisiz çalışır.
   if (state.silenceClosePending) return
   clearSilenceTimers(state)
-  if (state.closed || state.hangupPending) return
+  if (state.closed || state.hangupPending || state.interactionInProgress) return
 
   const warnMs = state.silenceWarnMs || 25_000
   const closeMs = state.silenceCloseMs || 15_000
@@ -445,8 +410,6 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           micEnabled: false,
           micBuffer: [],
           firstAudioSent: false,
-          aiVoiceFrames: 0,
-          lowPitchFrames: 0,
           silenceWarnMs: 30_000,
           silenceCloseMs: 20_000,
           silenceClosePending: false,
@@ -455,6 +418,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           aiSpeaking: false,
           outputTurnActive: false,
           outputTurnComplete: false,
+          interactionInProgress: false,
           playbackReady: false,
           outputUnderruns: 0,
           outputTranscript: '',
@@ -620,7 +584,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
 - Acil bir durum varsa aktarım teklif edebilirsin; fakat yalnızca aktif işlem düğümündeki kural eşleşirse aktarımı başlat.
 `
 
-            const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec] = await Promise.all([
+            const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec, thinkingLevel] = await Promise.all([
               (async () => {
                 try {
                   const preWarmEmbedding = await withTimeout(
@@ -674,7 +638,12 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
               })(),
               (async () => {
                 const { getSetting } = await import('../db/repositories/settings')
-                return Number(await getSetting('ai.start_wait_seconds', state.clinicId)) || 0.4
+                const configured = Number(await getSetting('ai.start_wait_seconds', state.clinicId))
+                return Number.isFinite(configured) ? Math.max(0, configured) : 0.4
+              })(),
+              (async () => {
+                const { getSetting } = await import('../db/repositories/settings')
+                return await getSetting('ai.thinking_level', state.clinicId)
               })(),
             ])
 
@@ -736,28 +705,6 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
                       console.log(`[${shortId}] (PERF) AI Yanıt Süresi (Audio): ${responseTime}ms`)
                       state.userSpeechEndTime = undefined
                     }
-                    // pcm: 24 kHz signed 16-bit LE
-                    // Yalnızca kadın sesi seçiliyken ses kalınlaşma kontrolü yap (Erkek sesi seçiliyken uyarı üretme)
-                    const isMale = ['Puck', 'Charon', 'Fenrir'].includes(state.voiceName || '')
-                    if (!isMale && pcm.length >= 4800) { // En az 100ms'lik chunk'lar için (24000 * 0.1 * 2)
-                      const pitch = estimatePitch(pcm, 24000)
-                      if (pitch > 0) {
-                        state.aiVoiceFrames++
-                        // 145 Hz altı genellikle erkek sesidir (veya pitch düşmüştür)
-                        if (pitch < 145) state.lowPitchFrames++
-
-                        // Her 10 sesli frame'de bir kontrol et
-                        if (state.aiVoiceFrames >= 10) {
-                          const lowPitchRatio = state.lowPitchFrames / state.aiVoiceFrames
-                          if (lowPitchRatio > 0.6) {
-                            console.warn(`[${shortId}] 🚨 UYARI: AI sesi kalınlaştı (Erkek sesi algılandı)! Ortalama Pitch < 145 Hz. (Olası Gemini Persona hatası)`)
-                          }
-                          state.aiVoiceFrames = 0
-                          state.lowPitchFrames = 0
-                        }
-                      }
-                    }
-
                     const { pcm: pcm8, state: nextState } = downsample24to8(pcm, state.downsampleState)
                     state.downsampleState = nextState
                     const frames = state.outChunker.chunk(pcm8)
@@ -792,6 +739,14 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
                     state.lastAiAudioAt = 0
                     state.audioQueue.length = 0
                     state.outChunker = new FrameChunker()
+                  },
+                  onInteractionStatus: (status) => {
+                    state.interactionInProgress = status === 'IN_PROGRESS'
+                    if (state.interactionInProgress) {
+                      clearSilenceTimers(state)
+                    } else if (!state.outputTurnActive && state.micEnabled) {
+                      startSilenceWatch(state, socket)
+                    }
                   },
                   onHangup: () => {
                     console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
@@ -829,6 +784,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
                   systemPrompt,
                   model,
                   voiceName,
+                  thinkingLevel: thinkingLevel as any,
                   realtimeInputConfig: {
                     automaticActivityDetection: {
                       disabled: false,

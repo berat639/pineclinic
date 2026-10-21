@@ -1,6 +1,7 @@
 import {
   GoogleGenAI,
   Modality,
+  ThinkingLevel,
   type Session,
   type LiveServerMessage,
   type FunctionDeclaration,
@@ -13,6 +14,7 @@ export type LiveChatCallbacks = {
   onConnectionChange: (connected: boolean) => void
   onError: (error: string) => void
   onInterrupted: () => void
+  onInteractionStatus?: (status: 'IN_PROGRESS' | 'IDLE') => void
 }
 
 export type SessionConfig = {
@@ -28,6 +30,7 @@ export type SessionConfig = {
     logoUrl: string
   }
   voiceName?: string
+  thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
   startWaitSeconds?: number
   callSilenceTimeout?: number
   callSilenceCloseTimeout?: number
@@ -99,6 +102,7 @@ export class AiLiveSession {
   private _isConnected = false
   private _sendGuard = false
   private flowSession?: { id: string; token: string; revision?: number }
+  private _interactionInProgress = false
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
@@ -107,6 +111,7 @@ export class AiLiveSession {
   async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
     const modelName = config.model || 'gemini-3.8-live'
     this.flowSession = config.flowSession
+    this._interactionInProgress = false
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
     // "response modalities (TEXT) is not supported". Keep text chat on the
@@ -184,6 +189,12 @@ export class AiLiveSession {
                 disabled: false,
               },
             } : undefined,
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            ...(modelName === 'gemini-3.8-live-extended-thinking' ? {
+              thinkingConfig: { thinkingLevel: ThinkingLevel[config.thinkingLevel || 'LOW'] },
+              proactiveAudio: true,
+            } : {}),
           },
         })
         .then((session) => {
@@ -304,6 +315,7 @@ export class AiLiveSession {
   }
 
   get connected() { return this._isConnected }
+  get interactionInProgress() { return this._interactionInProgress }
 
   private handleMessage(message: LiveServerMessage) {
     // Tool calls
@@ -329,7 +341,12 @@ export class AiLiveSession {
             }
           })
       }
-      return
+    }
+
+    const interactionStatus = (message.serverContent as any)?.interactionStatus ?? (message as any).interactionStatus
+    if (interactionStatus === 'IN_PROGRESS' || interactionStatus === 'IDLE') {
+      this._interactionInProgress = interactionStatus === 'IN_PROGRESS'
+      this.callbacks.onInteractionStatus?.(interactionStatus)
     }
 
     // Audio & text

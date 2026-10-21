@@ -31,6 +31,7 @@ import {
   type AutomaticTransferRule,
 } from './services/transfer-triggers'
 import { FlowEngine } from './services/flow-engine'
+import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -57,6 +58,7 @@ export type SessionCallbacks = {
   onTranscript: (role: 'model' | 'user', text: string) => void
   onInterrupted: () => void
   onTurnComplete: () => void
+  onInteractionStatus?: (status: 'IN_PROGRESS' | 'IDLE') => void
   onHangup?: () => void
   onUsage?: (usage: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number }) => void
   onError: (err: unknown) => void
@@ -71,6 +73,7 @@ export async function createLiveSession(
     systemPrompt: string
     model: string
     voiceName?: string
+    thinkingLevel?: ThinkingLevel
     realtimeInputConfig?: RealtimeInputConfig
     telephonyChannel?: string
     callerPhone?: string
@@ -551,24 +554,20 @@ export async function createLiveSession(
     }
   }
 
-  const toolDeclarations = (await buildToolDeclarations(options.direction))
+  const toolDeclarations = prepareLiveToolDeclarations(options.model, (await buildToolDeclarations(options.direction))
     .filter(tool => flowEngine || tool.name !== 'akisBilgisiGuncelle')
-
-  const isMaleVoice = ['Puck', 'Charon', 'Fenrir'].includes(options.voiceName || '')
-  const genderInstruction = isMaleVoice
-    ? 'ÖNEMLİ: Sen bir erkek asistansın. Sesin ve tonlaman her zaman bir erkek sesi olmalıdır.'
-    : 'ÖNEMLİ: Sen bir kadın asistansın. Sesin ve tonlaman her zaman bir kadın sesi olmalıdır. Hiçbir zaman sesini kalınlaştırma veya erkek sesine geçme.'
+  )
+  const voiceInstruction = 'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.'
 
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt + '\n\n' + genderInstruction + (flowEngine
+    systemInstruction: options.systemPrompt + '\n\n' + voiceInstruction + (flowEngine
       ? '\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.'
       : ''),
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
       },
-      languageCode: 'tr-TR',
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
     // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
@@ -582,6 +581,11 @@ export async function createLiveSession(
     outputAudioTranscription: {},
     // Kopuşta resume edebilmek için sunucudan handle iste.
     sessionResumption: {},
+    ...(isThinkingModel(options.model) ? {
+      thinkingConfig: { thinkingLevel: normalizeThinkingLevel(options.thinkingLevel).toLowerCase() },
+      // Extended Thinking uses proactive audio while it completes background work.
+      proactiveAudio: true,
+    } : {}),
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
   }
 
@@ -589,9 +593,11 @@ export async function createLiveSession(
   if (toolDeclarations.length > 0) {
     tools.push({ functionDeclarations: toolDeclarations })
   }
-  if (options.enableGoogleSearch) {
+  if (options.enableGoogleSearch && !isThinkingModel(options.model)) {
     tools.push({ googleSearch: {} })
     console.log('[Gemini Live] Google Search Grounding aktif edildi 🔍')
+  } else if (options.enableGoogleSearch) {
+    console.warn('[Gemini Live] Extended Thinking ile Google Search eklenmedi; işlev araçları NON_BLOCKING çalışır.')
   }
   if (tools.length > 0) {
     liveConfig.tools = tools
@@ -660,7 +666,6 @@ export async function createLiveSession(
                 sendToolResponseWithRetry(fcName, fc.id, { error: 'tool failed' })
               })
           }
-          return
         }
 
         // setupComplete — Gemini artık içerik kabul etmeye hazır.
@@ -675,6 +680,11 @@ export async function createLiveSession(
           }
           flushPendingClientContent()
           return
+        }
+
+        const interactionStatus = (msg.serverContent as any)?.interactionStatus ?? (msg as any).interactionStatus
+        if (interactionStatus === 'IN_PROGRESS' || interactionStatus === 'IDLE') {
+          callbacks.onInteractionStatus?.(interactionStatus)
         }
 
         const content = msg.serverContent

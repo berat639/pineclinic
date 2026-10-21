@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import FlowBuilder from './FlowBuilder'
 import WhatsAppConversationsCard from './WhatsAppConversationsCard'
+import VoiceAiSettings from './VoiceAiSettings'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 function Spinner() {
@@ -331,57 +332,6 @@ export default function KnowledgeTab() {
     setCallerIdSaving(false)
   }
 
-  // Voice Settings state
-  const [voiceSettings, setVoiceSettings] = useState<any>({
-    voiceName: 'Aoede',
-    googleSearchGrounding: false,
-    codeExecution: false,
-    urlContext: false,
-    startWaitSeconds: 0.4,
-    startOnPunctuationSeconds: 0.1,
-    startNoPunctuationSeconds: 1.5,
-    stopNumWords: 0,
-    stopVoiceSeconds: 0.2,
-    stopBackoffSeconds: 0.2,
-    callSilenceTimeout: 30,
-    callSilenceCloseTimeout: 15,
-    callMaxDuration: 600,
-    maxActivePhoneCalls: 3,
-  })
-  const [voiceLoading, setVoiceLoading] = useState(true)
-  const [voiceSaving, setVoiceSaving] = useState(false)
-
-  const fetchVoiceSettings = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/settings/voice')
-      if (res.ok) {
-        const data = await res.json()
-        setVoiceSettings(data)
-      }
-    } catch { /* ignore */ }
-    setVoiceLoading(false)
-  }, [])
-
-  const handleSaveVoiceSettings = async () => {
-    if (voiceSaving) return
-    setVoiceSaving(true)
-    try {
-      const res = await fetch('/api/admin/settings/voice', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(voiceSettings),
-      })
-      if (res.ok) {
-        showToast('✅ Sesli AI Ayarları Kaydedildi')
-      } else {
-        showToast('Kayıt Başarısız', 'error')
-      }
-    } catch {
-      showToast('Kayıt Başarısız', 'error')
-    }
-    setVoiceSaving(false)
-  }
-
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [catMgmtOpen, setCatMgmtOpen] = useState(false)
   const [newCatSlug, setNewCatSlug] = useState('')
@@ -455,8 +405,7 @@ export default function KnowledgeTab() {
   useEffect(() => {
     load()
     fetchGreeting()
-    fetchVoiceSettings()
-  }, [load, fetchGreeting, fetchVoiceSettings])
+  }, [load, fetchGreeting])
 
   // Filter both by category and call direction
   const filtered = docs.filter(d => {
@@ -991,114 +940,7 @@ export default function KnowledgeTab() {
             )}
           </div>
 
-          {/* Gelişmiş Ses Ayarları kartı */}
-          <div className="glass-card" style={{ padding: 20 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 14, paddingBottom: 12,
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-            }}>
-              <div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>
-                  ⚙️ Gelişmiş Sesli AI & Telephony
-                </span>
-                <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '2px 0 0' }}>
-                  Ses tonu, bekleme süreleri ve arama zaman aşımı
-                </p>
-              </div>
-              {voiceLoading && <Spinner />}
-            </div>
-
-            {!voiceLoading && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Asistan Sesi Seçimi */}
-                <div>
-                  <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Asistan Sesi Seçimi</label>
-                  <select
-                    value={voiceSettings.voiceName || 'Aoede'}
-                    onChange={e => setVoiceSettings({ ...voiceSettings, voiceName: e.target.value })}
-                    style={{
-                      width: '100%', padding: '7px 10px', fontSize: 12,
-                      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: 6, color: 'var(--foreground)', outline: 'none', cursor: 'pointer'
-                    }}
-                  >
-                    <option value="Aoede">Kadın (Sıcak ve Dost Canlısı)</option>
-                    <option value="Puck">Erkek (Dinamik ve Genç)</option>
-                    <option value="Charon">Erkek (Sakin ve Güven Verici)</option>
-                    <option value="Kore">Kadın (Profesyonel ve Net)</option>
-                    <option value="Fenrir">Erkek (Derin ve Olgun)</option>
-                  </select>
-                </div>
-
-                {/* Konuşmaya Başlama */}
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Bekleme Süresi</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.startWaitSeconds}s</span>
-                      </div>
-                      <input type="range" min="0" max="5" step="0.1" value={voiceSettings.startWaitSeconds} onChange={e => setVoiceSettings({...voiceSettings, startWaitSeconds: parseFloat(e.target.value)})} style={{ width: '100%' }} />
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Sessizlik uyarısı</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceTimeout}s</span>
-                      </div>
-                      <input type="range" min="5" max="120" step="1" value={voiceSettings.callSilenceTimeout} onChange={e => setVoiceSettings({...voiceSettings, callSilenceTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 12 }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Uyarı sonrası kapanış</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.callSilenceCloseTimeout ?? 15}s</span>
-                      </div>
-                      <input type="range" min="5" max="60" step="1" value={voiceSettings.callSilenceCloseTimeout ?? 15} onChange={e => setVoiceSettings({...voiceSettings, callSilenceCloseTimeout: parseInt(e.target.value)})} style={{ width: '100%' }} />
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Maksimum görüşme</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{Math.round((voiceSettings.callMaxDuration || 600) / 60)} dk</span>
-                      </div>
-                      <select
-                        value={voiceSettings.callMaxDuration || 600}
-                        onChange={e => setVoiceSettings({ ...voiceSettings, callMaxDuration: parseInt(e.target.value) })}
-                        style={{ width: '100%', padding: '6px 8px', fontSize: 11, color: 'var(--foreground)', background: 'var(--card-bg)', border: '1px solid var(--divider, #334155)', borderRadius: 6 }}
-                      >
-                        {Array.from({ length: 13 }, (_, i) => i + 3).map(minutes => (
-                          <option key={minutes} value={minutes * 60}>{minutes} dakika</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <label style={{ fontSize: 10, color: 'var(--foreground-3)' }}>Telefon AI kapasitesi</label>
-                        <span style={{ fontSize: 10, color: 'var(--foreground)' }}>{voiceSettings.maxActivePhoneCalls ?? 3} çağrı</span>
-                      </div>
-                      <select
-                        value={voiceSettings.maxActivePhoneCalls || 3}
-                        onChange={e => setVoiceSettings({ ...voiceSettings, maxActivePhoneCalls: parseInt(e.target.value) })}
-                        style={{ width: '100%', padding: '6px 8px', fontSize: 11, color: 'var(--foreground)', background: 'var(--card-bg)', border: '1px solid var(--divider, #334155)', borderRadius: 6 }}
-                      >
-                        {[2, 3, 4, 5].map(count => <option key={count} value={count}>{count} aktif çağrı</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: 'var(--foreground-3)', margin: '8px 0 0' }}>
-                    Bekleme, sessizlik ve maksimum görüşme süreleri klinik bazında telefon ve web görüşmelerinde uygulanır. Telefon AI kapasitesi yalnızca telefon çağrılarını sınırlar; kapasite dolunca yeni çağrılar Asterisk bekleme kuyruğunda tutulur, web görüşmeleri bu sınırdan etkilenmez.
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                  <button onClick={handleSaveVoiceSettings} disabled={voiceSaving} style={{ padding: '6px 14px', fontSize: 11, fontWeight: 600, background: voiceSaving ? 'rgba(255,255,255,0.05)' : 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 8, color: '#34d399', cursor: voiceSaving ? 'wait' : 'pointer' }}>
-                    {voiceSaving ? 'Kaydediliyor...' : 'Ses Ayarlarını Kaydet'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <VoiceAiSettings onToast={showToast} />
         </div>
       </div>
 

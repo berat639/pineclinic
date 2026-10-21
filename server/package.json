@@ -17,7 +17,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",
     "@elysiajs/static": "^1.4.10",
-    "@google/genai": "^1.0.0",
+    "@google/genai": "2.30.0",
     "@ricky0123/vad-node": "^0.0.3",
     "@types/nodemailer": "^8.0.1",
     "bullmq": "^5.76.8",

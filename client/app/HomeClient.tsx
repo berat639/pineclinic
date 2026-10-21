@@ -5,13 +5,14 @@ import { ThemeToggle } from './theme-provider'
 import { AiLiveSession, type LiveChatCallbacks, type SessionConfig } from '@/lib/ai-live'
 import { AudioStreamPlayer, MicrophoneCapture } from '@/lib/audio'
 
-type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
+type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'thinking' | 'error'
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: 'Başlamak için tıklayın',
   connecting: 'Bağlanıyor...',
   listening: 'Sizi dinliyorum',
   speaking: 'Asistan konuşuyor...',
+  thinking: 'Asistan işlemi tamamlıyor...',
   error: 'Bir hata oluştu',
 }
 
@@ -20,6 +21,7 @@ const STATUS_COLOR: Record<VoiceStatus, string> = {
   connecting: '#f59e0b',
   listening: '#22c55e',
   speaking: '#818cf8',
+  thinking: '#0ea5e9',
   error: '#ef4444',
 }
 
@@ -28,6 +30,7 @@ const STATUS_ICON: Record<VoiceStatus, string> = {
   connecting: '⏳',
   listening: '🎙️',
   speaking: '🔊',
+  thinking: '🧠',
   error: '⚠️',
 }
 
@@ -91,6 +94,16 @@ export default function Home() {
     }
     webWarningPendingRef.current = false
     webClosingRef.current = false
+  }, [])
+
+  const clearWebSilenceTimers = useCallback(() => {
+    for (const timerRef of [webSilenceTimerRef, webSilenceCloseTimerRef]) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+    webWarningPendingRef.current = false
   }, [])
 
   const stop = useCallback(() => {
@@ -275,10 +288,14 @@ export default function Home() {
           // console.log('[AI Turn]', textBufferRef.current.trim())
           addTranscript('model', modelText)
           textBufferRef.current = ''
-          if (isWebConversationFarewell(modelText)) {
+          if (!session.interactionInProgress && isWebConversationFarewell(modelText)) {
             stopAfterPlayback()
             return
           }
+        }
+        if (session.interactionInProgress) {
+          setStatus('thinking')
+          return
         }
         setStatus('listening')
         if (!webWarningPendingRef.current && !webClosingRef.current) {
@@ -309,6 +326,20 @@ export default function Home() {
       onInterrupted: () => {
         setStatus('listening')
         playerRef.current?.clear()
+      },
+      onInteractionStatus: (interactionStatus) => {
+        if (interactionStatus === 'IN_PROGRESS') {
+          clearWebSilenceTimers()
+          setStatus('thinking')
+          return
+        }
+        if (!playerRef.current?.isPlaying) setStatus('listening')
+        if (!webWarningPendingRef.current && !webClosingRef.current) {
+          scheduleWebSilenceTimer(
+            Math.max(5, liveConfig.callSilenceTimeout ?? 30),
+            Math.max(5, liveConfig.callSilenceCloseTimeout ?? 15),
+          )
+        }
       },
     }
 
@@ -370,7 +401,7 @@ export default function Home() {
       setStatus('error')
       setErrorMsg(err instanceof Error ? err.message : 'Bağlantı hatası')
     }
-  }, [apiKey, sessionConfig, mode, addTranscript, stop, stopAfterPlayback, clearWebTimers, scheduleWebMaxDurationTimer, scheduleWebSilenceTimer, markWebSpeech])
+  }, [apiKey, sessionConfig, mode, addTranscript, stop, stopAfterPlayback, clearWebTimers, clearWebSilenceTimers, scheduleWebMaxDurationTimer, scheduleWebSilenceTimer, markWebSpeech])
 
   useEffect(() => () => stop(), [stop])
 

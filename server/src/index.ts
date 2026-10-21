@@ -1706,10 +1706,12 @@ const app = new Elysia()
 
   // ── AI Model Settings ───────────────────────────────────────────────────────
   .get('/api/admin/settings/ai', async () => {
+    const { LIVE_MODEL_OPTIONS } = await import('./services/live-model-profile')
     return {
       current: await resolveLiveModel(),
       default: DEFAULT_LIVE_MODEL,
       available: ALLOWED_LIVE_MODELS,
+      models: LIVE_MODEL_OPTIONS,
     }
   })
 
@@ -1969,7 +1971,10 @@ const app = new Elysia()
   // ── Voice AI Settings ────────────────────────────────────────────────────────
   .get('/api/admin/settings/voice', async () => {
     const { getSetting } = await import('./db/repositories/settings')
+    const { normalizeThinkingLevel } = await import('./services/live-model-profile')
     return {
+      model: await resolveLiveModel(),
+      thinkingLevel: normalizeThinkingLevel(await getSetting('ai.thinking_level')),
       googleSearchGrounding: (await getSetting('ai.google_search_grounding')) === 'true',
       codeExecution: (await getSetting('ai.code_execution')) === 'true',
       urlContext: (await getSetting('ai.url_context')) === 'true',
@@ -1990,8 +1995,17 @@ const app = new Elysia()
     }
   })
   .put('/api/admin/settings/voice', async ({ body, set }) => {
-    const { setSetting } = await import('./db/repositories/settings')
+    const { setSetting, setAiModel } = await import('./db/repositories/settings')
+    const { isLiveModel, normalizeThinkingLevel } = await import('./services/live-model-profile')
     const config = body as any
+    if (config.model !== undefined && !isLiveModel(config.model)) {
+      set.status = 400
+      return { error: 'Geçersiz canlı model seçimi' }
+    }
+    if (config.thinkingLevel !== undefined && !['LOW', 'MEDIUM', 'HIGH'].includes(String(config.thinkingLevel).toUpperCase())) {
+      set.status = 400
+      return { error: 'Düşünme seviyesi düşük, orta veya yüksek olmalıdır' }
+    }
     if (config.callMaxDuration !== undefined) {
       const seconds = Number(config.callMaxDuration)
       if (!Number.isFinite(seconds) || seconds < 180 || seconds > 900) {
@@ -2015,6 +2029,8 @@ const app = new Elysia()
         }
       }
     }
+    if (config.model !== undefined) await setAiModel(config.model)
+    if (config.thinkingLevel !== undefined) await setSetting('ai.thinking_level', normalizeThinkingLevel(config.thinkingLevel))
     if (config.googleSearchGrounding !== undefined) await setSetting('ai.google_search_grounding', String(config.googleSearchGrounding))
     if (config.codeExecution !== undefined) await setSetting('ai.code_execution', String(config.codeExecution))
     if (config.urlContext !== undefined) await setSetting('ai.url_context', String(config.urlContext))
@@ -2201,30 +2217,33 @@ const app = new Elysia()
       }
     } catch { /* ignore */ }
 
-    const toolDeclarations = (await buildToolDeclarations())
-      .filter(t => t.name !== 'cagriySonlandir')
     const model = await resolveLiveModel()
     const branding = await getBranding()
     const { getSetting } = await import('./db/repositories/settings')
-    const [voiceName, startWaitSeconds, callSilenceTimeout, callSilenceCloseTimeout, callMaxDuration] = await Promise.all([
+    const [voiceName, startWaitSeconds, callSilenceTimeout, callSilenceCloseTimeout, callMaxDuration, thinkingLevel] = await Promise.all([
       getSetting('ai.voice_name'),
       getSetting('ai.start_wait_seconds'),
       getSetting('ai.call_silence_timeout'),
       getSetting('ai.call_silence_close_timeout'),
       getSetting('ai.call_max_duration'),
+      getSetting('ai.thinking_level'),
     ])
+    const { normalizeThinkingLevel, prepareLiveToolDeclarations } = await import('./services/live-model-profile')
+    const toolDeclarations = prepareLiveToolDeclarations(model, (await buildToolDeclarations())
+      .filter(t => t.name !== 'cagriySonlandir'))
 
     return {
       systemPrompt: systemPrompt + ragContext,
       toolDeclarations,
       model,
+      thinkingLevel: normalizeThinkingLevel(thinkingLevel),
       // Live models only produce audio. Written chat uses the normal Gemini
       // content API with this safe default instead of requesting TEXT from Live.
       textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
       greeting,
       branding,
       voiceName: voiceName || 'Aoede',
-      startWaitSeconds: Number(startWaitSeconds) || 0.4,
+      startWaitSeconds: Number.isFinite(Number(startWaitSeconds)) ? Math.max(0, Number(startWaitSeconds)) : 0.4,
       callSilenceTimeout: Number(callSilenceTimeout) || 30,
       callSilenceCloseTimeout: Number(callSilenceCloseTimeout) || 15,
       callMaxDuration: Number(callMaxDuration) || 600,
