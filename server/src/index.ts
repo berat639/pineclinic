@@ -692,6 +692,34 @@ const app = new Elysia()
       return { error: e.message || 'Hasta silinemedi' }
     }
   })
+  .post('/api/dental/patients/archive', async ({ body, set }) => {
+    try {
+      const { patientIds } = body as { patientIds?: string[] }
+      if (!patientIds || !Array.isArray(patientIds) || patientIds.length === 0) {
+        set.status = 400
+        return { error: 'Arşivlenecek hasta ID listesi boş olamaz' }
+      }
+      const { archivePatients } = await import('./db/repositories/dental')
+      return await archivePatients(patientIds)
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message || 'Hasta arşivlenemedi' }
+    }
+  })
+  .post('/api/dental/patients/restore', async ({ body, set }) => {
+    try {
+      const { patientIds } = body as { patientIds?: string[] }
+      if (!patientIds || !Array.isArray(patientIds) || patientIds.length === 0) {
+        set.status = 400
+        return { error: 'Aktifleştirilecek hasta ID listesi boş olamaz' }
+      }
+      const { restorePatients } = await import('./db/repositories/dental')
+      return await restorePatients(patientIds)
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message || 'Hasta aktifleştirilemedi' }
+    }
+  })
   .post('/api/dental/patients/bulk-delete', async ({ body, set }) => {
     try {
       const { patientIds } = body as { patientIds?: string[] }

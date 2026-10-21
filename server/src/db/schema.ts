@@ -217,6 +217,8 @@ export const patients = pgTable('patients', {
   whatsappOptOut: boolean('whatsapp_opt_out').notNull().default(false), // Hasta WA bildirimlerini kapattı mı?
   smsOptOut: boolean('sms_opt_out').notNull().default(false), // Hasta SMS bildirimlerini kapattı mı?
   emailOptOut: boolean('email_opt_out').notNull().default(false), // Hasta Email bildirimlerini kapattı mı?
+  isArchived: boolean('is_archived').notNull().default(false),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -241,6 +243,7 @@ export const dentalAppointments = pgTable('dental_appointments', {
   reviewedBy: uuid('reviewed_by').references(() => users.id),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
+  isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   // Kept explicitly because the patient sidebar is ordered by the latest
   // appointment operation, not the appointment's scheduled time.
@@ -319,6 +322,7 @@ export const patientPayments = pgTable('patient_payments', {
   method: text('method').notNull().default('Nakit'),
   notes: text('notes'),
   status: text('status').notNull().default('completed'),
+  isActive: boolean('is_active').notNull().default(true),
   dueDate: text('due_date'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })

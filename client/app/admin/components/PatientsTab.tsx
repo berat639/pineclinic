@@ -21,6 +21,10 @@ interface Patient {
   smsOptOut?: boolean
   emailOptOut?: boolean
   whatsappOptOut?: boolean
+  isArchived?: boolean
+  archivedAt?: string | null
+  appointmentCount?: number
+  paymentCount?: number
 }
 
 // Split full name into first name and last name
@@ -41,6 +45,7 @@ export default function PatientsTab() {
   const [patients, setPatients] = useState<Patient[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [patientTab, setPatientTab] = useState<'active' | 'archived'>('active')
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
   const [profileData, setProfileData] = useState<any>(null)
   const [profileLoading, setProfileLoading] = useState(false)
@@ -48,6 +53,7 @@ export default function PatientsTab() {
   // Selection for bulk delete
   const [selectedPatientIds, setSelectedPatientIds] = useState<string[]>([])
   const [isDeletingBulk, setIsDeletingBulk] = useState(false)
+  const [restoringPatientId, setRestoringPatientId] = useState<string | null>(null)
 
   // Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -439,7 +445,14 @@ export default function PatientsTab() {
     }
   }, [selectedPatientId])
 
-  const filtered = patients.filter(p => {
+  useEffect(() => {
+    setCurrentPage(1)
+    setSelectedPatientIds([])
+    setSelectedPatientId(null)
+  }, [patientTab])
+
+  const visiblePatients = patients.filter(patient => patientTab === 'active' ? !patient.isArchived : patient.isArchived)
+  const filtered = visiblePatients.filter(p => {
     const q = searchTerm.toLowerCase()
     return (
       (p.name && p.name.toLowerCase().includes(q)) ||
@@ -468,12 +481,14 @@ export default function PatientsTab() {
 
   // Selection toggle
   const toggleSelectPatient = (id: string) => {
+    if (patientTab === 'archived') return
     setSelectedPatientIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     )
   }
 
   const toggleSelectAll = () => {
+    if (patientTab === 'archived') return
     const pageIds = paginated.map(p => p.id)
     const isAllSelected = pageIds.every(id => selectedPatientIds.includes(id))
     if (isAllSelected) {
@@ -483,29 +498,52 @@ export default function PatientsTab() {
     }
   }
 
-  // Toplu silme işlemi
+  const getPatientsWithRecords = (ids: string[]) => patients.filter(patient => ids.includes(patient.id) && ((patient.appointmentCount || 0) > 0 || (patient.paymentCount || 0) > 0))
+
+  const openRemovalConfirmation = (ids: string[]) => {
+    const patientsWithRecords = getPatientsWithRecords(ids)
+    const appointmentCount = patientsWithRecords.reduce((total, patient) => total + (patient.appointmentCount || 0), 0)
+    const paymentCount = patientsWithRecords.reduce((total, patient) => total + (patient.paymentCount || 0), 0)
+    const hasRecords = patientsWithRecords.length > 0
+    setConfirmModal({
+      isOpen: true,
+      title: hasRecords ? 'Hastayı Arşivle' : 'Hastayı Kalıcı Olarak Sil',
+      message: hasRecords
+        ? `${patientsWithRecords.length} hastanın ${appointmentCount} randevu ve ${paymentCount} ödeme kaydı var. Bu hastalar kalıcı olarak silinmeyecek; hasta, randevu ve ödeme kayıtları pasife alınarak Arşiv sekmesine taşınacak. Devam etmek istiyor musunuz?`
+        : `${ids.length} hasta kalıcı olarak silinecek. Devam etmek istiyor musunuz?`,
+      confirmText: hasRecords ? `Evet, Arşive Taşı` : `Evet, Kalıcı Sil`,
+      variant: hasRecords ? 'warning' : 'danger',
+      onConfirm: () => handleBulkDelete(ids)
+    })
+  }
+
+  // Randevusu veya ödemesi olan hastalar arşivlenir; kaydı olmayanlar kalıcı silinir.
   const handleBulkDelete = async (ids: string[]) => {
     if (!ids || ids.length === 0) return
     setIsDeletingBulk(true)
     try {
-      const res = await fetch('/api/dental/patients/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientIds: ids })
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        toast.success(`${data.deletedCount || ids.length} hasta başarıyla silindi.`)
-        setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
-        loadPatients()
-        if (selectedPatientId && ids.includes(selectedPatientId)) {
-          setSelectedPatientId(null)
-          setProfileData(null)
+      const archiveIds = getPatientsWithRecords(ids).map(patient => patient.id)
+      const deleteIds = ids.filter(id => !archiveIds.includes(id))
+      const results = await Promise.all([
+        archiveIds.length ? fetch('/api/dental/patients/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: archiveIds }) }) : null,
+        deleteIds.length ? fetch('/api/dental/patients/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: deleteIds }) }) : null,
+      ])
+      for (const response of results) {
+        if (response && !response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err.error || 'Silme işlemi yapılamadı')
         }
-      } else {
-        const err = await res.json().catch(() => ({}))
-        toast.error('Hata: ' + (err.error || 'Silme işlemi yapılamadı'))
+      }
+      const [archiveResponse, deleteResponse] = results
+      const archiveData = archiveResponse ? await archiveResponse.json() : null
+      const deleteData = deleteResponse ? await deleteResponse.json() : null
+      if (archiveData?.archivedCount) toast.success(`${archiveData.archivedCount} hasta arşive taşındı; ${archiveData.deactivatedAppointments} randevu ve ${archiveData.deactivatedPayments} ödeme pasife alındı.`)
+      if (deleteData?.deletedCount) toast.success(`${deleteData.deletedCount} hasta kalıcı olarak silindi.`)
+      setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
+      loadPatients()
+      if (selectedPatientId && ids.includes(selectedPatientId)) {
+        setSelectedPatientId(null)
+        setProfileData(null)
       }
     } catch (err) {
       console.error(err)
@@ -513,6 +551,30 @@ export default function PatientsTab() {
     } finally {
       setIsDeletingBulk(false)
       setConfirmModal(prev => ({ ...prev, isOpen: false }))
+    }
+  }
+
+  const handleRestorePatient = async (patient: Patient) => {
+    setRestoringPatientId(patient.id)
+    try {
+      const response = await fetch('/api/dental/patients/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientIds: [patient.id] })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Hasta aktifleştirilemedi')
+      toast.success(`${patient.name} Aktif sekmesine geri alındı; ${data.reactivatedAppointments || 0} randevu ve ${data.reactivatedPayments || 0} ödeme yeniden aktifleştirildi.`)
+      if (selectedPatientId === patient.id) {
+        setSelectedPatientId(null)
+        setProfileData(null)
+      }
+      loadPatients()
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : 'Hasta aktifleştirilemedi.')
+    } finally {
+      setRestoringPatientId(null)
     }
   }
 
@@ -580,7 +642,7 @@ export default function PatientsTab() {
     }
   }
 
-  const isCurrentPageAllSelected = paginated.length > 0 && paginated.every(p => selectedPatientIds.includes(p.id))
+  const isCurrentPageAllSelected = patientTab === 'active' && paginated.length > 0 && paginated.every(p => selectedPatientIds.includes(p.id))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingBottom: '2rem' }}>
@@ -590,7 +652,7 @@ export default function PatientsTab() {
             Hastalar Yönetimi
           </h2>
           <span className="badge-clinic" style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: 12, fontWeight: 600 }}>
-            {patients.length} kayıt
+            {visiblePatients.length} kayıt
           </span>
         </div>
         
@@ -673,8 +735,26 @@ export default function PatientsTab() {
         </div>
       </div>
 
+      <div role="tablist" aria-label="Hasta kayıt durumu" style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--input-border)', paddingBottom: 8 }}>
+        {([
+          ['active', `Aktif (${patients.filter(patient => !patient.isArchived).length})`],
+          ['archived', `Arşiv (${patients.filter(patient => patient.isArchived).length})`],
+        ] as const).map(([tabId, label]) => (
+          <button
+            key={tabId}
+            type="button"
+            role="tab"
+            aria-selected={patientTab === tabId}
+            onClick={() => setPatientTab(tabId)}
+            style={{ minHeight: 38, padding: '0 13px', borderRadius: 8, border: `1px solid ${patientTab === tabId ? 'var(--accent)' : 'var(--input-border)'}`, background: patientTab === tabId ? 'var(--accent)' : 'var(--input-bg)', color: patientTab === tabId ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground)', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700 }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* ── Toplu Silme Barı ── */}
-      {selectedPatientIds.length > 0 && (
+      {patientTab === 'active' && selectedPatientIds.length > 0 && (
         <div style={{
           padding: '10px 16px',
           background: 'var(--card-bg, #1e293b)',
@@ -708,16 +788,7 @@ export default function PatientsTab() {
             <button
               type="button"
               disabled={isDeletingBulk}
-              onClick={() => {
-                setConfirmModal({
-                  isOpen: true,
-                  title: 'Toplu Hasta Silme',
-                  message: `Seçilen ${selectedPatientIds.length} hastayı ve bu hastalara ait tüm randevu/tedavi geçmişini kalıcı olarak silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`,
-                  confirmText: `Evet, ${selectedPatientIds.length} Hastayı Sil`,
-                  variant: 'danger',
-                  onConfirm: () => handleBulkDelete(selectedPatientIds)
-                })
-              }}
+              onClick={() => openRemovalConfirmation(selectedPatientIds)}
               style={{
                 padding: '6px 14px',
                 background: '#dc2626',
@@ -733,7 +804,7 @@ export default function PatientsTab() {
               }}
             >
               <Trash2 size={14} />
-              {isDeletingBulk ? 'Siliniyor...' : `Seçilen (${selectedPatientIds.length}) Hastayı Sil`}
+              {isDeletingBulk ? 'İşleniyor...' : `Seçilen (${selectedPatientIds.length}) Hastayı Sil`}
             </button>
           </div>
         </div>
@@ -842,8 +913,9 @@ export default function PatientsTab() {
                         type="checkbox"
                         checked={isCurrentPageAllSelected}
                         onChange={toggleSelectAll}
-                        style={{ cursor: 'pointer' }}
-                        title="Sayfadaki tüm hastaları seç/kaldır"
+                        disabled={patientTab === 'archived'}
+                        style={{ cursor: patientTab === 'archived' ? 'not-allowed' : 'pointer' }}
+                        title={patientTab === 'archived' ? 'Arşivdeki hastalar seçilemez' : 'Sayfadaki tüm hastaları seç/kaldır'}
                       />
                     </th>
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Ad</th>
@@ -860,6 +932,7 @@ export default function PatientsTab() {
                   {paginated.map((p, i) => {
                     const { firstName, lastName } = splitFullName(p.name)
                     const isSelected = selectedPatientIds.includes(p.id)
+                    const isArchived = Boolean(p.isArchived)
 
                     return (
                       <tr
@@ -881,7 +954,9 @@ export default function PatientsTab() {
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelectPatient(p.id)}
-                            style={{ cursor: 'pointer' }}
+                            disabled={isArchived}
+                            style={{ cursor: isArchived ? 'not-allowed' : 'pointer' }}
+                            title={isArchived ? 'Arşivdeki hastalar seçilemez' : 'Hastayı seç'}
                           />
                         </td>
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>
@@ -906,48 +981,53 @@ export default function PatientsTab() {
                           {fmtDate(p.createdAt)}
                         </td>
                         <td style={{ padding: '0.8rem 1rem', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(p)}
-                            className="btn-clinic-blue"
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              fontSize: '0.76rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              marginRight: 6
-                            }}
-                          >
-                            ✏️ Düzenle
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setConfirmModal({
-                                isOpen: true,
-                                title: 'Hastayı Sil',
-                                message: `"${p.name}" isimli hastayı ve bu hastaya ait tüm geçmiş kayıtları silmek istediğinizden emin misiniz?`,
-                                confirmText: 'Evet, Sil',
-                                variant: 'danger',
-                                onConfirm: () => handleBulkDelete([p.id])
-                              })
-                            }}
-                            style={{
-                              padding: '4px 8px',
-                              background: 'rgba(239, 68, 68, 0.15)',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              borderRadius: 6,
-                              color: '#f87171',
-                              fontSize: '0.76rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              marginRight: 8
-                            }}
-                            title="Hastayı kalıcı olarak sil"
-                          >
-                            <Trash2 size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                          </button>
+                          {isArchived ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRestorePatient(p)}
+                              disabled={restoringPatientId === p.id}
+                              className="btn-clinic-mint"
+                              style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.76rem', fontWeight: 700, cursor: restoringPatientId === p.id ? 'not-allowed' : 'pointer', marginRight: 8 }}
+                            >
+                              {restoringPatientId === p.id ? 'Aktifleştiriliyor…' : '↩ Aktife Al'}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(p)}
+                                className="btn-clinic-blue"
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: 6,
+                                  fontSize: '0.76rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  marginRight: 6
+                                }}
+                              >
+                                ✏️ Düzenle
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openRemovalConfirmation([p.id])}
+                                style={{
+                                  padding: '4px 8px',
+                                  background: 'var(--card-inner)',
+                                  border: '1px solid var(--danger)',
+                                  borderRadius: 6,
+                                  color: 'var(--danger)',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  marginRight: 8
+                                }}
+                                title={(p.appointmentCount || 0) + (p.paymentCount || 0) > 0 ? 'Hastayı ve ilişkili kayıtları arşive taşı' : 'Hastayı kalıcı olarak sil'}
+                              >
+                                <Trash2 size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                              </button>
+                            </>
+                          )}
                           <span 
                             onClick={() => setSelectedPatientId(selectedPatientId === p.id ? null : p.id)}
                             style={{ fontSize: '0.78rem', color: '#60a5fa', fontWeight: 500, cursor: 'pointer' }}

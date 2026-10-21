@@ -27,6 +27,20 @@ import {
 import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
 let aiReviewSchemaPromise: Promise<void> | null = null
+let patientArchiveSchemaPromise: Promise<void> | null = null
+
+/** Keeps patient archival safe when a deploy starts before migrations complete. */
+export function ensurePatientArchiveSchema(): Promise<void> {
+  if (!patientArchiveSchemaPromise) patientArchiveSchemaPromise = (async () => {
+    await db.execute(sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT false`)
+    await db.execute(sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
+    await db.execute(sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS patients_clinic_archive_idx ON patients (clinic_id, is_archived)`)
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS dental_appointments_clinic_active_idx ON dental_appointments (clinic_id, is_active, start_time)`)
+  })().catch(error => { patientArchiveSchemaPromise = null; throw error })
+  return patientArchiveSchemaPromise
+}
 
 /** Lightweight runtime safety net when a deployment starts before its migration. */
 export function ensureAiAppointmentReviewSchema(): Promise<void> {
@@ -226,6 +240,7 @@ export async function checkDoctorLeaveConflict(
 
 export async function listDentalAppointments(dateStr?: string) {
   await ensureAiAppointmentReviewSchema()
+  await ensurePatientArchiveSchema()
   const clinicId = requireClinicId()
   let appts: any[] = [];
   if (dateStr) {
@@ -234,10 +249,10 @@ export async function listDentalAppointments(dateStr?: string) {
     appts = await db
       .select()
       .from(dentalAppointments)
-      .where(and(eq(dentalAppointments.clinicId, clinicId), gte(dentalAppointments.startTime, dayStart), lte(dentalAppointments.startTime, dayEnd)))
+      .where(and(eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.isActive, true), gte(dentalAppointments.startTime, dayStart), lte(dentalAppointments.startTime, dayEnd)))
       .orderBy(dentalAppointments.startTime)
   } else {
-    appts = await db.select().from(dentalAppointments).where(eq(dentalAppointments.clinicId, clinicId)).orderBy(dentalAppointments.startTime)
+    appts = await db.select().from(dentalAppointments).where(and(eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.isActive, true))).orderBy(dentalAppointments.startTime)
   }
   
   if (appts.length === 0) return appts;
@@ -305,13 +320,14 @@ export async function getPatient(id: string) {
  * in more than one human-friendly format, so equality alone is not reliable.
  */
 export async function findPatientByPhone(phone: string, explicitClinicId?: string) {
+  await ensurePatientArchiveSchema()
   const clinicId = explicitClinicId ?? requireClinicId()
   const digits = phone.replace(/\D/g, '')
   if (digits.length < 10) return null
 
   const rows = await db.select({ id: patients.id, name: patients.name, phone: patients.phone })
     .from(patients)
-    .where(and(eq(patients.clinicId, clinicId), sql`${patients.phone} IS NOT NULL`))
+    .where(and(eq(patients.clinicId, clinicId), eq(patients.isArchived, false), sql`${patients.phone} IS NOT NULL`))
 
   const lastTenDigits = digits.slice(-10)
   return rows.find(patient => patient.phone?.replace(/\D/g, '').endsWith(lastTenDigits)) ?? null
@@ -476,6 +492,7 @@ export async function getPatientFullProfile(patientId: string) {
 export async function listPatients() {
   const clinicId = requireClinicId()
   await ensureAiAppointmentReviewSchema()
+  await ensurePatientArchiveSchema()
   return db.select({
     id: patients.id,
     clinicId: patients.clinicId,
@@ -490,7 +507,21 @@ export async function listPatients() {
     whatsappOptOut: patients.whatsappOptOut,
     smsOptOut: patients.smsOptOut,
     emailOptOut: patients.emailOptOut,
+    isArchived: patients.isArchived,
+    archivedAt: patients.archivedAt,
     createdAt: patients.createdAt,
+    appointmentCount: sql<number>`(
+      SELECT count(*)::int
+      FROM ${dentalAppointments}
+      WHERE ${dentalAppointments.clinicId} = ${clinicId}
+        AND ${dentalAppointments.patientId} = ${patients.id}
+    )`,
+    paymentCount: sql<number>`(
+      SELECT count(*)::int
+      FROM ${patientPayments}
+      WHERE ${patientPayments.clinicId} = ${clinicId}
+        AND ${patientPayments.patientId} = ${patients.id}
+    )`,
     lastAppointmentActivityAt: sql<Date | null>`(
       SELECT max(${dentalAppointments.updatedAt})
       FROM ${dentalAppointments}
@@ -787,7 +818,8 @@ export async function deleteTreatmentPlan(id: string): Promise<boolean> {
 // ── Payments ─────────────────────────────────────────────────────────────────
 
 export async function getPatientPayments(patientId: string) {
-  return db.select().from(patientPayments).where(and(eq(patientPayments.clinicId, requireClinicId()), eq(patientPayments.patientId, patientId))).orderBy(desc(patientPayments.createdAt))
+  await ensurePatientArchiveSchema()
+  return db.select().from(patientPayments).where(and(eq(patientPayments.clinicId, requireClinicId()), eq(patientPayments.patientId, patientId), eq(patientPayments.isActive, true))).orderBy(desc(patientPayments.createdAt))
 }
 
 export async function createPayment(data: {
@@ -820,11 +852,12 @@ export async function listAllPayments(opts?: {
   status?: string
   search?: string
 }) {
+  await ensurePatientArchiveSchema()
   const page = Math.max(1, Number(opts?.page || 1))
   const pageSize = Math.min(100, Math.max(1, Number(opts?.pageSize || 25)))
   const offset = (page - 1) * pageSize
 
-  const conditions: any[] = [eq(patientPayments.clinicId, requireClinicId())]
+  const conditions: any[] = [eq(patientPayments.clinicId, requireClinicId()), eq(patientPayments.isActive, true), eq(patients.isArchived, false)]
   if (opts?.status && opts.status !== 'all') {
     conditions.push(eq(patientPayments.status, opts.status))
   }
@@ -1510,6 +1543,7 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
 
 export async function deletePatientsBulk(patientIds: string[]) {
   const clinicId = requireClinicId()
+  await ensurePatientArchiveSchema()
   if (!patientIds || patientIds.length === 0) return { deletedCount: 0 }
 
   const validPatients = await db
@@ -1519,6 +1553,17 @@ export async function deletePatientsBulk(patientIds: string[]) {
 
   const validIds = validPatients.map(p => p.id)
   if (validIds.length === 0) return { deletedCount: 0 }
+
+  const [appointmentRows, paymentRows] = await Promise.all([
+    db.select({ patientId: dentalAppointments.patientId }).from(dentalAppointments)
+      .where(and(eq(dentalAppointments.clinicId, clinicId), inArray(dentalAppointments.patientId, validIds))),
+    db.select({ patientId: patientPayments.patientId }).from(patientPayments)
+      .where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.patientId, validIds))),
+  ])
+  const protectedIds = new Set([...appointmentRows, ...paymentRows].map(row => row.patientId).filter((id): id is string => Boolean(id)))
+  if (protectedIds.size > 0) {
+    throw new Error('Randevusu veya ödemesi olan hasta kalıcı olarak silinemez; arşivlenmelidir.')
+  }
 
   await db.transaction(async (tx) => {
     // 1. WhatsApp conversation referansını null yap
@@ -1577,4 +1622,46 @@ export async function deletePatientsBulk(patientIds: string[]) {
 
 export async function deletePatient(patientId: string) {
   return await deletePatientsBulk([patientId])
+}
+
+export async function archivePatients(patientIds: string[]) {
+  const clinicId = requireClinicId()
+  await ensurePatientArchiveSchema()
+  if (!patientIds.length) return { archivedCount: 0, deactivatedAppointments: 0, deactivatedPayments: 0 }
+
+  const activePatients = await db.select({ id: patients.id }).from(patients)
+    .where(and(eq(patients.clinicId, clinicId), eq(patients.isArchived, false), inArray(patients.id, patientIds)))
+  const ids = activePatients.map(patient => patient.id)
+  if (!ids.length) return { archivedCount: 0, deactivatedAppointments: 0, deactivatedPayments: 0 }
+
+  return db.transaction(async tx => {
+    const [appointments, payments] = await Promise.all([
+      tx.update(dentalAppointments).set({ isActive: false }).where(and(eq(dentalAppointments.clinicId, clinicId), inArray(dentalAppointments.patientId, ids), eq(dentalAppointments.isActive, true))).returning({ id: dentalAppointments.id }),
+      tx.update(patientPayments).set({ isActive: false }).where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.patientId, ids), eq(patientPayments.isActive, true))).returning({ id: patientPayments.id }),
+    ])
+    await tx.update(patients).set({ isArchived: true, archivedAt: new Date() })
+      .where(and(eq(patients.clinicId, clinicId), inArray(patients.id, ids)))
+    return { archivedCount: ids.length, deactivatedAppointments: appointments.length, deactivatedPayments: payments.length }
+  })
+}
+
+export async function restorePatients(patientIds: string[]) {
+  const clinicId = requireClinicId()
+  await ensurePatientArchiveSchema()
+  if (!patientIds.length) return { restoredCount: 0, reactivatedAppointments: 0, reactivatedPayments: 0 }
+
+  const archivedPatients = await db.select({ id: patients.id }).from(patients)
+    .where(and(eq(patients.clinicId, clinicId), eq(patients.isArchived, true), inArray(patients.id, patientIds)))
+  const ids = archivedPatients.map(patient => patient.id)
+  if (!ids.length) return { restoredCount: 0, reactivatedAppointments: 0, reactivatedPayments: 0 }
+
+  return db.transaction(async tx => {
+    const [appointments, payments] = await Promise.all([
+      tx.update(dentalAppointments).set({ isActive: true }).where(and(eq(dentalAppointments.clinicId, clinicId), inArray(dentalAppointments.patientId, ids), eq(dentalAppointments.isActive, false))).returning({ id: dentalAppointments.id }),
+      tx.update(patientPayments).set({ isActive: true }).where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.patientId, ids), eq(patientPayments.isActive, false))).returning({ id: patientPayments.id }),
+    ])
+    await tx.update(patients).set({ isArchived: false, archivedAt: null })
+      .where(and(eq(patients.clinicId, clinicId), inArray(patients.id, ids)))
+    return { restoredCount: ids.length, reactivatedAppointments: appointments.length, reactivatedPayments: payments.length }
+  })
 }

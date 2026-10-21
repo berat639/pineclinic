@@ -767,11 +767,14 @@ async function runMigrations() {
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`
   await sql`UPDATE dental_appointments SET updated_at = COALESCE(updated_at, created_at, now()) WHERE updated_at IS NULL`
   await sql`CREATE INDEX IF NOT EXISTS dental_appointments_review_status_idx ON dental_appointments (clinic_id, review_status, start_time)`
   await sql`CREATE INDEX IF NOT EXISTS dental_appointments_patient_activity_idx ON dental_appointments (clinic_id, patient_id, updated_at DESC)`
+  await sql`CREATE INDEX IF NOT EXISTS dental_appointments_clinic_active_idx ON dental_appointments (clinic_id, is_active, start_time)`
 
   await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed'`
+  await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`
   await sql`ALTER TABLE patient_payments ADD COLUMN IF NOT EXISTS due_date TEXT`
 
 
@@ -886,6 +889,9 @@ async function runMigrations() {
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS whatsapp_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS sms_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
   await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS email_opt_out BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT false`.catch(() => {})
+  await sql`ALTER TABLE patients ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`.catch(() => {})
+  await sql`CREATE INDEX IF NOT EXISTS patients_clinic_archive_idx ON patients (clinic_id, is_archived)`.catch(() => {})
 
   await sql`
     CREATE TABLE IF NOT EXISTS whatsapp_conversations (

@@ -9,7 +9,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }
 }
 
 interface Payment { id: string; patientId: string; patientName: string; patientPhone: string | null; date: string; amount: number; method: string; notes: string | null; status: string; dueDate: string | null; createdAt: string; treatmentPlanId: string | null; treatmentProcedureName: string | null; treatmentIndication: string | null; treatmentToothNumber: string | null }
-interface Patient { id: string; name: string; phone: string | null }
+interface Patient { id: string; name: string; phone: string | null; isArchived?: boolean }
 
 const inputStyle: React.CSSProperties = { padding: '8px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }
 const btnStyle: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }
@@ -55,7 +55,13 @@ export default function PaymentsTab() {
     } catch {}
   }, [page, pageSize, filterStatus, search])
   const fetchPatients = useCallback(async () => {
-    try { const res = await fetch('/api/dental/patients'); if (res.ok) setPatients(await res.json()) } catch {}
+    try {
+      const res = await fetch('/api/dental/patients')
+      if (res.ok) {
+        const rows = await res.json()
+        setPatients(rows.filter((patient: Patient) => !patient.isArchived))
+      }
+    } catch {}
   }, [])
 
   useEffect(() => { fetchPayments(); fetchPatients() }, [fetchPayments, fetchPatients])

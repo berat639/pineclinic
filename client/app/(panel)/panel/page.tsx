@@ -122,7 +122,7 @@ export default function YoneticiPage() {
         </div>
 
         <div style={{ width: '100%' }}>
-          {tab === 'calendar' && <CalendarTab />}
+          {tab === 'calendar' && <CalendarTab onNavigateToClinicStaff={() => setTab('klinik')} />}
           {tab === 'patients' && <PatientsTab />}
           {tab === 'payments' && (
             <div style={{ width: '100%' }}>
