@@ -67,6 +67,7 @@ import { authPlugin } from './api/auth'
 import { shiftsPlugin } from './api/shifts'
 import { notificationsPlugin } from './api/notifications'
 import { yoneticiPlugin } from './api/yonetici'
+import { financePlugin } from './api/finance'
 import { platformPlugin } from './api/platform'
 import { startReminderCron } from './cron/reminders'
 import { bindRequestContext, currentClinicId, currentTenant, enterTenantContext, findTenantByHostname, requireClinicId, resolveTenantFromRequest, runWithTenantContext, setRequestTenant } from './tenancy/context'
@@ -259,7 +260,7 @@ const app = new Elysia()
     setRequestTenant(request, await resolveTenantFromRequest(request))
     const pathname = new URL(request.url).pathname
     const protectedPrefixes = [
-      '/api/admin', '/api/dental', '/api/yonetici', '/api/shifts',
+      '/api/admin', '/api/dental', '/api/yonetici', '/api/finance', '/api/shifts',
       '/api/notifications', '/api/recordings', '/api/patient-notes', '/api/platform',
       '/api/knowledge', '/api/appointments',
     ]
@@ -378,6 +379,7 @@ const app = new Elysia()
   .use(shiftsPlugin)
   .use(notificationsPlugin)
   .use(yoneticiPlugin)
+  .use(financePlugin)
   .use(platformPlugin)
 
   // ── Public Opt-out API ─────────────────────────────────────────────────────

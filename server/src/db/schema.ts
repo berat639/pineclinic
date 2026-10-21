@@ -327,6 +327,101 @@ export const patientPayments = pgTable('patient_payments', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+// Financial documents are intentionally kept separate from collections. A payment
+// is not an invoice, and a draft here is never presented as a legally-issued
+// e-Invoice/e-Archive document until an authorised integrator confirms it.
+export const clinicFinanceSettings = pgTable('clinic_finance_settings', {
+  clinicId: uuid('clinic_id').primaryKey().references(() => clinics.id, { onDelete: 'cascade' }),
+  legalName: text('legal_name'),
+  taxNumber: text('tax_number'),
+  taxOffice: text('tax_office'),
+  mersisNumber: text('mersis_number'),
+  address: text('address'),
+  email: text('email'),
+  invoicePrefix: text('invoice_prefix').notNull().default('KLC'),
+  eDocumentProvider: text('e_document_provider').notNull().default('none'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
+export const financialDocuments = pgTable('financial_documents', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  patientId: uuid('patient_id').references(() => patients.id),
+  paymentId: uuid('payment_id').references(() => patientPayments.id),
+  documentType: text('document_type').notNull().default('e_archive_draft'),
+  status: text('status').notNull().default('draft'),
+  documentNumber: text('document_number').notNull(),
+  issueDate: text('issue_date').notNull(),
+  dueDate: text('due_date'),
+  recipientName: text('recipient_name').notNull(),
+  recipientIdentifier: text('recipient_identifier'),
+  recipientAddress: text('recipient_address'),
+  currency: text('currency').notNull().default('TRY'),
+  subtotal: integer('subtotal').notNull().default(0),
+  taxTotal: integer('tax_total').notNull().default(0),
+  grandTotal: integer('grand_total').notNull().default(0),
+  provider: text('provider'),
+  providerDocumentId: text('provider_document_id'),
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  clinicDocumentNumber: uniqueIndex('financial_documents_clinic_number_idx').on(table.clinicId, table.documentNumber),
+  clinicIssueDate: index('financial_documents_clinic_issue_date_idx').on(table.clinicId, table.issueDate),
+}))
+
+export const financialDocumentLines = pgTable('financial_document_lines', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  documentId: uuid('document_id').notNull().references(() => financialDocuments.id, { onDelete: 'cascade' }),
+  lineNo: integer('line_no').notNull(),
+  description: text('description').notNull(),
+  quantity: integer('quantity').notNull().default(1),
+  unitPrice: integer('unit_price').notNull(),
+  taxRate: integer('tax_rate').notNull().default(0),
+  netAmount: integer('net_amount').notNull(),
+  taxAmount: integer('tax_amount').notNull().default(0),
+  totalAmount: integer('total_amount').notNull(),
+})
+
+// Credentials are encrypted at rest by the finance API. Provider adapters can
+// consume this table without changing the clinic's core payment records.
+export const onlinePaymentProviders = pgTable('online_payment_providers', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  merchantId: text('merchant_id'),
+  apiKeyEncrypted: text('api_key_encrypted'),
+  secretEncrypted: text('secret_encrypted'),
+  webhookSecretEncrypted: text('webhook_secret_encrypted'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  clinicProvider: uniqueIndex('online_payment_providers_clinic_provider_idx').on(table.clinicId, table.provider),
+}))
+
+export const onlinePaymentTransactions = pgTable('online_payment_transactions', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  paymentId: uuid('payment_id').references(() => patientPayments.id),
+  provider: text('provider').notNull(),
+  providerTransactionId: text('provider_transaction_id'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  status: text('status').notNull().default('prepared'),
+  amount: integer('amount').notNull(),
+  currency: text('currency').notNull().default('TRY'),
+  checkoutUrl: text('checkout_url'),
+  callbackPayload: jsonb('callback_payload'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  idempotency: uniqueIndex('online_payment_transactions_idempotency_idx').on(table.clinicId, table.idempotencyKey),
+  providerTransaction: uniqueIndex('online_payment_transactions_provider_transaction_idx').on(table.provider, table.providerTransactionId),
+}))
+
 export const completedWorks = pgTable('completed_works', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').references(() => clinics.id),
