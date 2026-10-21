@@ -28,19 +28,27 @@ async function writeSections(target: Section[]) {
   const existing = await sendAmiAction({Action:'GetConfig',Filename:filename})
   if (!existing.success) throw new SetupError('Asterisk yönetilen yapılandırma desteği hazır değil',503)
   const names = [...(existing.raw || '').matchAll(/Category-\d+: ([^\r\n]+)/g)].map(m => m[1])
-  const action: Record<string,string> = {Action:'UpdateConfig',SrcFilename:filename,DstFilename:filename,Reload:'no'}
-  let i = 0
-  const add = (values: Record<string,string>) => { const suffix = String(i++).padStart(6,'0'); for (const [key,value] of Object.entries(values)) action[`${key}-${suffix}`] = value }
+  const operations: Record<string,string>[] = []
+  const add = (values: Record<string,string>) => { operations.push(values) }
   for (const name of names) add({Action:'DelCat',Cat:name})
   for (const section of target) {
     add({Action:'NewCat',Cat:section.name})
     for (const [key,value] of Object.entries(section.fields)) {
       if (/[\r\n\x00]/.test(value)) throw new SetupError('Geçersiz SIP yapılandırması')
-      add({Action:'Append',Cat:section.name,Var:key,Value:value.replace(/;/g,'\\;')})
+      add({Action:'Append',Cat:section.name,Var:key,Value:value})
     }
   }
-  const result = await sendAmiAction(action,15000)
-  if (!result.success) throw new SetupError('Asterisk yapılandırması uygulanamadı',503)
+  // AMI limits each message to 128 headers. Keep batches below that limit,
+  // including ActionID, and reload only after every batch has been written.
+  for (let offset = 0; offset < operations.length; offset += 20) {
+    const action: Record<string,string> = {Action:'UpdateConfig',SrcFilename:filename,DstFilename:filename,Reload:'no'}
+    operations.slice(offset, offset + 20).forEach((values, i) => {
+      const suffix = String(i).padStart(6,'0')
+      for (const [key,value] of Object.entries(values)) action[`${key}-${suffix}`] = value
+    })
+    const result = await sendAmiAction(action,15000)
+    if (!result.success) throw new SetupError('Asterisk yapılandırması uygulanamadı',503)
+  }
   await command('pjsip reload')
 }
 
@@ -77,6 +85,8 @@ export async function reconcileAsterisk() {
     if (JSON.stringify(snapshot) !== JSON.stringify(desired)) {
       try {
         await writeSections(desired)
+        const registrations = await command('pjsip show registrations')
+        for (const row of desired.filter(s => s.fields.type === 'registration')) if (!registrations.includes(`${row.name}/`)) throw new SetupError('Asterisk SIP kayıt yapılandırması yüklenemedi',503)
         const endpoints = await command('pjsip show endpoints')
         for (const row of desired.filter(s => s.fields.type === 'endpoint')) if (!endpoints.includes(row.name)) throw new SetupError('Asterisk endpoint doğrulanamadı',503)
       } catch (error) { await writeSections(snapshot).catch(() => {}); throw error }
@@ -99,7 +109,7 @@ function parseConfig(raw: string): Section[] {
     const cat = line.match(/^Category-\d+: (.+)$/)
     if (cat) result.push({name:cat[1],fields:{}})
     const field = line.match(/^Line-\d+-\d+: ([^=]+)=(.*)$/)
-    if (field && result.length) result[result.length-1].fields[field[1]] = field[2].replace(/\\;/g,';')
+    if (field && result.length) result[result.length-1].fields[field[1]] = field[2]
   }
   return result
 }
