@@ -55,7 +55,7 @@ export async function integrationView(id: string, platform = false) {
   const result: Record<string, unknown> = {}
   for (const service of ['phone','sms','smtp'] as Service[]) {
     const row = rows.find(r => r.service === service)
-    const tests = await db.execute(sql`SELECT id,kind,status,message,created_at,confirmed_at,revision,evidence FROM integration_tests WHERE clinic_id=${id} AND service=${service} ORDER BY created_at DESC LIMIT 20`)
+    const tests = await db.execute(sql`SELECT id,kind,CASE WHEN status IN ('pending','accepted') AND expires_at<=now() THEN 'expired' ELSE status END AS status,message,created_at,confirmed_at,revision,evidence,expires_at FROM integration_tests WHERE clinic_id=${id} AND service=${service} ORDER BY created_at DESC LIMIT 20`)
     const test = tests[0]
     const active = row?.active as Config | null
     result[service] = {
@@ -63,7 +63,7 @@ export async function integrationView(id: string, platform = false) {
       activeRevision: row?.active_revision ?? null, legacy: Boolean(row?.legacy),
       health: row?.checked_at && Date.now() - new Date(String(row.checked_at)).getTime() < 120000 ? row.health : 'unknown',
       checkedAt: row?.checked_at ?? null, test: test ?? null,
-      tests: tests.map(test => ({ id:test.id, kind:test.kind, status:test.status, message:test.message, revision:test.revision, confirmedAt:test.confirmed_at, evidence:test.evidence })),
+      tests: tests.map(test => ({ id:test.id, kind:test.kind, status:test.status, message:test.message, revision:test.revision, confirmedAt:test.confirmed_at, evidence:test.evidence, expiresAt:test.expires_at })),
       ...(platform ? { config: publicConfig(row?.draft as Config || null) } : {}),
       numbers: active?.numbers || [], callerId: active?.callerId || null,
       senderId: active?.senderId || null, fromAddress: active?.fromAddress || null,

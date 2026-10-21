@@ -64,12 +64,12 @@ export async function beginTest(id: string, service: Service, body: Record<strin
         if (!info.accepted?.length) throw new SetupError('SMTP alıcıyı kabul etmedi')
       } finally { transport.close() }
     }
-    await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id}`)
+    await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id} AND status='pending'`)
   } catch (error) {
     const message = error instanceof SetupError ? error.message : 'Test tamamlanamadı. Bağlantı bilgilerini ve sağlayıcı erişimini kontrol edin.'
     // Keep credentials and provider frames out of records; retain the actionable error in server logs.
     console.error(`[Integrations] ${service}/${kind} test failed for clinic ${id}:`, error instanceof Error ? error.message : 'Bilinmeyen hata')
-    await db.execute(sql`UPDATE integration_tests SET status='failed',message=${message} WHERE id=${created.id}`)
+    await db.execute(sql`UPDATE integration_tests SET status='failed',message=${message} WHERE id=${created.id} AND status='pending'`)
   }
   return testInfo(id,service,created.id)
 }

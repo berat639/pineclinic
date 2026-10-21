@@ -1347,9 +1347,8 @@ const app = new Elysia()
     const {verifyCallSignature} = await import('./integrations/managed/routing')
     if (!verifyCallSignature(query)) {set.status=403;return {ok:false}}
     if(query.did==='ANSWER') {
-      const {db}=await import('./db/client')
-      const {sql}=await import('drizzle-orm')
-      await db.execute(sql`UPDATE integration_tests SET evidence=evidence || '{"transferred":true}'::jsonb WHERE clinic_id=${String(query.clinicId)} AND service='phone' AND kind='transfer' AND evidence->>'channel'=${String(query.channel)} AND expires_at>now()`)
+      const {recordCallConnected}=await import('./integrations/managed/routing')
+      await recordCallConnected(String(query.channel || ''),String(query.clinicId || ''),true)
     }
     return {ok:true}
   })

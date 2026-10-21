@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '../../db/client'
 import { Config, endpointId, phone, SetupError } from './model'
-import { ensureIntegrations } from './store'
+import { audit, ensureIntegrations } from './store'
 const fields = ['uuid','caller','channel','direction','did','endpoint','clinicId','testId','timestamp']
 export function verifyCallSignature(query: Record<string,unknown>, secret = process.env.ASTERISK_AMI_SECRET || '') {
   const timestamp=Number(query.timestamp)
@@ -40,6 +40,24 @@ export async function resolveCall(query: Record<string,unknown>) {
   if(!config || (!outbound && did && !config.numbers?.includes(did))) throw new SetupError('Telefon bağlantısı etkin değil',403)
   return { clinicId:id,hostname:String(row.hostname),testId:test?String(test.id):undefined,caller,config }
 }
-export async function recordCallConnected(channel: string, clinicId: string) {
-  await db.execute(sql`UPDATE integration_tests SET evidence=evidence || '{"connected":true}'::jsonb WHERE clinic_id=${clinicId} AND service='phone' AND evidence->>'channel'=${channel} AND expires_at>now()`)
+// Only authenticated routing can attach this channel to a test. AudioSocket
+// connection proves call connectivity, not the caller's subjective audio quality.
+export async function recordCallConnected(channel: string, clinicId: string, transferred = false) {
+  if (!channel) return
+  await db.transaction(async tx => {
+    const evidence = transferred ? { transferred: true } : { connected: true }
+    await tx.execute(sql`UPDATE integration_tests t SET evidence=t.evidence || ${JSON.stringify(evidence)}::jsonb
+      FROM managed_integrations m WHERE t.clinic_id=${clinicId} AND t.service='phone'
+      AND m.clinic_id=t.clinic_id AND m.service=t.service AND m.revision=t.revision
+      AND t.evidence->>'channel'=${channel} AND t.expires_at>now()
+      AND t.status IN ('pending','accepted') AND (${!transferred} OR t.kind='transfer')`)
+    const confirmed = await tx.execute(sql`UPDATE integration_tests t
+      SET status='confirmed',confirmed_at=now(),message='Çağrı bağlantısı otomatik doğrulandı'
+      FROM managed_integrations m WHERE t.clinic_id=${clinicId} AND t.service='phone'
+      AND m.clinic_id=t.clinic_id AND m.service=t.service AND m.revision=t.revision
+      AND t.evidence->>'channel'=${channel} AND t.expires_at>now()
+      AND t.status IN ('pending','accepted') AND t.evidence->>'connected'='true'
+      AND (t.kind IN ('inbound','outbound') OR (t.kind='transfer' AND t.evidence->>'transferred'='true')) RETURNING t.id`)
+    if (confirmed.length) await audit(tx,clinicId,null,'integration.test.auto-confirm','phone')
+  })
 }
