@@ -731,6 +731,10 @@ const app = new Elysia()
       const res = await deletePatientsBulk(patientIds)
       return res
     } catch (e: any) {
+      if (e?.code === 'PATIENT_ARCHIVE_REQUIRED' && Array.isArray(e.patientIds)) {
+        set.status = 409
+        return { error: e.message, code: e.code, patientIds: e.patientIds }
+      }
       set.status = 500
       return { error: e.message || 'Hastalar silinemedi' }
     }

@@ -1541,6 +1541,13 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
   return true
 }
 
+export class PatientArchiveRequiredError extends Error {
+  readonly code = 'PATIENT_ARCHIVE_REQUIRED'
+  constructor(readonly patientIds: string[]) {
+    super('Randevusu veya ödemesi olan hasta kalıcı olarak silinemez; arşivlenmelidir.')
+  }
+}
+
 export async function deletePatientsBulk(patientIds: string[]) {
   const clinicId = requireClinicId()
   await ensurePatientArchiveSchema()
@@ -1562,7 +1569,7 @@ export async function deletePatientsBulk(patientIds: string[]) {
   ])
   const protectedIds = new Set([...appointmentRows, ...paymentRows].map(row => row.patientId).filter((id): id is string => Boolean(id)))
   if (protectedIds.size > 0) {
-    throw new Error('Randevusu veya ödemesi olan hasta kalıcı olarak silinemez; arşivlenmelidir.')
+    throw new PatientArchiveRequiredError([...protectedIds])
   }
 
   await db.transaction(async (tx) => {

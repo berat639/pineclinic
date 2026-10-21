@@ -528,16 +528,41 @@ export default function PatientsTab() {
         archiveIds.length ? fetch('/api/dental/patients/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: archiveIds }) }) : null,
         deleteIds.length ? fetch('/api/dental/patients/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: deleteIds }) }) : null,
       ])
-      for (const response of results) {
-        if (response && !response.ok) {
-          const err = await response.json().catch(() => ({}))
+      const [archiveResponse, deleteResponse] = results
+      if (archiveResponse && !archiveResponse.ok) {
+        const err = await archiveResponse.json().catch(() => ({}))
+        throw new Error(err.error || 'Arşivleme işlemi yapılamadı')
+      }
+      let fallbackArchiveData: { archivedCount?: number; deactivatedAppointments?: number; deactivatedPayments?: number } | null = null
+      let retriedDeleteData: { deletedCount?: number } | null = null
+      if (deleteResponse && !deleteResponse.ok) {
+        const err = await deleteResponse.json().catch(() => ({}))
+        if (err.code !== 'PATIENT_ARCHIVE_REQUIRED' || !Array.isArray(err.patientIds) || err.patientIds.length === 0) {
           throw new Error(err.error || 'Silme işlemi yapılamadı')
         }
+        const fallbackArchiveResponse = await fetch('/api/dental/patients/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: err.patientIds }) })
+        if (!fallbackArchiveResponse.ok) {
+          const fallbackError = await fallbackArchiveResponse.json().catch(() => ({}))
+          throw new Error(fallbackError.error || 'Hasta arşivlenemedi')
+        }
+        fallbackArchiveData = await fallbackArchiveResponse.json()
+        const protectedIds = new Set(err.patientIds)
+        const deletableIds = deleteIds.filter(id => !protectedIds.has(id))
+        if (deletableIds.length) {
+          const retryDeleteResponse = await fetch('/api/dental/patients/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: deletableIds }) })
+          if (!retryDeleteResponse.ok) {
+            const retryError = await retryDeleteResponse.json().catch(() => ({}))
+            throw new Error(retryError.error || 'Silme işlemi yapılamadı')
+          }
+          retriedDeleteData = await retryDeleteResponse.json()
+        }
       }
-      const [archiveResponse, deleteResponse] = results
       const archiveData = archiveResponse ? await archiveResponse.json() : null
-      const deleteData = deleteResponse ? await deleteResponse.json() : null
-      if (archiveData?.archivedCount) toast.success(`${archiveData.archivedCount} hasta arşive taşındı; ${archiveData.deactivatedAppointments} randevu ve ${archiveData.deactivatedPayments} ödeme pasife alındı.`)
+      const deleteData = deleteResponse?.ok ? await deleteResponse.json() : retriedDeleteData
+      const archivedCount = (archiveData?.archivedCount || 0) + (fallbackArchiveData?.archivedCount || 0)
+      const deactivatedAppointments = (archiveData?.deactivatedAppointments || 0) + (fallbackArchiveData?.deactivatedAppointments || 0)
+      const deactivatedPayments = (archiveData?.deactivatedPayments || 0) + (fallbackArchiveData?.deactivatedPayments || 0)
+      if (archivedCount) toast.success(`${archivedCount} hasta arşive taşındı; ${deactivatedAppointments} randevu ve ${deactivatedPayments} ödeme pasife alındı.`)
       if (deleteData?.deletedCount) toast.success(`${deleteData.deletedCount} hasta kalıcı olarak silindi.`)
       setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
       loadPatients()

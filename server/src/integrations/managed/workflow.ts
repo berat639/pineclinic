@@ -88,6 +88,24 @@ export async function confirmTest(id: string, service: Service, testId: string, 
   })
   return testInfo(id,service,testId)
 }
+export async function cancelTest(id: string, service: Service, testId: string, user: string) {
+  await ensureIntegrations(); await clinicExists(id)
+  await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('managed-integrations',0))`)
+    const [test] = await tx.execute(sql`
+      SELECT id FROM integration_tests
+      WHERE id=${testId} AND clinic_id=${id} AND service=${service}
+        AND status IN ('pending','accepted') AND expires_at>now()
+      FOR UPDATE
+    `)
+    if (!test) throw new SetupError('Yalnızca bekleyen test iptal edilebilir',409)
+    await tx.execute(sql`UPDATE integration_tests SET status='cancelled',message='Test kullanıcı tarafından iptal edildi',expires_at=now() WHERE id=${testId}`)
+    await audit(tx,id,user,'integration.test.cancel',service)
+  })
+  // A cancelled phone test must no longer keep its draft SIP registration alive.
+  if (service === 'phone') await reconcileAsterisk()
+  return testInfo(id,service,testId)
+}
 export async function setEnabled(id: string, service: Service, enabled: boolean, revision: number, user: string) {
   await ensureIntegrations(); await clinicExists(id)
   await db.transaction(async tx => {
