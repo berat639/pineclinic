@@ -1,0 +1,997 @@
+.cbctModalRoot {
+  --cbct-bg: var(--background, #0b0e14);
+  --cbct-panel: var(--card-bg, #131824);
+  --cbct-panel-2: var(--input-bg, #1a2132);
+  --cbct-border: var(--input-border, #263049);
+  --cbct-text: var(--foreground, #e6ebf5);
+  --cbct-muted: var(--foreground-2, #8a96b2);
+  --cbct-accent: #10b981;
+  --cbct-accent-bright: #35e0a1;
+  --cbct-accent-2: #3b82f6;
+  --cbct-ax: #ff5a3c;
+  --cbct-pano: #8d96ff;
+  --cbct-cross: #35e0a1;
+  --cbct-level: #ff9a3c;
+
+  position: fixed;
+  inset: 0;
+  z-index: 100010;
+  display: flex;
+  flex-direction: column;
+  background: var(--cbct-bg);
+  color: var(--cbct-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.cbctModalRoot *,
+.cbctModalRoot *::before,
+.cbctModalRoot *::after {
+  box-sizing: border-box;
+}
+
+.cbctModalRoot :global([hidden]) {
+  display: none !important;
+}
+
+/* ---- header: load, reset, patient meta, service light, close ---- */
+.cbctModalRoot :global(.topbar) {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--cbct-border);
+  background: var(--cbct-panel);
+  flex-shrink: 0;
+}
+
+.cbctModalRoot :global(h1) {
+  font-size: 17px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  color: var(--cbct-text);
+  display: flex;
+  align-items: center;
+}
+
+.cbctModalRoot :global(.logo) {
+  color: var(--cbct-accent);
+  margin-right: 8px;
+}
+
+.cbctModalRoot :global(.case-info) {
+  flex: 1;
+  color: var(--cbct-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cbctModalRoot :global(.actions) {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.cbctModalRoot :global(.btn) {
+  background: var(--cbct-panel-2);
+  color: var(--cbct-text);
+  border: 1px solid var(--cbct-border);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font: 600 12.5px 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.cbctModalRoot :global(.btn:hover:not(:disabled)) {
+  border-color: var(--cbct-accent-2);
+  transform: translateY(-1px);
+}
+
+.cbctModalRoot :global(.btn:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cbctModalRoot :global(.btn.primary) {
+  background: var(--btn-clinic-primary-bg, #0d9488);
+  color: var(--btn-clinic-primary-fg, #ffffff);
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.cbctModalRoot :global(.btn.primary:hover:not(:disabled)) {
+  background: var(--btn-clinic-primary-hover, #0f766e);
+  border-color: transparent;
+}
+
+.cbctModalRoot :global(.btn.large) {
+  padding: 11px 22px;
+  font-size: 13.5px;
+}
+
+/* Bold orange reset icon button */
+.cbctModalRoot :global(.btn.btn-reset) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 !important;
+  border-radius: 8px;
+  background: var(--cbct-panel-2) !important;
+  border: 1.5px solid #ff8c2b !important;
+  color: #ff9a3c !important;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  flex: none;
+}
+
+.cbctModalRoot :global(.btn.btn-reset:hover:not(:disabled)) {
+  border-color: #ffa14a !important;
+  color: #ffb86c !important;
+  transform: translateY(-1px);
+}
+
+.cbctModalRoot :global(.btn.btn-reset:active:not(:disabled)) {
+  transform: translateY(0);
+}
+
+.cbctModalRoot :global(.btn.btn-reset svg) {
+  width: 18px;
+  height: 18px;
+  stroke: #ff9a3c;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  display: block;
+}
+
+.cbctModalRoot :global(.btn.btn-reset:hover svg) {
+  stroke: #ffb86c;
+}
+
+/* Close modal button */
+.cbctModalRoot :global(.btn.btn-close-modal) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--cbct-panel-2);
+  border: 1px solid var(--cbct-border);
+  color: var(--cbct-text);
+  font-weight: 600;
+}
+
+.cbctModalRoot :global(.btn.btn-close-modal:hover:not(:disabled)) {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+.cbctModalRoot :global(.service-button) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+}
+
+.cbctModalRoot :global(.service-dot) {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #7e8aa3;
+  transition: background 0.2s;
+}
+
+.cbctModalRoot :global(.service-dot.online),
+.cbctModalRoot :global(.service-dot.running),
+.cbctModalRoot :global(.service-dot[data-state='online']),
+.cbctModalRoot :global(.service-dot[data-state='running']) {
+  background: var(--cbct-accent-bright);
+}
+
+.cbctModalRoot :global(.service-dot.connecting),
+.cbctModalRoot :global(.service-dot[data-state='connecting']) {
+  background: #ffd34d;
+  animation: cbctPulse 1.1s ease-in-out infinite;
+}
+
+.cbctModalRoot :global(.service-dot.stopping),
+.cbctModalRoot :global(.service-dot[data-state='stopping']) {
+  background: var(--cbct-level);
+}
+
+.cbctModalRoot :global(.service-dot.incompatible),
+.cbctModalRoot :global(.service-dot[data-state='incompatible']) {
+  background: #ff5d73;
+}
+
+@keyframes cbctPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+
+.cbctModalRoot :global(.service-popover) {
+  position: fixed;
+  z-index: 100030;
+  top: 56px;
+  right: 88px;
+  width: 310px;
+  padding: 14px 16px;
+  border: 1px solid var(--cbct-border);
+  border-radius: 12px;
+  background: var(--cbct-panel);
+  color: var(--cbct-text);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.cbctModalRoot :global(.service-popover strong) {
+  font-size: 14px;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.service-popover dl) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 12px 0 8px;
+}
+
+.cbctModalRoot :global(.service-popover dt) {
+  color: var(--cbct-muted);
+}
+
+.cbctModalRoot :global(.service-popover dd) {
+  margin: 0;
+  text-align: right;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.service-popover p) {
+  margin: 6px 0 0;
+  color: var(--cbct-muted);
+  line-height: 1.5;
+}
+
+/* ---- empty state ---- */
+.cbctModalRoot :global(.empty-state) {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--cbct-bg);
+}
+
+.cbctModalRoot :global(.empty-state.drag .empty-card) {
+  border-color: var(--cbct-accent);
+  background: var(--cbct-panel-2);
+}
+
+.cbctModalRoot :global(.empty-card) {
+  max-width: 520px;
+  text-align: center;
+  padding: 44px 40px;
+  border: 1.5px dashed var(--cbct-border);
+  border-radius: 16px;
+  background: var(--cbct-panel);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.cbctModalRoot :global(.empty-logo) {
+  font-size: 42px;
+  color: var(--cbct-accent);
+  letter-spacing: 2px;
+}
+
+.cbctModalRoot :global(.empty-card h2) {
+  margin: 14px 0 8px;
+  font-size: 20px;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.empty-card p) {
+  margin: 0 0 22px;
+  color: var(--cbct-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cbctModalRoot :global(.empty-card .empty-hint) {
+  margin: 16px 0 0;
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--cbct-level);
+}
+
+/* ---- 4 panel grid ---- */
+.cbctModalRoot :global(.grid) {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: var(--cbct-bg);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.cbctModalRoot :global(.panel) {
+  background: #05070b;
+  border: 1px solid var(--cbct-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cbctModalRoot :global(.tools) {
+  width: 34px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--cbct-panel);
+  border-right: 1px solid var(--cbct-border);
+}
+
+.cbctModalRoot :global(.tool) {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  color: var(--cbct-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: 600 13px 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.cbctModalRoot :global(.tool:hover),
+.cbctModalRoot :global(.tool.open) {
+  color: var(--cbct-text);
+  border-color: var(--cbct-accent-2);
+  background: var(--cbct-panel-2);
+}
+
+.cbctModalRoot :global(.tool.dir) {
+  font-size: 11px;
+}
+
+.cbctModalRoot :global(.tool-sep) {
+  width: 16px;
+  height: 1px;
+  background: var(--cbct-border);
+  margin: 4px 0;
+}
+
+/* Radiographic stages MUST remain #000000 for clinical HU / 3D VR accuracy */
+.cbctModalRoot :global(.stage) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #000000;
+}
+
+.cbctModalRoot :global(.stage canvas) {
+  position: absolute;
+  image-rendering: auto;
+}
+
+.cbctModalRoot :global(.stage canvas.overlay) {
+  pointer-events: none;
+}
+
+.cbctModalRoot :global(#cv-pano),
+.cbctModalRoot :global(#cv-pano-cpu) {
+  cursor: crosshair;
+}
+
+.cbctModalRoot :global(#panel-axial .stage) {
+  cursor: crosshair;
+}
+
+.cbctModalRoot :global(#panel-3d .stage) {
+  cursor: grab;
+}
+
+.cbctModalRoot :global(#panel-3d .stage:active) {
+  cursor: grabbing;
+}
+
+.cbctModalRoot :global(.cross-strip) {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1px;
+  background: #0f1a14;
+}
+
+.cbctModalRoot :global(.cross-cell) {
+  position: relative;
+  background: #000000;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.cbctModalRoot :global(.cross-cell canvas) {
+  position: absolute;
+}
+
+/* ---- popovers ---- */
+.cbctModalRoot :global(.popover) {
+  position: fixed;
+  z-index: 100025;
+  width: 255px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--cbct-border);
+  border-radius: 10px;
+  background: var(--cbct-panel);
+  color: var(--cbct-text);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.cbctModalRoot :global(.popover label) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--cbct-muted);
+}
+
+.cbctModalRoot :global(.popover label.inline) {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.cbctModalRoot :global(.popover output) {
+  float: right;
+  color: var(--cbct-text);
+  font-weight: 600;
+}
+
+.cbctModalRoot :global(.popover small) {
+  color: var(--cbct-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.cbctModalRoot :global(input[type='range']) {
+  accent-color: var(--cbct-accent);
+  width: 100%;
+}
+
+.cbctModalRoot :global(select) {
+  background: var(--cbct-panel-2);
+  border: 1px solid var(--cbct-border);
+  border-radius: 6px;
+  color: var(--cbct-text);
+  padding: 5px 7px;
+  font: inherit;
+}
+
+/* ---- loading overlay (solid flat overlay — no backdrop-filter per AGENTS.md) ---- */
+.cbctModalRoot :global(.loading) {
+  position: fixed;
+  inset: 0;
+  z-index: 100050;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 13, 0.85);
+}
+
+.cbctModalRoot :global(.loading-card) {
+  width: min(460px, calc(100vw - 40px));
+  padding: 28px 28px 22px;
+  border: 1px solid var(--cbct-border);
+  border-radius: 16px;
+  background: var(--cbct-panel);
+  color: var(--cbct-text);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.cbctModalRoot :global(.loading-logo) {
+  font-size: 32px;
+  color: var(--cbct-accent);
+  animation: cbctBreathe 1.8s ease-in-out infinite;
+}
+
+@keyframes cbctBreathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+.cbctModalRoot :global(.loading-card h2) {
+  margin: 8px 0 18px;
+  font-size: 18px;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.loading-stages) {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.cbctModalRoot :global(.loading-stages li) {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  opacity: 0.45;
+  transition: opacity 0.2s;
+}
+
+.cbctModalRoot :global(.loading-stages li[data-state='active']),
+.cbctModalRoot :global(.loading-stages li[data-state='done']),
+.cbctModalRoot :global(.loading-stages li[data-state='error']),
+.cbctModalRoot :global(.loading-stages li[data-state='skipped']) {
+  opacity: 1;
+}
+
+.cbctModalRoot :global(.stage-icon) {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--cbct-border);
+}
+
+.cbctModalRoot :global(li[data-state='active'] .stage-icon) {
+  border-color: var(--cbct-accent) transparent var(--cbct-accent) transparent;
+  animation: cbctSpin 0.9s linear infinite;
+}
+
+.cbctModalRoot :global(li[data-state='done'] .stage-icon) {
+  background: var(--cbct-accent);
+  border-color: var(--cbct-accent);
+}
+
+.cbctModalRoot :global(li[data-state='skipped'] .stage-icon) {
+  background: #ffd34d;
+  border-color: #ffd34d;
+}
+
+.cbctModalRoot :global(li[data-state='error'] .stage-icon) {
+  background: #ff5d73;
+  border-color: #ff5d73;
+}
+
+@keyframes cbctSpin {
+  to { transform: rotate(360deg); }
+}
+
+.cbctModalRoot :global(.stage-body) {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.cbctModalRoot :global(.stage-label) {
+  display: block;
+  font-weight: 600;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.stage-detail) {
+  display: block;
+  margin-top: 2px;
+  color: var(--cbct-muted);
+  font-size: 12px;
+  min-height: 1.2em;
+}
+
+.cbctModalRoot :global(.stage-bar) {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--cbct-panel-2);
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.cbctModalRoot :global(.stage-bar i) {
+  display: block;
+  height: 100%;
+  background: var(--cbct-accent);
+  transition: width 0.2s;
+}
+
+.cbctModalRoot :global(li[data-state='error'] .stage-bar i) {
+  background: #ff5d73;
+}
+
+.cbctModalRoot :global(.loading-notice) {
+  min-height: 1.4em;
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--cbct-level);
+  line-height: 1.5;
+}
+
+.cbctModalRoot :global(.loading-actions) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ---- toast ---- */
+.cbctModalRoot :global(.toast) {
+  position: fixed;
+  z-index: 100045;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  max-width: min(620px, calc(100vw - 40px));
+  padding: 11px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--cbct-border);
+  background: var(--cbct-panel);
+  color: var(--cbct-text);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cbctModalRoot :global(.toast.warn) {
+  border-color: #d97706;
+  background: var(--cbct-panel);
+  color: #f59e0b;
+}
+
+.cbctModalRoot :global(.toast.error) {
+  border-color: #dc2626;
+  background: var(--cbct-panel);
+  color: #ef4444;
+}
+
+.cbctModalRoot :global(.toast.ok) {
+  border-color: #059669;
+  background: var(--cbct-panel);
+  color: #10b981;
+}
+
+/* ---- service install / launch CTA ---- */
+.cbctModalRoot :global(.svc-cta) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cbctModalRoot :global(.svc-cta[hidden]) {
+  display: none;
+}
+
+.cbctModalRoot :global(.svc-cta p) {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cbct-muted);
+}
+
+.cbctModalRoot :global(.svc-cta .btn:disabled) {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.cbctModalRoot :global(.empty-card .svc-cta) {
+  align-items: center;
+}
+
+.cbctModalRoot :global(.link-btn) {
+  background: none;
+  border: 0;
+  padding: 2px;
+  color: var(--cbct-muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.cbctModalRoot :global(.link-btn:hover) {
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.link-btn:disabled) {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.cbctModalRoot :global(.link-btn[hidden]) {
+  display: none;
+}
+
+/* ---- reset confirmation & mac guide modals ---- */
+.cbctModalRoot :global(.confirm-modal) {
+  position: fixed;
+  inset: 0;
+  z-index: 100060;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 13, 0.82);
+}
+
+.cbctModalRoot :global(.confirm-card) {
+  width: min(440px, calc(100vw - 40px));
+  padding: 26px 24px 20px;
+  border: 1.5px solid var(--cbct-border);
+  border-radius: 16px;
+  background: var(--cbct-panel);
+  color: var(--cbct-text);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+
+.cbctModalRoot :global(.confirm-icon-wrap) {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--cbct-panel-2);
+  border: 1.5px solid #ff9a3c;
+  color: #ff9a3c;
+}
+
+.cbctModalRoot :global(.confirm-card h3) {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.confirm-card p) {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--cbct-muted);
+}
+
+.cbctModalRoot :global(.confirm-actions) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cbctModalRoot :global(.confirm-actions .btn) {
+  flex: 1;
+  padding: 10px 18px;
+  font-size: 13px;
+}
+
+.cbctModalRoot :global(.btn-warning-bold) {
+  background: #f97316 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: none !important;
+}
+
+.cbctModalRoot :global(.btn-warning-bold:hover:not(:disabled)) {
+  background: #ea580c !important;
+}
+
+/* ---- mac guide modal ---- */
+.cbctModalRoot :global(.mac-guide-card) {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 26px 24px 20px;
+  text-align: left;
+  border-color: var(--cbct-border);
+}
+
+.cbctModalRoot :global(.mac-guide-header) {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.cbctModalRoot :global(.mac-guide-header h3) {
+  margin: 8px 0 6px;
+  font-size: 18px;
+}
+
+.cbctModalRoot :global(.mac-guide-header p) {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cbct-muted);
+  line-height: 1.5;
+}
+
+.cbctModalRoot :global(.mac-icon-wrap) {
+  border-color: var(--cbct-accent-2);
+  color: var(--cbct-accent-2);
+  font-size: 24px;
+}
+
+.cbctModalRoot :global(.mac-steps) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.cbctModalRoot :global(.mac-step) {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--cbct-panel-2);
+  border: 1px solid var(--cbct-border);
+  font-size: 12.5px;
+}
+
+.cbctModalRoot :global(.mac-step.highlight) {
+  border-color: var(--cbct-accent);
+}
+
+.cbctModalRoot :global(.step-num) {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--cbct-panel);
+  border: 1px solid var(--cbct-border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.mac-step.highlight .step-num) {
+  background: var(--cbct-accent);
+  color: #ffffff;
+  border: none;
+}
+
+.cbctModalRoot :global(.step-content) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cbctModalRoot :global(.step-content strong) {
+  font-size: 13px;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.step-content span) {
+  color: var(--cbct-muted);
+  line-height: 1.45;
+}
+
+.cbctModalRoot :global(.step-content code) {
+  background: var(--cbct-panel);
+  border: 1px solid var(--cbct-border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--cbct-accent);
+}
+
+.cbctModalRoot :global(.mac-alt-tip) {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--cbct-panel-2);
+  border: 1px solid var(--cbct-border);
+  margin-bottom: 18px;
+  font-size: 11.5px;
+  color: var(--cbct-text);
+  line-height: 1.5;
+}
+
+.cbctModalRoot :global(.mac-guide-link) {
+  color: var(--cbct-accent-2);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  margin-top: 4px;
+}
+
+/* ---- Hasta & Çekim Bilgileri profil ikonu ve kartı ---- */
+.cbctModalRoot :global(.btn.profile-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--cbct-text);
+}
+
+.cbctModalRoot :global(.btn.profile-button.open) {
+  border-color: var(--cbct-accent-2);
+  background: var(--cbct-panel-2);
+}
+
+.cbctModalRoot :global(.patient-popover) {
+  right: 210px;
+  width: 355px;
+}
+
+.cbctModalRoot :global(.patient-popover dl) {
+  gap: 7px 14px;
+}
+
+.cbctModalRoot :global(.patient-popover dt),
+.cbctModalRoot :global(.patient-popover dd) {
+  cursor: help;
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--cbct-border);
+}
+
+.cbctModalRoot :global(.patient-popover dd) {
+  color: var(--cbct-text);
+  font-weight: 500;
+  word-break: break-word;
+}
+
+/* ---- 3D VR sağ-üst klinik rozet ---- */
+.cbctModalRoot :global(.vr-badge) {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 5;
+  padding: 3px 10px;
+  border: 1px solid rgba(92, 184, 198, 0.72);
+  border-radius: 3px;
+  background: #050a10;
+  color: #84d6e2;
+  font: 600 12px/1.2 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.8px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ---- Anlık tek cümlelik Türkçe bilgi balonu (Tooltip) ---- */
+.cbctModalRoot :global(#ui-tooltip.ui-tooltip) {
+  position: fixed;
+  z-index: 100100;
+  max-width: 310px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--input-border, #334155);
+  background: var(--card-bg, #0f172a);
+  color: var(--foreground, #f8fafc);
+  font: 500 12px/1.45 'Inter', system-ui, sans-serif;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  white-space: normal;
+}
+

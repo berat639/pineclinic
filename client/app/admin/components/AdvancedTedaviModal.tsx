@@ -1790,7 +1790,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     Tedavi Görüntüleri
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>
-                    (DICOM)
+                    (DICOM / 3D CBCT)
                   </span>
                   {treatmentDcmFile ? (
                     <span style={{

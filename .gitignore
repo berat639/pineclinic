@@ -8,3 +8,12 @@ node_modules/
 /data/
 temp/
 template-uikit/
+client/public/downloads/
+cbct-service/backend/.venv
+cbct-service/backend/.venv/
+cbct-service/backend/__pycache__/
+cbct-service/backend/models
+cbct-service/backend/models/
+cbct-service/build/
+cbct-service/dist/
+cbct-service/release/

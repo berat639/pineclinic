@@ -1,0 +1,72 @@
+name: Package PineClinic Local CBCT Service (Windows & macOS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows Installer (CUDA + DirectML)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cbct-service
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build Windows NSIS Setup (.exe)
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+
+      - name: Upload Windows Setup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PineClinic-Lokal-Servisler-Setup-Windows
+          path: cbct-service/dist/PineClinic-Lokal-Servisler-Setup.exe
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS Installer (Apple Silicon MPS)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: cbct-service
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies & package backend
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install --upgrade pip
+          backend/.venv/bin/pip install -r backend/requirements.txt
+          npm install
+          npm run dist:mac
+
+      - name: Upload macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PineClinic-Lokal-Servisler-macOS
+          path: cbct-service/dist/PineClinic-Lokal-Servisler.dmg
+          if-no-files-found: error
+

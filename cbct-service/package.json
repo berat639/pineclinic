@@ -1,0 +1,73 @@
+{
+  "name": "pineclinic-cbct-service",
+  "private": true,
+  "version": "1.0.0",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "backend:package": "backend/.venv/bin/python scripts/package_backend.py",
+    "backend:package:win": "backend\\.venv\\Scripts\\python.exe scripts/package_backend.py --export-onnx",
+    "package:mac": "npm run backend:package && electron-builder --mac",
+    "package:win": "npm run backend:package:win && electron-builder --win",
+    "dist:mac": "npm run package:mac && mkdir -p ../client/public/downloads && cp dist/PineClinic-Lokal-Servisler.dmg ../client/public/downloads/PineClinic-Lokal-Servisler.dmg",
+    "dist:win": "powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1"
+  },
+  "devDependencies": {
+    "electron": "^40.10.6",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.pineclinic.cpr",
+    "protocols": [
+      {
+        "name": "PineClinic Lokal Servisler",
+        "schemes": [
+          "pineclinic"
+        ]
+      }
+    ],
+    "productName": "PineClinic Lokal Servisler",
+    "files": [
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "release/backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "identity": null,
+      "artifactName": "PineClinic-Lokal-Servisler.${ext}",
+      "category": "public.app-category.healthcare-fitness"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "PineClinic-Lokal-Servisler-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PineClinic Lokal Servisler",
+      "runAfterFinish": true
+    }
+  }
+}
+

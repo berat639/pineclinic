@@ -1143,7 +1143,7 @@ async function runMigrations() {
     ON CONFLICT (clinic_id, key) DO NOTHING
   `
 
-  const configuredHosts = new Set<string>()
+  const configuredHosts = new Set<string>(['pineclinic.thinpine.com', 'localhost', '127.0.0.1'])
   for (const raw of (process.env.DEFAULT_CLINIC_HOSTS || '').split(',')) {
     const host = raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0]?.split(':')[0]
     if (host) configuredHosts.add(host)

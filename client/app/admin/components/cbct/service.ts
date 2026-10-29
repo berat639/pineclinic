@@ -1,0 +1,194 @@
+/**
+ * ============================================================================
+ * YEREL SERVİS GERÇEK ZAMANLI BAĞLANTI İSTEMCİSİ (cbct/service.ts — SSE)
+ * ============================================================================
+ * 127.0.0.1:8000 adresindeki Python FastAPI yerel servisine Server-Sent Events (SSE)
+ * ile bağlanır; kalp atışı (heartbeat), AI iş ilerlemesi ve servis durumunu izler.
+ * ============================================================================
+ */
+export const API: string = process.env.NEXT_PUBLIC_CBCT_SERVICE_URL || 'http://127.0.0.1:8000';
+const FALLBACK_API = API.includes('127.0.0.1')
+  ? API.replace('127.0.0.1', 'localhost')
+  : API.replace('localhost', '127.0.0.1');
+let resolvedApiBase = API;
+
+export function getActiveApiBase(): string {
+  return resolvedApiBase;
+}
+
+/**
+ * Çoklu klinik (multi-clinic) mimarisinde tarayıcının açıldığı özel klinik domain'ini döndürür.
+ * Yerel geliştirme ortamında (`localhost` / `127.0.0.1`) `'local'` döner.
+ */
+export function getClinicDomain(): string {
+  if (typeof window === 'undefined' || !window.location?.hostname) return 'local';
+  const host = window.location.hostname.trim().toLowerCase().replace(/^www\./, '');
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+    return 'local';
+  }
+  return host;
+}
+
+/**
+ * Yerel CBCT servisine yapılan tüm HTTP isteklerine `X-Clinic-Domain` başlığını ve
+ * PNA/CORS uyumlu `credentials: 'omit'` ayarını ekler; `127.0.0.1` <-> `localhost`
+ * yedeklemesini otomatik yönetir.
+ */
+export async function cbctFetch(pathOrUrl: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('X-Clinic-Domain')) {
+    headers.set('X-Clinic-Domain', getClinicDomain());
+  }
+  const requestInit: RequestInit = {
+    ...init,
+    headers,
+    mode: 'cors',
+    credentials: 'omit',
+  };
+  const buildUrl = (base: string) =>
+    pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')
+      ? pathOrUrl
+      : `${base}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
+
+  try {
+    return await fetch(buildUrl(resolvedApiBase), requestInit);
+  } catch (err) {
+    if (FALLBACK_API !== resolvedApiBase && !pathOrUrl.startsWith('http')) {
+      const fallbackResp = await fetch(buildUrl(FALLBACK_API), requestInit);
+      resolvedApiBase = FALLBACK_API;
+      return fallbackResp;
+    }
+    throw err;
+  }
+}
+
+// v3 adds a segmentation-schema header. The viewer uses it to select the
+// tooth-label path instead of treating every mask as a mandible mask.
+export const API_VERSION = 3;
+
+export type Conn = 'offline' | 'connecting' | 'online' | 'stopping' | 'incompatible';
+
+export interface JobInfo {
+  jobId: string; datasetId: string; state: string; stage: string; progress: number;
+  detail: string; provider: string; startedAt?: number | null; finishedAt?: number | null;
+}
+export interface ServerEventDetail { event: string; data: any }
+
+const EVENT_NAMES = [
+  'hello', 'heartbeat', 'clients', 'dataset.opened', 'dataset.released',
+  'job.queued', 'job.running', 'job.progress', 'job.done', 'job.failed', 'job.cancelled', 'service.stopping',
+];
+const HEARTBEAT_TIMEOUT_MS = 6000;
+const BACKOFF_MS = [500, 1000, 2000, 4000, 5000];
+
+/**
+ * Emits:  `state`      – connection state changed (`link.state`)
+ *         `event`      – every server event, detail = {event, data}
+ *         `restarted`  – the service came back with a different instanceId
+ */
+export class ServiceLink extends EventTarget {
+  state: Conn = 'offline';
+  instanceId = '';
+  engine = '';
+  provider = '';
+  startedAt = 0;
+  viewers = 0;
+  private source?: EventSource;
+  private watchdog = 0;
+  private retryTimer = 0;
+  private attempt = 0;
+  private everOnline = false;
+  private closed = false;
+  private stoppingByUser = false;
+
+  connect(): void {
+    this.closed = false;
+    window.clearTimeout(this.retryTimer);
+    this.source?.close();
+    const base = (!this.everOnline && this.attempt % 2 === 1 && FALLBACK_API !== API)
+      ? FALLBACK_API
+      : resolvedApiBase;
+    const domainParam = encodeURIComponent(getClinicDomain());
+    const source = this.source = new EventSource(`${base}/api/events?role=viewer&domain=${domainParam}`);
+    for (const name of EVENT_NAMES) source.addEventListener(name, (message) => {
+      resolvedApiBase = base;
+      this.onMessage(name, (message as MessageEvent).data);
+    });
+    source.onerror = () => { if (this.source === source) this.lost(); };
+  }
+
+  disconnect(): void { this.closed = true; this.source?.close(); window.clearTimeout(this.watchdog); window.clearTimeout(this.retryTimer); }
+
+  private set(next: Conn): void {
+    if (this.state === next) return;
+    this.state = next;
+    this.dispatchEvent(new Event('state'));
+  }
+
+  private arm(): void {
+    window.clearTimeout(this.watchdog);
+    this.watchdog = window.setTimeout(() => this.lost(), HEARTBEAT_TIMEOUT_MS);
+  }
+
+  private onMessage(event: string, raw: string): void {
+    this.arm();
+    let data: any = {};
+    try { data = JSON.parse(raw); } catch { /* heartbeat/keep-alive frames */ }
+    if (event === 'hello') {
+      const restarted = this.everOnline && this.instanceId && data.instanceId !== this.instanceId;
+      this.instanceId = data.instanceId; this.engine = data.engine; this.provider = data.provider; this.startedAt = data.startedAt;
+      this.viewers = data.clients?.viewers ?? 0;
+      this.attempt = 0;
+      this.stoppingByUser = false;
+      if (data.apiVersion !== API_VERSION) { this.set('incompatible'); this.source?.close(); window.clearTimeout(this.watchdog); return; }
+      this.everOnline = true;
+      this.set('online');
+      if (restarted) this.dispatchEvent(new Event('restarted'));
+    } else if (event === 'clients') {
+      this.viewers = data.viewers ?? this.viewers;
+    } else if (event === 'service.stopping') {
+      this.stoppingByUser = true;
+      this.set('stopping');
+    }
+    this.dispatchEvent(new CustomEvent<ServerEventDetail>('event', { detail: { event, data } }));
+  }
+
+  /** Stream broke (service stopped, crashed, or stalled): fall back to retrying with backoff. */
+  private lost(): void {
+    if (this.closed) return;
+    this.source?.close();
+    window.clearTimeout(this.watchdog);
+    if (this.state === 'incompatible') {
+      this.set('incompatible');
+    } else if (this.stoppingByUser || this.attempt >= 1) {
+      this.set('offline');
+    } else {
+      this.set(this.everOnline ? 'connecting' : 'offline');
+    }
+    const delay = BACKOFF_MS[Math.min(this.attempt++, BACKOFF_MS.length - 1)];
+    this.retryTimer = window.setTimeout(() => this.connect(), delay);
+  }
+
+  waitOnline(timeoutMs: number): Promise<void> {
+    if (this.state === 'online') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => { this.removeEventListener('state', listener); reject(new Error('The local service did not come online')); }, timeoutMs);
+      const listener = () => {
+        if (this.state === 'online') { window.clearTimeout(timer); this.removeEventListener('state', listener); resolve(); }
+        else if (this.state === 'incompatible') { window.clearTimeout(timer); this.removeEventListener('state', listener); reject(new Error('Service version is incompatible')); }
+      };
+      this.addEventListener('state', listener);
+    });
+  }
+
+  /** Subscribe to one job's state changes. Returns an unsubscribe function. */
+  onJob(jobId: string, callback: (job: JobInfo) => void): () => void {
+    const listener = (event: Event) => {
+      const { event: name, data } = (event as CustomEvent<ServerEventDetail>).detail;
+      if (name.startsWith('job.') && data.jobId === jobId) callback(data as JobInfo);
+    };
+    this.addEventListener('event', listener);
+    return () => this.removeEventListener('event', listener);
+  }
+}
+

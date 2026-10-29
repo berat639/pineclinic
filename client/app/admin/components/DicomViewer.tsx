@@ -5,6 +5,7 @@ import { Circle, Eraser, Hand, Layers, MoveUpRight, Pencil, RotateCcw, Ruler, Sl
 import { toast } from 'react-hot-toast'
 import { readDicomMetadata, type DicomMetadata } from './dicom/dicomMetadata'
 import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
+import DentalCprViewerModal from './cbct/DentalCprViewerModal'
 
 interface DicomViewerProps {
   dcmUrl?: string | null
@@ -81,6 +82,8 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
   const [showPresentationTools, setShowPresentationTools] = useState(false)
   const [isPresentationMode, setIsPresentationMode] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [isCbctOpen, setIsCbctOpen] = useState(false)
+  const [pendingCbctFiles, setPendingCbctFiles] = useState<File[] | null>(null)
 
   useEffect(() => {
     if (propFile !== undefined) {
@@ -314,6 +317,25 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                 >
                   <Trash2 size={12} /> Kaldır
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingCbctFiles(null)
+                    setIsCbctOpen(true)
+                  }}
+                  style={{
+                    ...secondaryButtonStyle,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    borderColor: 'var(--btn-clinic-blue-border)',
+                    background: 'var(--btn-clinic-blue-bg)',
+                    color: 'var(--btn-clinic-blue-fg)',
+                    fontWeight: 600,
+                  }}
+                >
+                  <FolderUp size={13} /> 3D CBCT Klasörü Seç
+                </button>
               </>
             )}
             <button
@@ -361,13 +383,43 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
             onDragLeave={(e) => { e.preventDefault(); setIsDragging(false) }}
-            onDrop={(e) => {
+            onDrop={async (e) => {
               e.preventDefault()
               setIsDragging(false)
               const droppedFiles = Array.from(e.dataTransfer.files)
-              const hasDirectory = Array.from(e.dataTransfer.items).some((item) => item.webkitGetAsEntry?.()?.isDirectory)
+              const entries = Array.from(e.dataTransfer.items ?? [])
+                .map((item) => item.webkitGetAsEntry?.())
+                .filter(Boolean) as FileSystemEntry[]
+              const hasDirectory = entries.some((entry) => entry.isDirectory)
+
               if (hasDirectory || droppedFiles.length > 1) {
-                toast.error('Lütfen tek bir 2D DICOM dosyası bırakın.')
+                const collected: File[] = []
+                const walk = async (entry: FileSystemEntry): Promise<void> => {
+                  if (entry.isFile) {
+                    collected.push(
+                      await new Promise<File>((resolve, reject) =>
+                        (entry as FileSystemFileEntry).file(resolve, reject)
+                      )
+                    )
+                  } else {
+                    const reader = (entry as FileSystemDirectoryEntry).createReader()
+                    for (;;) {
+                      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+                        reader.readEntries(resolve, reject)
+                      )
+                      if (!batch.length) break
+                      for (const child of batch) await walk(child)
+                    }
+                  }
+                }
+                for (const entry of entries) await walk(entry)
+                const finalFiles = collected.length > 0 ? collected : droppedFiles
+                if (finalFiles.length > 0) {
+                  setPendingCbctFiles(finalFiles)
+                  setIsCbctOpen(true)
+                } else {
+                  toast.error('Bırakılan klasörde DICOM dosyası bulunamadı.')
+                }
               } else if (droppedFiles.length === 1) {
                 chooseFile(droppedFiles[0])
               }
@@ -429,18 +481,20 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
               {/* 3D CBCT Seç */}
               <button
                 type="button"
-                disabled
+                onClick={() => {
+                  setPendingCbctFiles(null)
+                  setIsCbctOpen(true)
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
                   padding: '8px 12px',
                   borderRadius: 6,
-                  border: '1px solid var(--input-border)',
-                  background: 'var(--card-bg)',
-                  color: 'var(--foreground)',
-                  cursor: 'not-allowed',
-                  opacity: 1,
+                  border: '1px solid var(--btn-clinic-blue-border)',
+                  background: 'var(--btn-clinic-blue-bg)',
+                  color: 'var(--btn-clinic-blue-fg)',
+                  cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'all 0.15s ease',
                 }}
@@ -449,28 +503,28 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                   width: 32,
                   height: 32,
                   borderRadius: 6,
-                  background: 'var(--input-bg)',
-                  border: '1px solid var(--input-border)',
+                  background: 'var(--badge-clinic-bg)',
+                  border: '1px solid var(--badge-clinic-border)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
                 }}>
-                  <FolderUp size={16} color="var(--flow-text-muted)" />
+                  <FolderUp size={16} color="var(--badge-clinic-fg)" />
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)' }}>
                     3D CBCT Klasörü Seç
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    Şu anda kullanıma kapalı
+                    CBCT serisi · Panoramik, Kesit &amp; 3D VR
                   </div>
                 </div>
               </button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 10.5, color: 'var(--flow-text-muted)' }}>
-              <span>💡 DICOM dosyasını bu alana sürükleyip bırakabilirsiniz</span>
+              <span>💡 2D DICOM dosyasını veya 3D CBCT klasörünü bu alana sürükleyip bırakabilirsiniz</span>
             </div>
           </div>
         )}
@@ -516,6 +570,15 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
             {metadata.pixelSpacing ? 'Uzunluk aracı diş ölçülerini bu DICOM kalibrasyonuyla mm olarak hesaplar.' : 'Diş uzunluğunu mm olarak ölçmek için dosyada Pixel Spacing veya Imager Pixel Spacing bilgisi gerekir.'}
           </p>
         </aside>
+      )}
+      {isCbctOpen && (
+        <DentalCprViewerModal
+          initialFiles={pendingCbctFiles}
+          onClose={() => {
+            setIsCbctOpen(false)
+            setPendingCbctFiles(null)
+          }}
+        />
       )}
     </section>
   )
