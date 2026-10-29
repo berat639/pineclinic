@@ -24,33 +24,43 @@ export class LoadingOverlay {
   private readonly notice: HTMLElement;
   private readonly cancelButton: HTMLButtonElement;
   private readonly retryButton: HTMLButtonElement;
+  private readonly closeButton: HTMLButtonElement;
+  private readonly closeTopButton: HTMLButtonElement;
   private cancelHandler: () => void = () => undefined;
   private retryHandler: () => void = () => undefined;
+  private closeHandler: () => void = () => undefined;
 
   constructor(root: HTMLElement) {
     this.root = root;
     root.innerHTML = `
       <div class="loading-card">
+        <button type="button" class="loading-close-top" id="loading-close-top" aria-label="Görüntüleyiciyi Kapat" title="Görüntüleyiciyi kapatıp tedavi planlamaya döner">✕</button>
         <div class="loading-logo" aria-hidden="true">◖◗</div>
         <h2 id="loading-title">Vaka hazırlanıyor</h2>
         <ol class="loading-stages" id="loading-stages"></ol>
         <p class="loading-notice" id="loading-notice"></p>
         <div class="loading-actions">
-          <button class="btn primary" id="loading-retry" hidden>Tekrar dene</button>
-          <button class="btn" id="loading-cancel">İptal</button>
+          <button type="button" class="btn primary" id="loading-retry" hidden>Tekrar dene</button>
+          <button type="button" class="btn" id="loading-cancel">İptal</button>
+          <button type="button" class="btn btn-close-modal" id="loading-close">✕ Kapat</button>
         </div>
       </div>`;
     this.list = root.querySelector('#loading-stages')!;
     this.notice = root.querySelector('#loading-notice')!;
     this.cancelButton = root.querySelector('#loading-cancel')!;
     this.retryButton = root.querySelector('#loading-retry')!;
+    this.closeButton = root.querySelector('#loading-close')!;
+    this.closeTopButton = root.querySelector('#loading-close-top')!;
     this.cancelButton.onclick = () => this.cancelHandler();
     this.retryButton.onclick = () => this.retryHandler();
+    this.closeButton.onclick = () => this.closeHandler();
+    this.closeTopButton.onclick = () => this.closeHandler();
     this.reset();
   }
 
   onCancel(handler: () => void) { this.cancelHandler = handler; }
   onRetry(handler: () => void) { this.retryHandler = handler; }
+  onClose(handler: () => void) { this.closeHandler = handler; }
 
   private reset() {
     this.list.innerHTML = ORDER.map((id) => `

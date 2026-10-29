@@ -2217,21 +2217,21 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 )}
               </div>
 
-              {/* ── SEÇİLİ DİŞLER ŞERİDİ (TRAY) ── */}
-              <div style={{
-                background: selectedTeeth.length > 0 ? 'var(--card-bg, #0f172a)' : 'transparent',
-                border: selectedTeeth.length > 0 ? '1px solid #2563eb' : '1px dashed var(--border, #334155)',
-                borderRadius: 8,
-                padding: '6px 12px',
-                marginBottom: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                minHeight: 38,
-                transition: 'all 0.2s ease'
-              }}>
-                {selectedTeeth.length > 0 ? (
+              {/* ── SEÇİLİ DİŞLER ŞERİDİ (TRAY) — Yalnızca seçili diş varsa gösterilir ── */}
+              {selectedTeeth.length > 0 && (
+                <div style={{
+                  background: 'var(--card-bg, #0f172a)',
+                  border: '1px solid #2563eb',
+                  borderRadius: 8,
+                  padding: '6px 12px',
+                  marginBottom: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  minHeight: 38,
+                  transition: 'all 0.2s ease'
+                }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', display: 'flex', alignItems: 'center', gap: 4 }}>
                       <span>🎯</span> Seçili ({selectedTeeth.length}):
@@ -2278,9 +2278,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       ))}
                     </div>
                   </div>
-                ) : null}
 
-                {selectedTeeth.length > 0 && (
                   <button
                     type="button"
                     onClick={() => handleQuickSelect('clear')}
@@ -2302,8 +2300,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   >
                     <X size={12} /> Seçimi Sıfırla
                   </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {odontogramMode === '2d' ? (
                 /* ── MOD 1: MEVCUT 2D BASİT GÖRÜNÜM ── */

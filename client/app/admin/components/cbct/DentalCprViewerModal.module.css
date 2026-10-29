@@ -37,6 +37,8 @@
 
 /* ---- header: load, reset, patient meta, service light, close ---- */
 .cbctModalRoot :global(.topbar) {
+  position: relative;
+  z-index: 100060;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -279,6 +281,7 @@
 }
 
 .cbctModalRoot :global(.empty-card) {
+  position: relative;
   max-width: 520px;
   text-align: center;
   padding: 44px 40px;
@@ -286,6 +289,14 @@
   border-radius: 16px;
   background: var(--cbct-panel);
   transition: border-color 0.2s, background 0.2s;
+}
+
+.cbctModalRoot :global(.empty-actions) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .cbctModalRoot :global(.empty-logo) {
@@ -505,6 +516,7 @@
 }
 
 .cbctModalRoot :global(.loading-card) {
+  position: relative;
   width: min(460px, calc(100vw - 40px));
   padding: 28px 28px 22px;
   border: 1px solid var(--cbct-border);
@@ -512,6 +524,31 @@
   background: var(--cbct-panel);
   color: var(--cbct-text);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.cbctModalRoot :global(.loading-close-top) {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--cbct-border);
+  background: var(--cbct-panel-2);
+  color: var(--cbct-muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.cbctModalRoot :global(.loading-close-top:hover) {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
 }
 
 .cbctModalRoot :global(.loading-logo) {

@@ -1217,13 +1217,28 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
     })
 
     // ---- Arayüz Bağlantıları (UI Wiring) --------------------------------------------------------
+    function closeViewerModal() {
+      loadToken++
+      cancelActiveJob()
+      currentXhr?.abort()
+      loading.hide()
+      onCloseRef.current()
+    }
+
     loading.onCancel(() => {
       loadToken++
       cancelActiveJob()
       currentXhr?.abort()
       loading.hide()
-      if (!volume) showEmpty()
+      if (!volume) {
+        if (initialFiles && initialFiles.length > 0) {
+          onCloseRef.current()
+        } else {
+          showEmpty()
+        }
+      }
     })
+    loading.onClose(() => closeViewerModal())
     loading.onRetry(() => {
       if (lastSource) void loadCase(lastSource)
     })
@@ -1242,7 +1257,10 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
 
     for (const id of ['btn-load', 'btn-load-empty']) $(id).onclick = () => void onLoadClick()
     $('btn-reset').onclick = () => openResetConfirm()
-    $('btn-close-modal').onclick = () => onCloseRef.current()
+    for (const id of ['btn-close-modal', 'btn-close-empty', 'btn-close-empty-top']) {
+      const el = root.querySelector<HTMLElement>(`#${id}`)
+      if (el) el.onclick = () => closeViewerModal()
+    }
     btnCancelReset.onclick = () => closeResetConfirm()
     btnProceedReset.onclick = () => {
       closeResetConfirm()
@@ -1763,10 +1781,10 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
   }, [initialFiles])
 
   return (
-    <div ref={rootRef} className={styles.cbctModalRoot} role="dialog" aria-modal="true" aria-label="Dental CPR 3D CBCT Görüntüleyici">
+    <div ref={rootRef} className={styles.cbctModalRoot} role="dialog" aria-modal="true" aria-label="3D CBCT Viewer">
       <header className="topbar">
         <h1>
-          <span className="logo">◖◗</span> Dental CPR Viewer
+          <span className="logo">◖◗</span> 3D CBCT Viewer
         </h1>
         <span id="case-info" className="case-info"></span>
         <div className="actions">
@@ -2032,6 +2050,15 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
 
       <section id="empty-state" className="empty-state">
         <div className="empty-card">
+          <button
+            id="btn-close-empty-top"
+            type="button"
+            className="loading-close-top"
+            aria-label="Görüntüleyiciyi Kapat"
+            title="3D CBCT görüntüleyiciyi kapatıp tedavi planlamaya döner."
+          >
+            ✕
+          </button>
           <div className="empty-logo" aria-hidden="true">
             ◖◗
           </div>
@@ -2039,15 +2066,26 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           <p id="empty-desc">
             Seri klasörünü seçin ya da buraya sürükleyin. Panoramik, kesitler ve 3D görünüm AI segmentasyonu tamamlanınca birlikte açılır.
           </p>
-          <button
-            id="btn-load-empty"
-            type="button"
-            className="btn primary large"
-            title="Bilgisayarınızdaki bir CBCT DICOM serisi klasörünü seçerek vakayı açar."
-            data-tip="Bilgisayarınızdaki bir CBCT DICOM serisi klasörünü seçerek vakayı açar."
-          >
-            DICOM Klasörü Yükle
-          </button>
+          <div className="empty-actions">
+            <button
+              id="btn-load-empty"
+              type="button"
+              className="btn primary large"
+              title="Bilgisayarınızdaki bir CBCT DICOM serisi klasörünü seçerek vakayı açar."
+              data-tip="Bilgisayarınızdaki bir CBCT DICOM serisi klasörünü seçerek vakayı açar."
+            >
+              DICOM Klasörü Yükle
+            </button>
+            <button
+              id="btn-close-empty"
+              type="button"
+              className="btn btn-close-modal large"
+              title="3D CBCT görüntüleyiciyi kapatıp tedavi planlamaya döner."
+              data-tip="3D CBCT görüntüleyiciyi kapatıp tedavi planlamaya döner."
+            >
+              ← Geri Dön / Kapat
+            </button>
+          </div>
           <div className="svc-cta" data-svc-cta hidden>
             <p data-svc="note"></p>
             <button className="btn primary large" data-svc="primary" type="button"></button>
