@@ -3,6 +3,9 @@ name: Package PineClinic Local CBCT Service (Windows & macOS)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     name: Build Windows Installer (CUDA + DirectML)
@@ -24,9 +27,26 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Download DentalSegmentator model weights from release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path backend/models | Out-Null
+          gh release download cbct-v1.0.0 --pattern "dental-segmentator-model.tar.gz" --dir backend/models --clobber
+          tar -xzf backend/models/dental-segmentator-model.tar.gz -C backend/models
+          Remove-Item backend/models/dental-segmentator-model.tar.gz -Force
+
       - name: Build Windows NSIS Setup (.exe)
         shell: pwsh
         run: ./scripts/build-windows.ps1
+
+      - name: Publish Windows Setup (.exe) to GitHub Release cbct-v1.0.0
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload cbct-v1.0.0 dist/PineClinic-Lokal-Servisler-Setup.exe --clobber
 
       - name: Upload Windows Setup Artifact
         uses: actions/upload-artifact@v4
@@ -34,39 +54,3 @@ jobs:
           name: PineClinic-Lokal-Servisler-Setup-Windows
           path: cbct-service/dist/PineClinic-Lokal-Servisler-Setup.exe
           if-no-files-found: error
-
-  build-macos:
-    name: Build macOS Installer (Apple Silicon MPS)
-    runs-on: macos-14
-    defaults:
-      run:
-        working-directory: cbct-service
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Python dependencies & package backend
-        run: |
-          python -m venv backend/.venv
-          backend/.venv/bin/pip install --upgrade pip
-          backend/.venv/bin/pip install -r backend/requirements.txt
-          npm install
-          npm run dist:mac
-
-      - name: Upload macOS DMG Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PineClinic-Lokal-Servisler-macOS
-          path: cbct-service/dist/PineClinic-Lokal-Servisler.dmg
-          if-no-files-found: error
-
