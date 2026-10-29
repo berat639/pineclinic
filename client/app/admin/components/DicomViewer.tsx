@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Circle, Eraser, Hand, Layers, MoveUpRight, Pencil, RotateCcw, Ruler, SlidersHorizontal, Square, SunMedium, Triangle, ZoomIn, FileUp, FolderUp, Trash2 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { readDicomMetadata, type DicomMetadata } from './dicom/dicomMetadata'
 import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
-import { findLocalCbctSeries } from './dicom/localCbctSeries'
-import CbctMprViewer from './CbctMprViewer'
 
 interface DicomViewerProps {
   dcmUrl?: string | null
@@ -72,7 +71,6 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
   const toolGroupId = `dicom-2d-tools-${reactId}`
   const viewportElementRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const folderInputRef = useRef<HTMLInputElement>(null)
   const sessionRef = useRef<any>(null)
   const [file, setFile] = useState<File | null>(propFile ?? null)
   const [metadata, setMetadata] = useState<DicomMetadata | null>(null)
@@ -82,8 +80,6 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
   const [error, setError] = useState<string | null>(null)
   const [showPresentationTools, setShowPresentationTools] = useState(false)
   const [isPresentationMode, setIsPresentationMode] = useState(false)
-  const [cbctFiles, setCbctFiles] = useState<File[] | null>(null)
-  const [folderStatus, setFolderStatus] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
@@ -269,32 +265,6 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
     onFileChange?.(null)
   }
 
-  const chooseFolder = async (selectedFiles: File[]) => {
-    if (!selectedFiles.length) return
-    setError(null)
-    setFolderStatus(`Klasörde uygun CBCT serisi aranıyor… (0/${selectedFiles.length})`)
-    try {
-      const series = await findLocalCbctSeries(selectedFiles, (scanned, total) => {
-        setFolderStatus(`Klasörde uygun CBCT serisi aranıyor… (${scanned}/${total})`)
-      })
-      if (!series) {
-        setError('Bu klasörde en az 16 farklı konumlu kesit ve gerekli geometri bilgilerini içeren bir CBCT serisi bulunamadı.')
-        return
-      }
-      setFile(null)
-      setCbctFiles(series.files)
-    } catch (folderError) {
-      const detail = folderError instanceof Error
-        ? folderError.message
-        : typeof folderError === 'string'
-          ? folderError
-          : (() => { try { return JSON.stringify(folderError) } catch { return '' } })()
-      setError(detail || `Klasördeki DICOM dosyaları okunamadı (${selectedFiles.length} dosya tarandı). CBCT klasörünü seçtiğinizden emin olun.`)
-    } finally { setFolderStatus(null) }
-  }
-
-  if (cbctFiles) return <CbctMprViewer files={cbctFiles} onClose={() => setCbctFiles(null)} />
-
   return (
     <section style={{
       position: isPresentationMode ? 'fixed' : 'relative',
@@ -305,13 +275,12 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
       gap: 12,
       padding: isPresentationMode ? 0 : isModal ? 12 : 0,
       borderRadius: isPresentationMode ? 0 : 8,
-      background: isPresentationMode ? 'var(--background)' : 'transparent',
+      background: isPresentationMode ? 'var(--background)' : 'var(--card-bg)',
       border: isPresentationMode || !isModal ? 'none' : '1px solid var(--input-border)',
       color: 'var(--foreground)'
     }}>
       <div style={{ minWidth: 0 }}>
         <input ref={fileInputRef} type="file" accept=".dcm,application/dicom" style={{ display: 'none' }} onChange={(event) => chooseFile(event.target.files?.[0])} />
-        <input ref={folderInputRef} type="file" multiple style={{ display: 'none' }} {...({ webkitdirectory: '' } as any)} onChange={(event) => { const selectedFiles = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void chooseFolder(selectedFiles) }} />
 
         {/* Dosya Seçildiğinde Üst Bilgi ve Araç Çubuğu */}
         {file && (
@@ -396,10 +365,11 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
               e.preventDefault()
               setIsDragging(false)
               const droppedFiles = Array.from(e.dataTransfer.files)
-              if (droppedFiles.length === 1) {
+              const hasDirectory = Array.from(e.dataTransfer.items).some((item) => item.webkitGetAsEntry?.()?.isDirectory)
+              if (hasDirectory || droppedFiles.length > 1) {
+                toast.error('Lütfen tek bir 2D DICOM dosyası bırakın.')
+              } else if (droppedFiles.length === 1) {
                 chooseFile(droppedFiles[0])
-              } else if (droppedFiles.length > 1) {
-                void chooseFolder(droppedFiles)
               }
             }}
             style={{
@@ -407,7 +377,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
               padding: '10px 12px',
               borderRadius: 8,
               border: isDragging ? '2px dashed var(--accent)' : '1px dashed var(--input-border)',
-              background: isDragging ? 'var(--flow-info-bg, rgba(37,99,235,0.08))' : 'var(--input-bg)',
+              background: isDragging ? 'var(--flow-info-bg)' : 'var(--input-bg)',
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
@@ -450,7 +420,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)' }}>
                     2D DICOM Seç
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     .dcm panoramik / periapikal
                   </div>
                 </div>
@@ -459,7 +429,7 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
               {/* 3D CBCT Seç */}
               <button
                 type="button"
-                onClick={() => folderInputRef.current?.click()}
+                disabled
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -469,7 +439,8 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                   border: '1px solid var(--input-border)',
                   background: 'var(--card-bg)',
                   color: 'var(--foreground)',
-                  cursor: 'pointer',
+                  cursor: 'not-allowed',
+                  opacity: 1,
                   textAlign: 'left',
                   transition: 'all 0.15s ease',
                 }}
@@ -478,33 +449,32 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                   width: 32,
                   height: 32,
                   borderRadius: 6,
-                  background: 'var(--card-inner)',
+                  background: 'var(--input-bg)',
                   border: '1px solid var(--input-border)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
                 }}>
-                  <FolderUp size={16} color="var(--foreground-2)" />
+                  <FolderUp size={16} color="var(--flow-text-muted)" />
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)' }}>
                     3D CBCT Klasörü Seç
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    Açılmış kesit klasörü
+                  <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Şu anda kullanıma kapalı
                   </div>
                 </div>
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 10.5, color: 'var(--foreground-3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 10.5, color: 'var(--flow-text-muted)' }}>
               <span>💡 DICOM dosyasını bu alana sürükleyip bırakabilirsiniz</span>
             </div>
           </div>
         )}
 
-        {folderStatus && <div style={messageStyle}>{folderStatus}</div>}
         {isLoading && <div style={messageStyle}>DICOM görüntüsü hazırlanıyor…</div>}
         {error && <div style={{ ...messageStyle, color: 'var(--danger)' }}>⚠️ {error}</div>}
         <div

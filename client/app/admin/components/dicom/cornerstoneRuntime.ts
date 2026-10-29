@@ -38,10 +38,6 @@ export function getCornerstoneRuntime(): Promise<any> {
     ]).then(([core, tools, dicomImageLoader, metadata, dcmjs]) => {
       filterKnownInvalidAgeTagWarning(dcmjs)
       if (!core.isCornerstoneInitialized()) core.init()
-      core.volumeLoader.registerVolumeLoader(
-        'cornerstoneStreamingImageVolume',
-        core.cornerstoneStreamingImageVolumeLoader as any,
-      )
       dicomImageLoader.init({ maxWebWorkers: 1 })
       tools.init()
       if (!toolsRegistered) {
@@ -50,8 +46,6 @@ export function getCornerstoneRuntime(): Promise<any> {
           tools.LengthTool, tools.AngleTool, tools.ArrowAnnotateTool,
           tools.RectangleROITool, tools.EllipticalROITool, tools.PlanarFreehandROITool,
           tools.EraserTool,
-          tools.CrosshairsTool,
-          tools.TrackballRotateTool,
         ].forEach((tool) => tools.addTool(tool))
         toolsRegistered = true
       }

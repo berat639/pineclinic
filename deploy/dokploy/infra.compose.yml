@@ -34,28 +34,6 @@ services:
       dokploy-network:
         aliases: [voiceai-redis]
 
-  dental-segmentator:
-    build:
-      context: ../..
-      dockerfile: services/dental-segmentator/Dockerfile
-    restart: always
-    environment:
-      DENTAL_SEGMENTATOR_MODE: ${DENTAL_SEGMENTATOR_MODE:-fast}
-      DENTAL_SEGMENTATOR_DATASET: ${DENTAL_SEGMENTATOR_DATASET:-Dataset112_DentalSegmentator_v100}
-      DENTAL_SEGMENTATOR_DEVICE: ${DENTAL_SEGMENTATOR_DEVICE:-cpu}
-      NNUNET_RESULTS: /models/nnUNet_results
-    volumes:
-      - dental_segmentator_models:/models
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-    networks:
-      dokploy-network:
-        aliases: [voiceai-dental-segmentator]
-
   asterisk:
     build:
       context: ../../infra/asterisk
@@ -94,9 +72,6 @@ volumes:
   redis_data:
     external: true
     name: voiceai-vfdp7y_redis_data
-  dental_segmentator_models:
-    external: true
-    name: voiceai-vfdp7y_dental_segmentator_models
   asterisk_logs:
     external: true
     name: voiceai-vfdp7y_asterisk_logs

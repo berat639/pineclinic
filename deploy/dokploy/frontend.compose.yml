@@ -14,7 +14,6 @@ services:
       NODE_ENV: production
       SERVER_URL: http://voiceai-server:3001
       BACKEND_PROXY_URL: http://voiceai-server:3001
-      DENTAL_SEGMENTATOR_URL: ${DENTAL_SEGMENTATOR_URL:-http://voiceai-dental-segmentator:8000}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       INTERNAL_PROXY_SECRET: ${INTERNAL_PROXY_SECRET:-${JWT_SECRET:-${ADMIN_PASSWORD}}}
       GEMINI_API_KEY: ${GEMINI_API_KEY}

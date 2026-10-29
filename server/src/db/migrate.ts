@@ -768,6 +768,9 @@ async function runMigrations() {
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`
   await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`
+  // The tenant backfill below also adds this column for legacy tables, but
+  // appointment indexes need it before that step on a fresh database.
+  await sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES clinics(id)`
   await sql`UPDATE dental_appointments SET updated_at = COALESCE(updated_at, created_at, now()) WHERE updated_at IS NULL`
   await sql`CREATE INDEX IF NOT EXISTS dental_appointments_review_status_idx ON dental_appointments (clinic_id, review_status, start_time)`
   await sql`CREATE INDEX IF NOT EXISTS dental_appointments_patient_activity_idx ON dental_appointments (clinic_id, patient_id, updated_at DESC)`

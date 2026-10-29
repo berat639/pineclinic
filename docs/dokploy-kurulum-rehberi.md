@@ -1,6 +1,6 @@
 # VoiceAI — Docker ve Dokploy Kurulum Rehberi
 
-Bu rehber, VoiceAI'nin tek bir Linux sunucusunda, tek bir Dokploy projesi altında frontend, backend, PostgreSQL, Redis, Asterisk ve DentalSegmentator ile kurulmasını anlatır. WhatsApp için ayrı Evolution API kurulumu ve Google Calendar bağlantısı da kapsamdadır.
+Bu rehber, VoiceAI'nin tek bir Linux sunucusunda, tek bir Dokploy projesi altında frontend, backend, PostgreSQL, Redis ve Asterisk ile kurulmasını anlatır. WhatsApp için ayrı Evolution API kurulumu ve Google Calendar bağlantısı da kapsamdadır.
 
 **İnceleme tarihi:** 16 Ekim 2026. **Kaynak sürüm:** `7947108c`. Bu belge kaynak kodu ve yapılandırmalar incelenerek hazırlanmıştır; burada anlatılan dağıtım canlı sunucuda uygulanmamıştır. Aşağıdaki düzeltme örnekleri de uygulama dosyalarına otomatik uygulanmış değildir.
 
@@ -21,7 +21,7 @@ Bu rehber, VoiceAI'nin tek bir Linux sunucusunda, tek bir Dokploy projesi altın
 11. [Frontend ve backend doğrulaması](#11-frontend-ve-backend-dogrulamasi)
 12. [Gemini, RAG ve Google Calendar](#12-gemini-rag-ve-google-calendar)
 13. [Asterisk ve Netgsm](#13-asterisk-ve-netgsm)
-14. [DentalSegmentator ve DICOM](#14-dentalsegmentator-ve-dicom)
+14. [2D DICOM görüntüleri](#14-2d-dicom-goruntuleri)
 15. [Evolution API, WhatsApp, SMS ve e-posta](#15-evolution-api-whatsapp-sms-ve-e-posta)
 16. [Frontend, backend ve altyapıyı ayrı servisler olarak kurma](#16-ayri-servisler-olarak-kurma)
 17. [Yedekleme ve geri yükleme](#17-yedekleme-ve-geri-yukleme)
@@ -43,7 +43,6 @@ flowchart LR
     Server --> PG[(PostgreSQL 16 + pgvector)]
     Server --> Redis[(Redis 7 / BullMQ)]
     Server --> Gemini[Google Gemini]
-    Client --> Dental[DentalSegmentator :8000]
     Netgsm[Netgsm SIP / RTP] --> Asterisk[Asterisk :5060]
     Asterisk -->|AudioSocket TCP 12000| Server
     Server -->|AMI TCP 5038| Asterisk
@@ -59,13 +58,12 @@ flowchart LR
 | `server/` | Elysia HTTP/WS, auth, klinikler, randevular, RAG, ses, WhatsApp | `server/Dockerfile`, HTTP 3001 |
 | `server/src/db/` | PostgreSQL şeması, migration, repository'ler, Redis | pgvector gerekli |
 | `server/src/queue/`, `server/src/cron/` | Kuyruklar ve hatırlatıcılar | Backend işlemi içinde çalışır; ayrı worker servisi tanımlı değil |
-| `client/` | Next.js 15, React 19, panel, takvim, DICOM/CBCT | `client/Dockerfile`, standalone Node 20, port 3002 |
+| `client/` | Next.js 15, React 19, panel, takvim, 2D DICOM | `client/Dockerfile`, standalone Node 20, port 3002 |
 | `infra/asterisk/` | SIP, RTP, dialplan, AMI, AGI | Netgsm telefon köprüsü |
-| `services/dental-segmentator/` | FastAPI, SimpleITK, PyTorch/nnU-Net | CPU image, port 8000 |
 | `data/` | Seed JSON dosyaları ve görüşme WAV kayıtları | `/app/data` volume |
 | `server/public/uploads/` | Klinik logoları ve yüklenen DICOM dosyaları | Ayrıca kalıcı volume gerekir |
 | `server/public/tenant-assets/` | Kliniğe özel logo/branding dosyaları | Kalıcı volume veya DB'den yeniden üretim |
-| `docker-compose.dokploy.yml` | Altı servisin Dokploy topolojisi | Production başlangıç dosyası |
+| `docker-compose.dokploy.yml` | Beş servisin Dokploy topolojisi | Production başlangıç dosyası |
 | `docker-compose.yml` | Yerel geliştirme; host portları açık | Production dosyası yerine kullanılmaz |
 | `docker-compose.asterisk.yml` | Belirli bir eski kuruluma özel Asterisk | Genel kurulum şablonu değildir |
 
@@ -77,10 +75,9 @@ flowchart LR
 | `redis` | `redis:7-alpine` | 6379/TCP | Yok | 256 MB / 0.5 CPU |
 | `server` | Kök context + `server/Dockerfile` | 3001/TCP, 12000/TCP | HTTP, Traefik üzerinden | 512 MB / 1 CPU |
 | `client` | Kök context + `client/Dockerfile` | 3002/TCP | HTTP, Traefik üzerinden | 256 MB / 0.5 CPU |
-| `dental-segmentator` | Kök context + servis Dockerfile'ı | 8000/TCP | Yok | 4 GB / 2 CPU |
 | `asterisk` | `infra/asterisk` context | 5060/TCP+UDP, RTP, 5038/TCP | SIP/RTP doğrudan host | 512 MB / 1 CPU |
 
-Bu değerler kapasite garantisi değildir. Özellikle DICOM upload sırasında Next.js ve backend bellek tüketimi artar; mevcut 256/512 MB limitler büyük hacimlerde yetersiz kalabilir. Başlangıçta izleyerek client/backend için 1–2 GB aralığını değerlendirin. Full nnU-Net için 4 GB dental limiti yeterli kabul edilmemelidir.
+Bu değerler kapasite garantisi değildir. Özellikle DICOM upload sırasında Next.js ve backend bellek tüketimi artabilir. Başlangıçta kullanımı izleyerek client/backend kaynaklarını değerlendirin.
 
 <a id="2-kurulumdan-once-giderilecek-eksikler"></a>
 ## 2. Kurulumdan önce giderilecek eksikler
@@ -95,12 +92,11 @@ Mevcut dosyalar bir dağıtım iskeleti sağlar; aşağıdaki bulgular giderilme
 | `/app/server/public/uploads` ve `tenant-assets` volume'a bağlı değil | Container yeniden yaratılınca dosyalar kaybolabilir; bazı logolar DB'den üretilebilir | Bölüm 7: dosya volume'larını ekleyin; eski veriyi önce taşıyın |
 | `NEXT_PUBLIC_API_URL` Dockerfile'da var, Compose build arg listesinde yok | Bazı takvim/DICOM istekleri kullanıcının `localhost:3001` adresine gidebilir | Bölüm 7: aynı origin frontend URL'sini build arg olarak verin |
 | Asterisk'e `ASTERISK_AMI_SECRET` aktarılmıyor | Backend'deki özel AMI parolası Asterisk ile eşleşmez | Bölüm 7 ve 13: aynı değişkeni Asterisk'e de aktarın |
-| Dokploy Compose'da Asterisk ve dental için `profiles` yok | `TELEPHONY_ENABLED=0`, Asterisk container'ını kapatmaz | Tam kurulumda SIP bilgilerini doldurun; kısmi kurulum için açık profile düzenlemesi yapın |
+| Dokploy Compose'da Asterisk için `profiles` yok | `TELEPHONY_ENABLED=0`, Asterisk container'ını kapatmaz | Tam kurulumda SIP bilgilerini doldurun; kısmi kurulum için açık profile düzenlemesi yapın |
 | `/api/direct-session` kimlik kontrolü olmadan `GEMINI_API_KEY` döndürüyor; client Compose anahtarı alıyor | Public frontend kalıcı Gemini anahtarını açığa çıkarır | Public yayın öncesi bu yolu kapatın veya kısa ömürlü yetkilendirmeye taşıyın; yalnız login eklemek kalıcı anahtarı tarayıcıya verme sorununu çözmez |
 | `/api/ai/parse` route'unda uygulama içi kimlik kontrolü yok | Public erişim ücretli AI çağrılarını tetikleyebilir | Oturum/rol kontrolü ve kullanım sınırı ekleyin veya özelliği erişime kapatın |
 | Backend proxy fallback listesinde eski kuruluma ait public domain/servis adları var | Yerel backend erişilemeyince istekler yanlış ortama yönlenebilir | Yeni ortamda fallback listesini yalnız bu kuruluma ait adreslerle sınırlandırın |
 | `migrate.ts` eski `doctors` tablosuna `DROP TABLE IF EXISTS ... CASCADE` uygular | Eski bir DB üzerinde veri kaybı riski | Eski DB'yi doğrudan bağlamadan önce yedek ve izole migration provası yapın |
-| Dental README otomatik model indirmeden söz ediyor; Docker CMD yalnız Uvicorn başlatıyor | Full mod model olmadan 503 üretir | Bölüm 14: modeli açıkça indirin |
 | `docker-compose.asterisk.yml` sabit sunucu bilgileri ve düz metin SIP parolası içeriyor | Başka sunucuya yanlış bağlantı ve credential yayılımı | Bu dosyayı yeni kurulumda kullanmayın; ilgili anahtarları yenileyip env üzerinden yönetin |
 
 Bu çalışma yalnız dokümantasyondur; tabloda tarif edilen kod değişiklikleri tamamlanmış değildir. Geçici olarak client'tan `GEMINI_API_KEY` kaldırmak anahtar döndürülmesini önler, ancak ana sayfadaki doğrudan ses akışını ve AI parse özelliğini devre dışı bırakır. Bu, bütün özellikleri çalışan bir çözüm olarak kabul edilmemelidir.
@@ -117,11 +113,9 @@ Linux üzerinde Ubuntu 24.04 LTS veya Debian 12 kullanılabilir. Aşağıdaki Vo
 | Kullanım | Başlangıç planı |
 |---|---|
 | Panel + backend + PostgreSQL + Redis | 4 vCPU, 8 GB RAM, 80–100 GB SSD |
-| Asterisk + dental fast + build işlemleri dahil | 8 vCPU, 16 GB RAM, en az 150 GB SSD |
-| Dental full CPU | 32 GB ve üzeri RAM bütçesi; gerçek CBCT ile kapasite testi |
-| Dental full GPU | Ayrı GPU image/runtime çalışması gerekir; mevcut Dockerfile CPU PyTorch kurar |
+| Asterisk ve build işlemleri dahil | 8 vCPU, 16 GB RAM, en az 150 GB SSD |
 
-Build sırasında Next.js, Python/PyTorch indirmeleri ve Docker image katmanları için ek disk/RAM gerekir. Görüşme kayıtları ve DICOM depolaması için kullanım hacmine göre ayrıca alan ayırın. Depolama büyümesi için otomatik silme politikasının mevcut olduğunu varsaymayın.
+Build sırasında Next.js bağımlılıkları ve Docker image katmanları için ek disk/RAM gerekir. Görüşme kayıtları ve DICOM depolaması için kullanım hacmine göre ayrıca alan ayırın. Depolama büyümesi için otomatik silme politikasının mevcut olduğunu varsaymayın.
 
 ### 3.2 Domain planı
 
@@ -275,7 +269,7 @@ Dokploy Compose uygulamasının **Environment** alanı Compose değişkenlerini 
 
 ### 6.1 Örnek tam kurulum şablonu
 
-Bu şablon tek klinik, telefon etkin ve dental fast kurulum içindir. Bölüm 7'deki eksik eşlemeleri tamamlayın. `DEGISTIR_...` alanlarını gerçek değerlerle değiştirin; kullanmadığınız entegrasyonların alanlarını boş bırakın.
+Bu şablon tek klinik ve telefon etkin kurulum içindir. Bölüm 7'deki eksik eşlemeleri tamamlayın. `DEGISTIR_...` alanlarını gerçek değerlerle değiştirin; kullanmadığınız entegrasyonların alanlarını boş bırakın.
 
 ```dotenv
 # PostgreSQL: URL içindeki kullanıcı/parola POSTGRES_* ile aynı olmalıdır.
@@ -357,11 +351,6 @@ NETGSM_API_USERCODE=
 NETGSM_API_PASSWORD=
 NETGSM_API_MSGHEADER=
 
-# Dental CPU / fast.
-DENTAL_SEGMENTATOR_URL=http://voiceai-dental-segmentator:8000
-DENTAL_SEGMENTATOR_MODE=fast
-DENTAL_SEGMENTATOR_DATASET=Dataset112_DentalSegmentator_v100
-DENTAL_SEGMENTATOR_DEVICE=cpu
 ```
 
 Güçlü hex değer üretmek için her farklı sır için ayrı kez çalıştırın:
@@ -445,24 +434,21 @@ volumes:
 | `server_data` | `/app/data` | Görüşme WAV dosyaları | Kritik |
 | `server_uploads` — eklenecek | `/app/server/public/uploads` | Logo, DICOM ve upload dosyaları | Kritik |
 | `server_tenant_assets` — eklenecek | `/app/server/public/tenant-assets` | Kliniğe özel branding; bazı logo içerikleri DB'de de bulunur | Dosya bütünlüğü |
-| `dental_segmentator_models` | `/models` | İndirilen nnU-Net ağırlıkları | Yeniden indirilebilir ama maliyetli |
 | `asterisk_logs` — isteğe bağlı ek | `/var/log/asterisk` | Asterisk logları; etkinse CDR dosyaları | Operasyon ihtiyacına göre |
 
 Yeni kurulumda boş volume kullanılabilir. Mevcut container'a uploads volume eklemeden **önce** eski dizini dışarı kopyalayın ve yeni volume'a aktarın; boş mount var olan dosyaları görünmez yapabilir. Veritabanı yedeği ses/DICOM dosyalarını içermez.
 
-### 7.3 Telefon veya dental olmadan ilk kurulum
+### 7.3 Telefon olmadan ilk kurulum
 
-Ana Dokploy dosyası altı servisi de başlatır. Sadece env'de `TELEPHONY_ENABLED=0` yapmak Asterisk'in SIP bilgisi istemesini engellemez. Kısmi kurulum istenirse ilgili service bloklarına şu profiles alanlarını ekleyin:
+Ana Dokploy dosyası beş servisi de başlatır. Sadece env'de `TELEPHONY_ENABLED=0` yapmak Asterisk'in SIP bilgisi istemesini engellemez. Kısmi kurulum istenirse Asterisk service bloğuna şu profiles alanını ekleyin:
 
 ```yaml
 services:
   asterisk:
     profiles: [telephony]
-  dental-segmentator:
-    profiles: [dental-ai]
 ```
 
-Bu değişiklikten sonra normal `up` çekirdek dört servisi başlatır. Tam kurulum için Compose çalıştıran ortamda `COMPOSE_PROFILES=telephony,dental-ai` tanımlayın veya tam compose komutuna `--profile telephony --profile dental-ai` ekleyin. Dokploy'da bir özel komut kullanılıyorsa panelin gösterdiği **tam komutu ve proje adını** koruyun; yalnız ek bayrak yazmak varsayılan komutun yerini alabilir. [Dokploy Advanced komut davranışı](https://docs.dokploy.com/docs/core/docker-compose#advanced).
+Bu değişiklikten sonra normal `up` çekirdek dört servisi başlatır. Telefon servisini de başlatmak için Compose ortamında `COMPOSE_PROFILES=telephony` tanımlayın veya komuta `--profile telephony` ekleyin. Dokploy'da özel komut kullanılıyorsa panelin gösterdiği **tam komutu ve proje adını** koruyun. [Dokploy Advanced komut davranışı](https://docs.dokploy.com/docs/core/docker-compose#advanced).
 
 <a id="8-dokploy-projesini-olusturma-ve-deploy"></a>
 ## 8. Dokploy projesini oluşturma ve deploy
@@ -481,7 +467,7 @@ Bu değişiklikten sonra normal `up` çekirdek dört servisi başlatır. Tam kur
 10. **Preview Compose** ekranında env eşlemelerini, volume'ları, network alias'larını ve Traefik hedef portlarını kontrol edin; secret içeren çıktıyı paylaşmayın.
 11. Deploy'u başlatıp her servisin build/runtime logunu takip edin.
 
-Bu rehber mevcut `dokploy-network` alias düzenini kullanır. Isolated Deployments gibi ağ dönüştüren seçenekleri etkinleştirirseniz Preview Compose'da altı servisin birbirine erişimini ve alias'ların korunmasını ayrıca doğrulayın. [Dokploy domain ve ağ üretimi](https://docs.dokploy.com/docs/core/docker-compose/domains).
+Bu rehber mevcut `dokploy-network` alias düzenini kullanır. Isolated Deployments gibi ağ dönüştüren seçenekleri etkinleştirirseniz Preview Compose'da beş servisin birbirine erişimini ve alias'ların korunmasını ayrıca doğrulayın. [Dokploy domain ve ağ üretimi](https://docs.dokploy.com/docs/core/docker-compose/domains).
 
 ### 8.2 Başlama sırası
 
@@ -495,7 +481,6 @@ postgres + redis → healthcheck başarılı
       → index.ts / HTTP / WS / workers / cron / opsiyonel AudioSocket
   → client ve asterisk
 
-dental-segmentator → bağımsız başlar, frontend tarafından çağrılır
 ```
 
 Backend entrypoint `set -e` kullanır. İlk üç veri hazırlama adımından biri hata verirse HTTP sunucusu başlamaz. Restart döngüsünde yalnız son log satırına değil ilk migration/seed hatasına bakın.
@@ -744,78 +729,14 @@ Gerçek kabul testi için yönetiminizdeki test numarasıyla inbound/outbound ç
 
 İlk testlerde noise gate değerlerini varsayılan bırakın. Ses kesikliği veya gecikme ölçüldükten sonra `PHONE_*` ayarlarını birer birer değiştirin. Asterisk log/CDR volume'u eklemek CDR üretimini kendiliğinden etkinleştirmez; aktif modül/logger yapılandırmasını ayrıca doğrulayın.
 
-<a id="14-dentalsegmentator-ve-dicom"></a>
-## 14. DentalSegmentator ve DICOM
+<a id="14-2d-dicom-goruntuleri"></a>
+## 14. 2D DICOM görüntüleri
 
-### 14.1 Fast mod
+Tedavi ekranında tek bir 2D DICOM dosyası seçilebilir veya sürüklenebilir. Backend yalnız `.dcm` uzantılı ve en fazla 20 MiB boyutundaki dosyaları kabul eder; dosyalar klinik bazında saklanır. Tedavi kaydındaki `dcmUrl`, yetkili oturumla görüntüyü yeniden açmak için kullanılır.
 
-Varsayılan `DENTAL_SEGMENTATOR_MODE=fast`, model indirmeden CPU üzerinde seçilmiş axial dilimlerden dental ark çıkarır. Bu çıktı tam nnU-Net segmentasyonu değildir.
+Yükleme dosyaları için kalıcı `server_uploads` volume'u ve yedekleme düzeni Bölüm 7 ve 17'de açıklanmıştır. Testlerde anonim bir DICOM dosyası yükleyip tedavi kaydından yeniden açın; redeploy sonrası dosyanın korunmasını doğrulayın.
 
-Frontend runtime env:
-
-```dotenv
-DENTAL_SEGMENTATOR_URL=http://voiceai-dental-segmentator:8000
-```
-
-Python servis env:
-
-```dotenv
-DENTAL_SEGMENTATOR_MODE=fast
-DENTAL_SEGMENTATOR_DEVICE=cpu
-DENTAL_SEGMENTATOR_DATASET=Dataset112_DentalSegmentator_v100
-NNUNET_RESULTS=/models/nnUNet_results
-```
-
-`NNUNET_RESULTS` ana Compose'da zaten sabittir. Servise public domain veya host port publish eklemeyin; Next.js oturum kontrollü API route'ları üzerinden erişilir. Python servisinin kendi endpoint'lerinde uygulama auth kontrolü bulunmaz.
-
-```bash
-dc exec -T dental-segmentator python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health").read().decode())'
-```
-
-Beklenen `ok:true`, `mode:"fast"`. Fast modda `modelReady:false` normaldir.
-
-### 14.2 Full mod ve model indirme
-
-1. Dental container'ını fast modda başlatın.
-2. `/models` volume'unun bağlı olduğunu doğrulayın.
-3. Modeli **açıkça** indirin:
-
-   ```bash
-   dc exec -T dental-segmentator python download-model.py
-   ```
-
-4. Beklenen kurulum yolu:
-
-   ```text
-   /models/nnUNet_results/Dataset112_DentalSegmentator_v100
-   ```
-
-5. Kaynak limitlerini gerçek hacme uygun yükseltin; mevcut 4 GB limitle full işin çalışacağını varsaymayın. Shared memory ihtiyacını da test edin.
-6. `DENTAL_SEGMENTATOR_MODE=full` ayarlayıp ilgili servisi yeniden deploy edin.
-7. `/health` içinde `mode:"full"` ve `modelReady:true` görünmesini doğrulayın.
-8. Gerçekçi boyutta anonim test CBCT serisiyle işin `complete` durumuna geldiğini doğrulayın.
-
-İndirme script'i varsayılan olarak resmî Zenodo arşivini kullanır. Mevcut klasör varsa tekrar indirmez; yarım/yanlış bir kurulumda yalnız klasör varlığını görmek yeterli değildir. Farklı dataset env'i vermek download script'indeki sabit dataset adını değiştirmez.
-
-GPU kullanımı için CUDA uyumlu PyTorch kurulumu, uygun image ve Docker GPU tahsisi ayrıca hazırlanmalıdır. Yalnız `DENTAL_SEGMENTATOR_DEVICE=cuda` yazmak mevcut CPU image'ını GPU image'ına dönüştürmez.
-
-### 14.3 Upload ve iş yaşam döngüsü
-
-| Özellik | Mevcut davranış |
-|---|---|
-| Minimum dosya/kesit | En az 16 DICOM kesiti |
-| Python toplam upload sınırı | Varsayılan 2048 MB |
-| Tek DICOM tedavi upload'u | Ayrı backend yolu; en fazla 20 MiB ve `.dcm` |
-| İş gönderimi | Frontend `/api/dental-segmentator/arch`, başarılı başlangıç 202 |
-| İş izleme | `/api/dental-segmentator/jobs/{jobId}` |
-| İş kuyruğu | Tek süreç içinde seri inference |
-| İş durumu | RAM'de; restart ile kaybolur |
-| Geçici seri | `/tmp/dental-segmentator`; iş sonunda silinir |
-| Kalıcı dosya | `/models` altındaki ağırlıklar |
-
-Next.js multipart formu okuyup yeniden gönderir. Python'un 2 GB sınırı client RAM'i veya proxy limitinin bunu kaldırdığı anlamına gelmez. İş çalışırken dental servisi yeniden başlatmayın; birden fazla replica, ortak job deposu olmadan polling'i bozabilir.
-
-Opsiyonel `DENTAL_SEGMENTATOR_MAX_UPLOAD_MB`, `DENTAL_SEGMENTATOR_WORKDIR`, `DENTAL_SEGMENTATOR_CORS`, `DENTAL_SEGMENTATOR_MODEL_URL` kaynakta bulunur fakat ana Compose'da aktarılmaz. Bunları kullanacaksanız doğru servis `environment` listesine ekleyin; özellikle sayısal değerleri geçerli biçimde verin.
+3D CBCT seçimi şu anda kullanıma kapalıdır.
 
 <a id="15-evolution-api-whatsapp-sms-ve-e-posta"></a>
 ## 15. Evolution API, WhatsApp, SMS ve e-posta
@@ -900,7 +821,6 @@ Frontend ve backend'i bağımsız deploy etmek istiyorsanız aynı Dokploy proje
 | `voiceai-infra` | Docker Compose | PostgreSQL + Redis |
 | `voiceai-backend` | Application / Dockerfile | Bun backend |
 | `voiceai-frontend` | Application / Dockerfile | Next.js frontend |
-| `voiceai-dental` | Docker Compose veya Application | DentalSegmentator |
 | `voiceai-telephony` | Docker Compose | Asterisk; doğrudan SIP/RTP publish |
 | `voiceai-evolution` | Opsiyonel ayrı Compose | Evolution + kendi DB/cache'i |
 
@@ -970,7 +890,6 @@ Runtime Environment:
 NODE_ENV=production
 SERVER_URL=http://GERCEK_BACKEND_SERVIS_DNS:3001
 BACKEND_PROXY_URL=http://GERCEK_BACKEND_SERVIS_DNS:3001
-DENTAL_SEGMENTATOR_URL=http://GERCEK_DENTAL_SERVIS_DNS:8000
 INTERNAL_PROXY_SECRET=DEGISTIR_BACKEND_ILE_AYNI_DEGER
 ADMIN_PASSWORD=DEGISTIR_LEGACY_ADMIN_PAROLASI
 # Yalnız Bölüm 2'deki public endpoint sorunları giderildikten sonra:
@@ -979,7 +898,7 @@ GEMINI_API_KEY=DEGISTIR_GEMINI_API_ANAHTARI
 
 Builder stage'e verilen env runner stage'e otomatik taşınmış kabul edilmez. Özellikle iç backend URL'leri runtime'da da bulunmalıdır. Frontend ile backend'in aynı erişilebilir Docker ağına bağlı olduğunu doğrulayın.
 
-### 16.5 Asterisk ve dental'i ekleme
+### 16.5 Asterisk'i ekleme
 
 Asterisk için ana Compose'daki service'i yeni telephony Compose'a taşıyın. Ayrı dosyada artık bulunmayan `depends_on: server` kaydını kaldırın. `AUDIOSOCKET_HOST` ve backend HTTP hedefi gerçek backend DNS adı, `BACKEND_HTTP_PORT=3001` olmalıdır. Backend'in `ASTERISK_AMI_HOST` değeri de bu yeni Asterisk servisinin alias'ı olmalıdır. Port yayınları, ortak AMI parolası ve DID/domain eşlemesi Bölüm 13 ile aynıdır.
 
@@ -993,11 +912,7 @@ volumes:
   asterisk_logs:
 ```
 
-Dental için context repository kökü, Dockerfile `services/dental-segmentator/Dockerfile`, target port 8000, model mount `/models` ve replica/worker 1 kullanın. Frontend runtime `DENTAL_SEGMENTATOR_URL` adresini güncelleyin. Public domain eklemeyin.
-
-Ayrı dental Compose dosyasında `dokploy-network` ve `dental_segmentator_models` üst seviye tanımlarını koruyun. Application seçilirse `/health` probe'unu iç port 8000 üzerinde ayrıca tanımlayın; full mod kabulünde JSON içindeki `modelReady` yine kontrol edilmelidir.
-
-Son sıra: **infra → backend → frontend → dental/telephony → opsiyonel entegrasyonlar → uçtan uca test**.
+Son sıra: **infra → backend → frontend → telephony → opsiyonel entegrasyonlar → uçtan uca test**.
 
 <a id="17-yedekleme-ve-geri-yukleme"></a>
 ## 17. Yedekleme ve geri yükleme
@@ -1010,7 +925,6 @@ Son sıra: **infra → backend → frontend → dental/telephony → opsiyonel e
 | Ses kayıtları | `server_data` volume |
 | DICOM/logo/branding | `server_uploads` ve `server_tenant_assets` volume'ları |
 | Redis | Kuyruk durumunun korunması için tutarlı AOF/RDB veya durmuş volume yedeği |
-| Dental | Model volume'u veya doğrulanmış yeniden indirme kaynağı/sürümü |
 | Evolution | Kendi DB'si, Redis'i ve `/evolution/instances` volume'u |
 | Konfigürasyon | Release commit/image digest, domain/ağ/env/mount ayarları |
 | Şifreleme anahtarı | `INTEGRATION_ENCRYPTION_KEY`; DB'den ayrı güvenli saklama |
@@ -1036,7 +950,7 @@ mv "$VOICEAI_BACKUP_DIR/voiceai.dump.partial" "$VOICEAI_BACKUP_DIR/voiceai.dump"
 
 Komut zinciri başarısızsa `.partial` dosyayı tamamlanmış yedek olarak kullanmayın; önce hatayı giderin. `pg_dump` canlı DB için tutarlı bir DB görünümü sağlar; aynı anda alınan ayrı dosya/Redis yedekleriyle işlemsel eşzamanlılık sağlamaz. Tam kurtarma noktası gerekiyorsa kısa bakım penceresinde yeni istekleri/çağrıları durdurun, aktif işleri bitirin, yazan servisleri durdurun, ardından DB ve dosya yedeklerini birlikte alın.
 
-Örneğin tam kurulumda yazan servisleri durdurma sırası `client`, `asterisk`, `dental-segmentator`, `server` olabilir. Bu işlem aktif çağrı/işleri keser; boşalmaları beklenmelidir. DB dump sırasında PostgreSQL açık kalır. Redis volume dosyalarını doğrudan arşivleyecekseniz Redis'i de durdurun. Bakım sonunda yalnız önceden etkin servisleri tekrar başlatın; volume'ları silmeyin.
+Örneğin tam kurulumda yazan servisleri durdurma sırası `client`, `asterisk`, `server` olabilir. Bu işlem aktif çağrı/işleri keser; boşalmaları beklenmelidir. DB dump sırasında PostgreSQL açık kalır. Redis volume dosyalarını doğrudan arşivleyecekseniz Redis'i de durdurun. Bakım sonunda yalnız önceden etkin servisleri tekrar başlatın; volume'ları silmeyin.
 
 ### 17.3 Dosya volume'larını yedekleme
 
@@ -1096,7 +1010,7 @@ Test DB zaten varsa yeni benzersiz bir isim seçin; rehber otomatik `DROP DATABA
 2. Bölüm 5.4'teki beş zorunlu komutun yerel test ortamında başarılı olduğunu doğrulayın.
 3. İlgili Docker image'larını temiz context'te build edin.
 4. Geri yüklenebilir DB/dosya yedeği alın; önceki çalışan image/digest ve env'i kaydedin.
-5. Aktif görüşme ve dental işlerini bitirin; gerekiyorsa bakım penceresi kullanın.
+5. Aktif görüşmeleri bitirin; gerekiyorsa bakım penceresi kullanın.
 6. Dokploy'da seçilmiş release'i deploy edin.
 7. Migration/seed loglarını, DB/Redis durumunu ve frontend auth akışını doğrulayın.
 8. Değişen özelliklerde uçtan uca test yapın.
@@ -1106,21 +1020,20 @@ Test DB zaten varsa yeni benzersiz bir isim seçin; rehber otomatik `DROP DATABA
 | Değişiklik | Gereken işlem |
 |---|---|
 | Frontend kodu, `NEXT_PUBLIC_*` | Frontend image rebuild + redeploy |
-| Client iç backend URL'si veya dental URL'si | Runtime env güncellemesi + container yeniden oluşturma |
+| Client iç backend URL'si | Runtime env güncellemesi + container yeniden oluşturma |
 | Backend kodu/dependency | Backend image rebuild + redeploy; migration tekrar çalışır |
 | JWT/proxy/entegrasyon secret | Etkilenen servislerde koordineli runtime redeploy; anahtarın veri/oturum etkisini değerlendirin |
 | PostgreSQL parolası | DB rol parolası ile uygulama URL'sini birlikte güncelleme; sadece env yeterli değil |
 | Domain | DNS + Dokploy domain + tenant/CORS/callback ayarları; Compose redeploy |
 | SIP/AMI ayarı | Backend/Asterisk tutarlılığı; ilgili container yeniden oluşturma |
-| Dental fast/full | Model hazırlığı + kaynak kontrolü + dental redeploy |
 
 Sadece `restart` mevcut container'ın environment değerlerini değiştirmez. Dokploy üzerinden redeploy/recreate kullanın.
 
 ### 18.3 Kesintisizlik sınırı
 
-Mevcut uygulamada ses oturumları, Asterisk çağrı eşlemesi ve SSE bağlantıları backend RAM'indedir. Dental job durumu da Python RAM'indedir. Backend cron her instance'ta çalışır; migration/seed geneli için dağıtık tekil çalıştırma garantisi yoktur.
+Mevcut uygulamada ses oturumları, Asterisk çağrı eşlemesi ve SSE bağlantıları backend RAM'indedir. Backend cron her instance'ta çalışır; migration/seed geneli için dağıtık tekil çalıştırma garantisi yoktur.
 
-Bu nedenle `replicas=2` veya `start-first` seçmek tek başına sıfır kesinti sağlamaz. Ölçekleme öncesi ortak oturum/iş depolaması, tekil cron/worker koordinasyonu, migration yönetimi, trafik/çağrı boşaltma ve route tutarlılığı tasarlanmalıdır. Bu rehberin çalışma varsayımı tek backend ve tek dental process'tir.
+Bu nedenle `replicas=2` veya `start-first` seçmek tek başına sıfır kesinti sağlamaz. Ölçekleme öncesi ortak oturum/iş depolaması, tekil cron/worker koordinasyonu, migration yönetimi, trafik/çağrı boşaltma ve route tutarlılığı tasarlanmalıdır. Bu rehberin çalışma varsayımı tek backend process'tir.
 
 ### 18.4 Geri dönüş
 
@@ -1159,10 +1072,7 @@ Image tag'leri ve frontend dependency çözümü hareketli olduğu için eski co
 | Telefon AI cevaplamıyor | `TELEPHONY_ENABLED` yanlış, 12000 erişimsiz veya AI hatası | Tam `1`, AudioSocket module/host, backend logu |
 | Inbound çalışıyor, outbound/transfer bozuk | AMI host/parola veya caller ID | İki tarafta ortak secret, manager kullanıcı, trunk caller ID |
 | Asterisk sürekli çöküyor, telefon kapalı sanılıyor | Ana Compose profile'sız başlatıyor | SIP alanlarını doldurun veya Bölüm 7.3 profiles |
-| Dental 503 | Servis kapalı veya full model hazır değil | Frontend runtime URL, `/health` JSON, model indirme |
-| Dental healthy ama job failed | Model/seri/bellek/timeout problemi | En az 16 kesit, `modelReady`, job error, container OOM |
-| Dental job ID bulunamadı | Restart veya farklı replica | Tek instance; işi yeniden yükleme |
-| Exit 137 / OOMKilled | Bellek limiti aşıldı | Client/backend/dental RAM, gerçek upload hacmi |
+| Exit 137 / OOMKilled | Bellek limiti aşıldı | Client/backend RAM ve gerçek upload hacmi |
 | WhatsApp QR oluşmuyor | Evolution URL/key/instance uyuşmazlığı | Ayrı Evolution logları ve panel yapılandırması |
 | WhatsApp webhook 401/403 | Secret veya instance adı uyuşmuyor | VoiceAI'nin ürettiği webhook/instance ayarları |
 | Entegrasyon şifresi açılamıyor | Encryption key eksik/değişmiş | Eski doğru 64 hex anahtarı geri yükleme |
@@ -1198,7 +1108,6 @@ docker inspect --format '{{.State.Status}} OOM={{.State.OOMKilled}} Exit={{.Stat
 - [ ] Panel login, listeleme, kayıt oluşturma ve geri okuma çalışıyor.
 - [ ] Kullanılan Gemini modeli/hesap erişimi ve RAG işlevi doğrulandı.
 - [ ] Telefon kullanılıyorsa SIP, iki yönlü ses, DID, AMI ve kayıt testi geçti.
-- [ ] Dental kullanılıyorsa seçilen modda gerçek test serisi tamamlandı.
 - [ ] Calendar/WhatsApp/SMS/e-posta yalnız yapılandırılan kliniklerde test edildi.
 - [ ] Yedekler sunucu dışında saklanıyor; izole restore provası yapıldı.
 - [ ] Önceki image, commit, environment ve kurtarma noktası kaydedildi.
@@ -1207,7 +1116,7 @@ docker inspect --format '{{.State.Status}} OOM={{.State.OOMKilled}} Exit={{.Stat
 
 | Konu | Kaynak |
 |---|---|
-| Altı servis topolojisi | [`docker-compose.dokploy.yml`](../docker-compose.dokploy.yml) |
+| Beş servis topolojisi | [`docker-compose.dokploy.yml`](../docker-compose.dokploy.yml) |
 | Yerel profiller | [`docker-compose.yml`](../docker-compose.yml) |
 | Backend build ve başlangıç | [`server/Dockerfile`](../server/Dockerfile), [`docker-entrypoint.sh`](../server/docker-entrypoint.sh) |
 | Frontend build | [`client/Dockerfile`](../client/Dockerfile), [`next.config.ts`](../client/next.config.ts) |
@@ -1219,7 +1128,6 @@ docker inspect --format '{{.State.Status}} OOM={{.State.OOMKilled}} Exit={{.Stat
 | Model seçimi | [`assistant-config.ts`](../server/src/services/assistant-config.ts) |
 | WhatsApp ve şifreleme | [`api/whatsapp.ts`](../server/src/api/whatsapp.ts), [`integration-secrets.ts`](../server/src/services/integration-secrets.ts) |
 | Asterisk | [`infra/asterisk/Dockerfile`](../infra/asterisk/Dockerfile), [`entrypoint`](../infra/asterisk/docker-entrypoint.sh), [`dialplan`](../infra/asterisk/templates/extensions.conf.tmpl), [`AMI`](../infra/asterisk/templates/manager.conf.tmpl) |
-| Dental | [`Dockerfile`](../services/dental-segmentator/Dockerfile), [`app.py`](../services/dental-segmentator/app.py), [`download-model.py`](../services/dental-segmentator/download-model.py) |
 | Netgsm ek notları | [`netgsm-integration.md`](netgsm-integration.md); yeni sunucuda kaynak kod ve gerçek trunk bilgileri önceliklidir |
 
 Dokploy kurulumu, environment aktarımı, domain yönlendirmesi ve volume backup davranışı ilgili bölümlerde bağlantılanan resmî belgelerle kontrol edilmiştir. Uygulamaya özgü portlar, env farkları, dosya yolları ve sınırlamalar yukarıdaki repository kaynaklarından çıkarılmıştır.
