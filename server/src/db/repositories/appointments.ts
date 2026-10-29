@@ -11,7 +11,7 @@ export interface Appointment {
   sessionId?: string | null
   calendarEventId?: string | null
   data: Record<string, unknown>
-  // Legacy fields (backward compat reads)
+  // Compatibility fields for earlier appointment records.
   customerName: string
   phone: string
   type: string
@@ -88,7 +88,7 @@ export async function createAppointment(data: {
           customerName: data.customerName,
           phone: data.phone,
           type: data.type,
-          vehicleInfo: data.vehicleInfo ?? null,
+          ...(data.vehicleInfo !== undefined ? { vehicleInfo: data.vehicleInfo } : {}),
           issueOrRequest: data.issueOrRequest ?? null,
           date: data.date,
           time: data.time,

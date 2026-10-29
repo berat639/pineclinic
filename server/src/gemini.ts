@@ -432,7 +432,7 @@ export async function createLiveSession(
               `[${i + 1}]`,
               r.date,
               r.time,
-              r.issueOrRequest ? `— ${r.issueOrRequest}` : `— ${TYPE_LABELS[r.type] || r.type}`,
+              r.issueOrRequest ? `— ${r.issueOrRequest}` : `— ${TYPE_LABELS[r.type] || r.type || 'Randevu'}`,
             ]
             return parts.filter(Boolean).join(' ')
           })
@@ -469,7 +469,7 @@ export async function createLiveSession(
           service: 'Tedavi', test_drive: 'Muayene', gallery_visit: 'Kontrol', other: 'Randevu',
         }
         const summary = result
-          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.issueOrRequest || TYPE_LABELS[a.type] || 'Randevu'}`)
+          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.issueOrRequest || TYPE_LABELS[a.type] || a.type || 'Randevu'}`)
           .join('\n')
         return {
           sonuc: `${tarih || `${from} - ${to}`} tarihinde ${count} randevu mevcut:\n${summary}\n\nNot: Mevcut randevu sayısına göre müsaitlik değerlendir.`,
@@ -570,7 +570,7 @@ export async function createLiveSession(
       },
     },
     // Uzun görüşmelerde context limitine takılmamak için sıkıştırma açık.
-    // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/araç/tarih
+    // Pencere geniş tutuldu ki müşterinin başta verdiği ad/telefon/talep/tarih
     // gibi bilgiler erkenden kırpılıp model baştan sormasın.
     contextWindowCompression: {
       triggerTokens: '25600',
@@ -818,7 +818,7 @@ export async function createLiveSession(
       },
       onerror: (e: unknown) => callbacks.onError(e),
       onclose: (e: unknown) => {
-        // Kullanıcı/araç bilerek kapattıysa: normal kapanış.
+        // Kullanıcı veya istemci bilerek kapattıysa: normal kapanış.
         if (closedByUser) {
           callbacks.onClose()
           return

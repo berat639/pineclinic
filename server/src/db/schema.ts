@@ -44,7 +44,7 @@ export const appointments = pgTable('appointments', {
   sessionId: text('session_id'),
   calendarEventId: text('calendar_event_id'),
   data: jsonb('data').notNull().default({}),
-  // Legacy columns kept for backward compat (not used by new flow)
+  // Legacy columns kept for backward-compatible appointment reads.
   customerName: text('customer_name').notNull().default(''),
   phone: text('phone').notNull().default(''),
   type: text('type').notNull().default(''),

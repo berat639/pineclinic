@@ -118,6 +118,9 @@ async function runMigrations() {
   // by earlier schema revisions. Safe when the legacy column is absent.
   await sql`ALTER TABLE appointments DROP COLUMN IF EXISTS ata_hsys_id`
 
+  // Preserve the legacy field and restore it if an older schema lacks it.
+  await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS vehicle_info TEXT`
+
   // Generic JSONB data column for flow-based appointments
   await sql`
     ALTER TABLE appointments
@@ -273,13 +276,13 @@ async function runMigrations() {
     await sql`
       INSERT INTO knowledge_categories (slug, label, icon, color, sort_order) VALUES
         ('genel',    'Genel',    '🌐', '#60a5fa', 0),
-        ('servis',   'Servis',   '🔧', '#34d399', 1),
-        ('galeri',   'Galeri',   '🏪', '#a78bfa', 2),
+        ('tedavi',   'Tedavi',   '🦷', '#34d399', 1),
+        ('estetik',  'Estetik',  '✨', '#a78bfa', 2),
         ('kampanya', 'Kampanya', '🎯', '#fb923c', 3),
         ('sss',      'SSS',      '❓', '#f59e0b', 4),
-        ('arac',     'Araç',     '🚗', '#38bdf8', 5),
-        ('musteri',  'Müşteri',  '👤', '#f472b6', 6)
-      ON CONFLICT (slug) DO NOTHING
+        ('hizmet',   'Hizmet',   '⚕️', '#38bdf8', 5),
+        ('musteri',  'Hasta',    '👤', '#f472b6', 6)
+      ON CONFLICT DO NOTHING
     `
     console.log('[Migration] Varsayılan kategoriler oluşturuldu')
   }
@@ -1110,6 +1113,7 @@ async function runMigrations() {
   // Values that only need to be unique inside a clinic must not remain global.
   await sql`ALTER TABLE knowledge_categories DROP CONSTRAINT IF EXISTS knowledge_categories_slug_unique`
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_categories_clinic_slug_unique ON knowledge_categories (clinic_id, slug)`
+
   await sql`ALTER TABLE vip_assistants DROP CONSTRAINT IF EXISTS vip_assistants_phone_unique`
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS vip_assistants_clinic_phone_unique ON vip_assistants (clinic_id, phone)`
 

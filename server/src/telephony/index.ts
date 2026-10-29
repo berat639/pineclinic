@@ -873,7 +873,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
                     if (upcoming.length > 0) {
                       ctxMsg += `\nYaklaşan Randevular (${upcoming.length} adet):\n`
                       upcoming.slice(0, 3).forEach(a => {
-                        ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] ?? a.type}\n`
+                        ctxMsg += `- ${a.date} ${a.time}: ${TYPE_LABELS[a.type] || a.type || 'Randevu'}\n`
                       })
                     }
 

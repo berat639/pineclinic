@@ -3,7 +3,7 @@
 import { getCalendarSettings } from '../db/repositories/settings'
 
 export type CalendarEventInput = {
-  title: string          // e.g., "Servis Randevusu - Ahmet Yılmaz"
+  title: string          // e.g., "Klinik Randevusu - Ahmet Yılmaz"
   description: string    // appointment details
   date: string           // YYYY-MM-DD
   time: string           // HH:MM
