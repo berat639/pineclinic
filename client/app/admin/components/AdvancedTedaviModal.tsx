@@ -193,6 +193,14 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const silenceDebounceRef = useRef<any>(null);
   const recognitionRestartRef = useRef<any>(null);
   const lastProcessedTextRef = useRef<string>('');
+  const processedResultIndexRef = useRef<number>(0);
+  const pendingDentalPrefixRef = useRef<{ text: string; updatedAt: number }>({ text: '', updatedAt: 0 });
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioMonitorIntervalRef = useRef<any>(null);
+  const noiseFloorRmsRef = useRef<number>(0.008);
+  const lastNearFieldSpeechAtRef = useRef<number>(0);
+  const peakUtteranceRmsRef = useRef<number>(0);
 
   // Anatomik Diş Grupları ve Kadranlar
   const QUADRANT_1 = [18, 17, 16, 15, 14, 13, 12, 11];
@@ -626,6 +634,23 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     });
   };
 
+  const cleanupAudioMonitor = () => {
+    if (audioMonitorIntervalRef.current) {
+      clearInterval(audioMonitorIntervalRef.current);
+      audioMonitorIntervalRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch {}
+      audioContextRef.current = null;
+    }
+    if (micStreamRef.current) {
+      try {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+      } catch {}
+      micStreamRef.current = null;
+    }
+  };
+
   const stopListening = () => {
     isListeningRef.current = false;
     isVoiceStartingRef.current = false;
@@ -638,9 +663,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     silenceDebounceRef.current = null;
     if (recognitionRestartRef.current) clearTimeout(recognitionRestartRef.current);
     recognitionRestartRef.current = null;
+    processedResultIndexRef.current = 0;
+    pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch {}
     }
+    cleanupAudioMonitor();
     setTranscript('');
   };
 
@@ -649,9 +677,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     onClose();
   };
 
-  const processAICommand = async (text: string) => {
+  const processAICommand = async (text: string, fromVoice = false) => {
     if (!text || !text.trim() || isAnalyzingRef.current) return;
-    const cleanText = text.trim();
+    const cleanText = normalizeDentalCommandNumbers(text).trim();
+    if (!cleanText) return;
     isAnalyzingRef.current = true;
     setIsAnalyzing(true);
     setTranscript(`⚙️ "${cleanText}" analiz ediliyor...`);
@@ -757,20 +786,25 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         }
 
         if (!executedAny) {
-          toast.error(`"${cleanText}" için işlem veya diş tespit edilemedi.`);
+          if (!fromVoice) {
+            toast.error(`"${cleanText}" için işlem veya diş tespit edilemedi.`);
+          }
         } else if (treatments && treatments.length > 0) {
           stopListening();
           toast.success('Taslak güncellendi, dinleme kapatıldı.');
         }
-      } else {
+      } else if (!fromVoice) {
         toast.error("Komut çözümlenemedi.");
       }
     } catch (err) {
       console.error("processAICommand error:", err);
-      toast.error("Asistan yanıtı alınırken bir hata oluştu.");
+      if (!fromVoice) {
+        toast.error("Asistan yanıtı alınırken bir hata oluştu.");
+      }
     } finally {
       isAnalyzingRef.current = false;
       setIsAnalyzing(false);
+      pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
       if (isListeningRef.current) {
         setTranscript("🎙️ Dinleniyor... Yeni komut söyleyebilirsiniz.");
       } else {
@@ -779,13 +813,91 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     }
   };
 
+  // Türkçe yazıyla söylenen diş numaralarını ("on altı" -> "16"), bitişik FDI sayılarını ("1617 18" -> "16 17 18")
+  // ve ilk hecesi yutulmuş ardışık diş serilerini ("6 17 18" -> "16 17 18") normalize eder.
+  const normalizeDentalCommandNumbers = (rawText: string): string => {
+    if (!rawText) return '';
+    let text = rawText;
+
+    const tensMap: Record<string, number> = {
+      'on': 10,
+      'yirmi': 20,
+      'otuz': 30,
+      'kırk': 40,
+      'kirk': 40,
+    };
+    const onesMap: Record<string, number> = {
+      'bir': 1,
+      'iki': 2,
+      'üç': 3,
+      'uc': 3,
+      'dört': 4,
+      'dort': 4,
+      'beş': 5,
+      'bes': 5,
+      'altı': 6,
+      'alti': 6,
+      'yedi': 7,
+      'sekiz': 8,
+    };
+
+    for (const [tenWord, tenVal] of Object.entries(tensMap)) {
+      for (const [oneWord, oneVal] of Object.entries(onesMap)) {
+        const fdi = String(tenVal + oneVal);
+        const pattern = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${tenWord}\\s*${oneWord}(?=$|[\\s,.;:!?()\\-])`, 'gi');
+        text = text.replace(pattern, fdi);
+      }
+    }
+
+    // Ardışık FDI diş numarasından hemen önce tek başına yazıyla kalmış rakam ("altı 17 18" -> "6 17 18")
+    for (const [oneWord, oneVal] of Object.entries(onesMap)) {
+      const singleBeforeFdi = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${oneWord}(?=\\s+[1-4][1-8](?=$|[\\s,.;:!?()\\-]))`, 'gi');
+      text = text.replace(singleBeforeFdi, String(oneVal));
+    }
+
+    // Bitişik yazılmış FDI diş numaralarını ayır ("1617 18" -> "16 17 18", "161718" -> "16 17 18")
+    text = text.replace(/\b((?:[1-4][1-8]){2,8})\b/g, (match) => {
+      const pairs: string[] = [];
+      for (let i = 0; i < match.length; i += 2) {
+        pairs.push(match.slice(i, i + 2));
+      }
+      return pairs.join(' ');
+    });
+
+    // Başlangıçta onlar basamağı yutulmuş ardışık diş serisini tamamla ("6 17 18" -> "16 17 18")
+    text = text.replace(/\b([1-8])\s+(([1-4])([1-8]))\b/g, (full, firstDigitStr, secondFdi, quadrantStr, secondUnitStr) => {
+      const firstDigit = Number(firstDigitStr);
+      const secondUnit = Number(secondUnitStr);
+      if (Math.abs(firstDigit - secondUnit) === 1) {
+        return `${quadrantStr}${firstDigit} ${secondFdi}`;
+      }
+      return full;
+    });
+
+    // İlk FDI dişten sonra birler basamağı olarak devam eden ardışık seriyi tamamla ("16 7 8" -> "16 17 18")
+    for (let pass = 0; pass < 3; pass++) {
+      text = text.replace(/\b(([1-4])([1-8]))\s+([1-8])\b(?!\s*(?:tl|lira|₺|bin|yüz|kanal|yüzey))/gi, (full, firstFdi, quadrantStr, firstUnitStr, nextDigitStr) => {
+        const firstUnit = Number(firstUnitStr);
+        const nextDigit = Number(nextDigitStr);
+        if (Math.abs(nextDigit - firstUnit) === 1) {
+          return `${firstFdi} ${quadrantStr}${nextDigit}`;
+        }
+        return full;
+      });
+    }
+
+    return text.replace(/\s+/g, ' ').trim();
+  };
+
   // Ses Metnini Temizleme & Normalize Etme (Türkçe kesme işaretleri ' ve noktalama temizliği)
   const normalizeSpeechText = (text: string) => {
     if (!text) return '';
-    return text
-      .toLocaleLowerCase('tr-TR')
-      .replace(/['’`´]/g, '') // Kesme işaretlerini kaldır: asistan'ı -> asistanı
-      .replace(/[-_.,!?:;]/g, ' ') // Noktalamaları boşluğa çevir
+    return normalizeDentalCommandNumbers(
+      text
+        .toLocaleLowerCase('tr-TR')
+        .replace(/['’`´]/g, '') // Kesme işaretlerini kaldır: asistan'ı -> asistanı
+        .replace(/[-_.,!?:;]/g, ' ') // Noktalamaları boşluğa çevir
+    )
       .replace(/\s+/g, ' ')
       .trim();
   };
@@ -816,28 +928,135 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     }
 
     // (asistan / dinleme / mikrofon / ses) + (kapat / durdur / bitir / sonlandır) ikilisi
-    const hasSubject = /\b(asistan|asistanı|asistani|dinleme|dinlemeyi|mikrofon|mikrofonu|ses|sesi)\b/i.test(norm);
-    const hasCloseVerb = /\b(kapat|kapatılsın|durdur|durdurulsun|bitir|bitirilsin|sonlandır)\b/i.test(norm);
+    const hasSubject = /(?:^|\s)(asistan|asistanı|asistani|dinleme|dinlemeyi|mikrofon|mikrofonu|ses|sesi)(?=$|\s)/i.test(norm);
+    const hasCloseVerb = /(?:^|\s)(kapat|kapatılsın|durdur|durdurulsun|bitir|bitirilsin|sonlandır)(?=$|\s)/i.test(norm);
     return Boolean(hasSubject && hasCloseVerb);
   };
 
-  // Eylemler: Ekle, Sil, Düzenle, Güncelle, Değiştir, Kaydet, Onayla vb.
+  // Doğrudan dental komut eylemleri (Günlük sohbette geçen "olsun", "yapalım", "koy", "yaz", "bitir" gibi kelimeler çıkarıldı)
   const ACTION_KEYWORDS = [
-    'ekle', 'eklensin', 'ekleyelim', 'ekler misin', 'yap', 'yapılsın', 'yapalım', 'yaz', 'yazılsın', 'koy', 'koyulsun', 'işle',
-    'sil', 'silinsin', 'silelim', 'kaldır', 'kaldırılsın', 'çıkar', 'çıkart', 'iptal', 'iptal et', 'vazgeç', 'temizle',
-    'düzenle', 'düzenlensin', 'güncelle', 'güncellensin', 'değiştir', 'değiştirilsin', 'çevir', 'olsun',
-    'kaydet', 'kaydedilsin', 'onayla', 'onaylansın', 'bitir', 'tamamla'
+    'ekle', 'eklensin', 'ekleyelim', 'ekler misin', 'uygula', 'uygulansın',
+    'sil', 'silinsin', 'silelim', 'kaldır', 'kaldırılsın', 'çıkar', 'çıkart', 'iptal et', 'seçimi temizle', 'seçimleri temizle', 'seçimleri kaldır',
+    'düzenle', 'düzenlensin', 'güncelle', 'güncellensin', 'değiştir', 'değiştirilsin',
+    'seç', 'seçilsin', 'işaretle',
+    'planı kaydet', 'tedaviyi kaydet', 'işlemleri kaydet', 'planı onayla', 'işlemleri onayla', 'kaydet', 'onayla'
   ];
 
+  // Dental domain sözlüğü: ortam konuşmasını gerçek dental komuttan ayırmak için kullanılır
+  const DENTAL_DOMAIN_TERMS = [
+    'dolgu', 'kompozit', 'amalgam', 'kanal', 'endodonti', 'çekim', 'çek', 'implant', 'zirkonyum',
+    'kuron', 'kron', 'kaplama', 'köprü', 'protez', 'detertraj', 'tartır', 'diş taşı', 'temizlik', 'temizliği',
+    'inley', 'onlay', 'overlay', 'veneer', 'lamina', 'porselen', 'beyazlatma', 'bleaching', 'rezeksiyon',
+    'apeksifikasyon', 'kistektomi', 'alveoloplasti', 'gingival', 'periodontoloji', 'ortodonti', 'flor',
+    'oklüzal', 'mezyal', 'distal', 'bukkal', 'vestibüler', 'lingual', 'palatinal', 'mod', 'kole', 'servikal', 'kök',
+    'çürük', 'kırık', 'lezyon', 'apikal', 'pulpitis', 'abse', 'enfeksiyon', 'eksik diş', 'estetik',
+    'üst çene', 'alt çene', 'tüm ağız', 'tüm dişler', 'bütün dişler', 'maksilla', 'mandibula',
+    'kadran', 'anterior', 'posterior', 'ön dişler', 'arka dişler', 'azı dişleri', 'kesici dişler',
+    'seçimi temizle', 'seçimleri temizle', 'seçimleri kaldır', 'seçimleri sıfırla',
+    'diyabet', 'hipertansiyon', 'astım', 'alerji', 'konsültasyon', 'kardiyoloji',
+    'planı kaydet', 'tedaviyi kaydet', 'işlemleri kaydet', 'planı onayla', 'işlemleri onayla'
+  ];
+
+  // Bir metin parçasında FDI diş numarası (11-48) olup olmadığını kontrol eder
+  const hasFdiToothNumber = (text: string): boolean => {
+    const norm = normalizeSpeechText(text);
+    return /\b[1-4][1-8]\b/.test(norm);
+  };
+
+  // Bir metin parçasında bilinen işlem, endikasyon, yüzey veya çene/bölge terimi olup olmadığını kontrol eder
+  const hasDentalTerm = (text: string): boolean => {
+    const norm = normalizeSpeechText(text);
+    if (!norm) return false;
+    if (DENTAL_DOMAIN_TERMS.some(term => norm.includes(term))) return true;
+    const dynamicProcs = procTemplates.map(p => normalizeSpeechText(p.name)).filter(Boolean);
+    if (dynamicProcs.some(p => norm.includes(p))) return true;
+    const dynamicInds = indTemplates.map(i => normalizeSpeechText(i)).filter(Boolean);
+    if (dynamicInds.some(i => norm.includes(i))) return true;
+    return false;
+  };
+
+  // Segmentin dental bir komut parçası (diş no, işlem, seçim veya kontrol komutu) olup olmadığını belirler
+  const hasDentalDomainSignal = (text: string): boolean => {
+    if (!text) return false;
+    const norm = normalizeSpeechText(text);
+    if (!norm) return false;
+    if (checkCloseTrigger(norm)) return true;
+    if (hasFdiToothNumber(norm) || hasDentalTerm(norm)) return true;
+    if (norm === 'kaydet' || norm === 'onayla') return true;
+    return false;
+  };
+
+  // Cümle başında hasta-hekim sohbeti varsa ("ağzınızı açın bakalım 16 17 18 kompozit dolgu ekle"),
+  // ilk dental çapa kelimesinden ("16", "tüm", "üst", "alt", "sağ", "sol", işlem adı vb.) öncesini kırpar.
+  const extractDentalCommandClause = (text: string): string => {
+    const normalized = normalizeDentalCommandNumbers(text);
+    const words = normalized.split(/\s+/).filter(Boolean);
+    if (words.length <= 3) return normalized;
+
+    const anchorPrefixes = new Set([
+      'tüm', 'tum', 'bütün', 'butun', 'üst', 'ust', 'alt', 'sağ', 'sag', 'sol',
+      'birinci', 'ikinci', 'üçüncü', 'ucuncu', 'dördüncü', 'dorduncu', '1', '2', '3', '4',
+      'ön', 'on', 'arka', 'diş', 'dis', 'seçimi', 'secimi', 'seçimleri', 'secimleri',
+      'planı', 'plani', 'tedaviyi', 'işlemleri', 'islemleri', 'asistan', 'asistanı', 'dinlemeyi', 'mikrofonu'
+    ]);
+
+    for (let i = 0; i < words.length; i++) {
+      const cleanW = words[i].toLocaleLowerCase('tr-TR').replace(/['’`´.,!?:;-]/g, '');
+      // FDI diş numarası (11-48)
+      if (/^[1-4][1-8]$/.test(cleanW)) {
+        // Hemen öncesinde "sağ üst", "diş", "numara" gibi niteleyici varsa onu da koru
+        let startIdx = i;
+        while (startIdx > 0) {
+          const prevW = words[startIdx - 1].toLocaleLowerCase('tr-TR').replace(/['’`´.,!?:;-]/g, '');
+          if (anchorPrefixes.has(prevW) || /^[1-4][1-8]$/.test(prevW) || prevW === 've' || prevW === 'ile') {
+            startIdx--;
+          } else {
+            break;
+          }
+        }
+        return words.slice(startIdx).join(' ');
+      }
+      // Bilinen dental çapa veya terimle başlıyorsa
+      if (anchorPrefixes.has(cleanW) || hasDentalTerm(cleanW)) {
+        return words.slice(i).join(' ');
+      }
+    }
+
+    return normalized;
+  };
+
+  // Yalnızca geçerli bir dental varlık (diş no / işlem / bölge) + açık komut eylemi varsa tetikleyici döndürür.
+  // Böylece sessiz veya gürültülü mekandaki günlük konuşmalar ("şöyle yapalım", "geçmiş olsun" vb.) asla komut olarak eklenmez.
   const checkActionTrigger = (text: string) => {
     if (!text) return null;
     const norm = normalizeSpeechText(text);
+    if (!norm) return null;
+
+    // Tek başına veya açık kalıpla kaydet/onayla/temizle
+    if (
+      /(?:^|\s)(planı kaydet|tedaviyi kaydet|işlemleri kaydet|planı onayla|işlemleri onayla|seçimi temizle|seçimleri temizle|seçimleri kaldır)(?=$|\s)/i.test(norm) ||
+      ((norm === 'kaydet' || norm === 'onayla') && norm.split(' ').length <= 2)
+    ) {
+      return 'kaydet';
+    }
+
+    // Diğer tüm eylemler için metinde en az bir FDI diş numarası VEYA dental terim bulunması zorunludur
+    if (!hasFdiToothNumber(norm) && !hasDentalTerm(norm)) {
+      return null;
+    }
+
     for (const kw of ACTION_KEYWORDS) {
       const regex = new RegExp(`(^|\\s)${kw}($|\\s)`, 'i');
       if (regex.test(norm)) {
         return kw;
       }
     }
+
+    // Diş numarası + bilinen işlem birlikte söylenmişse ve sonunda "yap" / "yaz" dendiyse kabul et
+    if (hasFdiToothNumber(norm) && hasDentalTerm(norm) && /(?:^|\s)(yap|yapılsın|yaz|yazılsın)(?=$|\s)/i.test(norm)) {
+      return 'ekle';
+    }
+
     return null;
   };
 
@@ -888,11 +1107,82 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         return;
       }
 
-      // İzni kullanıcı tıklamasıyla açıkça doğrula; test akışını hemen kapat.
-      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      permissionStream.getTracks().forEach(track => track.stop());
+      // Mikrofonu gürültü/eko engelleme ile aç ve dinleme boyunca sıcak (warm) tut.
+      // (Açıp hemen kapatmak işletim sistemi ses sürücüsünde 300-500ms cold-start kaybına yol açıp ilk "16" sayısını yutuyordu.)
+      cleanupAudioMonitor();
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        }
+      });
+      micStreamRef.current = micStream;
+
+      // Web Audio API ile insan sesi bandında (85Hz - 3400Hz) yakın-alan (near-field) SNR / enerji takibi
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          audioContextRef.current = audioCtx;
+          const source = audioCtx.createMediaStreamSource(micStream);
+
+          const highpass = audioCtx.createBiquadFilter();
+          highpass.type = 'highpass';
+          highpass.frequency.value = 85;
+
+          const lowpass = audioCtx.createBiquadFilter();
+          lowpass.type = 'lowpass';
+          lowpass.frequency.value = 3400;
+
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.3;
+
+          source.connect(highpass);
+          highpass.connect(lowpass);
+          lowpass.connect(analyser);
+
+          const timeData = new Float32Array(analyser.fftSize);
+          noiseFloorRmsRef.current = 0.008;
+          lastNearFieldSpeechAtRef.current = Date.now();
+          peakUtteranceRmsRef.current = 0;
+
+          audioMonitorIntervalRef.current = setInterval(() => {
+            if (!isListeningRef.current) return;
+            analyser.getFloatTimeDomainData(timeData);
+            let sumSq = 0;
+            for (let i = 0; i < timeData.length; i++) {
+              sumSq += timeData[i] * timeData[i];
+            }
+            const rms = Math.sqrt(sumSq / timeData.length);
+            const floor = noiseFloorRmsRef.current;
+
+            // Ortam gürültü tabanını yavaşça adapte et
+            if (rms < floor * 1.5) {
+              noiseFloorRmsRef.current = Math.max(0.002, Math.min(0.06, floor * 0.94 + rms * 0.06));
+            } else {
+              noiseFloorRmsRef.current = Math.max(0.002, Math.min(0.06, floor * 0.992 + rms * 0.008));
+            }
+
+            // Mikrofona yakın konuşma enerjisi (ortam gürültüsünün en az 1.8 katı ve minimum eşik üstü)
+            if (rms > Math.max(0.011, noiseFloorRmsRef.current * 1.8)) {
+              lastNearFieldSpeechAtRef.current = Date.now();
+              if (rms > peakUtteranceRmsRef.current) {
+                peakUtteranceRmsRef.current = rms;
+              }
+            }
+          }, 60);
+        }
+      } catch (audioErr) {
+        console.warn('Web Audio near-field monitor init skipped:', audioErr);
+      }
 
       hasVoiceFatalErrorRef.current = false;
+      processedResultIndexRef.current = 0;
+      pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+
       const recognition = new SpeechRecognition();
       recognition.lang = 'tr-TR';
       recognition.interimResults = true;
@@ -905,58 +1195,140 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         isVoiceStartingRef.current = false;
         setIsVoiceStarting(false);
         setVoiceError(null);
-        setTranscript("🎙️ Dinleniyor... (Örn: '18-17 16 kompozit dolgu ekle', 'asistanı kapat')");
+        processedResultIndexRef.current = 0;
+        setTranscript("🎙️ Dinleniyor... (Örn: '16 17 18 kompozit dolgu ekle', 'asistanı kapat')");
       };
 
       recognition.onresult = (event: any) => {
-        let interimText = '';
-        let finalText = '';
+        const now = Date.now();
+        // Gürültülü ortamda uzaktan gelen çok düşük güvenli (confidence) ve düşük enerjili arka plan seslerini ele
+        const latestRes = event.results[event.results.length - 1];
+        const latestConfidence = latestRes?.[0]?.confidence ?? 1;
+        const hasRecentNearFieldVoice = (now - lastNearFieldSpeechAtRef.current) < 4500;
+        if (latestRes?.isFinal && latestConfidence > 0 && latestConfidence < 0.38 && !hasRecentNearFieldVoice) {
+          processedResultIndexRef.current = event.results.length;
+          return;
+        }
 
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+        // ÖNEMLİ: event.resultIndex'ten değil, son işlenen/temizlenen indeksten (processedResultIndexRef) başla!
+        // Böylece "16" (results[0], isFinal=true) söylendikten sonra "17 18 kompozit dolgu ekle" (results[1], resultIndex=1)
+        // geldiğinde baştaki "16" ASLA kaybolmaz.
+        let startIdx = Math.min(processedResultIndexRef.current, event.results.length);
+        const keptParts: string[] = [];
+        let interimText = '';
+
+        for (let i = startIdx; i < event.results.length; i++) {
           const res = event.results[i];
+          const segText = (res[0]?.transcript || '').trim();
+          if (!segText) continue;
+
+          // Herhangi bir segmentte kapatma komutu varsa anında kapat
+          if (checkCloseTrigger(segText)) {
+            stopListening();
+            toast('🛑 Sesli asistan dinlemeyi kapattı.', { icon: '🎙️' });
+            return;
+          }
+
           if (res.isFinal) {
-            finalText += res[0].transcript + ' ';
+            // Eğer bu tamamlanmış cümle hiçbir diş numarası veya dental terim içermiyorsa (günlük sohbet / ortam konuşması)
+            // ve henüz başlamış bir dental komut önekimiz yoksa, bu sohbeti anında atla.
+            if (keptParts.length === 0 && !pendingDentalPrefixRef.current.text && !hasDentalDomainSignal(segText)) {
+              processedResultIndexRef.current = i + 1;
+              continue;
+            }
+            keptParts.push(segText);
           } else {
-            interimText += res[0].transcript;
+            interimText += segText + ' ';
           }
         }
 
-        const activeText = (finalText + interimText).trim();
-        if (!activeText) return;
+        // Eğer önceki oturumdan (anlık restart öncesi) kalan taze (12 sn içinde) bir diş/komut öneki varsa (örn. "16") birleştir
+        const prefixAlive =
+          pendingDentalPrefixRef.current.text &&
+          now - pendingDentalPrefixRef.current.updatedAt < 12000;
 
-        setTranscript(activeText);
+        const combinedRaw = [
+          prefixAlive ? pendingDentalPrefixRef.current.text : '',
+          ...keptParts,
+          interimText.trim()
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (!combinedRaw) return;
 
         // 1. Kullanıcı "asistanı kapat" / "dinlemeyi kapat" dediyse anında dinlemeyi sonlandır
-        if (checkCloseTrigger(activeText)) {
+        if (checkCloseTrigger(combinedRaw)) {
           stopListening();
           toast('🛑 Sesli asistan dinlemeyi kapattı.', { icon: '🎙️' });
           return;
         }
 
-        if (isAnalyzingRef.current) return;
-        if (activeText === lastProcessedTextRef.current) return;
+        // Halihazırda bir komut AI tarafından işleniyorsa, o komuta ait artçı onresult/isFinal event'lerini tüket ve çık
+        if (isAnalyzingRef.current) {
+          processedResultIndexRef.current = event.results.length;
+          pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+          return;
+        }
+
+        const normalizedCombined = normalizeDentalCommandNumbers(combinedRaw);
+
+        // Eğer şu ana kadar söylenen metinde hiçbir dental sinyal (diş no, işlem, çene, kaydet vb.) yoksa
+        // ortam sohbetini ekrana veya AI'ya taşıma
+        if (!hasDentalDomainSignal(normalizedCombined)) {
+          return;
+        }
+
+        // Başında sohbet kalıntısı varsa sadece dental komut kısmını ayıkla
+        const commandText = extractDentalCommandClause(normalizedCombined);
+        setTranscript(commandText);
+
+        // Eğer yalnızca diş numaraları veya başlangıç parçası söylendiyse (örn. "16" veya "16 17")
+        // olası bir duraksama/restartta kaybolmaması için önekte sakla
+        if (keptParts.length > 0 && !interimText.trim()) {
+          pendingDentalPrefixRef.current = {
+            text: commandText,
+            updatedAt: now
+          };
+          processedResultIndexRef.current = event.results.length;
+        }
+
+        if (commandText === lastProcessedTextRef.current) return;
 
         if (triggerDebounceRef.current) clearTimeout(triggerDebounceRef.current);
         if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
 
-        const matchedKeyword = checkActionTrigger(activeText);
+        const matchedKeyword = checkActionTrigger(commandText);
+        const isLastSegmentFinal = Boolean(latestRes?.isFinal);
 
         if (matchedKeyword) {
-          // Tetikleyici kelime algılandı ("ekle", "sil", "düzenle", "güncelle", "kaydet" vb.)
-          const delay = finalText.trim() ? 100 : 350;
+          // Tetikleyici kelime ("ekle", "sil", "düzenle", "seç", "kaydet" vb.) + dental varlık doğrulandı.
+          // Son segment henüz interim (geçici) ise cümlenin kesilmemesi için 450ms, final ise 140ms bekle.
+          const delay = isLastSegmentFinal ? 140 : 450;
           triggerDebounceRef.current = setTimeout(() => {
-            if (!isAnalyzingRef.current && activeText && activeText !== lastProcessedTextRef.current) {
-              lastProcessedTextRef.current = activeText;
-              processAICommand(activeText);
+            if (!isAnalyzingRef.current && commandText && commandText !== lastProcessedTextRef.current) {
+              lastProcessedTextRef.current = commandText;
+              processedResultIndexRef.current = event.results.length;
+              pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+              processAICommand(commandText, true);
             }
           }, delay);
-          // Tetikleyici kelime henüz söylenmediyse, doğal duraklama (1.3 sn sessizlik) kontrolü
+        } else if (
+          (hasFdiToothNumber(commandText) && hasDentalTerm(commandText)) ||
+          /(?:^|\s)(tüm ağız|tüm dişler|bütün dişler|tüm üst|üst çene|tüm alt|alt çene|birinci kadran|ikinci kadran|üçüncü kadran|dördüncü kadran|sağ üst kadran|sol üst kadran|sol alt kadran|sağ alt kadran|ön dişler|arka dişler)(?=$|\s)/i.test(normalizeSpeechText(commandText))
+        ) {
+          // Kullanıcı sonunda "ekle" demeden "16 17 18 kompozit dolgu" veya "21 zirkonyum kuron" dediyse
+          // 1.35 sn doğal sessizlik sonrasında komutu işle.
           silenceDebounceRef.current = setTimeout(() => {
-            if (!isAnalyzingRef.current && activeText && activeText !== lastProcessedTextRef.current && activeText.length >= 4) {
-              lastProcessedTextRef.current = activeText;
-              processAICommand(activeText);
+            if (!isAnalyzingRef.current && commandText && commandText !== lastProcessedTextRef.current) {
+              lastProcessedTextRef.current = commandText;
+              processedResultIndexRef.current = event.results.length;
+              pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+              processAICommand(commandText, true);
             }
-          }, 1300);
+          }, 1350);
         }
       };
 
@@ -974,6 +1346,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           hasVoiceFatalErrorRef.current = true;
           isListeningRef.current = false;
           setIsListening(false);
+          cleanupAudioMonitor();
           toast.error(message, { duration: 7000 });
         }
       };
@@ -982,8 +1355,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         if (isListeningRef.current && !hasVoiceFatalErrorRef.current) {
           recognitionRestartRef.current = setTimeout(() => {
             if (!isListeningRef.current || hasVoiceFatalErrorRef.current) return;
+            processedResultIndexRef.current = 0;
             try { recognition.start(); } catch (err) { console.warn('Speech recognition restart failed', err); }
-          }, 250);
+          }, 180);
         } else {
           setIsListening(false);
           setTranscript("");
@@ -1002,6 +1376,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       setIsListening(false);
       setIsVoiceStarting(false);
       setVoiceError(message);
+      cleanupAudioMonitor();
       toast.error(message, { duration: 7000 });
     }
   };
@@ -1013,6 +1388,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     if (silenceDebounceRef.current) clearTimeout(silenceDebounceRef.current);
     if (recognitionRestartRef.current) clearTimeout(recognitionRestartRef.current);
     try { recognitionRef.current?.abort(); } catch {}
+    cleanupAudioMonitor();
   }, []);
 
   // The historical command panel is no longer reachable from the UI. These

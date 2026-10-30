@@ -1,11 +1,90 @@
 import { NextResponse } from 'next/server'
 
+// Türkçe yazıyla söylenen diş numaralarını ve bitişik/kırpılmış FDI serilerini normalize eder
+function normalizeDentalSpeechInput(rawText: string): string {
+  if (!rawText) return ''
+  let text = rawText.trim()
+
+  // 1. Türkçe onlar ve birler basamağı kombinasyonlarını rakama çevir ("on altı" -> "16", "yirmi sekiz" -> "28")
+  const tensMap: Record<string, number> = {
+    'on': 10,
+    'yirmi': 20,
+    'otuz': 30,
+    'kırk': 40,
+    'kirk': 40,
+  }
+  const onesMap: Record<string, number> = {
+    'bir': 1,
+    'iki': 2,
+    'üç': 3,
+    'uc': 3,
+    'dört': 4,
+    'dort': 4,
+    'beş': 5,
+    'bes': 5,
+    'altı': 6,
+    'alti': 6,
+    'yedi': 7,
+    'sekiz': 8,
+  }
+
+  // Bitişik veya ayrı yazılmış Türkçe FDI sayıları ("onaltı", "on altı", "yirmibir" vb.)
+  for (const [tenWord, tenVal] of Object.entries(tensMap)) {
+    for (const [oneWord, oneVal] of Object.entries(onesMap)) {
+      const fdi = String(tenVal + oneVal)
+      const pattern = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${tenWord}\\s*${oneWord}(?=$|[\\s,.;:!?()\\-])`, 'gi')
+      text = text.replace(pattern, fdi)
+    }
+  }
+
+  // Tek başına yazıyla kalmış birler basamağı ("altı 17 18" -> "6 17 18")
+  for (const [oneWord, oneVal] of Object.entries(onesMap)) {
+    const singleBeforeFdi = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${oneWord}(?=\\s+[1-4][1-8](?=$|[\\s,.;:!?()\\-]))`, 'gi')
+    text = text.replace(singleBeforeFdi, String(oneVal))
+  }
+
+  // 2. Bitişik yazılmış FDI diş numaralarını ayır ("1617 18" -> "16 17 18", "161718" -> "16 17 18")
+  // FDI diş numaraları yalnızca [1-4][1-8] aralığındadır (içinde 0 veya 9 bulunmaz, bu yüzden 1500 gibi fiyatlarla çakışmaz)
+  text = text.replace(/\b((?:[1-4][1-8]){2,8})\b/g, (match) => {
+    const pairs: string[] = []
+    for (let i = 0; i < match.length; i += 2) {
+      pairs.push(match.slice(i, i + 2))
+    }
+    return pairs.join(' ')
+  })
+
+  // 3. Başlangıçta onlar basamağı yutulmuş ardışık diş serisini tamamla ("6 17 18" -> "16 17 18", "5 26 27" -> "25 26 27")
+  text = text.replace(/\b([1-8])\s+(([1-4])([1-8]))\b/g, (full, firstDigitStr, secondFdi, quadrantStr, secondUnitStr) => {
+    const firstDigit = Number(firstDigitStr)
+    const secondUnit = Number(secondUnitStr)
+    if (Math.abs(firstDigit - secondUnit) === 1) {
+      return `${quadrantStr}${firstDigit} ${secondFdi}`
+    }
+    return full
+  })
+
+  // 4. İlk FDI diş numarasından sonra sadece birler basamağı söylenmiş ardışık serileri tamamla ("16 7 8" -> "16 17 18")
+  for (let pass = 0; pass < 3; pass++) {
+    text = text.replace(/\b(([1-4])([1-8]))\s+([1-8])\b(?!\s*(?:tl|lira|₺|bin|yüz|kanal|yüzey))/gi, (full, firstFdi, quadrantStr, firstUnitStr, nextDigitStr) => {
+      const firstUnit = Number(firstUnitStr)
+      const nextDigit = Number(nextDigitStr)
+      if (Math.abs(nextDigit - firstUnit) === 1) {
+        return `${firstFdi} ${quadrantStr}${nextDigit}`
+      }
+      return full
+    })
+  }
+
+  return text
+}
+
 export async function POST(req: Request) {
   try {
-    const { text, procNames = [], indNames = [], diseaseNames = [], consultationNames = [] } = await req.json()
-    if (!text) {
+    const { text: rawText, procNames = [], indNames = [], diseaseNames = [], consultationNames = [] } = await req.json()
+    if (!rawText) {
       return NextResponse.json({ error: 'Text is required' }, { status: 400 })
     }
+    const text = normalizeDentalSpeechInput(String(rawText))
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
@@ -68,13 +147,20 @@ Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesn
    - "düzenle", "düzenlensin", "değiştir", "değiştirilsin", "yerine ... yap", "güncelle", "olarak ayarla", "çevir" -> "intent": "UPDATE"
    - "onayla", "kaydet", "işlemleri kaydet", "bitir", "tamamla" -> "globalIntent": "CONFIRM"
 
-5. DİŞ NUMARALARI (FDI Standart):
-   - "18", "18-17 16", "18 17 16", "18, 17 ve 16", "on sekiz", "alt 36", "sağ üst 16", "11 den 15 e kadar" gibi ifadeleri her zaman string dizi olarak ["18", "17", "16"] şeklinde çıkar.
+5. DİŞ NUMARALARI (FDI Standart - HİÇBİR DİŞİ ATLAMA):
+   - "16 17 18", "18-17 16", "18 17 16", "18, 17 ve 16", "on altı on yedi on sekiz", "alt 36", "sağ üst 16", "11 den 15 e kadar" gibi ifadelerde söylenen TÜM diş numaralarını eksiksiz olarak string dizi şeklinde (örn: ["16", "17", "18"]) çıkar. Cümlenin en başındaki ilk diş numarasını (örn: "16") ASLA atlama.
+   - Ses tanıma (STT) bazen çoklu diş sıralamalarında ilk dişin onlar basamağını yutabilir (örn: "16 17 18" yerine "6 17 18" veya "altı 17 18") ya da sonraki dişlerin onlar basamağını yutabilir (örn: "16 7 8"). Tek basamaklı bir rakam (1-8) hemen yanındaki FDI diş numarasıyla (örn: 17, 18) ardışık bir seri oluşturuyorsa, onu aynı kadrandaki FDI diş numarası ("16", "17", "18") olarak tamamla.
    - Eğer aralık belirtildiyse (örn: "11-14 arası") aralıktaki tüm dişleri tek tek ["11", "12", "13", "14"] şeklinde ekle.
    - Çene belirtildiyse (örn: "tüm üst çene dolgu"):
      * Üst çene: ["11","12","13","14","15","16","17","18","21","22","23","24","25","26","27","28"]
      * Alt çene: ["31","32","33","34","35","36","37","38","41","42","43","44","45","46","47","48"]
-   - Diş numarası belirtilmediyse "toothNumbers": ["general"] yap.
+   - Yalnızca genel ağız içi bir işlem açıkça söylendiyse (örn: "detertraj ekle", "diş taşı temizliği ekle") ve diş numarası belirtilmediyse "toothNumbers": ["general"] yap.
+
+6. ORTAM KONUŞMASI VE GÜRÜLTÜ FİLTRELEME (ÇOK ÖNEMLİ):
+   - Mikrofon açıkken ortamda hasta-hekim sohbeti, nezaket ifadeleri veya arka plan konuşmaları ("ağzınızı açın", "geçmiş olsun", "ağrınız ne zamandır var", "şöyle yapalım", "bir bakalım", "tamam birazdan bitiriyoruz" vb.) duyulabilir.
+   - Eğer metin yalnızca günlük sohbet veya alakasız ortam konuşması içeriyorsa ve açık bir dental tedavi, diş seçimi, hastalık veya konsültasyon komutu İÇERMİYORSA: kesinlikle işlem uydurma, "globalIntent": "NONE", "selectIntent": "NONE", "targetTeeth": [], "treatments": [], "diseases": [], "consultations": [] döndür.
+   - Eğer metnin başında veya ortasında ortam sohbeti var ama devamında gerçek bir dental komut verildiyse (örn: "ağzınızı açın bakalım 16 17 18 kompozit dolgu ekle"), sohbet kısmını tamamen yoksay ve SADECE kullanıcının verdiği dental komutu ("16 17 18 kompozit dolgu ekle") ayrıştır.
+   - "bitir", "tamamla", "olsun", "yapalım" gibi kelimeler günlük sohbette geçtiğinde ASLA "globalIntent": "CONFIRM" döndürme; "CONFIRM" yalnızca açıkça "tedaviyi kaydet", "planı kaydet", "işlemleri kaydet", "planı onayla" gibi doğrudan kayıt/onay komutu verildiğinde kullanılmalıdır.
 
 Sık Kullanılan İşlemler: ${activeProcs.map((p: string) => `"${p}"`).join(', ')}
 Sık Kullanılan Endikasyonlar: ${activeInds.map((i: string) => `"${i}"`).join(', ')}
@@ -111,20 +197,23 @@ Format:
   ]
 }
 
-Örnek 1: "36 MOD kompozit dolgu ekle"
+Örnek 1: "16 17 18 kompozit dolgu ekle"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["16","17","18"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["16","17","18"],"surfaces":[],"section":null,"intent":"ADD"}]}
+
+Örnek 2: "36 MOD kompozit dolgu ekle"
 {"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["36"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"surfaces":["M","O","D"],"section":"crown","intent":"ADD"}]}
 
-Örnek 2: "tüm üst çeneyi seç"
+Örnek 3: "tüm üst çeneyi seç"
 {"globalIntent":"NONE","selectIntent":"SELECT_MAXILLA","targetTeeth":[],"treatments":[]}
 
-Örnek 3: "21 kuron zirkonyum kaplama"
+Örnek 4: "21 kuron zirkonyum kaplama"
 {"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["21"],"treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["21"],"section":"crown","surfaces":[],"intent":"ADD"}]}
 
-Örnek 4: "seçimleri temizle"
+Örnek 5: "seçimleri temizle"
 {"globalIntent":"NONE","selectIntent":"CLEAR_SELECTION","targetTeeth":[],"treatments":[]}
 
-Örnek 5: "16 ve 26"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["16","26"],"treatments":[]}`
+Örnek 6: "ağzınızı biraz açın geçmiş olsun şöyle yapalım"
+{"globalIntent":"NONE","selectIntent":"NONE","targetTeeth":[],"treatments":[],"diseases":[],"consultations":[]}`
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
     let data: any
