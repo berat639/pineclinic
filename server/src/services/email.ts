@@ -27,25 +27,21 @@ export async function sendEmail({ clinicId, to, subject, text, html }: SendEmail
   const port = settings.port
 
   // Güvenlik (Secure) durumunu belirle
-  let secure = false
-  if (settings.secure === 'ssl') {
-    secure = true
-  } else if (settings.secure === 'tls') {
-    secure = false // STARTTLS için false olmalıdır, nodemailer port 587'de otomatik dener.
-  } else {
-    // Eğer smtpSecure ayarlanmamışsa port 465 ise otomatik SSL, değilse STARTTLS varsayılır
-    secure = port === 465
-  }
+  const secure = port === 465 || settings.secure === 'ssl'
 
   // Transport nesnesini oluştur
   const transporter = nodemailer.createTransport({
     host: settings.host,
     port: port,
     secure: secure,
+    requireTLS: !secure,
     auth: {
       user: settings.username,
       pass: settings.password,
-    }
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
   })
 
   // E-postayı gönder

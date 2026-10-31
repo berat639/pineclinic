@@ -8,7 +8,8 @@ import { audit, clinicExists, decrypt, ensureIntegrations, getRow } from './stor
 import { reconcileAsterisk, registered } from './asterisk'
 
 export function smtpTransport(c: Config) {
-  return nodemailer.createTransport({ host:c.host,port:c.port,secure:c.secure==='ssl',requireTLS:c.secure==='tls',auth:{user:c.username,pass:c.password},connectionTimeout:10000,greetingTimeout:10000,socketTimeout:15000,tls:{rejectUnauthorized:true} })
+  const isSsl = c.port === 465 || c.secure === 'ssl'
+  return nodemailer.createTransport({ host:c.host,port:c.port,secure:isSsl,requireTLS:!isSsl,auth:{user:c.username,pass:c.password},connectionTimeout:10000,greetingTimeout:10000,socketTimeout:15000,tls:{rejectUnauthorized:false} })
 }
 export async function testInfo(id: string, service: Service, testId: string) {
   await ensureIntegrations(); await clinicExists(id)
@@ -30,8 +31,8 @@ export async function beginTest(id: string, service: Service, body: Record<strin
     if (existing) return { id: String(existing.id), duplicate:true }
     const [row] = await tx.execute(sql`SELECT * FROM managed_integrations WHERE clinic_id=${id} AND service=${service} FOR UPDATE`)
     if (!row || row.revision !== Number(body.revision)) throw new SetupError('Önce güncel ayarları kaydedin',409)
-    const [recent] = await tx.execute(sql`SELECT id FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND created_at>now()-interval '30 seconds' LIMIT 1`)
-    if (recent) throw new SetupError('Yeni test için 30 saniye bekleyin',429)
+    const [recent] = await tx.execute(sql`SELECT id FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND status NOT IN ('failed','cancelled') AND created_at>now()-interval '15 seconds' LIMIT 1`)
+    if (recent) throw new SetupError('Yeni test için 15 saniye bekleyin',429)
     const config = decrypt(row.draft as Config)
     if (service === 'phone' && row.enabled && row.active) {
       const active = decrypt(row.active as Config)
