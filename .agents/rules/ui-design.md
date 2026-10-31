@@ -20,6 +20,7 @@ trigger: always_on
   - Secondary Text / Labels: Crisp `var(--foreground-2, #94a3b8)` in dark; `#334155` / `#475569` in light.
   - Never place low-contrast dark blue text on dark backgrounds or light white text on light backgrounds.
 - **Buttons & Badges**:
+  - **STRICT RULE — NEVER BLACK TEXT INSIDE BLUE BUTTONS**: Nowhere in the application (in either Light or Dark mode) may a blue button (`#0284c7`, `#2563eb`, `#3b82f6`, `#075cff`, `#1d4ed8`, `.primary`, `.btn-primary`, `.btn-clinic-primary`, etc.) ever have black or dark text (`#000000`, `#060d1a`, `#0f172a`, `var(--foreground)`). Every blue button and all of its inner elements (`span`, `svg`, etc.) MUST ALWAYS have pure white (`#ffffff`) text and icons. Global light-theme text overrides must never crush white text inside blue buttons.
   - Primary: Solid `#2563eb` / `#0284c7` with clean `#ffffff` text.
   - Secondary / Outline (Light mode): Crisp white or soft sky blue (`#ffffff` / `#eff6ff`), medical blue border (`#93c5fd` / `#3b82f6`), deep medical blue text (`#0284c7` / `#1d4ed8`). NEVER black / dark boxes.
   - Secondary / Outline (Dark mode): Deep clinical blue (`#132238`), border (`#1e40af`), bright medical blue text (`#60a5fa`).

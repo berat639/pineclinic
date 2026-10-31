@@ -28,7 +28,8 @@
 .button:not(:disabled):active { transform:translateY(1px); box-shadow:var(--pc-neo-inset); }
 .button:disabled { cursor:not-allowed; background:var(--input-bg); color:var(--pc-muted); border-color:var(--pc-border); box-shadow:none; }
 .button:focus-visible, .button:focus-within, .input:focus-visible, .select:focus-visible, .textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.primary { background:var(--pc-blue); color:var(--pc-blue-fg); border-color:var(--pc-blue); box-shadow:var(--pc-clay-primary); }
+.primary { background:var(--pc-blue, #0284c7); color:#ffffff !important; border-color:var(--pc-blue, #0284c7); box-shadow:var(--pc-clay-primary); }
+.primary * { color:#ffffff !important; }
 .pale { background:var(--pc-tint); color:var(--pc-tint-fg); box-shadow:var(--pc-clay-pale); }
 .small { min-height:30px; padding:6px 10px; font-size:12px; }
 .mediaGrid { display:grid; grid-template-columns:1.06fr .98fr 1fr; gap:8px; }
@@ -141,7 +142,9 @@
 .totalcard strong { position:relative; z-index:1; color:var(--pc-total-value,var(--pc-blue)); font-size:31px; font-weight:800; letter-spacing:-1.1px; line-height:1.08; }
 .actions { display:flex; justify-content:flex-end; gap:9px; margin-top:11px; }
 .actions .button { min-width:125px; }
-.dialogOverlay { position:fixed; inset:0; z-index:100002; display:grid; place-items:center; background:var(--modal-overlay); }
+.dialogOverlay { --pc-surface:var(--background-2); --pc-border:var(--input-border, #334155); --pc-muted:var(--foreground-2); --pc-tint:var(--btn-clinic-blue-bg, #e0f2fe); --pc-blue:var(--btn-clinic-primary-bg, #0284c7); --pc-blue-fg:#ffffff; --pc-tint-fg:var(--btn-clinic-blue-fg, #0284c7); position:fixed; inset:0; z-index:100002; display:grid; place-items:center; background:var(--modal-overlay); }
+:global([data-theme="light"]) .dialogOverlay { --pc-surface:#f4f8fe; --pc-border:#d8e5f6; --pc-muted:#526e98; --pc-tint:#edf5ff; --pc-blue:#075cff; --pc-blue-fg:#ffffff; --pc-tint-fg:#0759da; }
+:global([data-theme="dark"]) .dialogOverlay { --pc-surface:#0f172a; --pc-border:#334155; --pc-muted:#cbd5e1; --pc-tint:#132b4b; --pc-blue:#2563eb; --pc-blue-fg:#ffffff; --pc-tint-fg:#93c5fd; }
 .dialog { width:min(92%,560px); max-width:560px; max-height:calc(100dvh - 40px); overflow:auto; padding:20px; border:1px solid var(--pc-border); border-radius:10px; background:var(--card-bg); color:var(--foreground); }
 .dialog h3 { margin-top:0; }
 .dialog label { display:block; margin:10px 0 4px; }
@@ -151,10 +154,14 @@
 @media(max-width:950px) { .consent { order:9; flex-basis:100%; } .headerRight { margin-left:0; } .sectionHeading { flex-wrap:wrap; } }
 @media(max-width:750px) { .modal { width:100%; border-radius:12px; } .header h1 { font-size:17px; } .mediaGrid, .workgrid, .summary { grid-template-columns:1fr; } .chartHelp { flex-wrap:wrap; } .chartActions { flex-wrap:wrap; } }
 @media(max-width:520px) {  .headerRight { flex-wrap:wrap; } .actions .button { min-width:0; } }
-/* Counter the application-wide light-theme text overrides inside this modal. */
+/* Counter the application-wide light-theme text overrides inside this modal and standalone panels. */
+:global([data-theme="light"] .admin-content) button.primary:not(:disabled),
+:global([data-theme="light"] .admin-content) button.primary:not(:disabled) *,
 :global([data-theme="light"] .admin-content) .modal button.primary,
 :global([data-theme="light"] .admin-content) .modal button.primary *,
-:global([data-theme="light"] .admin-content) .modal .step { color:var(--pc-blue-fg) !important; }
+:global([data-theme="light"] .admin-content) .modal .step { color:#ffffff !important; }
+:global([data-theme="light"] .admin-content) button.primary:disabled,
+:global([data-theme="light"] .admin-content) button.primary:disabled *,
 :global([data-theme="light"] .admin-content) .modal button.primary:disabled,
 :global([data-theme="light"] .admin-content) .modal button.primary:disabled * { color:var(--pc-muted) !important; }
 :global([data-theme="light"] .admin-content) .modal .avatar { color:var(--pc-tint-fg) !important; }

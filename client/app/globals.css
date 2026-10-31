@@ -716,27 +716,47 @@ body {
 }
 
 /* Exempt buttons and badges so white text is never crushed by #060d1a */
-[data-theme="light"] .admin-content button,
 [data-theme="light"] .admin-content button *,
-[data-theme="light"] .admin-content .btn,
 [data-theme="light"] .admin-content .btn *,
-[data-theme="light"] .admin-content .btn-primary,
-[data-theme="light"] .admin-content .btn-primary *,
-[data-theme="light"] .admin-content .btn-clinic-primary,
-[data-theme="light"] .admin-content .btn-clinic-primary *,
-[data-theme="light"] .admin-content .btn-clinic-blue,
 [data-theme="light"] .admin-content .btn-clinic-blue *,
-[data-theme="light"] .admin-content .btn-clinic-mint,
 [data-theme="light"] .admin-content .btn-clinic-mint *,
-[data-theme="light"] .admin-content .badge-clinic,
 [data-theme="light"] .admin-content .badge-clinic * {
-  color: inherit;
+  color: inherit !important;
 }
 
-[data-theme="light"] .admin-content .btn-primary,
-[data-theme="light"] .admin-content .btn-primary *,
-[data-theme="light"] .admin-content .btn-clinic-primary,
-[data-theme="light"] .admin-content .btn-clinic-primary * {
+/* Blue / Primary buttons must ALWAYS have pure white (#ffffff) text in both themes */
+.btn-primary:not(:disabled),
+.btn-primary:not(:disabled) *,
+.btn-clinic-primary:not(:disabled),
+.btn-clinic-primary:not(:disabled) *,
+button[class*="primary"]:not(:disabled),
+button[class*="primary"]:not(:disabled) *,
+[data-theme="light"] .admin-content .btn-primary:not(:disabled),
+[data-theme="light"] .admin-content .btn-primary:not(:disabled) *,
+[data-theme="light"] .admin-content .btn-clinic-primary:not(:disabled),
+[data-theme="light"] .admin-content .btn-clinic-primary:not(:disabled) *,
+[data-theme="light"] .admin-content button[class*="primary"]:not(:disabled),
+[data-theme="light"] .admin-content button[class*="primary"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="#2563eb"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="#2563eb"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="rgb(37, 99, 235)"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="rgb(37, 99, 235)"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="#0284c7"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="#0284c7"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="rgb(2, 132, 199)"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="rgb(2, 132, 199)"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="#075cff"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="#075cff"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="rgb(7, 92, 255)"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="rgb(7, 92, 255)"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="#1d4ed8"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="#1d4ed8"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="rgb(29, 78, 216)"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="rgb(29, 78, 216)"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="var(--btn-clinic-primary-bg"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="var(--btn-clinic-primary-bg"]:not(:disabled) *,
+[data-theme="light"] .admin-content button[style*="var(--brand"]:not(:disabled),
+[data-theme="light"] .admin-content button[style*="var(--brand"]:not(:disabled) * {
   color: #ffffff !important;
 }
 

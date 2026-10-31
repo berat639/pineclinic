@@ -14,9 +14,10 @@
    - Açık temada siyah/koyu arka planlı yamaların kalması veya açık temada beyaz/açık yazıların okunaksızlaşması kesinlikle kabul edilemez.
 4. **Klinik & Sağlık Renk Mimarisi ve Buton Standartları (Medical Clean Design)**:
    - **Klinik / Sağlık Kimliği:** Bu bir medikal ve klinik yönetim sistemidir. Renk dili her zaman sağlık, ferahlık, güven, hijyen ve profesyonellik hissettirmelidir. Ana renk paleti **Sağlık Mavisi (Medikal Mavi), Açık Mavi, Buz Mavisi, Nane Yeşili ve Opak Beyaz**'dır.
-   - **Açık (Light) Mod Buton Kuralları (KESİNLİKLE SİYAH/KOYU BUTON KULLANILMAZ):**
+   - **Açık (Light) Mod Buton Kuralları (KESİNLİKLE SİYAH/KOYU BUTON VEYA MAVİ BUTON İÇİNDE SİYAH YAZI KULLANILMAZ):**
      - Light modda butonların siyah, antrasit, koyu gri veya koyu lacivert kutu zeminli olması KESİNLİKLE YASAKTIR. Açık ekranda siyah kutulu buton yer alamaz.
-     - Birincil Butonlar (Primary): Canlı medikal mavi (`#0284c7`, `#2563eb`), beyaz yazı (`#ffffff`).
+     - **Mavi Buton İçinde Siyah/Koyu Yazı Kesinlikle Yasaktır:** Hiçbir yerde (Light veya Dark mod fark etmeksizin) mavi zeminli bir butonun (`#0284c7`, `#2563eb`, `#3b82f6`, `#075cff`, `#1d4ed8`, `.primary`, `.btn-primary`, `.btn-clinic-primary` vb.) içinde siyah veya koyu renkli yazı/ikon (`#000000`, `#060d1a`, `#0f172a`, `var(--foreground)`) KESİNLİKLE OLAMAZ. Mavi butonların metin ve ikon rengi her koşulda saf beyaz (`#ffffff`) olmak zorundadır; global tema kuralları mavi butonların veya içindeki `span`/`svg` elemanlarının beyaz rengini asla ezemez.
+     - Birincil Butonlar (Primary): Canlı medikal mavi (`#0284c7`, `#2563eb`), saf beyaz yazı (`#ffffff`).
      - İkincil / İşlem Butonları (Secondary/Outline): Temiz beyaz veya çok açık buz mavisi zemin (`#ffffff` / `#eff6ff`), medikal mavi sınır (`#93c5fd` / `#3b82f6`), medikal mavi metin (`#0284c7` / `#1d4ed8`).
      - Pozitif / Eylem Butonları (Excel, İçe Aktar vb.): Ferah nane zemin (`#f0fdf4`), nane yeşili sınır (`#86efac`), sağlık yeşili metin (`#15803d`).
      - Rozetler ve Sayaçlar (Badges/Pills): Açık gök mavisi zemin (`#e0f2fe`), medikal mavi sınır (`#bae6fd`), koyu medikal mavi metin (`#0369a1`).
