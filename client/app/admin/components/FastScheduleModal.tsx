@@ -5,6 +5,7 @@ import { tr } from 'date-fns/locale';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon, Clock, X, User, Check } from 'lucide-react';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
+import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect';
 
 interface FastScheduleModalProps {
   treatment: any;
@@ -34,17 +35,22 @@ export default function FastScheduleModal({
   onSuccess
 }: FastScheduleModalProps) {
   const backdropDismiss = useBackdropDismiss(onClose);
+  const batchList: any[] = Array.isArray(treatment?.batchTreatments) && treatment.batchTreatments.length > 0
+    ? treatment.batchTreatments
+    : (treatment ? [treatment] : []);
+  const primaryTreatment = batchList[0] || treatment;
+
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
-    const sessionTime = treatment?.sessions?.[0]?.startTime;
+    const sessionTime = primaryTreatment?.sessions?.[0]?.startTime;
     if (sessionTime) return new Date(sessionTime);
-    if (treatment?.plannedDate) return new Date(treatment.plannedDate);
+    if (primaryTreatment?.plannedDate) return new Date(primaryTreatment.plannedDate);
     if (selectedEvent?.startTime) return new Date(selectedEvent.startTime);
     const d = new Date();
     d.setDate(d.getDate() + 1);
     return d;
   });
   const [selectedTime, setSelectedTime] = useState<string>(() => {
-    const sessionTime = treatment?.sessions?.[0]?.startTime;
+    const sessionTime = primaryTreatment?.sessions?.[0]?.startTime;
     if (sessionTime) {
       return new Date(sessionTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
     }
@@ -53,26 +59,31 @@ export default function FastScheduleModal({
     }
     return '10:00';
   });
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(
-    treatment?.doctorId || selectedEvent?.doctorId || ''
-  );
+  const [selectedDoctorIds, setSelectedDoctorIds] = useState<string[]>(() => {
+    if (Array.isArray(primaryTreatment?.doctorIds) && primaryTreatment.doctorIds.length > 0) {
+      return primaryTreatment.doctorIds;
+    }
+    const fallbackDoc = primaryTreatment?.doctorId || selectedEvent?.doctorId;
+    return fallbackDoc ? [fallbackDoc] : [];
+  });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const formattedDateStr = format(selectedDate, 'yyyy-MM-dd');
   const displayDateStr = format(selectedDate, 'd MMMM yyyy, EEEE', { locale: tr });
+  const primaryDoctorId = selectedDoctorIds[0] || '';
 
   const handleSave = async () => {
-    if (!treatment || !selectedEvent) return;
+    if (batchList.length === 0 || !selectedEvent) return;
     setIsSubmitting(true);
     try {
       const startDt = new Date(`${formattedDateStr}T${selectedTime}:00+03:00`);
       const endDt = new Date(startDt.getTime() + 30 * 60000);
-      const titleStr = `${patientInfo?.name || 'Hasta'} - ${treatment.procedureName}`;
+      const titleStr = `${patientInfo?.name || 'Hasta'} - ${primaryTreatment.procedureName}`;
 
-      // Vardiya Kontrolü: Seçilen hekimin o gün ve saatte vardiyası var mı?
-      if (selectedDoctorId) {
-        const targetDocShifts = (shifts || []).filter((s: any) => s.userId === selectedDoctorId && s.date === formattedDateStr);
-        const docObj = doctors.find((d: any) => d.id === selectedDoctorId);
+      // Vardiya Kontrolü: Seçilen hekimlerin o gün ve saatte vardiyası var mı?
+      for (const docId of selectedDoctorIds) {
+        const targetDocShifts = (shifts || []).filter((s: any) => s.userId === docId && s.date === formattedDateStr);
+        const docObj = doctors.find((d: any) => d.id === docId);
         const docName = docObj?.name || 'Seçilen hekim';
 
         if (targetDocShifts.length === 0) {
@@ -114,12 +125,12 @@ export default function FastScheduleModal({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             patientId: selectedEvent.patientId,
-            doctorId: selectedDoctorId || null,
+            doctorId: primaryDoctorId || null,
             title: titleStr,
             startTime: startDt.toISOString(),
             endTime: endDt.toISOString(),
             type: 'Tedavi',
-            status: selectedDoctorId ? 'scheduled' : 'pending_assignment'
+            status: primaryDoctorId ? 'scheduled' : 'pending_assignment'
           })
         });
 
@@ -127,31 +138,32 @@ export default function FastScheduleModal({
         targetAppt = await apptRes.json();
       }
 
-      // 2. Eski randevu seanslarından çıkar (farklı bir randevuya taşınıyorsa)
-      if (treatment.sessions && Array.isArray(treatment.sessions)) {
-        for (const oldS of treatment.sessions) {
-          if (oldS.appointmentId && oldS.appointmentId !== targetAppt.id) {
-            await fetch(`/api/dental/appointments/${oldS.appointmentId}/treatments/${treatment.id}`, { method: 'DELETE' }).catch(() => {});
+      // 2. Gruptaki tüm işlemleri eski randevulardan çıkarıp yeni randevuya bağla ve güncelle
+      for (const item of batchList) {
+        if (item.sessions && Array.isArray(item.sessions)) {
+          for (const oldS of item.sessions) {
+            if (oldS.appointmentId && oldS.appointmentId !== targetAppt.id) {
+              await fetch(`/api/dental/appointments/${oldS.appointmentId}/treatments/${item.id}`, { method: 'DELETE' }).catch(() => {});
+            }
           }
         }
+
+        await fetch(`/api/dental/appointments/${targetAppt.id}/treatments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ treatmentPlanId: item.id, sessionNumber: 1 })
+        });
+
+        await fetch(`/api/dental/treatments/${item.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            doctorId: primaryDoctorId || null,
+            doctorIds: selectedDoctorIds,
+            plannedDate: startDt.toISOString()
+          })
+        });
       }
-
-      // 3. Tedaviyi hedef randevuya bağla
-      await fetch(`/api/dental/appointments/${targetAppt.id}/treatments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ treatmentPlanId: treatment.id, sessionNumber: 1 })
-      });
-
-      // 4. Tedaviyi güncelle (plan tarihi & doktor)
-      await fetch(`/api/dental/treatments/${treatment.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          doctorId: selectedDoctorId || undefined,
-          plannedDate: startDt.toISOString()
-        })
-      });
 
       import('react-hot-toast').then(mod =>
         mod.toast.success(`Randevu ${format(startDt, 'd MMMM HH:mm', { locale: tr })} tarihine planlandı!`)
@@ -165,12 +177,17 @@ export default function FastScheduleModal({
     }
   };
 
+  const teethSummary = batchList
+    .map(item => item.toothNumber ? `#${item.toothNumber}` : '')
+    .filter(Boolean)
+    .join(', ');
+
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.65)',
+        background: 'var(--modal-overlay, rgba(15, 23, 42, 0.65))',
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',
@@ -181,12 +198,12 @@ export default function FastScheduleModal({
     >
       <div
         style={{
-          background: 'var(--card-bg, #181c24)',
+          background: 'var(--card-bg, #ffffff)',
           width: '100%',
           maxWidth: '440px',
-          borderRadius: '18px',
-          border: '1px solid var(--input-border, #334155)',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.7)',
+          borderRadius: '14px',
+          border: '1px solid var(--input-border, #cbd5e1)',
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -197,12 +214,12 @@ export default function FastScheduleModal({
         {/* Header */}
         <div
           style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid var(--divider, rgba(255,255,255,0.08))',
+            padding: '14px 18px',
+            borderBottom: '1px solid var(--input-border, #cbd5e1)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: 'rgba(255,255,255,0.02)'
+            background: 'var(--card-inner, #f1f5f9)'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -211,8 +228,9 @@ export default function FastScheduleModal({
                 width: 34,
                 height: 34,
                 borderRadius: 8,
-                background: 'rgba(59, 130, 246, 0.15)',
-                color: '#3b82f6',
+                background: 'var(--badge-clinic-bg, #e0f2fe)',
+                border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                color: 'var(--badge-clinic-text, #0369a1)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
@@ -221,23 +239,23 @@ export default function FastScheduleModal({
               <CalendarIcon size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--foreground)' }}>
-                İleri Tarihe Randevu Ver
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--foreground)' }}>
+                {batchList.length > 1 ? `Toplu Randevu Planla (${batchList.length} İşlem)` : 'Randevu Tarihi Belirle'}
               </h3>
-              <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>
-                {treatment.toothNumber ? `#${treatment.toothNumber} ` : ''}{treatment.procedureName}
+              <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)', fontWeight: 600 }}>
+                {teethSummary ? `${teethSummary} · ` : ''}{primaryTreatment?.procedureName}
               </div>
             </div>
           </div>
           <button
             onClick={onClose}
             style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: 'none',
+              background: 'var(--input-bg, #ffffff)',
+              border: '1px solid var(--input-border, #cbd5e1)',
               borderRadius: '50%',
               width: 30,
               height: 30,
-              color: 'var(--foreground-3)',
+              color: 'var(--foreground-2)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -251,10 +269,10 @@ export default function FastScheduleModal({
         {/* Body */}
         <div
           style={{
-            padding: '18px 20px',
+            padding: '16px 18px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 16,
+            gap: 14,
             maxHeight: 'calc(85vh - 120px)',
             overflowY: 'auto'
           }}
@@ -263,19 +281,19 @@ export default function FastScheduleModal({
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <CalendarIcon size={13} style={{ color: 'var(--brand)' }} />
+                <CalendarIcon size={13} style={{ color: 'var(--accent, #0284c7)' }} />
                 <span>Tarih</span>
               </label>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--brand)' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent, #0284c7)' }}>
                 {displayDateStr}
               </span>
             </div>
 
             <div
               style={{
-                background: 'rgba(255, 255, 255, 0.02)',
-                border: '1px solid var(--glass-border, rgba(255,255,255,0.08))',
-                borderRadius: 12,
+                background: 'var(--input-bg, #ffffff)',
+                border: '1px solid var(--input-border, #cbd5e1)',
+                borderRadius: 10,
                 padding: '8px 4px',
                 display: 'flex',
                 justifyContent: 'center'
@@ -284,8 +302,8 @@ export default function FastScheduleModal({
               <style>{`
                 .simple-picker .rdp {
                   --rdp-cell-size: 36px;
-                  --rdp-accent-color: #3b82f6;
-                  --rdp-background-color: rgba(59, 130, 246, 0.15);
+                  --rdp-accent-color: #0284c7;
+                  --rdp-background-color: #e0f2fe;
                   margin: 0;
                 }
                 .simple-picker .rdp-caption_label {
@@ -306,13 +324,13 @@ export default function FastScheduleModal({
                   color: var(--foreground);
                 }
                 .simple-picker .rdp-day_selected {
-                  background-color: #3b82f6 !important;
+                  background-color: #0284c7 !important;
                   color: white !important;
                   font-weight: 700;
                 }
                 .simple-picker .rdp-day_today:not(.rdp-day_selected) {
-                  border: 1px solid #3b82f6;
-                  color: #60a5fa;
+                  border: 1px solid #0284c7;
+                  color: var(--accent, #0284c7);
                 }
               `}</style>
               <div className="simple-picker">
@@ -328,11 +346,11 @@ export default function FastScheduleModal({
             </div>
           </div>
 
-          {/* Saat Seçimi (Sade & Kullanışlı: Açılır Liste + Özel Saat) */}
+          {/* Saat Seçimi */}
           <div>
             <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 6 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Clock size={13} style={{ color: '#3b82f6' }} />
+                <Clock size={13} style={{ color: 'var(--accent, #0284c7)' }} />
                 <span>Saat</span>
               </span>
             </label>
@@ -341,12 +359,13 @@ export default function FastScheduleModal({
               onChange={e => setSelectedTime(e.target.value)}
               style={{
                 width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid var(--glass-border, rgba(255,255,255,0.1))',
-                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '9px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--input-border, #cbd5e1)',
+                background: 'var(--input-bg, #ffffff)',
                 color: 'var(--foreground)',
-                fontSize: '0.9rem',
+                fontSize: '0.86rem',
+                fontWeight: 600,
                 outline: 'none',
                 cursor: 'pointer'
               }}
@@ -357,74 +376,51 @@ export default function FastScheduleModal({
             </select>
           </div>
 
-          {/* Doktor Seçimi */}
+          {/* Doktor Seçimi (Çoklu Hekim Desteği) */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <User size={13} style={{ color: 'var(--brand)' }} />
-                <span>Doktor</span>
+                <User size={13} style={{ color: 'var(--accent, #0284c7)' }} />
+                <span>Katılan Hekimler</span>
               </label>
-              {!selectedDoctorId && (
-                <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 700 }}>⚠️ Atanmadı</span>
+              {selectedDoctorIds.length === 0 && (
+                <span style={{ fontSize: '0.7rem', color: '#d97706', fontWeight: 700 }}>⚠️ Atanmadı</span>
               )}
             </div>
-            <select
-              value={selectedDoctorId}
-              onChange={e => setSelectedDoctorId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: 10,
-                border: !selectedDoctorId ? '1.5px solid #f59e0b' : '1px solid var(--glass-border, rgba(255,255,255,0.1))',
-                background: !selectedDoctorId ? 'rgba(245, 158, 11, 0.06)' : 'rgba(255, 255, 255, 0.03)',
-                color: !selectedDoctorId ? '#f59e0b' : 'var(--foreground)',
-                fontWeight: !selectedDoctorId ? 600 : 400,
-                fontSize: '0.85rem',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="">⚠️ Doktor Seçiniz (Atama Bekliyor)</option>
-              {doctors.map((d: any) => {
-                const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === formattedDateStr);
-                const hasShift = docShifts.length > 0;
-                const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : `(Vardiya Yok ⚠️)`;
-                return (
-                  <option 
-                    key={d.id} 
-                    value={d.id}
-                    disabled={!hasShift}
-                    style={{ color: !hasShift ? '#ef4444' : 'inherit' }}
-                  >
-                    Dr. {d.name} {d.specialty ? `(${d.specialty})` : ''} {shiftText}
-                  </option>
-                );
-              })}
-            </select>
+            <TreatmentDoctorMultiSelect
+              doctors={doctors}
+              selectedDoctorIds={selectedDoctorIds}
+              onChange={setSelectedDoctorIds}
+              shifts={shifts}
+              targetApptTime={`${formattedDateStr}T${selectedTime}:00`}
+              placeholder="Hekim Seçiniz (Çoklu Seçilebilir)"
+            />
           </div>
         </div>
 
         {/* Footer */}
         <div
           style={{
-            padding: '14px 20px',
-            borderTop: '1px solid var(--divider, rgba(255,255,255,0.08))',
+            padding: '12px 18px',
+            borderTop: '1px solid var(--input-border, #cbd5e1)',
             display: 'flex',
             justifyContent: 'flex-end',
             gap: 10,
-            background: 'rgba(255,255,255,0.02)'
+            background: 'var(--card-inner, #f1f5f9)'
           }}
         >
           <button
             type="button"
             onClick={onClose}
-            className="btn-clinic-blue"
             style={{
               padding: '8px 16px',
               borderRadius: 8,
+              border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+              background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+              color: 'var(--btn-clinic-secondary-text, #0284c7)',
               cursor: 'pointer',
-              fontSize: '0.82rem',
-              fontWeight: 500
+              fontSize: '0.8rem',
+              fontWeight: 600
             }}
           >
             İptal
@@ -433,13 +429,15 @@ export default function FastScheduleModal({
             type="button"
             onClick={handleSave}
             disabled={isSubmitting}
-            className="btn-clinic-primary"
             style={{
               padding: '8px 18px',
               borderRadius: 8,
+              border: '1px solid var(--btn-clinic-primary-border, #0284c7)',
+              background: 'var(--btn-clinic-primary-bg, #0284c7)',
+              color: '#ffffff',
               cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              fontSize: '0.82rem',
-              fontWeight: 600,
+              fontSize: '0.8rem',
+              fontWeight: 700,
               display: 'flex',
               alignItems: 'center',
               gap: 6,
@@ -447,7 +445,7 @@ export default function FastScheduleModal({
             }}
           >
             <Check size={15} />
-            <span>{isSubmitting ? 'Oluşturuluyor...' : 'Oluştur ve Planla'}</span>
+            <span>{isSubmitting ? 'Planlanıyor...' : 'Oluştur ve Planla'}</span>
           </button>
         </div>
       </div>

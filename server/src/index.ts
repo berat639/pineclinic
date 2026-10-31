@@ -1086,7 +1086,11 @@ const app = new Elysia()
     const { eq, and } = await import('drizzle-orm')
     const b = body as any
 
-    if (b.doctorId) {
+    const doctorIdsToCheck: string[] = Array.isArray(b.doctorIds)
+      ? b.doctorIds.filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+      : (b.doctorId ? [b.doctorId] : [])
+
+    if (doctorIdsToCheck.length > 0) {
       // Check if this treatment has linked appointments and validate doctor shift
       const linkedAppts = await db
         .select({
@@ -1101,21 +1105,23 @@ const app = new Elysia()
       for (const appt of linkedAppts) {
         if (appt.startTime) {
           const apptDateStr = new Date(appt.startTime).toISOString().split('T')[0]
-          const docShifts = await db
-            .select()
-            .from(shifts)
-            .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, b.doctorId), eq(shifts.date, apptDateStr)))
+          for (const docId of doctorIdsToCheck) {
+            const docShifts = await db
+              .select()
+              .from(shifts)
+              .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, docId), eq(shifts.date, apptDateStr)))
 
-          if (docShifts.length === 0) {
-            set.status = 400
-            return { error: `Seçilen hekimin bu randevu tarihinde (${apptDateStr}) vardiyası bulunmuyor` }
+            if (docShifts.length === 0) {
+              set.status = 400
+              return { error: `Seçilen hekimin bu randevu tarihinde (${apptDateStr}) vardiyası bulunmuyor` }
+            }
           }
         }
       }
     }
 
     try {
-      return await completeTreatmentItem(params.id, requireClinicId(), { status: b.status, groupId: b.groupId, doctorId: b.doctorId })
+      return await completeTreatmentItem(params.id, requireClinicId(), { status: b.status, groupId: b.groupId, doctorId: b.doctorId, doctorIds: b.doctorIds })
     } catch (error) {
       if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
       throw error

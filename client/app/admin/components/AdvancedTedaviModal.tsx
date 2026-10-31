@@ -34,7 +34,7 @@ interface AssistantCommand {
   treatments: any[];
 }
 
-type DraftItem = { id: string; name: string; price: number; indications: string[]; doctorId: string | null; materials: any[]; color?: string; surface?: string; section?: string; status?: string; locked?: boolean; dcmUrl?: string | null; procedureId?: string; scope?: 'tooth' | 'jaw' | 'mouth'; originalIndication?: string | null }
+type DraftItem = { id: string; name: string; price: number; indications: string[]; doctorId: string | null; doctorIds?: string[]; materials: any[]; color?: string; surface?: string; section?: string; status?: string; locked?: boolean; dcmUrl?: string | null; procedureId?: string; scope?: 'tooth' | 'jaw' | 'mouth'; originalIndication?: string | null }
 const targetLabel = (target: string) => target === 'upper' ? 'Üst çene' : target === 'lower' ? 'Alt çene' : target === 'general' ? 'Tüm ağız' : `Diş ${target}`;
 const normalizeSection = (value?: string) => value === 'Kuron' ? 'crown' : value === 'Kole (Servikal)' ? 'cervical' : value === 'Kök & Apeks' ? 'root' : value;
 
@@ -161,10 +161,17 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           section = normalizeSection(section);
           if (number && surface) surfaces[number] = surface.split('');
           if (number && section) sections[number] = section;
+          const loadedDoctorIds: string[] = Array.isArray(t.doctorIds)
+            ? t.doctorIds
+            : Array.isArray(t.metadata?.doctorIds)
+              ? t.metadata.doctorIds
+              : (t.doctorId ? [t.doctorId] : []);
           (drafts[tooth] ||= []).push({
             id: t.id, name: t.procedureName, price: t.basePriceMinor / 100,
             indications: indication ? indication.split(',').map((value: string) => value.trim()).filter(Boolean) : [],
-            doctorId: t.doctorId || null, materials: Array.isArray(t.materials) ? t.materials : [],
+            doctorId: loadedDoctorIds[0] || t.doctorId || null,
+            doctorIds: loadedDoctorIds,
+            materials: Array.isArray(t.materials) ? t.materials : [],
             surface, section, status: t.status, locked: t.locked, dcmUrl: t.dcmUrl, originalIndication: t.indication,
             procedureId: t.metadata?.procedureId, scope: t.metadata?.scope || 'tooth', color: t.metadata?.color,
           });
@@ -1647,16 +1654,21 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const tags = [surface && `Yüzey: ${surface}`, section && `Bölüm: ${section}`].filter(Boolean);
         const indication = [proc.indications.join(', '), tags.length ? `[${tags.join(' | ')}]` : ''].filter(Boolean).join(' ');
         const existing = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(proc.id);
+        const resolvedDoctorId = existing ? proc.doctorId : (proc.doctorId || defaultDoctorId || selectedEvent.doctorId || null);
+        const resolvedDoctorIds = Array.isArray(proc.doctorIds) && proc.doctorIds.length > 0
+          ? proc.doctorIds
+          : (resolvedDoctorId ? [resolvedDoctorId] : []);
         return {
           id: existing ? proc.id : undefined,
           procedureName: proc.name, toothNumber: tooth, indication: proc.locked ? (proc.originalIndication || undefined) : (indication || undefined),
           basePriceMinor: Math.round(proc.price * 100),
-          doctorId: existing ? proc.doctorId : (proc.doctorId || defaultDoctorId || selectedEvent.doctorId || null),
+          doctorId: resolvedDoctorIds[0] || resolvedDoctorId,
+          doctorIds: resolvedDoctorIds,
           dcmUrl: proc.locked ? (proc.dcmUrl ?? null) : dcmUrl,
           materials: proc.materials,
           ...(!existing || notificationChanged ? { isPeriodic, periodDays, notifyPatient, notificationType,
             nextNotificationDate: isPeriodic && notifyPatient ? date.toISOString().slice(0, 10) : undefined } : {}),
-          metadata: { clientKey: proc.id, procedureId: proc.procedureId, color: proc.color, scope: proc.scope || 'tooth', indicationIds: proc.indications.map(indication => indicationIds[indication]).filter(Boolean) },
+          metadata: { clientKey: proc.id, procedureId: proc.procedureId, color: proc.color, scope: proc.scope || 'tooth', doctorIds: resolvedDoctorIds, indicationIds: proc.indications.map(indication => indicationIds[indication]).filter(Boolean) },
         };
       }));
       if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();

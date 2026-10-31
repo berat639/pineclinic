@@ -13,7 +13,7 @@ import { calculateTreatmentPrices } from './treatment-pricing'
 type Material = { inventoryItemId: string; quantity: number; unitCostMinor: number; unitSalePriceMinor: number; name: string }
 type TreatmentInput = {
   id?: string; procedureName: string; toothNumber?: string | null; indication?: string | null
-  doctorId?: string | null; cost?: number; basePriceMinor?: number; materials?: unknown
+  doctorId?: string | null; doctorIds?: string[] | null; cost?: number; basePriceMinor?: number; materials?: unknown
   dcmUrl?: string | null; isPeriodic?: boolean; periodDays?: number | null
   nextNotificationDate?: string | null; notifyPatient?: boolean; notificationType?: string | null
   metadata?: Record<string, unknown>
@@ -34,6 +34,22 @@ function validUuid(value: unknown): value is string { return typeof value === 's
 function isObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
 function assertSafeInteger(value: unknown, label: string, min = 0): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < min) throw new TreatmentPlanError(`${label} geçersiz`)
+}
+function normalizeDoctorIds(doctorIds: unknown, doctorId: unknown): string[] {
+  if (Array.isArray(doctorIds)) {
+    const unique: string[] = []
+    for (const raw of doctorIds) {
+      if (!raw) continue
+      if (!validUuid(raw)) throw new TreatmentPlanError('Hekim kimliği geçersiz')
+      if (!unique.includes(raw)) unique.push(raw)
+    }
+    return unique
+  }
+  if (doctorId) {
+    if (!validUuid(doctorId)) throw new TreatmentPlanError('Hekim kimliği geçersiz')
+    return [doctorId]
+  }
+  return []
 }
 
 /** Load a complete plan without exposing another clinic's data. */
@@ -61,11 +77,17 @@ export async function getTreatmentPlan(groupId: string, clinicId: string) {
     discountFixedMinor: details?.discountFixedMinor ?? 0,
     metadata: details?.metadata ?? {},
     attachments,
-    treatments: rows.filter(row => row.plan.status !== 'cancelled').map(({ plan, details: item }) => ({
-      ...plan, materials: item?.materials ?? [], basePriceMinor: item?.basePriceMinor ?? plan.cost * 100,
-      netPriceMinor: item?.netPriceMinor ?? plan.cost * 100, metadata: item?.metadata ?? {},
-      stockState: item?.stockState ?? 'legacy_unknown', locked: plan.status === 'completed' || item?.stockState === 'consumed' || paidIds.has(plan.id),
-    })),
+    treatments: rows.filter(row => row.plan.status !== 'cancelled').map(({ plan, details: item }) => {
+      const metaObj = isObject(item?.metadata) ? item.metadata : {}
+      const doctorIds = Array.isArray(metaObj.doctorIds)
+        ? (metaObj.doctorIds as unknown[]).filter((id): id is string => validUuid(id))
+        : (plan.doctorId ? [plan.doctorId] : [])
+      return {
+        ...plan, doctorIds, materials: item?.materials ?? [], basePriceMinor: item?.basePriceMinor ?? plan.cost * 100,
+        netPriceMinor: item?.netPriceMinor ?? plan.cost * 100, metadata: item?.metadata ?? {},
+        stockState: item?.stockState ?? 'legacy_unknown', locked: plan.status === 'completed' || item?.stockState === 'consumed' || paidIds.has(plan.id),
+      }
+    }),
   }
 }
 
@@ -103,7 +125,8 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
     if (!isObject(item) || typeof item.procedureName !== 'string' || !item.procedureName.trim() || item.procedureName.length > 250)
       throw new TreatmentPlanError('İşlem adı geçersiz')
     if (item.id && !validUuid(item.id)) throw new TreatmentPlanError('Tedavi kimliği geçersiz')
-    if (item.doctorId && !validUuid(item.doctorId)) throw new TreatmentPlanError('Hekim kimliği geçersiz')
+    const itemDoctorIds = normalizeDoctorIds(item.doctorIds, item.doctorId)
+    const primaryDoctorId = itemDoctorIds[0] ?? null
     if (item.basePriceMinor !== undefined) assertSafeInteger(item.basePriceMinor, 'İşlem fiyatı')
     const basePriceMinor = item.basePriceMinor ?? Math.round(Number(item.cost ?? 0) * 100)
     assertSafeInteger(basePriceMinor, 'İşlem fiyatı')
@@ -118,7 +141,9 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
       if (materials.some(m => m.inventoryItemId === raw.inventoryItemId)) throw new TreatmentPlanError('Malzeme satırda yalnız bir kez bulunabilir')
       materials.push({ inventoryItemId: raw.inventoryItemId, quantity, unitSalePriceMinor, unitCostMinor: 0, name: '' })
     }
-    normalized.push({ ...item, basePriceMinor, materials })
+    const mergedMeta = isObject(item.metadata) ? { ...item.metadata } : {}
+    if (item.doctorIds !== undefined || itemDoctorIds.length > 0) mergedMeta.doctorIds = itemDoctorIds
+    normalized.push({ ...item, doctorId: primaryDoctorId, doctorIds: itemDoctorIds, metadata: Object.keys(mergedMeta).length ? mergedMeta : item.metadata, basePriceMinor, materials })
   }
   let pricing: ReturnType<typeof calculateTreatmentPrices>
   try { pricing = calculateTreatmentPrices(normalized, percentBps, fixedMinor) }
@@ -135,7 +160,7 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
         )).limit(1)
         if (!appointment) throw new TreatmentPlanError('Randevu bu hastaya ait değil', 400)
       }
-      const doctorIds = [...new Set(normalized.map(item => item.doctorId).filter((id): id is string => !!id))]
+      const doctorIds = [...new Set(normalized.flatMap(item => item.doctorIds && item.doctorIds.length ? item.doctorIds : (item.doctorId ? [item.doctorId] : [])))]
       if (doctorIds.length) {
         const doctors = await tx.select({ id: clinicMemberships.userId }).from(clinicMemberships).where(and(
           eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'hekim'), eq(clinicMemberships.active, true), inArray(clinicMemberships.userId, doctorIds),
@@ -328,23 +353,31 @@ export async function createStandaloneTreatment(patientId: string, input: Treatm
 }
 
 /** Consume new-plan material once, atomically with completion. */
-export async function completeTreatmentItem(id: string, clinicId: string, values: { status?: string; groupId?: string | null; doctorId?: string | null }) {
+export async function completeTreatmentItem(id: string, clinicId: string, values: { status?: string; groupId?: string | null; doctorId?: string | null; doctorIds?: string[] | null }) {
   await ensureTreatmentPlanningSchema()
   if (!validUuid(id)) throw new TreatmentPlanError('Tedavi kimliği geçersiz')
   if (values.status !== undefined && !['planned', 'in_progress', 'completed'].includes(values.status)) throw new TreatmentPlanError('Tedavi durumu geçersiz')
-  if (values.doctorId && !validUuid(values.doctorId)) throw new TreatmentPlanError('Hekim kimliği geçersiz')
+  const hasDoctorUpdate = values.doctorIds !== undefined || values.doctorId !== undefined
+  const resolvedDoctorIds = values.doctorIds !== undefined
+    ? normalizeDoctorIds(values.doctorIds, null)
+    : values.doctorId !== undefined
+      ? normalizeDoctorIds(undefined, values.doctorId)
+      : []
+  const effectiveDoctorId = hasDoctorUpdate ? (resolvedDoctorIds[0] ?? null) : undefined
   return db.transaction(async tx => {
     const [plan] = await tx.select().from(treatmentPlans).where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId))).for('update')
     if (!plan) throw new TreatmentPlanError('Tedavi bulunamadı', 404)
     if (plan.status === 'cancelled') throw new TreatmentPlanError('İptal edilmiş tedavi değiştirilemez', 409)
     if (values.groupId !== undefined && values.groupId !== plan.groupId) throw new TreatmentPlanError('Tedavi başka bir plana taşınamaz')
-    if (values.doctorId && values.doctorId !== plan.doctorId) {
-      const [doctor] = await tx.select({ id: clinicMemberships.userId }).from(clinicMemberships).where(and(eq(clinicMemberships.userId, values.doctorId),
-        eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'hekim'), eq(clinicMemberships.active, true))).limit(1)
-      if (!doctor) throw new TreatmentPlanError('Seçilen hekim kliniğe ait değil')
+    if (resolvedDoctorIds.length > 0) {
+      const doctors = await tx.select({ id: clinicMemberships.userId }).from(clinicMemberships).where(and(
+        inArray(clinicMemberships.userId, resolvedDoctorIds),
+        eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'hekim'), eq(clinicMemberships.active, true),
+      ))
+      if (doctors.length !== resolvedDoctorIds.length) throw new TreatmentPlanError('Seçilen hekim kliniğe ait değil')
     }
     const [details] = await tx.select().from(treatmentPlanDetails).where(eq(treatmentPlanDetails.treatmentId, id)).for('update')
-    if ((plan.status === 'completed' || details?.stockState === 'consumed') && values.doctorId !== undefined && values.doctorId !== plan.doctorId)
+    if ((plan.status === 'completed' || details?.stockState === 'consumed') && hasDoctorUpdate && effectiveDoctorId !== plan.doctorId)
       throw new TreatmentPlanError('Tamamlanmış tedavinin hekimi değiştirilemez', 409)
     if (values.status === 'completed' && details?.stockState === 'planned') {
       const materials = [...(details.materials as Material[])].sort((a, b) => a.inventoryItemId.localeCompare(b.inventoryItemId))
@@ -354,18 +387,32 @@ export async function completeTreatmentItem(id: string, clinicId: string, values
         if (!updated) throw new TreatmentPlanError(`${material.name} için yeterli stok bulunmuyor`, 409)
         const date = new Date().toISOString().slice(0, 10)
         await tx.insert(inventoryMovements).values({ clinicId, itemId: material.inventoryItemId, type: 'cikis', quantity: material.quantity, notes: `Tedavi ${plan.id}` })
-        if (values.doctorId || plan.doctorId) await tx.insert(materialUsages).values({ clinicId, doctorId: (values.doctorId || plan.doctorId)!, patientId: plan.patientId, inventoryItemId: material.inventoryItemId, quantity: material.quantity, date })
+        if (effectiveDoctorId || plan.doctorId) await tx.insert(materialUsages).values({ clinicId, doctorId: (effectiveDoctorId || plan.doctorId)!, patientId: plan.patientId, inventoryItemId: material.inventoryItemId, quantity: material.quantity, date })
         await tx.insert(expenses).values({ clinicId, category: 'malzeme', itemName: material.name, quantity: material.quantity,
           unitCost: material.unitCostMinor / 100, totalCost: material.quantity * material.unitCostMinor / 100, date, notes: `Tedavi ${plan.id}` })
       }
       await tx.update(treatmentPlanDetails).set({ stockState: 'consumed' }).where(eq(treatmentPlanDetails.treatmentId, id))
     }
+    if (hasDoctorUpdate) {
+      const currentMeta = isObject(details?.metadata) ? { ...details.metadata } : {}
+      currentMeta.doctorIds = resolvedDoctorIds
+      if (details) {
+        await tx.update(treatmentPlanDetails).set({ metadata: currentMeta }).where(eq(treatmentPlanDetails.treatmentId, id))
+      } else {
+        await tx.insert(treatmentPlanDetails).values({
+          treatmentId: id, clinicId, basePriceMinor: plan.cost * 100, netPriceMinor: plan.cost * 100,
+          materials: [], metadata: currentMeta, stockState: 'legacy_unknown',
+        }).onConflictDoUpdate({ target: treatmentPlanDetails.treatmentId, set: { metadata: currentMeta } })
+      }
+    }
     const update: { status?: string; doctorId?: string | null } = {}
     if (values.status !== undefined) update.status = values.status
-    if (values.doctorId !== undefined) update.doctorId = values.doctorId
-    if (!Object.keys(update).length) return plan
+    if (effectiveDoctorId !== undefined) update.doctorId = effectiveDoctorId
+    if (!Object.keys(update).length) {
+      return { ...plan, doctorIds: hasDoctorUpdate ? resolvedDoctorIds : (plan.doctorId ? [plan.doctorId] : []) }
+    }
     const [saved] = await tx.update(treatmentPlans).set(update).where(eq(treatmentPlans.id, id)).returning()
-    return saved
+    return { ...saved, doctorIds: hasDoctorUpdate ? resolvedDoctorIds : (saved.doctorId ? [saved.doctorId] : []) }
   })
 }
 

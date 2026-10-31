@@ -7,6 +7,7 @@ import PlanHistoryDialog from './PlanHistoryDialog'
 import PlanToothTools from './PlanToothTools'
 import PatientConsentPanel from './PatientConsentPanel'
 import PlanMediaPanel from './PlanMediaPanel'
+import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
 import styles from './PineTreatmentPlan.module.css'
 
@@ -209,7 +210,7 @@ export default function PineTreatmentPlanView(p: any) {
           p.setDrafts((previous: any) => Object.fromEntries(
             Object.entries(previous).map(([target, items]) => [
               target,
-              (items as any[]).map(item => item.locked ? item : { ...item, doctorId: nextDoctorId }),
+              (items as any[]).map(item => item.locked ? item : { ...item, doctorId: nextDoctorId, doctorIds: nextDoctorId ? [nextDoctorId] : [] }),
             ])
           ))
         }}><option value="">Seçiniz</option>{p.doctors.map((doctor: any) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></div></div>
@@ -224,7 +225,7 @@ export default function PineTreatmentPlanView(p: any) {
                   {!item.locked && <select className={styles.addIndication} aria-label={`${targetName(target)} endikasyon ekle`} value="" onChange={event => { const value = event.target.value; if (value && !item.indications.includes(value)) updateRow(target, item.id, row => ({ ...row, indications: [...row.indications, value] })) }}><option value="">+</option>{p.indications.map((value: string) => <option key={p.indicationIds[value] || value} value={value}>{value}</option>)}</select>}
                 </div></td>
                 <td>{item.locked ? item.name : <select className={styles.cellSelect} title={item.name} aria-label={`${targetName(target)} tedavi`} value={item.procedureId || ''} onChange={event => { const replacement = p.procedures.find((value: any) => value.id === event.target.value); if (!replacement || replacement.id === item.procedureId) return; updateRow(target, item.id, row => ({ ...row, name: replacement.name, procedureId: replacement.id, scope: replacement.scope, price: replacement.price, materials: (replacement.materials || []).map((value: any) => ({ ...value })) })) }}><option value={p.procedures.some((value: any) => value.id === item.procedureId) ? '' : item.procedureId || ''}>{item.name}</option>{p.procedures.filter((value: any) => (value.scope || 'tooth') === (item.scope || 'tooth')).map((value: any) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>}</td>
-                <td><select className={styles.cellSelect} title={p.doctors.find((doctor: any) => doctor.id === item.doctorId)?.name || "Hekim seçin"} aria-label={`${targetName(target)} hekim`} disabled={item.locked} value={item.doctorId || ''} onChange={event => updateRow(target, item.id, row => ({ ...row, doctorId: event.target.value || null }))}><option value="">Seçiniz</option>{p.doctors.map((doctor: any) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></td>
+                <td><TreatmentDoctorMultiSelect doctors={p.doctors} selectedDoctorIds={Array.isArray(item.doctorIds) ? item.doctorIds : (item.doctorId ? [item.doctorId] : [])} disabled={item.locked} compact placeholder="Seçiniz" onChange={nextDoctorIds => updateRow(target, item.id, row => ({ ...row, doctorId: nextDoctorIds[0] || null, doctorIds: nextDoctorIds }))} /></td>
                 <td><input className={styles.moneyInput} aria-label={`${targetName(target)} işlem fiyatı`} disabled={item.locked} type="number" min="0" step="0.01" value={item.price} onChange={event => updateRow(target, item.id, row => ({ ...row, price: Number(event.target.value) }))} /><button type="button" className={styles.materialLink} disabled={item.locked && !item.materials.length} title={item.materials.map((material: any) => `${material.name} ${material.quantity} adet`).join(', ')} onClick={() => setMaterialRow({ target, id: item.id })}>{item.materials.length ? `Malzeme: ${item.materials.map((material: any) => `${material.name} ${material.quantity} adet +${money(Number(material.quantity) * Number(material.unitSalePriceMinor || 0))}`).join(', ')}` : item.locked ? 'Malzeme yok' : '+ Malzeme ekle'}</button></td>
                 <td className={styles.rowTotal}>{money(Math.round(item.price * 100) + item.materials.reduce((sum: number, material: any) => sum + Number(material.quantity) * Number(material.unitSalePriceMinor || 0), 0))}</td>
                 <td><button type="button" className={styles.rowDelete} disabled={item.locked} aria-label={`${targetName(target)} ${item.name} kaldır`} onClick={() => p.setDrafts((previous: any) => ({ ...previous, [target]: previous[target].filter((row: any) => row.id !== item.id) }))}><Trash2 size={15} /></button></td>

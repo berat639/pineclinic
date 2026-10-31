@@ -5,6 +5,7 @@ import {
   patients,
   dentalAppointments,
   treatmentPlans,
+  treatmentPlanDetails,
   treatmentGroups,
   appointmentTreatments,
   patientPayments,
@@ -557,6 +558,29 @@ export async function createPatient(data: { name: string; phone?: string; balanc
 
 // ── Treatment Groups ─────────────────────────────────────────────────────────
 
+async function enrichTreatmentDoctorIds(plans: Array<typeof treatmentPlans.$inferSelect>, clinicId: string) {
+  if (plans.length === 0) return
+  try {
+    const ids = plans.map(p => p.id)
+    const details = await db.select({
+      treatmentId: treatmentPlanDetails.treatmentId,
+      metadata: treatmentPlanDetails.metadata,
+    }).from(treatmentPlanDetails).where(and(eq(treatmentPlanDetails.clinicId, clinicId), inArray(treatmentPlanDetails.treatmentId, ids)))
+    const detailMap = new Map(details.map(d => [d.treatmentId, d.metadata]))
+    for (const p of plans) {
+      const meta = detailMap.get(p.id) as Record<string, unknown> | undefined
+      const metaDocIds = meta && Array.isArray(meta.doctorIds)
+        ? (meta.doctorIds as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+        : null
+      ;(p as any).doctorIds = metaDocIds ?? (p.doctorId ? [p.doctorId] : [])
+    }
+  } catch {
+    for (const p of plans) {
+      ;(p as any).doctorIds = p.doctorId ? [p.doctorId] : []
+    }
+  }
+}
+
 export async function getPatientTreatmentGroups(patientId: string) {
   const clinicId = requireClinicId()
   const groups = await db.select({
@@ -582,6 +606,8 @@ export async function getPatientTreatmentGroups(patientId: string) {
       .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id), ne(treatmentPlans.status, 'cancelled')))
       .orderBy(desc(treatmentPlans.createdAt))
     
+    await enrichTreatmentDoctorIds(plans, clinicId)
+
     for (const p of plans) {
       const sessions = await db.select({
         id: appointmentTreatments.id,
@@ -604,6 +630,8 @@ export async function getPatientTreatmentGroups(patientId: string) {
   const ungrouped = await db.select().from(treatmentPlans)
     .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'), sql`group_id IS NULL`))
     .orderBy(desc(treatmentPlans.createdAt))
+
+  await enrichTreatmentDoctorIds(ungrouped, clinicId)
 
   for (const p of ungrouped) {
     const sessions = await db.select({
@@ -740,6 +768,8 @@ export async function deleteTreatmentGroup(id: string): Promise<boolean> {
 export async function getPatientTreatments(patientId: string) {
   const clinicId = requireClinicId()
   const plans = await db.select().from(treatmentPlans).where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'))).orderBy(desc(treatmentPlans.createdAt))
+
+  await enrichTreatmentDoctorIds(plans, clinicId)
 
   for (const p of plans) {
     const sessions = await db.select({

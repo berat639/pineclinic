@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
-import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight, Pencil, Trash2, FolderKanban, ChevronDown, ChevronUp, ArrowUpRight } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DoctorLeaveModal, { DoctorLeaveItem } from './DoctorLeaveModal'
 import DentalCalendar from './DentalCalendar'
@@ -11,6 +11,7 @@ import QuickCreatePopover from './QuickCreatePopover';
 import MiniCalendar from './MiniCalendar';
 import PatientProfileCard from './PatientProfileCard';
 import FastScheduleModal from './FastScheduleModal';
+import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect';
 import ConfirmModal from './ConfirmModal';
 import AddPatientModal from './AddPatientModal';
 import PatientConsentPanel from './PatientConsentPanel';
@@ -431,6 +432,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
   // Treatment Form state
   const [showTedaviForm, setShowTedaviForm] = useState(false)
   const [editingGroup, setEditingGroup] = useState<any>(null)
+  const [expandedMergedKeys, setExpandedMergedKeys] = useState<Record<string, boolean>>({})
   const [tedaviName, setTedaviName] = useState('')
   const [selectedTooth, setSelectedTooth] = useState<string>('')
   const [tedaviIndication, setTedaviIndication] = useState('')
@@ -1629,10 +1631,97 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                   }
                 };
 
+                const getTreatmentDoctorIds = (t: any): string[] => {
+                  if (Array.isArray(t.doctorIds) && t.doctorIds.length > 0) {
+                    return t.doctorIds.filter(Boolean);
+                  }
+                  if (Array.isArray(t.metadata?.doctorIds) && t.metadata.doctorIds.length > 0) {
+                    return t.metadata.doctorIds.filter(Boolean);
+                  }
+                  return t.doctorId ? [t.doctorId] : [];
+                };
+
+                const handleBatchDoctorChange = async (items: any[], nextDocIds: string[], apptTime?: string | null) => {
+                  const targetApptTime = apptTime || selectedEvent?.startTime;
+                  if (nextDocIds.length > 0 && targetApptTime) {
+                    const apptDateStr = new Date(targetApptTime).toLocaleDateString('sv');
+                    const startMin = new Date(targetApptTime).getHours() * 60 + new Date(targetApptTime).getMinutes();
+                    for (const docId of nextDocIds) {
+                      const docShifts = (shifts || []).filter((s: any) => s.userId === docId && s.date === apptDateStr);
+                      const docObj = doctors.find((d: any) => d.id === docId);
+                      const docName = docObj?.name || 'Hekim';
+                      if (docShifts.length === 0) {
+                        toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`);
+                        return;
+                      }
+                      const isCovered = docShifts.some((s: any) => {
+                        const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
+                        const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
+                        return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+                      });
+                      if (!isCovered) {
+                        const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
+                        toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`);
+                        return;
+                      }
+                    }
+                  }
+
+                  try {
+                    const primaryDoctorId = nextDocIds[0] || null;
+                    await Promise.all(
+                      items.map(item =>
+                        fetch(`/api/dental/treatments/${item.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ doctorId: primaryDoctorId, doctorIds: nextDocIds }),
+                        })
+                      )
+                    );
+                    refreshTreatmentsList();
+                  } catch {
+                    toast.error('Hekim güncellenemedi');
+                  }
+                };
+
+                const handleBatchStatusChange = async (items: any[], newStatus: string) => {
+                  if (items.length === 1) {
+                    await handleTreatmentStatusChange(items[0].id, items[0].procedureName, newStatus);
+                    return;
+                  }
+                  const pid = selectedEvent?.patientId || patientInfo?.id;
+                  if (!pid || !selectedEvent) return;
+                  try {
+                    const results = await Promise.all(
+                      items.map(item =>
+                        fetch(`/api/dental/treatments/${item.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ status: newStatus }),
+                        })
+                      )
+                    );
+                    if (results.some(r => !r.ok)) {
+                      toast.error('Bazı işlemlerin durumu güncellenemedi');
+                    } else {
+                      toast.success(
+                        newStatus === 'completed'
+                          ? `✅ ${items.length} işlem yapıldı olarak işaretlendi`
+                          : `${items.length} işlemin durumu güncellendi`
+                      );
+                    }
+                    refreshTreatmentsList();
+                  } catch {
+                    toast.error('Durum güncellenirken hata oluştu');
+                  }
+                };
+
                 const renderTreatmentItemCard = (t: any, g?: any) => {
                   const apptTime = t.sessions?.[0]?.startTime || t.plannedDate;
                   const isCompleted = t.status === 'completed';
                   const costVal = Number(t.cost || 0);
+                  const docIds = getTreatmentDoctorIds(t);
+
                   return (
                     <div
                       id={`treatment-${t.id}`}
@@ -1641,11 +1730,11 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: 8,
-                        padding: '10px 12px',
+                        gap: 7,
+                        padding: '9px 11px',
                         borderRadius: 8,
                         background: 'var(--input-bg, #ffffff)',
-                        border: isCompleted ? '1px solid #10b981' : '1px solid var(--input-border, #cbd5e1)',
+                        border: isCompleted ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--input-border, #cbd5e1)',
                         borderLeft: isCompleted ? '3px solid #10b981' : '3px solid var(--accent, #0284c7)',
                         fontSize: '0.76rem',
                         cursor: 'pointer',
@@ -1674,27 +1763,13 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           <span style={{
                             fontWeight: 700,
                             color: 'var(--foreground)',
-                            fontSize: '0.82rem',
+                            fontSize: '0.81rem',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }} title={t.procedureName}>
                             {t.procedureName}
                           </span>
-                          {isCompleted && (
-                            <span style={{
-                              fontSize: '0.65rem',
-                              padding: '1px 6px',
-                              borderRadius: 4,
-                              background: 'var(--btn-clinic-mint-bg, #f0fdf4)',
-                              border: '1px solid var(--btn-clinic-mint-border, #86efac)',
-                              color: 'var(--btn-clinic-mint-text, #15803d)',
-                              fontWeight: 700,
-                              flexShrink: 0,
-                            }}>
-                              ✓ Yapıldı
-                            </span>
-                          )}
                           {t.dcmUrl && (
                             <button
                               onClick={(e) => {
@@ -1719,7 +1794,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                           {costVal > 0 && (
-                            <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent, #0284c7)', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--foreground)', whiteSpace: 'nowrap' }}>
                               {costVal.toLocaleString('tr-TR')} ₺
                             </span>
                           )}
@@ -1731,7 +1806,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                               setConfirmModal({
                                 isOpen: true,
                                 title: 'İşlemi Sil',
-                                message: `"${t.procedureName}" işlemini silmek istediğinize emin misiniz?`,
+                                message: `"${t.toothNumber ? `#${t.toothNumber} ` : ''}${t.procedureName}" işlemini silmek istediğinize emin misiniz?`,
                                 confirmText: 'Evet, Sil',
                                 variant: 'danger',
                                 onConfirm: async () => {
@@ -1746,27 +1821,28 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                               borderRadius: 6,
                               color: 'var(--danger, #ef4444)',
                               cursor: 'pointer',
-                              padding: '3px 6px',
-                              fontSize: '0.72rem',
-                              lineHeight: 1,
+                              padding: '4px 6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
                               flexShrink: 0,
                             }}
                             title="İşlemi Sil"
                           >
-                            🗑️
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       </div>
 
-                      {/* 2. Satır: Durum ve Doktor */}
-                      <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {/* 2. Satır: Durum (dar) ve Çoklu Hekim Seçici (geniş) */}
+                      <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '108px 1fr', gap: 6 }}>
                         <select
                           value={t.status || 'planned'}
                           onChange={(e) => handleTreatmentStatusChange(t.id, t.procedureName, e.target.value)}
                           style={{
                             width: '100%',
-                            fontSize: '0.74rem',
-                            padding: '5px 8px',
+                            fontSize: '0.73rem',
+                            padding: '5px 6px',
                             borderRadius: 6,
                             border: isCompleted ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--input-border, #cbd5e1)',
                             background: isCompleted ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--card-inner, #f1f5f9)',
@@ -1782,81 +1858,18 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           <option value="completed">✓ Yapıldı</option>
                         </select>
 
-                        <select
-                          value={t.doctorId || ''}
-                          onChange={(e) => {
-                            const newDocId = e.target.value || null;
-                            const targetApptTime = apptTime || selectedEvent?.startTime;
-                            if (newDocId && targetApptTime) {
-                              const apptDateStr = new Date(targetApptTime).toLocaleDateString('sv');
-                              const docShifts = (shifts || []).filter((s: any) => s.userId === newDocId && s.date === apptDateStr);
-                              const docObj = doctors.find((d: any) => d.id === newDocId);
-                              const docName = docObj?.name || 'Hekim';
-
-                              if (docShifts.length === 0) {
-                                e.target.value = t.doctorId || '';
-                                import('react-hot-toast').then(mod => mod.toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) vardiya bulunmuyor!`));
-                                return;
-                              }
-
-                              const startMin = new Date(targetApptTime).getHours() * 60 + new Date(targetApptTime).getMinutes();
-                              const isCovered = docShifts.some((s: any) => {
-                                const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
-                                const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
-                                return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
-                              });
-
-                              if (!isCovered) {
-                                e.target.value = t.doctorId || '';
-                                const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
-                                import('react-hot-toast').then(mod => mod.toast.error(`⚠️ Randevu saati ${docName} vardiyası (${shiftRanges}) dışındadır!`));
-                                return;
-                              }
-                            }
-
-                            fetch(`/api/dental/treatments/${t.id}`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ doctorId: newDocId }),
-                            }).then(() => refreshTreatmentsList()).catch(() => {});
-                          }}
-                          style={{
-                            width: '100%',
-                            fontSize: '0.74rem',
-                            padding: '5px 8px',
-                            borderRadius: 6,
-                            border: '1px solid var(--input-border, #cbd5e1)',
-                            background: 'var(--card-inner, #f1f5f9)',
-                            color: t.doctorId ? 'var(--foreground)' : '#d97706',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            outline: 'none',
-                            boxSizing: 'border-box',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          <option value="">👤 Hekim Seç</option>
-                          {doctors.map((d: any) => {
-                            const targetApptTime = apptTime || selectedEvent?.startTime;
-                            const apptDateStr = targetApptTime ? new Date(targetApptTime).toLocaleDateString('sv') : '';
-                            const docShifts = (shifts || []).filter((s: any) => s.userId === d.id && s.date === apptDateStr);
-                            const hasShift = docShifts.length > 0;
-                            const shiftText = hasShift ? `(🟢 ${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})` : (apptDateStr ? `(Vardiya Yok ⚠️)` : '');
-                            return (
-                              <option
-                                key={d.id}
-                                value={d.id}
-                                disabled={apptDateStr ? !hasShift : false}
-                              >
-                                {d.name} {shiftText}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        <TreatmentDoctorMultiSelect
+                          doctors={doctors}
+                          selectedDoctorIds={docIds}
+                          onChange={(nextDocIds) => handleBatchDoctorChange([t], nextDocIds, apptTime)}
+                          shifts={shifts}
+                          targetApptTime={apptTime || selectedEvent?.startTime}
+                          disabled={isCompleted}
+                          placeholder="Hekim Seç"
+                        />
                       </div>
 
-                      {/* 3. Satır: Tarih / Randevu Butonu */}
+                      {/* 3. Satır: Tarih / Randevu Butonu (Planlandı = Mavi, Yapıldı = Yeşil) */}
                       <div onClick={e => e.stopPropagation()}>
                         <button
                           type="button"
@@ -1867,12 +1880,22 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           }}
                           style={{
                             width: '100%',
-                            background: isCompleted || apptTime ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--btn-clinic-secondary-bg, #eff6ff)',
-                            border: isCompleted || apptTime ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
-                            color: isCompleted || apptTime ? 'var(--btn-clinic-mint-text, #15803d)' : 'var(--btn-clinic-secondary-text, #0284c7)',
+                            background: isCompleted
+                              ? 'var(--btn-clinic-mint-bg, #f0fdf4)'
+                              : apptTime
+                                ? 'var(--btn-clinic-secondary-bg, #eff6ff)'
+                                : 'var(--card-inner, #f1f5f9)',
+                            border: isCompleted
+                              ? '1px solid var(--btn-clinic-mint-border, #86efac)'
+                              : apptTime
+                                ? '1px solid var(--btn-clinic-secondary-border, #93c5fd)'
+                                : '1px dashed var(--accent, #0284c7)',
+                            color: isCompleted
+                              ? 'var(--btn-clinic-mint-text, #15803d)'
+                              : 'var(--btn-clinic-secondary-text, #0284c7)',
                             borderRadius: 6,
                             cursor: 'pointer',
-                            padding: '6px 10px',
+                            padding: '5px 10px',
                             fontSize: '0.73rem',
                             fontWeight: 600,
                             display: 'flex',
@@ -1883,14 +1906,321 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           title="Tarih / Saat Belirle veya Değiştir"
                         >
                           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <span>📅</span>
-                            <span>{apptTime ? new Date(apptTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'Tarih / Randevu Belirle'}</span>
+                            <CalendarDays size={13} />
+                            <span>
+                              {apptTime
+                                ? new Date(apptTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+                                : 'Tarih / Randevu Belirle'}
+                            </span>
                           </span>
-                          <span style={{ fontSize: '0.68rem', fontWeight: 700 }}>{apptTime ? 'Değiştir ↗' : '+ Planla'}</span>
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                            {apptTime ? <>Değiştir <ArrowUpRight size={12} /></> : '+ Planla'}
+                          </span>
                         </button>
                       </div>
                     </div>
                   );
+                };
+
+                const renderSmartGroupedTreatments = (items: any[], g?: any, scopePrefix = 'grp') => {
+                  const buckets: Array<{ key: string; items: any[] }> = [];
+                  const bucketMap = new Map<string, { key: string; items: any[] }>();
+
+                  for (const t of items) {
+                    const apptTime = t.sessions?.[0]?.startTime || t.plannedDate || '';
+                    const apptKey = apptTime ? new Date(apptTime).toISOString() : 'no-date';
+                    const docKey = [...getTreatmentDoctorIds(t)].sort().join(',') || 'no-doc';
+                    const procKey = (t.procedureName || '').trim().toLocaleLowerCase('tr-TR');
+                    const statusKey = t.status || 'planned';
+                    const key = `${scopePrefix}::${procKey}::${statusKey}::${docKey}::${apptKey}`;
+
+                    let b = bucketMap.get(key);
+                    if (!b) {
+                      b = { key, items: [] };
+                      bucketMap.set(key, b);
+                      buckets.push(b);
+                    }
+                    b.items.push(t);
+                  }
+
+                  return buckets.map(bucket => {
+                    const sortedItems = [...bucket.items].sort((a, b) =>
+                      String(a.toothNumber || '').localeCompare(String(b.toothNumber || ''), 'tr-TR', { numeric: true })
+                    );
+
+                    if (sortedItems.length === 1) {
+                      return renderTreatmentItemCard(sortedItems[0], g);
+                    }
+
+                    const isExpanded = !!expandedMergedKeys[bucket.key];
+                    const first = sortedItems[0];
+                    const apptTime = first.sessions?.[0]?.startTime || first.plannedDate;
+                    const isCompleted = first.status === 'completed';
+                    const totalCost = sortedItems.reduce((sum, item) => sum + Number(item.cost || 0), 0);
+                    const docIds = getTreatmentDoctorIds(first);
+
+                    if (isExpanded) {
+                      return (
+                        <div
+                          key={bucket.key}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                            padding: 7,
+                            borderRadius: 9,
+                            background: 'var(--card-inner, #f1f5f9)',
+                            border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '2px 4px',
+                              gap: 6,
+                            }}
+                          >
+                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--btn-clinic-secondary-text, #0284c7)' }}>
+                              🦷 {sortedItems.map(i => i.toothNumber ? `#${i.toothNumber}` : '').filter(Boolean).join(', ')} · Tekil Düzenleme ({sortedItems.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedMergedKeys(prev => ({ ...prev, [bucket.key]: false }))}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                                background: 'var(--input-bg, #ffffff)',
+                                color: 'var(--btn-clinic-secondary-text, #0284c7)',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <ChevronUp size={12} /> Birleştir
+                            </button>
+                          </div>
+                          {sortedItems.map(item => renderTreatmentItemCard(item, g))}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        id={`treatment-${first.id}`}
+                        key={bucket.key}
+                        onClick={() => handleTreatmentCardClick(first, g)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          padding: '10px 11px',
+                          borderRadius: 8,
+                          background: 'var(--input-bg, #ffffff)',
+                          border: isCompleted ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--input-border, #cbd5e1)',
+                          borderLeft: isCompleted ? '3px solid #10b981' : '3px solid var(--accent, #0284c7)',
+                          fontSize: '0.76rem',
+                          cursor: 'pointer',
+                          boxSizing: 'border-box',
+                        }}
+                        title="Takvimde bu tedavi / randevu tarihine git"
+                      >
+                        {/* 1. Satır: Birleşik Diş Rozetleri + İşlem Adı + Toplam Fiyat + Ayır / Sil */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, flexWrap: 'wrap' }}>
+                            {sortedItems.map(item => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setExpandedMergedKeys(prev => ({ ...prev, [bucket.key]: true }));
+                                }}
+                                title={`#${item.toothNumber} dişini tekil düzenlemek için tıklayın`}
+                                style={{
+                                  padding: '2px 6px',
+                                  borderRadius: 5,
+                                  background: isCompleted ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--badge-clinic-bg, #e0f2fe)',
+                                  border: isCompleted ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--badge-clinic-border, #bae6fd)',
+                                  color: isCompleted ? 'var(--btn-clinic-mint-text, #15803d)' : 'var(--badge-clinic-text, #0369a1)',
+                                  fontWeight: 700,
+                                  fontSize: '0.71rem',
+                                  cursor: 'pointer',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {item.toothNumber ? `#${item.toothNumber}` : 'Genel'}
+                              </button>
+                            ))}
+                            <span
+                              style={{
+                                fontWeight: 700,
+                                color: 'var(--foreground)',
+                                fontSize: '0.82rem',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                              title={first.procedureName}
+                            >
+                              {first.procedureName}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                            {totalCost > 0 && (
+                              <span
+                                style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--foreground)', whiteSpace: 'nowrap' }}
+                                title={`${sortedItems.length} × ${(totalCost / sortedItems.length).toLocaleString('tr-TR')} ₺`}
+                              >
+                                {totalCost.toLocaleString('tr-TR')} ₺
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedMergedKeys(prev => ({ ...prev, [bucket.key]: true }))}
+                              title="Dişleri ayırarak tek tek düzenle"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 2,
+                                padding: '3px 7px',
+                                borderRadius: 6,
+                                border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                                background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+                                color: 'var(--btn-clinic-secondary-text, #0284c7)',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <ChevronDown size={12} /> Ayır
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmModal({
+                                  isOpen: true,
+                                  title: 'Birleşik İşlemleri Sil',
+                                  message: `Seçili ${sortedItems.length} dişe (${sortedItems.map(i => `#${i.toothNumber}`).join(', ')}) ait "${first.procedureName}" işlemlerini silmek istediğinize emin misiniz?`,
+                                  confirmText: 'Evet, Tümünü Sil',
+                                  variant: 'danger',
+                                  onConfirm: async () => {
+                                    await Promise.all(sortedItems.map(item => fetch(`/api/dental/treatments/${item.id}`, { method: 'DELETE' })));
+                                    refreshTreatmentsList();
+                                  },
+                                });
+                              }}
+                              style={{
+                                background: 'var(--card-inner, #f1f5f9)',
+                                border: '1px solid var(--input-border, #cbd5e1)',
+                                borderRadius: 6,
+                                color: 'var(--danger, #ef4444)',
+                                cursor: 'pointer',
+                                padding: '4px 6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                              title="Grubu Sil"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2. Satır: Toplu Durum ve Çoklu Hekim Seçici */}
+                        <div onClick={e => e.stopPropagation()} style={{ display: 'grid', gridTemplateColumns: '108px 1fr', gap: 6 }}>
+                          <select
+                            value={first.status || 'planned'}
+                            onChange={e => handleBatchStatusChange(sortedItems, e.target.value)}
+                            style={{
+                              width: '100%',
+                              fontSize: '0.73rem',
+                              padding: '5px 6px',
+                              borderRadius: 6,
+                              border: isCompleted ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--input-border, #cbd5e1)',
+                              background: isCompleted ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--card-inner, #f1f5f9)',
+                              color: isCompleted ? 'var(--btn-clinic-mint-text, #15803d)' : (first.status === 'in_progress' ? '#d97706' : 'var(--foreground)'),
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              outline: 'none',
+                              boxSizing: 'border-box',
+                            }}
+                          >
+                            <option value="planned">Planlandı</option>
+                            <option value="in_progress">Devam Ediyor</option>
+                            <option value="completed">✓ Yapıldı</option>
+                          </select>
+
+                          <TreatmentDoctorMultiSelect
+                            doctors={doctors}
+                            selectedDoctorIds={docIds}
+                            onChange={nextDocIds => handleBatchDoctorChange(sortedItems, nextDocIds, apptTime)}
+                            shifts={shifts}
+                            targetApptTime={apptTime || selectedEvent?.startTime}
+                            disabled={isCompleted}
+                            placeholder="Hekim Seç"
+                          />
+                        </div>
+
+                        {/* 3. Satır: Ortak Randevu / Tarih Butonu */}
+                        <div onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setFastScheduleTreatment({ ...first, batchTreatments: sortedItems });
+                            }}
+                            style={{
+                              width: '100%',
+                              background: isCompleted
+                                ? 'var(--btn-clinic-mint-bg, #f0fdf4)'
+                                : apptTime
+                                  ? 'var(--btn-clinic-secondary-bg, #eff6ff)'
+                                  : 'var(--card-inner, #f1f5f9)',
+                              border: isCompleted
+                                ? '1px solid var(--btn-clinic-mint-border, #86efac)'
+                                : apptTime
+                                  ? '1px solid var(--btn-clinic-secondary-border, #93c5fd)'
+                                  : '1px dashed var(--accent, #0284c7)',
+                              color: isCompleted
+                                ? 'var(--btn-clinic-mint-text, #15803d)'
+                                : 'var(--btn-clinic-secondary-text, #0284c7)',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              padding: '5px 10px',
+                              fontSize: '0.73rem',
+                              fontWeight: 600,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              boxSizing: 'border-box',
+                            }}
+                            title="Bu gruptaki tüm işlemler için ortak randevu saati belirle"
+                          >
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <CalendarDays size={13} />
+                              <span>
+                                {apptTime
+                                  ? new Date(apptTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+                                  : 'Tarih / Randevu Belirle'}
+                              </span>
+                            </span>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                              {apptTime ? <>Değiştir <ArrowUpRight size={12} /></> : '+ Planla'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  });
                 };
 
                 return (
@@ -2313,106 +2643,161 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                             if (groupTreatments.length === 0) return null;
                             const completedCount = groupTreatments.filter((t: any) => t.status === 'completed').length;
                             const groupTotal = groupTreatments.reduce((sum: number, t: any) => sum + Number(t.cost || 0), 0);
+                            const uniqueGroupDocIds = Array.from(new Set(groupTreatments.flatMap((t: any) => getTreatmentDoctorIds(t))));
+                            const progressPct = Math.round((completedCount / groupTreatments.length) * 100);
+
                             return (
                               <div key={g.id} style={{ background: 'var(--card-bg, #ffffff)', borderRadius: 10, border: '1px solid var(--input-border, #cbd5e1)', overflow: 'hidden' }}>
                                 <div
                                   onClick={() => handleGroupHeaderClick(g)}
                                   style={{
                                     display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    padding: '8px 10px',
+                                    flexDirection: 'column',
+                                    gap: 6,
+                                    padding: '9px 11px',
                                     background: 'var(--input-bg, #ffffff)',
                                     borderBottom: '1px solid var(--input-border, #cbd5e1)',
                                     cursor: 'pointer',
-                                    gap: 6,
                                   }}
                                   title="Takvimde bu plan tarihine git"
                                 >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '0.82rem' }}>📁</span>
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      {g.name}
-                                    </span>
-                                    <span style={{
-                                      fontSize: '0.66rem',
-                                      padding: '2px 7px',
-                                      borderRadius: 999,
-                                      background: completedCount === groupTreatments.length ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--badge-clinic-bg, #e0f2fe)',
-                                      border: completedCount === groupTreatments.length ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--badge-clinic-border, #bae6fd)',
-                                      color: completedCount === groupTreatments.length ? 'var(--btn-clinic-mint-text, #15803d)' : 'var(--badge-clinic-text, #0369a1)',
-                                      fontWeight: 700,
-                                    }}>
-                                      {completedCount > 0 ? `${completedCount}/${groupTreatments.length} Yapıldı` : `${groupTreatments.length} İşlem`}
-                                    </span>
+                                  {/* Üst Satır: Klasör İkonu + Grup Adı + Düzenle / Sil */}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                                      <FolderKanban size={15} style={{ color: 'var(--accent, #0284c7)', flexShrink: 0 }} />
+                                      <span
+                                        style={{
+                                          fontSize: '0.8rem',
+                                          fontWeight: 700,
+                                          color: 'var(--foreground)',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                        }}
+                                        title={g.name}
+                                      >
+                                        {g.name}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setEditingGroup({ ...g, treatments: groupTreatments });
+                                          setShowTedaviForm(true);
+                                        }}
+                                        style={{
+                                          background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+                                          border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                                          color: 'var(--btn-clinic-secondary-text, #0284c7)',
+                                          borderRadius: 6,
+                                          padding: '4px 8px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.7rem',
+                                          fontWeight: 700,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                        }}
+                                        title="Planı Düzenle"
+                                      >
+                                        <Pencil size={11} /> Düzenle
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setConfirmModal({
+                                            isOpen: true,
+                                            title: 'Tedavi Grubunu Sil',
+                                            message: `"${g.name}" tedavi grubunun ve içindeki tüm işlemlerin silinmesini onaylıyor musunuz?`,
+                                            confirmText: 'Evet, Sil',
+                                            variant: 'danger',
+                                            onConfirm: async () => {
+                                              await fetch(`/api/dental/treatment-groups/${g.id}`, { method: 'DELETE' });
+                                              refreshTreatmentsList();
+                                            },
+                                          });
+                                        }}
+                                        style={{
+                                          background: 'var(--card-inner, #f1f5f9)',
+                                          border: '1px solid var(--input-border, #cbd5e1)',
+                                          color: 'var(--danger, #ef4444)',
+                                          borderRadius: 6,
+                                          padding: '4px 7px',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                        }}
+                                        title="Grubu Sil"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Alt Satır: İşlem Sayısı + Katılan Hekim Sayısı + Toplam Tutar */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{
+                                        fontSize: '0.67rem',
+                                        padding: '2px 8px',
+                                        borderRadius: 999,
+                                        background: completedCount === groupTreatments.length ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--badge-clinic-bg, #e0f2fe)',
+                                        border: completedCount === groupTreatments.length ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--badge-clinic-border, #bae6fd)',
+                                        color: completedCount === groupTreatments.length ? 'var(--btn-clinic-mint-text, #15803d)' : 'var(--badge-clinic-text, #0369a1)',
+                                        fontWeight: 700,
+                                      }}>
+                                        {completedCount > 0 ? `${completedCount}/${groupTreatments.length} Yapıldı` : `${groupTreatments.length} İşlem`}
+                                      </span>
+                                      {uniqueGroupDocIds.length > 1 && (
+                                        <span style={{
+                                          fontSize: '0.66rem',
+                                          padding: '2px 7px',
+                                          borderRadius: 999,
+                                          background: 'var(--card-inner, #f1f5f9)',
+                                          border: '1px solid var(--input-border, #cbd5e1)',
+                                          color: 'var(--foreground-2)',
+                                          fontWeight: 600,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 3,
+                                        }}>
+                                          <Users size={11} /> {uniqueGroupDocIds.length} Hekim
+                                        </span>
+                                      )}
+                                    </div>
                                     {groupTotal > 0 && (
-                                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent, #0284c7)' }}>
-                                        · {groupTotal.toLocaleString('tr-TR')} ₺
+                                      <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--accent, #0284c7)' }}>
+                                        {groupTotal.toLocaleString('tr-TR')} ₺
                                       </span>
                                     )}
                                   </div>
-                                  <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        setEditingGroup({ ...g, treatments: groupTreatments });
-                                        setShowTedaviForm(true);
-                                      }}
-                                      style={{
-                                        background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
-                                        border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
-                                        color: 'var(--btn-clinic-secondary-text, #0284c7)',
-                                        borderRadius: 6,
-                                        padding: '3px 8px',
-                                        cursor: 'pointer',
-                                        fontSize: '0.7rem',
-                                        fontWeight: 700,
-                                      }}
-                                      title="Planı Düzenle"
-                                    >
-                                      ✏️ Düzenle
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        setConfirmModal({
-                                          isOpen: true,
-                                          title: 'Tedavi Grubunu Sil',
-                                          message: `"${g.name}" tedavi grubunun ve içindeki tüm işlemlerin silinmesini onaylıyor musunuz?`,
-                                          confirmText: 'Evet, Sil',
-                                          variant: 'danger',
-                                          onConfirm: async () => {
-                                            await fetch(`/api/dental/treatment-groups/${g.id}`, { method: 'DELETE' });
-                                            refreshTreatmentsList();
-                                          },
-                                        });
-                                      }}
-                                      style={{
-                                        background: 'var(--card-inner, #f1f5f9)',
-                                        border: '1px solid var(--input-border, #cbd5e1)',
-                                        color: 'var(--danger, #ef4444)',
-                                        borderRadius: 6,
-                                        padding: '3px 7px',
-                                        cursor: 'pointer',
-                                        fontSize: '0.7rem',
-                                      }}
-                                      title="Grubu Sil"
-                                    >
-                                      🗑️
-                                    </button>
-                                  </div>
+
+                                  {completedCount > 0 && (
+                                    <div style={{ height: 4, borderRadius: 999, background: 'var(--card-inner, #e2e8f0)', overflow: 'hidden' }}>
+                                      <div
+                                        style={{
+                                          width: `${progressPct}%`,
+                                          height: '100%',
+                                          background: completedCount === groupTreatments.length ? '#10b981' : 'var(--accent, #0284c7)',
+                                          transition: 'width 0.25s ease',
+                                        }}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                                 <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                  {groupTreatments.map((t: any) => renderTreatmentItemCard(t, g))}
+                                  {renderSmartGroupedTreatments(groupTreatments, g, g.id)}
                                 </div>
                               </div>
                             );
                           })}
 
                           {/* Ungrouped treatments if any */}
-                          {patientTreatments.filter((t: any) => !t.groupId).map((t: any) => renderTreatmentItemCard(t))}
+                          {renderSmartGroupedTreatments(patientTreatments.filter((t: any) => !t.groupId), undefined, 'ungrouped')}
                         </div>
                       )}
                     </div>
