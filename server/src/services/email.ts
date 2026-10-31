@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
 import type { Config } from '../integrations/managed/model'
 import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
+import { describeSmtpError } from '../integrations/managed/workflow'
 import { requireClinicId } from '../tenancy/context'
 
 export interface SendEmailOptions {
@@ -21,7 +22,7 @@ export async function sendEmail({ clinicId, to, subject, text, html }: SendEmail
 
   // Kontrol: Ayarlar eksik mi?
   if (!settings?.host || !settings.port || !settings.username || !settings.password) {
-    throw new Error('SMTP bağlantısı etkin değil. Klinikler ekranında kurulumu tamamlayın.')
+    throw new Error('SMTP bağlantısı etkin değil. 💡 Öneri: Panel → Klinikler ekranından E-posta / SMTP kurulumunu tamamlayın.')
   }
 
   const port = settings.port
@@ -35,6 +36,9 @@ export async function sendEmail({ clinicId, to, subject, text, html }: SendEmail
     port: port,
     secure: secure,
     requireTLS: !secure,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
     auth: {
       user: settings.username,
       pass: settings.password,
@@ -44,15 +48,21 @@ export async function sendEmail({ clinicId, to, subject, text, html }: SendEmail
     },
   })
 
-  // E-postayı gönder
-  const info = await transporter.sendMail({
-    from: `"${settings.fromName || 'Klinik Sistemi'}" <${settings.fromAddress || settings.username}>`,
-    to: Array.isArray(to) ? to.join(', ') : to,
-    subject,
-    text,
-    html: html || text,
-  })
+  try {
+    // E-postayı gönder
+    const info = await transporter.sendMail({
+      from: `"${settings.fromName || 'Klinik Sistemi'}" <${settings.fromAddress || settings.username}>`,
+      to: Array.isArray(to) ? to.join(', ') : to,
+      subject,
+      text,
+      html: html || text,
+    })
 
-  console.log(`[Email] E-posta başarıyla gönderildi: ${info.messageId}`)
-  return info
+    console.log(`[Email] E-posta başarıyla gönderildi: ${info.messageId}`)
+    return info
+  } catch (err: any) {
+    throw new Error(describeSmtpError(err, settings))
+  } finally {
+    transporter.close()
+  }
 }

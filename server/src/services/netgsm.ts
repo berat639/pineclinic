@@ -1,12 +1,12 @@
 const NETGSM_ERROR_REASONS: Record<string, string> = {
-  '20': 'Mesaj metni veya karakter sınırı hatası (Kod 20)',
-  '30': 'NetGSM API kullanıcı adı/şifre hatalı veya API erişim/IP izni kapalı (Kod 30)',
-  '40': 'Gönderici başlığı (MsgHeader) NetGSM hesabında tanımlı değil (Kod 40)',
-  '50': 'Abone hesabınız ile İYS kontrollü gönderim yapılamıyor (Kod 50)',
-  '51': 'Aboneliğinize tanımlı İYS Marka bilgisi bulunamadı (Kod 51)',
-  '70': 'Eksik veya hatalı sorgulama parametresi (Kod 70)',
-  '80': 'Gönderim sınır aşımı (Kod 80)',
-  '85': 'Mükerrer gönderim sınırı aşımı (Kod 85)',
+  '20': 'Mesaj metni veya karakter sınırı hatası (NetGSM Kod 20). 💡 Öneri: Mesajda desteklenmeyen özel karakter olmadığından ve 917 karakter sınırını aşmadığından emin olun.',
+  '30': 'NetGSM API kullanıcı adı/şifre hatalı veya API erişim/IP izni kapalı (NetGSM Kod 30). 💡 Öneri: 1) API kullanıcı kodu ve parolasını kontrol edin. 2) NetGSM Paneli → Abonelik İşlemleri → API İşlemleri menüsünden API erişimini açın ve varsa IP kısıtlamasına sunucu IP adresini ekleyin.',
+  '40': 'Gönderici başlığı (MsgHeader) NetGSM hesabında tanımlı veya onaylı değil (NetGSM Kod 40). 💡 Öneri: Başlık alanına girdiğiniz değerin (örn. ONLNEMLAKTN) NetGSM panelindeki onaylı başlığınızla büyük/küçük harf dahil birebir aynı olduğundan emin olun.',
+  '50': 'Abone hesabınız ile İYS kontrollü gönderim yapılamıyor (NetGSM Kod 50). 💡 Öneri: NetGSM panelinden İYS ayarlarınızı veya bilgilendirme başlığı yetkinizi kontrol edin.',
+  '51': 'Aboneliğinize tanımlı İYS Marka bilgisi bulunamadı (NetGSM Kod 51). 💡 Öneri: NetGSM panelinde başlığınıza tanımlı İYS marka kaydını kontrol edin.',
+  '70': 'Eksik veya hatalı sorgulama parametresi (NetGSM Kod 70). 💡 Öneri: Alıcı telefon numarasının 5XX XXX XX XX formatında geçerli bir GSM numarası olduğundan ve kullanıcı/başlık alanlarının dolu olduğundan emin olun.',
+  '80': 'Dakikalık gönderim sınır aşımı (NetGSM Kod 80). 💡 Öneri: 1 dakika bekleyip tekrar deneyin.',
+  '85': 'Aynı numaraya mükerrer gönderim sınırı aşımı (NetGSM Kod 85). 💡 Öneri: Aynı numaraya kısa sürede çok fazla SMS gönderildi; birkaç dakika bekleyin veya farklı bir test numarası girin.',
 }
 
 export async function sendSMS({

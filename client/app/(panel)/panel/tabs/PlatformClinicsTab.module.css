@@ -88,9 +88,71 @@
 }
 .secondaryButton:disabled { cursor: wait; opacity: .65; }
 
-.notice, .error { padding: 10px 12px; border: 1px solid; border-radius: 8px; font-size: 13px; }
+.notice, .error { padding: 12px 14px; border: 1px solid; border-radius: 10px; font-size: 13px; line-height: 1.5; }
 .notice { background: var(--clinic-success-bg); border-color: var(--clinic-success-border); color: var(--clinic-success-text); }
 .error { background: var(--clinic-danger-bg); border-color: var(--clinic-danger-border); color: var(--clinic-danger-text); }
+
+.diagnosticBox {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--clinic-danger-bg);
+  border: 1px solid var(--clinic-danger-border);
+  color: var(--clinic-danger-text);
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.diagnosticTitle {
+  font-weight: 700;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.suggestionBox {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--clinic-card);
+  border: 1px solid var(--clinic-border);
+  color: var(--clinic-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.quickFixRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.quickFixButton {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--clinic-primary);
+  border: 1px solid #3b82f6;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.quickFixButton:hover {
+  background: var(--clinic-primary-hover);
+}
+.hintBanner {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--clinic-surface);
+  border: 1px solid #3b82f6;
+  color: var(--clinic-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 
 .list { display: grid; gap: 10px; }
 .row {

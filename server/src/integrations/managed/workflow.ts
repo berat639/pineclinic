@@ -11,6 +11,43 @@ export function smtpTransport(c: Config) {
   const isSsl = c.port === 465 || c.secure === 'ssl'
   return nodemailer.createTransport({ host:c.host,port:c.port,secure:isSsl,requireTLS:!isSsl,auth:{user:c.username,pass:c.password},connectionTimeout:10000,greetingTimeout:10000,socketTimeout:15000,tls:{rejectUnauthorized:false} })
 }
+export function describeSmtpError(err: any, c: { host?: string; port?: number; username?: string; fromAddress?: string }): string {
+  const code = String(err?.code || '')
+  const msg = String(err?.message || '').toLowerCase()
+  const host = (c.host || '').toLowerCase()
+  const port = Number(c.port || 587)
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || msg.includes('getaddrinfo')) {
+    return `SMTP sunucu adresi (${c.host}) bulunamadı (DNS kaydı yok). 💡 Öneri: Sunucu adresinde yazım hatası olmadığından emin olun (örn. mx-out03.natrohost.com, mail.alanadi.com, smtp.gmail.com).`
+  }
+  if (code === 'EAUTH' || msg.includes('invalid login') || msg.includes('535')) {
+    if (host.includes('gmail') || host.includes('google')) {
+      return 'Gmail / Google Workspace kimlik doğrulaması reddedildi (535). 💡 Öneri: Google normal hesap şifresini kabul etmez; Google Hesabım → Güvenlik → 2 Adımlı Doğrulama → Uygulama Şifreleri menüsünden 16 haneli Uygulama Şifresi oluşturup Parola alanına girin.'
+    }
+    if (host.includes('yandex')) {
+      return 'Yandex SMTP kimlik doğrulaması reddedildi (535). 💡 Öneri: Yandex Hesap → Güvenlik → Uygulama Şifreleri menüsünden uygulama şifresi oluşturun ve Gönderici e-posta ile Kullanıcı adresinin aynı olduğundan emin olun.'
+    }
+    if (host.includes('office365') || host.includes('outlook')) {
+      return 'Microsoft 365 / Outlook kimlik doğrulaması reddedildi. 💡 Öneri: Microsoft 365 yönetim panelinden bu hesap için "Authenticated SMTP (Kimliği Doğrulanmış SMTP)" izninin açık olduğunu kontrol edin.'
+    }
+    return `SMTP kullanıcı adı (${c.username}) veya parolası sunucu tarafından reddedildi (535). 💡 Öneri: Kullanıcı alanına e-posta adresinin tamamını yazdığınızdan ve parolanın webmail giriş şifrenizle aynı olduğundan emin olun.`
+  }
+  if (code === 'ETIMEDOUT' || code === 'ECONNECTION' || code === 'ECONNREFUSED' || msg.includes('timeout') || msg.includes('econnrefused')) {
+    if (port === 587) {
+      return `Port 587 (STARTTLS) bağlantısı zaman aşımına uğradı (${c.host}:587 yanıt vermiyor). 💡 Öneri: Natro ve kurumsal mail sunucularında 587 portu kapalı veya yanıtsız olabilir; Port değerini 465 (SSL) yapıp sunucu olarak mx-out03.natrohost.com veya mail.alanadi.com ile tekrar kaydedip deneyin.`
+    }
+    if (port === 465) {
+      return `Port 465 (SSL) üzerinden ${c.host} sunucusuna bağlanılamadı. 💡 Öneri: Sunucu adresini kontrol edin (Natro için mx-out03.natrohost.com) veya Port 587 deneyin.`
+    }
+    return `SMTP sunucusuna (${c.host}:${port}) bağlanılamadı. 💡 Öneri: Standart SMTP portları olan 465 (SSL) veya 587 (TLS) değerlerinden birini deneyin.`
+  }
+  if (code === 'ESOCKET' || msg.includes('certificate') || msg.includes('altnames') || msg.includes('wrong version number') || msg.includes('ssl')) {
+    return `SMTP SSL/TLS güvenlik el sıkışması başarısız oldu (${c.host}:${port}). 💡 Öneri: Port 587 ise 465 (SSL) yapmayı deneyin; paylaşımlı hosting (Natro/cPanel) kullanıyorsanız mail.alanadi.com yerine sağlayıcının gerçek sunucu adını (örn. mx-out03.natrohost.com) girin.`
+  }
+  if (code === 'EENVELOPE' || msg.includes('sender') || msg.includes('550') || msg.includes('553')) {
+    return `SMTP sunucusu gönderici adresini (${c.fromAddress || c.username}) veya alıcıyı reddetti. 💡 Öneri: "Gönderici e-posta" alanının "Kullanıcı" alanındaki e-posta adresiyle (${c.username}) birebir aynı olduğundan emin olun.`
+  }
+  return `SMTP bağlantısı tamamlanamadı (${err?.message || 'Bilinmeyen hata'}). 💡 Öneri: Port 465 (SSL) ve sağlayıcı sunucu adresini (örn. mx-out03.natrohost.com) kullanarak tekrar deneyin.`
+}
 export async function testInfo(id: string, service: Service, testId: string) {
   await ensureIntegrations(); await clinicExists(id)
   const [test] = await db.execute(sql`SELECT id,revision,kind,target,status,evidence,message,created_at,expires_at,confirmed_at FROM integration_tests WHERE id=${testId} AND clinic_id=${id} AND service=${service}`)
@@ -50,26 +87,22 @@ export async function beginTest(id: string, service: Service, body: Record<strin
       await reconcileAsterisk()
       // Registration is asynchronous; the test remains pending and can be refreshed.
       if (kind !== 'inbound') {
-        if (!await registered(id)) throw new SetupError('SIP kaydı henüz hazır değil. Bağlantı durumunu kontrol edip testi yeniden başlatın.')
+        if (!await registered(id)) throw new SetupError('SIP kaydı henüz hazır değil (Unregistered). 💡 Öneri: 1) SIP kullanıcı adı ve SIP şifresini (Web panel şifresi değil, Ses/Santral SIP şifresi) kontrol edin. 2) NetGSM Ses Paketinizde sunucu IP adresinin güvenilir IP listesinde tanımlı olduğundan emin olun.')
         const result = await sendAmiAction({Action:'Originate',Channel:`PJSIP/${target.replace('+','')}@${endpointId(id)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:c.callerId!.replace('+',''),Variable:`CUSTOMER_NUMBER=${target},VOICEAI_CLINIC_ID=${id},VOICEAI_TEST_ID=${created.id}`,Async:'true'})
-        if (!result.success) throw new SetupError(result.message)
+        if (!result.success) throw new SetupError(`${result.message} 💡 Öneri: Çıkış numarasının Gelen numaralar listesinde yer aldığından ve test numarasının +90 5XX... cep telefonu olduğundan emin olun.`)
       }
     } else if (service === 'sms') {
       const result = await sendSMS({usercode:c.username,password:c.password,senderId:c.senderId!,phone:target,message:'Klinik entegrasyon test mesajı.'})
-      if (!result.success) throw new SetupError(result.reason || 'SMS sağlayıcısı test gönderimini kabul etmedi')
+      if (!result.success) throw new SetupError(result.reason || 'SMS sağlayıcısı test gönderimini kabul etmedi. 💡 Öneri: API kullanıcı kodu, parola ve onaylı gönderici başlığını (MsgHeader) kontrol edin.')
     } else {
       const transport = smtpTransport(c)
       try {
         await transport.verify()
         const info = await transport.sendMail({from:{name:c.fromName || 'Klinik',address:c.fromAddress!},to:target,subject:'Klinik bağlantı testi',text:'Klinik e-posta entegrasyonu test mesajı.'})
-        if (!info.accepted?.length) throw new SetupError('SMTP alıcıyı kabul etmedi')
+        if (!info.accepted?.length) throw new SetupError('SMTP sunucusu alıcı e-posta adresini kabul etmedi. 💡 Öneri: Test alıcısı alanına geçerli bir e-posta adresi girin ve Gönderici e-posta adresinin Kullanıcı ile aynı olduğundan emin olun.')
       } catch (smtpErr: any) {
         if (smtpErr instanceof SetupError) throw smtpErr
-        const code = String(smtpErr?.code || '')
-        if (code === 'EAUTH') throw new SetupError('SMTP kullanıcı adı veya parolası hatalı (Kurumsal/Gmail hesaplarında Uygulama Şifresi gerekebilir)')
-        if (code === 'ECONNECTION' || code === 'ETIMEDOUT') throw new SetupError('SMTP sunucusuna bağlanılamadı; sunucu adresini ve portu (587 veya 465) kontrol edin')
-        if (code === 'ESOCKET') throw new SetupError('SMTP güvenlik (SSL/TLS) bağlantısı kurulamadı; port 465 veya 587 deneyin')
-        throw smtpErr
+        throw new SetupError(describeSmtpError(smtpErr, c))
       } finally { transport.close() }
     }
     await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id} AND status='pending'`)
