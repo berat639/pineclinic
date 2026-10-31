@@ -1598,7 +1598,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             <div
               className="cal-responsive-panel"
               style={{
-                position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '380px',
+                position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: '435px',
                 backgroundColor: 'var(--card-bg, #1e293b)', borderLeft: '1px solid var(--divider)',
                 zIndex: 9999, padding: '24px', overflowY: 'auto',
                 boxShadow: '-4px 0 20px rgba(0,0,0,0.3)'
