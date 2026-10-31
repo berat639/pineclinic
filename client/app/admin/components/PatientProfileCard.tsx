@@ -1,4 +1,5 @@
 import React from 'react'
+import PatientConsentPanel from './PatientConsentPanel'
 
 interface PatientProfileCardProps {
   profile: any
@@ -84,7 +85,12 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
 
       {/* İletişim İzinleri (KVKK) */}
       <div style={cardStyle}>
-        <div style={headerStyle}>🛡️ İletişim İzinleri (KVKK)</div>
+        <div style={headerStyle}>🛡️ Bildirim Onamı & İletişim İzinleri (KVKK)</div>
+        {patient?.id && (
+          <div style={{ marginBottom: 10 }}>
+            <PatientConsentPanel patientId={patient.id} />
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
           <ConsentRow label="💬 SMS" field="smsOptOut" optedOut={patient.smsOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
           <ConsentRow label="📧 E-posta" field="emailOptOut" optedOut={patient.emailOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />

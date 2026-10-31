@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { toast } from 'react-hot-toast'
 import { Trash2, X, AlertCircle } from 'lucide-react'
 import PatientProfileCard from './PatientProfileCard'
+import PatientConsentPanel from './PatientConsentPanel'
 import Pagination from './Pagination'
 import AddPatientModal from './AddPatientModal'
 import ConfirmModal from './ConfirmModal'
@@ -1127,7 +1128,7 @@ export default function PatientsTab() {
       {/* ── Hasta Düzenle Modalı (Ad ve Soyad Ayrı) ─────────────────────────── */}
       {editingPatient && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--card-bg, #1e293b)', padding: '1.5rem', borderRadius: 14, border: '1px solid var(--input-border, #334155)', width: 440, maxWidth: '92vw', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ background: 'var(--card-bg, #1e293b)', padding: '1.5rem', borderRadius: 14, border: '1px solid var(--input-border, #334155)', width: 520, maxWidth: '94vw', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0, color: 'var(--foreground, #ffffff)', fontSize: '1.1rem', fontWeight: 700 }}>Hasta Bilgilerini Düzenle</h3>
               <button
@@ -1196,20 +1197,47 @@ export default function PatientsTab() {
                 <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
               
-              <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>İletişim İzinleri (KVKK)</label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!editFormData.smsOptOut} onChange={e => setEditFormData({...editFormData, smsOptOut: !e.target.checked})} />
-                  SMS ile bilgilendirilmek istiyorum
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!editFormData.emailOptOut} onChange={e => setEditFormData({...editFormData, emailOptOut: !e.target.checked})} />
-                  E-posta ile bilgilendirilmek istiyorum
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!editFormData.whatsappOptOut} onChange={e => setEditFormData({...editFormData, whatsappOptOut: !e.target.checked})} />
-                  WhatsApp ile bilgilendirilmek istiyorum
-                </label>
+              <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>Bildirim Onamı & İletişim İzinleri (KVKK)</label>
+                <PatientConsentPanel
+                  patientId={editingPatient.id}
+                  unsavedContact={{
+                    phone: editFormData.phone,
+                    email: editFormData.email,
+                    smsOptOut: editFormData.smsOptOut,
+                    emailOptOut: editFormData.emailOptOut,
+                    whatsappOptOut: editFormData.whatsappOptOut,
+                  }}
+                  onContactChange={(contact) => {
+                    setEditFormData(prev => ({
+                      ...prev,
+                      phone: contact.phone ?? prev.phone,
+                      email: contact.email ?? prev.email,
+                    }))
+                    loadPatients()
+                  }}
+                  onConsentChange={(nextOptOuts) => {
+                    setEditFormData(prev => ({
+                      ...prev,
+                      ...nextOptOuts,
+                    }))
+                    loadPatients()
+                  }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4, borderTop: '1px solid var(--divider, #334155)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!editFormData.smsOptOut} onChange={e => setEditFormData({...editFormData, smsOptOut: !e.target.checked})} />
+                    SMS ile bilgilendirilmek istiyorum
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!editFormData.emailOptOut} onChange={e => setEditFormData({...editFormData, emailOptOut: !e.target.checked})} />
+                    E-posta ile bilgilendirilmek istiyorum
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!editFormData.whatsappOptOut} onChange={e => setEditFormData({...editFormData, whatsappOptOut: !e.target.checked})} />
+                    WhatsApp ile bilgilendirilmek istiyorum
+                  </label>
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
