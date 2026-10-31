@@ -4,16 +4,22 @@ import { BriefcaseMedical, X, Pencil, Trash2, Plus, Mic, MicOff, Check, RotateCc
 import dynamic from 'next/dynamic';
 import { ToothChip, UPPER_TEETH, LOWER_TEETH, inputStyle } from './ToothChip';
 import DicomViewer from './DicomViewer';
+import PatientConsentPanel from './PatientConsentPanel';
+import PlanMediaPanel, { type PlanAttachment } from './PlanMediaPanel';
+import { notificationChannels, type NotificationChannel } from '../../../lib/notification-channels';
+import PineTreatmentPlanView from './PineTreatmentPlanView';
 import ConfirmModal from './ConfirmModal';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 import type { DefectMarker } from './Odontogram3D';
+import { calculateTreatmentPrices } from '../../../lib/treatment-pricing';
+import { treatmentTargets, type TreatmentScope } from '../../../lib/treatment-targets';
 
 const Odontogram3D = dynamic(() => import('./Odontogram3D'), {
   ssr: false,
   loading: () => (
-    <div style={{ height: 440, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0b1120', borderRadius: 8, color: '#94a3b8', fontSize: 13, border: '1px solid #334155', gap: 10 }}>
+    <div style={{ height: 440, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--card-bg)', borderRadius: 8, color: 'var(--foreground-2)', fontSize: 13, border: '1px solid var(--input-border)', gap: 10 }}>
       <span style={{ fontSize: 28 }}>🦷</span>
-      <span style={{ fontWeight: 600, color: '#f8fafc' }}>3D Anatomik Odontogram Yükleniyor...</span>
+      <span style={{ fontWeight: 600, color: 'var(--foreground)' }}>3D Anatomik Odontogram Yükleniyor...</span>
     </div>
   ),
 });
@@ -27,14 +33,19 @@ interface AssistantCommand {
   treatments: any[];
 }
 
+type DraftItem = { id: string; name: string; price: number; indications: string[]; doctorId: string | null; materials: any[]; color?: string; surface?: string; section?: string; status?: string; locked?: boolean; dcmUrl?: string | null; procedureId?: string; scope?: 'tooth' | 'jaw' | 'mouth'; originalIndication?: string | null }
+const targetLabel = (target: string) => target === 'upper' ? 'Üst çene' : target === 'lower' ? 'Alt çene' : target === 'general' ? 'Tüm ağız' : `Diş ${target}`;
+const normalizeSection = (value?: string) => value === 'Kuron' ? 'crown' : value === 'Kole (Servikal)' ? 'cervical' : value === 'Kök & Apeks' ? 'root' : value;
+
 export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, shifts = [], onClose, onSaved, editingGroup }: any) {
   const toothDetailsBackdropDismiss = useBackdropDismiss(() => setSelectedToothForDetails(null));
   const contextMenuBackdropDismiss = useBackdropDismiss(() => setContextMenu(null));
-  const [toothDrafts, setToothDrafts] = useState<Record<string, { id: string, name: string, price: number, indications: string[], doctorId: string | null, materials: any[], color?: string, surface?: string, section?: string }[]>>({})
+  const [toothDrafts, setToothDrafts] = useState<Record<string, DraftItem[]>>({})
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([])
   const [selectionMode, setSelectionMode] = useState<'inspect' | 'batch'>('batch');
   const [isQuickSelectOpen, setIsQuickSelectOpen] = useState(false);
   const [odontogramMode, setOdontogramMode] = useState<'2d' | '3d'>('2d');
+  const [jawSelection, setJawSelection] = useState<'all' | 'upper' | 'lower'>('all');
   const [toothSurfaces, setToothSurfaces] = useState<Record<number, string[]>>({});
   const [toothSections, setToothSections] = useState<Record<number, string>>({});
   const [defectMarkers, setDefectMarkers] = useState<DefectMarker[]>([]);
@@ -64,103 +75,189 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     onConfirm: () => {}
   });
 
-  React.useEffect(() => {
-    fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json()).then(setConsultations).catch(() => { });
-    fetch(`/api/dental/inventory`).then(r => r.json()).then(setInventory).catch(() => { });
-    if (clinicId) {
-      fetch(`/api/dental/clinics/${clinicId}/consultations/autocomplete`).then(r => r.json()).then(setAutocomplete).catch(() => { });
-    }
-  }, [selectedEvent.patientId, clinicId]);
-
   const [groupName, setGroupName] = useState<string>(editingGroup ? editingGroup.name : `Tedavi Planı - ${new Date().toLocaleDateString('tr-TR')}`);
+  const [planIdentity, setPlanIdentity] = useState<{ id: string; version: number } | null>(null);
+  const [planLoading, setPlanLoading] = useState(!!editingGroup);
+  const [planLoadError, setPlanLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [baseDataLoading, setBaseDataLoading] = useState(true);
+  const [baseDataError, setBaseDataError] = useState<string | null>(null);
+  const [planNote, setPlanNote] = useState('');
+  const [savedDcmUrl, setSavedDcmUrl] = useState<string | null>(null);
+  const [planAttachments, setPlanAttachments] = useState<PlanAttachment[]>([]);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const [advancedView, setAdvancedView] = useState(false);
+  const [contactOverride, setContactOverride] = useState<{ phone: string | null; email: string | null } | null>(null);
+  const [notificationChanged, setNotificationChanged] = useState(false);
+  const savingRef = useRef(false);
+  const idempotencyKey = useRef<string | null>(null);
+  const initialSnapshot = useRef<string | null>(null);
+  const updateSnapshotAfterSave = useRef(false);
+  const [, setSnapshotRevision] = useState(0);
 
-  const [procTemplates, setProcTemplates] = useState<any[]>([
-    { name: 'Kompozit Dolgu (Tek Yüzey)', price: 1200, color: '#3b82f6' },
-    { name: 'Kanal Tedavisi (Tek Kanal)', price: 3500, color: '#ec4899' },
-    { name: 'Diş Çekimi', price: 800, color: '#ef4444' },
-    { name: 'İmplant (Yerli)', price: 8000, color: '#06b6d4' },
-    { name: 'Zirkonyum Kuron', price: 5000, color: '#f59e0b' },
-  ])
+  const [procTemplates, setProcTemplates] = useState<any[]>([])
+  const [indicationIds, setIndicationIds] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (editingGroup && editingGroup.treatments) {
-      const drafts: any = {};
-      const teethSet = new Set<number>();
-      const initialSurfaces: Record<number, string[]> = {};
-      const initialSections: Record<number, string> = {};
+    const controller = new AbortController();
+    setBaseDataLoading(true); setBaseDataError(null);
+    const read = async (url: string) => {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error('Veriler yüklenemedi');
+      return response.json();
+    };
+    Promise.all([
+      read(`/api/dental/patients/${selectedEvent.patientId}/consultations`),
+      read('/api/dental/inventory'), read('/api/dental/treatment-catalog'),
+      clinicId ? read(`/api/dental/clinics/${clinicId}/consultations/autocomplete`) : Promise.resolve({ consultationNotes: [], diseaseNotes: [] }),
+    ]).then(([notes, stock, catalog, completion]) => {
+      if (!Array.isArray(notes) || !Array.isArray(stock) || !Array.isArray(catalog)) throw new Error('Veriler geçersiz');
+      setConsultations(notes); setInventory(stock); setAutocomplete(completion);
+      setProcTemplates(catalog.filter((entry: any) => entry.kind === 'procedure').map((entry: any) => ({
+        id: entry.id, name: entry.name, scope: entry.scope, price: entry.priceMinor / 100, color: entry.color, materials: entry.materials,
+      })));
+      const indications = catalog.filter((entry: any) => entry.kind === 'indication');
+      setIndTemplates(indications.map((entry: any) => entry.name));
+      setIndicationIds(Object.fromEntries(indications.map((entry: any) => [entry.name, entry.id])));
+      setBaseDataLoading(false);
+    }).catch(error => {
+      if (error.name !== 'AbortError') { setBaseDataError('Hasta, stok veya katalog verileri yüklenemedi.'); setBaseDataLoading(false); }
+    });
+    return () => controller.abort();
+  }, [selectedEvent.patientId, clinicId, loadAttempt]);
 
-      editingGroup.treatments.forEach((t: any) => {
-        const toothStr = String(t.toothNumber || 'general');
-        const toothNum = Number(t.toothNumber);
-        if (t.toothNumber) teethSet.add(toothNum);
-        if (!drafts[toothStr]) drafts[toothStr] = [];
-        const matchedProc = procTemplates.find(p => p.name === t.procedureName);
-
-        let parsedSurface: string | undefined;
-        let parsedSection: string | undefined;
-        let cleanIndication = t.indication || '';
-
-        // Format örn: "[Yüzey: MOD | Bölüm: Kuron]"
-        const metaMatch = cleanIndication.match(/\[([^\]]*(?:Yüzey|Bölüm)[^\]]*)\]/i);
-        if (metaMatch) {
-          const inner = metaMatch[1];
-          const parts = inner.split('|').map((s: string) => s.trim());
-          parts.forEach((p: string) => {
-            if (p.toLowerCase().startsWith('yüzey:')) {
-              parsedSurface = p.split(':')[1]?.trim();
-            } else if (p.toLowerCase().startsWith('bölüm:')) {
-              parsedSection = p.split(':')[1]?.trim();
+  useEffect(() => {
+    if (!editingGroup?.id) return;
+    const controller = new AbortController();
+    setPlanLoading(true);
+    setPlanLoadError(null);
+    initialSnapshot.current = null;
+    fetch(`/api/dental/treatment-groups/${editingGroup.id}`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Plan yüklenemedi');
+        return response.json();
+      })
+      .then(plan => {
+        const drafts: Record<string, DraftItem[]> = {};
+        const surfaces: Record<number, string[]> = {};
+        const sections: Record<number, string> = {};
+        for (const t of plan.treatments || []) {
+          const tooth = String(t.toothNumber || 'general');
+          const number = Number(t.toothNumber);
+          let indication = t.indication || '';
+          let surface: string | undefined;
+          let section: string | undefined;
+          const match = indication.match(/\[([^\]]*(?:Yüzey|Bölüm)[^\]]*)\]/i);
+          if (match) {
+            for (const part of match[1].split('|').map((value: string) => value.trim())) {
+              if (part.toLocaleLowerCase('tr').startsWith('yüzey:')) surface = part.split(':')[1]?.trim();
+              if (part.toLocaleLowerCase('tr').startsWith('bölüm:')) section = part.split(':')[1]?.trim();
             }
+            indication = indication.replace(match[0], '').trim();
+          }
+          section = normalizeSection(section);
+          if (number && surface) surfaces[number] = surface.split('');
+          if (number && section) sections[number] = section;
+          (drafts[tooth] ||= []).push({
+            id: t.id, name: t.procedureName, price: t.basePriceMinor / 100,
+            indications: indication ? indication.split(',').map((value: string) => value.trim()).filter(Boolean) : [],
+            doctorId: t.doctorId || null, materials: Array.isArray(t.materials) ? t.materials : [],
+            surface, section, status: t.status, locked: t.locked, dcmUrl: t.dcmUrl, originalIndication: t.indication,
+            procedureId: t.metadata?.procedureId, scope: t.metadata?.scope || 'tooth', color: t.metadata?.color,
           });
-          cleanIndication = cleanIndication.replace(metaMatch[0], '').trim();
         }
-
-        if (toothNum && parsedSurface) {
-          initialSurfaces[toothNum] = parsedSurface.split('');
-        }
-        if (toothNum && parsedSection) {
-          initialSections[toothNum] = parsedSection;
-        }
-
-        drafts[toothStr].push({
-          id: t.id || Date.now().toString(),
-          name: t.procedureName,
-          price: t.cost,
-          indications: cleanIndication ? [cleanIndication] : [],
-          doctorId: t.doctorId || null,
-          materials: [],
-          color: matchedProc ? matchedProc.color : undefined,
-          surface: parsedSurface,
-          section: parsedSection
-        });
+        setToothDrafts(drafts);
+        setSelectedTeeth([]);
+        setToothSurfaces(plan.metadata?.toothSurfaces || surfaces);
+        const savedSections = plan.metadata?.toothSections || sections;
+        setToothSections(Object.fromEntries(Object.entries(savedSections).map(([key, value]) => [key, normalizeSection(String(value)) || ''])));
+        setDefectMarkers(Array.isArray(plan.metadata?.defectMarkers) ? plan.metadata.defectMarkers : []);
+        setGroupName(plan.name);
+        setPlanIdentity({ id: plan.id, version: plan.version });
+        setPlanNote(plan.consultationNote || '');
+        setDiscount(plan.discountPercentBps / 100 || 0);
+        setDiscountFixed(plan.discountFixedMinor / 100 || 0);
+        setDefaultDoctorId(plan.metadata?.defaultDoctorId || null);
+        const firstItem = (plan.treatments || [])[0];
+        setIsPeriodic(firstItem !== undefined ? !!firstItem.isPeriodic : !!plan.metadata?.isPeriodic);
+        setPeriodDays(firstItem?.periodDays || Number(plan.metadata?.periodDays) || 180);
+        const channels = Array.isArray(plan.metadata?.notificationChannels) ? plan.metadata.notificationChannels : firstItem?.notifyPatient ? notificationChannels(firstItem.notificationType) : [];
+        setNotifyPatient(channels.length > 0);
+        setNotificationType(channels.join(','));
+        setNotificationChanged(false);
+        setSavedDcmUrl((plan.treatments || []).find((item: any) => item.dcmUrl)?.dcmUrl || null);
+        setPlanAttachments(Array.isArray(plan.attachments) ? plan.attachments : []);
+        setPlanLoading(false);
+      })
+      .catch(error => {
+        if (error.name !== 'AbortError') { setPlanLoadError('Plan yüklenemedi. Yeniden deneyin.'); setPlanLoading(false); }
       });
-      setToothDrafts(drafts);
-      setSelectedTeeth(Array.from(teethSet));
-      if (Object.keys(initialSurfaces).length > 0) setToothSurfaces(initialSurfaces);
-      if (Object.keys(initialSections).length > 0) setToothSections(initialSections);
-    }
-  }, [editingGroup]);
-  const [indTemplates, setIndTemplates] = useState<string[]>([
-    'Çürük', 'Kırık', 'Eksik Diş', 'Enfeksiyon', 'Kanal Yenileme', 'Estetik',
-  ])
+    return () => controller.abort();
+  }, [editingGroup?.id, loadAttempt]);
+  const [indTemplates, setIndTemplates] = useState<string[]>([])
   const [editingTemplate, setEditingTemplate] = useState<{ type: 'procedure' | 'indication', index: number } | null>(null)
   const [newTemplateType, setNewTemplateType] = useState<'procedure' | 'indication'>('procedure')
   const [newTemplateInput, setNewTemplateInput] = useState('')
   const [newTemplatePrice, setNewTemplatePrice] = useState<number>(0)
   const [newTemplateMaterials, setNewTemplateMaterials] = useState<any[]>([])
   const [newTemplateColor, setNewTemplateColor] = useState('#3b82f6')
+  const [newTemplateScope, setNewTemplateScope] = useState<'tooth' | 'jaw' | 'mouth'>('tooth');
+  const [catalogSaving, setCatalogSaving] = useState(false);
+
+  const saveCatalogTemplate = async () => {
+    if (catalogSaving || !newTemplateInput.trim()) return;
+    const id = editingTemplate?.type === 'procedure' ? procTemplates[editingTemplate.index]?.id
+      : editingTemplate ? indicationIds[indTemplates[editingTemplate.index]] : undefined;
+    setCatalogSaving(true);
+    try {
+      const response = await fetch(id ? `/api/dental/treatment-catalog/${id}` : '/api/dental/treatment-catalog', {
+        method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: newTemplateType, name: newTemplateInput.trim(), scope: newTemplateScope,
+          priceMinor: Math.round(newTemplatePrice * 100), color: newTemplateColor, materials: newTemplateMaterials }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Katalog kaydedilemedi.');
+      if (newTemplateType === 'procedure') {
+        const item = { id: result.id, name: result.name, scope: result.scope, price: result.priceMinor / 100, color: result.color, materials: result.materials };
+        setProcTemplates(previous => id ? previous.map(entry => entry.id === id ? item : entry) : [...previous, item]);
+      } else {
+        const previousName = editingTemplate ? indTemplates[editingTemplate.index] : undefined;
+        setIndTemplates(previous => previousName ? previous.map(name => name === previousName ? result.name : name) : [...previous, result.name]);
+        setIndicationIds(previous => { const next = { ...previous }; if (previousName) delete next[previousName]; next[result.name] = result.id; return next; });
+      }
+      setSelectedTemplates({ procedures: [], indications: [] }); setActiveSelectionMaterials([]);
+      setEditingTemplate(null); setNewTemplateInput(''); setNewTemplatePrice(0); setNewTemplateMaterials([]); setNewTemplateScope('tooth');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Katalog kaydedilemedi.'); }
+    finally { setCatalogSaving(false); }
+  };
+
+  const archiveCatalogTemplate = async (id: string | undefined, kind: 'procedure' | 'indication', name: string) => {
+    if (!id || catalogSaving) return;
+    setCatalogSaving(true);
+    try {
+      const response = await fetch(`/api/dental/treatment-catalog/${id}`, { method: 'DELETE' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Katalog kaydı kaldırılamadı.');
+      if (kind === 'procedure') setProcTemplates(previous => previous.filter(entry => entry.id !== id));
+      else { setIndTemplates(previous => previous.filter(entry => entry !== name)); setIndicationIds(previous => { const next = { ...previous }; delete next[name]; return next; }); }
+      setSelectedTemplates({ procedures: [], indications: [] }); setActiveSelectionMaterials([]);
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Katalog kaydı kaldırılamadı.'); }
+    finally { setCatalogSaving(false); }
+  };
 
   const [treatmentDcmFile, setTreatmentDcmFile] = useState<File | null>(null)
   const [isDicomSectionOpen, setIsDicomSectionOpen] = useState(false)
   const [isNotesSectionOpen, setIsNotesSectionOpen] = useState(false)
 
   const [discount, setDiscount] = useState<number>(0)
-  const [discountType, setDiscountType] = useState<'amount' | 'percentage'>('percentage')
+  const [discountFixed, setDiscountFixed] = useState<number>(0)
 
   const [isPeriodic, setIsPeriodic] = useState(false)
   const [periodDays, setPeriodDays] = useState<number>(180)
   const [notifyPatient, setNotifyPatient] = useState(false)
-  const [notificationType, setNotificationType] = useState('sms')
+  const [notificationType, setNotificationType] = useState('')
   const [missingPhone, setMissingPhone] = useState('')
   const [missingEmail, setMissingEmail] = useState('')
 
@@ -201,6 +298,26 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const noiseFloorRmsRef = useRef<number>(0.008);
   const lastNearFieldSpeechAtRef = useRef<number>(0);
   const peakUtteranceRmsRef = useRef<number>(0);
+
+  const snapshot = JSON.stringify({ groupName, toothDrafts, toothSurfaces, toothSections, defectMarkers,
+    planNote, discount, discountFixed, defaultDoctorId, isPeriodic, periodDays, notifyPatient, notificationType, savedDcmUrl,
+    attachments: planAttachments.map(item => item.id),
+    selectedFile: treatmentDcmFile ? `${treatmentDcmFile.name}:${treatmentDcmFile.size}:${treatmentDcmFile.lastModified}` : null });
+  useEffect(() => {
+    if (!planLoading && !planLoadError && (initialSnapshot.current === null || updateSnapshotAfterSave.current)) {
+      initialSnapshot.current = snapshot;
+      updateSnapshotAfterSave.current = false;
+      setSnapshotRevision(value => value + 1);
+    }
+  }, [snapshot, planLoading, planLoadError]);
+  const hasUnsavedChanges = initialSnapshot.current !== null && initialSnapshot.current !== snapshot;
+  let pricing: ReturnType<typeof calculateTreatmentPrices> | null = null;
+  try {
+    pricing = calculateTreatmentPrices(Object.values(toothDrafts).flat().map(item => ({
+      basePriceMinor: Math.round(item.price * 100),
+      materials: item.materials.map(material => ({ quantity: Number(material.quantity), unitSalePriceMinor: Number(material.unitSalePriceMinor || 0) })),
+    })), Math.round(discount * 100), Math.round(discountFixed * 100));
+  } catch { /* Invalid inputs are reported when saving. */ }
 
   // Anatomik Diş Grupları ve Kadranlar
   const QUADRANT_1 = [18, 17, 16, 15, 14, 13, 12, 11];
@@ -249,6 +366,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   const handleQuickSelect = (type: 'all' | 'upper' | 'lower' | 'q1' | 'q2' | 'q3' | 'q4' | 'anterior' | 'posterior' | 'clear') => {
+    if (type === 'all' || type === 'upper' || type === 'lower') setJawSelection(type);
     const teeth = getTeethForQuickSelect(type);
     setSelectedTeeth(teeth);
     if (teeth.length > 0) {
@@ -290,13 +408,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   // 2D ve 3D Odontogram için ortak sürükle-bırak tedavi atama yöneticisi
-  const handleDropTreatment = (targets: number[], treatmentData: any) => {
+  const handleDropTreatment = (targets: Array<number | string>, treatmentData: any) => {
     if (!targets || targets.length === 0 || !treatmentData) return;
 
-    // Eğer tek dişe bırakıldıysa ve o diş çoklu seçimin bir parçasıysa, seçili tüm dişlere uygula
-    const effectiveTargets = (targets.length === 1 && selectedTeeth.includes(targets[0]) && selectedTeeth.length > 1)
-      ? selectedTeeth
-      : targets;
+    const effectiveTargets = targets;
 
     // treatmentData JSON string veya iç içe nesne olarak geldiyse güvenle çöz
     let resolved = { ...treatmentData };
@@ -327,47 +442,42 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       return;
     }
 
+    const keysFor = (scope: TreatmentScope | undefined) => treatmentTargets(scope || 'tooth', effectiveTargets);
+
     setToothDrafts(prev => {
       const next = { ...prev };
-      effectiveTargets.forEach(t => {
-        const tk = String(t);
-        next[tk] = next[tk] ? [...next[tk]] : [];
-
-        if (procsToAdd.length > 0) {
-          procsToAdd.forEach(p => {
-            if (!next[tk].find((x: any) => x.name.toLowerCase() === p.name.toLowerCase())) {
-              next[tk].push({
-                id: Math.random().toString(36).substring(7),
-                name: p.name,
-                price: p.price || 0,
-                indications: [...indsToAdd],
-                doctorId: defaultDoctorId,
-                materials: [...(activeMaterials || p.materials || []).map((m: any) => ({ ...m }))],
-                color: p.color || '#3b82f6'
-              });
-            }
-          });
-        } else if (indsToAdd.length > 0) {
-          if (next[tk].length > 0) {
-            const last = next[tk][next[tk].length - 1];
-            indsToAdd.forEach(ind => {
-              if (!last.indications.includes(ind)) last.indications.push(ind);
-            });
-          }
+      if (procsToAdd.length) {
+        for (const proc of procsToAdd) for (const key of keysFor(proc.scope)) {
+          next[key] = [...(next[key] || []), {
+            id: Math.random().toString(36).substring(7), procedureId: proc.id, scope: proc.scope || 'tooth',
+            name: proc.name, price: proc.price || 0, indications: [...indsToAdd], doctorId: defaultDoctorId,
+            materials: [...((procsToAdd.length === 1 ? activeMaterials : undefined) || proc.materials || []).map((material: any) => ({ ...material }))],
+            color: proc.color || '#3b82f6', surface: resolved.surface || toothSurfaces[Number(key)]?.join(''), section: resolved.section || toothSections[Number(key)],
+          }];
         }
-      });
+      } else for (const tooth of effectiveTargets) {
+        const key = String(tooth);
+        next[key] = [...(next[key] || [])];
+        next[key].push({ id: Math.random().toString(36).substring(7), name: 'Belirtilmedi', price: 0,
+          indications: [...indsToAdd], doctorId: defaultDoctorId, materials: [] });
+      }
       return next;
     });
 
     const procNamesStr = procsToAdd.map(p => p.name).join(', ') || indsToAdd.join(', ');
-    const teethStr = effectiveTargets.map(t => `#${t}`).join(', ');
-    toast.success(`🎯 ${teethStr} dişine "${procNamesStr}" atandı.`);
+    const teethStr = effectiveTargets.map(t => targetLabel(String(t))).join(', ');
+    toast.success(`🎯 ${teethStr} için "${procNamesStr}" atandı.`);
   };
 
   const handlePrint = () => {
-    const subtotal = Object.values(toothDrafts).reduce((sum, drafts) => sum + drafts.reduce((s, p) => s + p.price, 0), 0);
-    const actualDiscount = discountType === 'percentage' ? subtotal * (Math.min(100, discount) / 100) : Math.min(discount, subtotal);
-    const total = subtotal - actualDiscount;
+    if (!pricing) {
+      toast.error('Fiyat veya iskonto geçersiz.');
+      return;
+    }
+    const subtotal = pricing.subtotalMinor / 100;
+    const actualDiscount = (pricing.percentageDiscountMinor + pricing.fixedDiscountMinor) / 100;
+    const total = pricing.totalMinor / 100;
+    const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
 
     let rowsHtml = '';
     Object.entries(toothDrafts).forEach(([tooth, procedures]) => {
@@ -378,14 +488,18 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const itemSurf = p.surface || surf;
         const itemSec = p.section || sec;
         const metaStr = [itemSurf ? `Yüzey: ${itemSurf}` : '', itemSec ? `Bölüm: ${itemSec}` : ''].filter(Boolean).join(' | ');
+        const matSaleMinor = p.materials.reduce((sum, material) => sum + Number(material.quantity || 0) * Number(material.unitSalePriceMinor || 0), 0);
+        const lineGross = (Math.round(p.price * 100) + matSaleMinor) / 100;
         rowsHtml += `
           <tr>
-            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; font-weight: 600; font-size: 12px;">Diş ${tooth}</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; font-weight: 600; font-size: 12px;">${escape(targetLabel(tooth))}</td>
             <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; font-size: 12px;">
-              ${p.name} ${metaStr ? `<b>[${metaStr}]</b>` : ''}
-              ${p.indications.length > 0 ? `<br><small style="color: #666;">(${p.indications.join(', ')})</small>` : ''}
+              ${escape(p.name)} ${metaStr ? `<b>[${escape(metaStr)}]</b>` : ''}
+              ${p.indications.length > 0 ? `<br><small style="color: #666;">(${escape(p.indications.join(', '))})</small>` : ''}
+              <br><small>Hekim: ${escape(doctors.find((doctor: any) => doctor.id === p.doctorId)?.name || 'Belirtilmedi')}</small>
+              ${p.materials.length ? `<br><small>Malzemeler: ${escape(p.materials.map(material => `${material.name} × ${material.quantity}`).join(', '))}</small>` : ''}
             </td>
-            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; text-align: right; font-size: 12px;">${p.price} ₺</td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #ddd; text-align: right; font-size: 12px;">${lineGross.toLocaleString('tr-TR', { minimumFractionDigits: lineGross % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })} ₺</td>
           </tr>
         `;
       });
@@ -432,6 +546,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       <body>
         <div class="header">
           <h1>Tedavi Planı Özeti</h1>
+          <div>Hasta: ${escape(patientInfo?.name || selectedEvent?.title || '')}</div>
           <div class="date">Tarih: ${new Date().toLocaleDateString('tr-TR')}</div>
         </div>
         
@@ -467,6 +582,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           </table>
         </div>
         
+        <div>Konsültasyon notu: ${escape(planNote)}</div>
         <div class="footer">
           Bu belge bilgilendirme amaçlıdır.
         </div>
@@ -547,6 +663,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
             next[tn] = [{
               id: Math.random().toString(36).substring(2, 9),
+              procedureId: procTemp?.id,
+              scope: procTemp?.scope || (tn === 'general' ? 'mouth' : tn === 'upper' || tn === 'lower' ? 'jaw' : 'tooth'),
               name: procName,
               price: procPrice,
               indications: matchedIndication,
@@ -584,6 +702,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   : [];
                 next[tn].push({
                   id: Math.random().toString(36).substring(2, 9),
+                  procedureId: procTemp?.id,
+                  scope: procTemp?.scope || (tn === 'general' ? 'mouth' : tn === 'upper' || tn === 'lower' ? 'jaw' : 'tooth'),
                   name: procName,
                   price: procPrice,
                   indications: matchedIndication,
@@ -673,6 +793,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   const handleModalClose = () => {
+    if (saving) return;
+    if (mediaUploading) { toast.error('Kapatmadan önce görüntü yüklemesini tamamlayın veya iptal edin.'); return; }
+    if (hasUnsavedChanges) { setShowCloseDialog(true); return; }
     stopListening();
     onClose();
   };
@@ -700,8 +823,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const { globalIntent, selectIntent, targetTeeth, treatments } = data.result;
 
         if (globalIntent === 'CONFIRM') {
-          toast.success("AI 'Kaydet' komutu algıladı.");
-          handleSave();
+          toast('Planı kaydetmek için Kaydet düğmesini kullanın.');
           return;
         }
 
@@ -775,8 +897,48 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
         // Sesli komutla belirtilen tedavileri uygula.
         if (treatments && treatments.length > 0) {
-          executeTreatmentCommand(treatments);
-          const affectedTeeth = treatments.flatMap((t: any) => (t.toothNumbers || []).map(Number)).filter(Boolean);
+          const validTargets = new Set([...UPPER_TEETH, ...LOWER_TEETH, 'general', 'upper', 'lower'].map(String));
+          const valid = Array.isArray(treatments) && treatments.every((item: any) =>
+            (!item.intent || ['ADD', 'UPDATE', 'EDIT', 'DELETE'].includes(item.intent)) &&
+            Array.isArray(item.toothNumbers) && item.toothNumbers.length > 0 &&
+            item.toothNumbers.every((number: unknown) => validTargets.has(String(number))));
+          if (!valid) {
+            toast.error('Komut güvenli şekilde eşleştirilemedi. İşlemi elle düzenleyin.');
+            stopListening();
+            return;
+          }
+          stopListening();
+          const hasDeleteOrUpdate = treatments.some((item: any) => item.intent === 'DELETE' || item.intent === 'UPDATE' || item.intent === 'EDIT');
+          if (hasDeleteOrUpdate) {
+            executeTreatmentCommand(treatments);
+          } else {
+            for (const item of treatments) {
+              const normTarget = (item.procedureName || '').toLocaleLowerCase('tr-TR').trim();
+              const procedure = procTemplates.find(proc => {
+                const pName = proc.name.toLocaleLowerCase('tr-TR').trim();
+                return pName === normTarget || pName.includes(normTarget) || (normTarget && normTarget.includes(pName));
+              });
+              const resolvedProcedure = procedure || (item.procedureName ? {
+                id: undefined,
+                name: item.procedureName,
+                price: item.cost || 0,
+                scope: item.toothNumbers.includes('general') ? 'mouth' : (item.toothNumbers.includes('upper') || item.toothNumbers.includes('lower')) ? 'jaw' : 'tooth',
+                color: '#0284c7',
+                materials: [],
+              } : null);
+              const normalizedTargets = item.toothNumbers.map((tn: any) => {
+                const n = Number(tn);
+                return Number.isInteger(n) && n >= 11 && n <= 48 ? n : String(tn);
+              });
+              handleDropTreatment(normalizedTargets, {
+                procedures: resolvedProcedure ? [resolvedProcedure] : [],
+                indications: item.indication ? [item.indication] : [],
+                surface: Array.isArray(item.surfaces) ? item.surfaces.join('') : undefined,
+                section: item.section,
+              });
+            }
+          }
+          const affectedTeeth = treatments.flatMap((t: any) => (t.toothNumbers || []).map(Number)).filter((n: number) => Number.isInteger(n) && n >= 11 && n <= 48);
           if (affectedTeeth.length > 0) {
             setSelectedTeeth(prev => Array.from(new Set([...prev, ...affectedTeeth])));
           }
@@ -1423,205 +1585,196 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     await processAICommand(text);
   };
 
-  const handleSave = async () => {
-    if (Object.keys(toothDrafts).length === 0) {
-      toast.error('Lütfen önce dişlere işlem veya endikasyon atayın.');
-      return;
+  const handleSave = async ({ closeAfter = true, allowEmpty = false }: { closeAfter?: boolean; allowEmpty?: boolean } = {}) => {
+    if (savingRef.current || planLoading || planLoadError || baseDataLoading || baseDataError) return;
+    if (mediaUploading) { toast.error('Planı kaydetmeden önce görüntü yüklemesini tamamlayın veya iptal edin.'); return; }
+    if (!groupName.trim()) { toast.error('Plan adı gereklidir.'); return; }
+    if (!allowEmpty && Object.values(toothDrafts).every(items => !items.length)) {
+      toast.error('Önce işlem veya endikasyon ekleyin.'); return;
     }
-
-    // Vardiya Kontrolü
+    if (!pricing) { toast.error('Fiyat, malzeme miktarı veya iskonto geçersiz.'); return; }
     if (selectedEvent?.startTime) {
-      const apptDateStr = new Date(selectedEvent.startTime).toLocaleDateString('sv');
-      const startMin = new Date(selectedEvent.startTime).getHours() * 60 + new Date(selectedEvent.startTime).getMinutes();
-      
-      for (const drafts of Object.values(toothDrafts)) {
-        for (const proc of drafts) {
-          const docId = proc.doctorId || defaultDoctorId || selectedEvent?.doctorId;
-          if (docId) {
-            const docShifts = (shifts || []).filter((s: any) => s.userId === docId && s.date === apptDateStr);
-            const docObj = doctors.find((d: any) => d.id === docId);
-            const docName = docObj?.name || 'Seçilen hekim';
-
-            if (docShifts.length === 0) {
-              toast.error(`⚠️ ${docName} için bu tarihte (${apptDateStr}) tanımlı vardiya bulunmuyor! Lütfen vardiyası olan bir hekim seçin.`);
-              return;
-            }
-
-            const isCovered = docShifts.some((s: any) => {
-              const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
-              const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
-              return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
-            });
-
-            if (!isCovered) {
-              const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');
-              toast.error(`⚠️ Randevu saati (${new Date(selectedEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}) ${docName} vardiya saatleri (${shiftRanges}) dışındadır!`);
-              return;
-            }
-          }
-        }
-      }
-    }
-
-    const hasMissingProc = Object.values(toothDrafts).some(drafts => drafts.some(p => p.name === 'Belirtilmedi'));
-    if (hasMissingProc) {
-      if (!confirm('Bazı dişlere sadece endikasyon atanmış (işlem adı yok). Yine de devam etmek istiyor musunuz?')) return;
-    }
-
-    const isPhoneMissing = notifyPatient && (notificationType === 'sms' || notificationType === 'whatsapp' || notificationType === 'both') && !patientInfo?.phone
-    const isEmailMissing = notifyPatient && (notificationType === 'email' || notificationType === 'both') && !patientInfo?.email
-
-    if (isPhoneMissing && !missingPhone.trim()) {
-      toast.error('Lütfen eksik olan telefon numarasını giriniz.');
-      return;
-    }
-    if (isEmailMissing && !missingEmail.trim()) {
-      toast.error('Lütfen eksik olan e-posta adresini giriniz.');
-      return;
-    }
-
-    if (notifyPatient && (missingPhone.trim() || missingEmail.trim())) {
-      try {
-        await fetch(`/api/dental/patients/${selectedEvent.patientId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phone: missingPhone.trim() || undefined,
-            email: missingEmail.trim() || undefined
-          })
-        })
-      } catch (err) { }
-    }
-
-    let nextNotificationDate: string | undefined = undefined
-    if (isPeriodic && notifyPatient) {
-      const d = new Date()
-      d.setDate(d.getDate() + periodDays)
-      nextNotificationDate = d.toISOString().slice(0, 10)
-    }
-
-    const subtotal = Object.values(toothDrafts).reduce((sum, drafts) => sum + drafts.reduce((s, p) => s + p.price, 0), 0);
-
-    let actualDiscount = 0;
-    if (discountType === 'percentage') {
-      actualDiscount = subtotal * (Math.min(100, discount) / 100);
-    } else {
-      actualDiscount = Math.min(discount, subtotal);
-    }
-
-    const discountFactor = subtotal > 0 ? (subtotal - actualDiscount) / subtotal : 1;
-
-    let uploadedDcmUrl = undefined;
-    if (treatmentDcmFile) {
-      const formData = new FormData();
-      formData.append('file', treatmentDcmFile);
-      try {
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
-        const uploadRes = await fetch(`${baseUrl}/api/dental/upload-dcm`, {
-          method: 'POST',
-          body: formData
-        });
-        if (uploadRes.ok) {
-          const upData = await uploadRes.json();
-          uploadedDcmUrl = upData.url;
-        } else {
-          const errText = await uploadRes.text();
-          console.error('DCM Upload Error:', errText);
-          toast.error(`Röntgen dosyası yüklenemedi (Sunucu Hatası): ${errText}`);
-          return;
-        }
-      } catch (e: any) {
-        console.error('DCM Upload Catch Error:', e);
-        toast.error(`Röntgen yüklenirken ağ hatası oluştu: ${e.message}`);
-        return;
-      }
-    }
-
-    try {
-      const payloadTreatments = [];
-      for (const [tooth, procedures] of Object.entries(toothDrafts)) {
-        const toothNum = Number(tooth);
-        const surf = toothSurfaces[toothNum]?.length ? toothSurfaces[toothNum].join('') : '';
-        const sec = toothSections[toothNum] || '';
-
-        for (const proc of procedures) {
-          const toothOriginalPrice = proc.price;
-          const toothFinalPrice = Math.round(toothOriginalPrice * discountFactor);
-
-          const itemSurf = proc.surface || surf;
-          const itemSec = proc.section || sec;
-          const metaTags: string[] = [];
-          if (itemSurf) metaTags.push(`Yüzey: ${itemSurf}`);
-          if (itemSec) metaTags.push(`Bölüm: ${itemSec}`);
-
-          let finalIndication = proc.indications.length > 0 ? proc.indications.join(', ') : '';
-          if (metaTags.length > 0) {
-            finalIndication = finalIndication ? `${finalIndication} [${metaTags.join(' | ')}]` : `[${metaTags.join(' | ')}]`;
-          }
-
-          payloadTreatments.push({
-            id: (proc.id && String(proc.id).includes('-')) ? proc.id : undefined,
-            procedureName: proc.name,
-            toothNumber: tooth,
-            indication: finalIndication || undefined,
-            cost: toothFinalPrice,
-            doctorId: proc.doctorId || selectedEvent.doctorId,
-            status: 'planned',
-            dcmUrl: uploadedDcmUrl,
-            materials: proc.materials,
-            isPeriodic,
-            periodDays,
-            notifyPatient,
-            notificationType,
-            nextNotificationDate,
-            clinicId: clinicId || undefined
+      const date = new Date(selectedEvent.startTime).toLocaleDateString('sv');
+      const minutes = new Date(selectedEvent.startTime).getHours() * 60 + new Date(selectedEvent.startTime).getMinutes();
+      for (const proc of Object.values(toothDrafts).flat()) {
+        if (proc.locked) continue;
+        const doctorId = proc.doctorId || defaultDoctorId || selectedEvent.doctorId;
+        if (!doctorId) continue;
+        const matching = (shifts || []).filter((shift: any) => shift.userId === doctorId && shift.date === date);
+        if (matching.length > 0) {
+          const covered = matching.some((shift: any) => {
+            const [startHour, startMinute] = (shift.startTime || '00:00').split(':').map(Number);
+            const [endHour, endMinute] = (shift.endTime || '23:59').split(':').map(Number);
+            return minutes >= startHour * 60 + startMinute && minutes <= endHour * 60 + endMinute;
           });
+          if (!covered) {
+            const name = doctors.find((doctor: any) => doctor.id === doctorId)?.name || 'Seçilen hekim';
+            toast.error(`${name} için bu randevu saatinde vardiya bulunmuyor.`); return;
+          }
         }
       }
+    }
+    const phoneMissing = notifyPatient && notificationChannels(notificationType).some(channel => channel !== 'email') && !(contactOverride || patientInfo)?.phone;
+    const emailMissing = notifyPatient && notificationChannels(notificationType).includes('email') && !(contactOverride || patientInfo)?.email;
+    if (phoneMissing && !missingPhone.trim()) { toast.error('Telefon numarası gereklidir.'); return; }
+    if (emailMissing && !missingEmail.trim()) { toast.error('E-posta adresi gereklidir.'); return; }
 
-      let res;
-      if (editingGroup) {
-        res = await fetch(`/api/dental/treatment-groups/${editingGroup.id}/full`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: groupName,
-            patientId: selectedEvent.patientId,
-            treatments: payloadTreatments,
-            appointmentId: selectedEvent?.id || undefined
-          })
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (notifyPatient && (missingPhone.trim() || missingEmail.trim())) {
+        const response = await fetch(`/api/dental/patients/${selectedEvent.patientId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: missingPhone.trim() || undefined, email: missingEmail.trim() || undefined }),
         });
-      } else {
-        res = await fetch(`/api/dental/patients/${selectedEvent.patientId}/treatments/bulk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            groupName: groupName,
-            treatments: payloadTreatments
-          })
+        if (!response.ok) throw new Error('Hasta iletişim bilgileri kaydedilemedi.');
+      }
+      let dcmUrl = savedDcmUrl;
+      if (treatmentDcmFile) {
+        const formData = new FormData();
+        formData.append('file', treatmentDcmFile);
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/dental/upload-dcm`, { method: 'POST', body: formData });
+        if (!response.ok) throw new Error('Radyoloji dosyası yüklenemedi.');
+        dcmUrl = (await response.json()).url;
+      }
+      const date = new Date();
+      date.setDate(date.getDate() + periodDays);
+      const treatments = Object.entries(toothDrafts).flatMap(([tooth, procedures]) => procedures.map(proc => {
+        const number = Number(tooth);
+        const surface = proc.surface || toothSurfaces[number]?.join('') || '';
+        const section = proc.section || toothSections[number] || '';
+        const tags = [surface && `Yüzey: ${surface}`, section && `Bölüm: ${section}`].filter(Boolean);
+        const indication = [proc.indications.join(', '), tags.length ? `[${tags.join(' | ')}]` : ''].filter(Boolean).join(' ');
+        const existing = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(proc.id);
+        return {
+          id: existing ? proc.id : undefined,
+          procedureName: proc.name, toothNumber: tooth, indication: proc.locked ? (proc.originalIndication || undefined) : (indication || undefined),
+          basePriceMinor: Math.round(proc.price * 100),
+          doctorId: existing ? proc.doctorId : (proc.doctorId || defaultDoctorId || selectedEvent.doctorId || null),
+          dcmUrl: proc.locked ? (proc.dcmUrl ?? null) : dcmUrl,
+          materials: proc.materials,
+          ...(!existing || notificationChanged ? { isPeriodic, periodDays, notifyPatient, notificationType,
+            nextNotificationDate: isPeriodic && notifyPatient ? date.toISOString().slice(0, 10) : undefined } : {}),
+          metadata: { clientKey: proc.id, procedureId: proc.procedureId, color: proc.color, scope: proc.scope || 'tooth', indicationIds: proc.indications.map(indication => indicationIds[indication]).filter(Boolean) },
+        };
+      }));
+      if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
+      const payload = {
+        name: groupName, patientId: selectedEvent.patientId, appointmentId: selectedEvent.id || undefined,
+        expectedVersion: planIdentity?.version, idempotencyKey: idempotencyKey.current,
+        consultationNote: planNote, discountPercentBps: Math.round(discount * 100),
+        discountFixedMinor: Math.round(discountFixed * 100),
+        metadata: { toothSurfaces, toothSections, defectMarkers, defaultDoctorId, isPeriodic, periodDays, notificationChannels: notifyPatient ? notificationChannels(notificationType) : [] }, attachmentIds: planAttachments.map(item => item.id), treatments,
+      };
+      const response = await fetch(planIdentity ? `/api/dental/treatment-groups/${planIdentity.id}/full` : `/api/dental/patients/${selectedEvent.patientId}/treatments/bulk`, {
+        method: planIdentity ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Plan kaydedilemedi.');
+      const plan = planIdentity ? result : result.plan;
+      if (!plan?.id) throw new Error('Kaydedilen plan doğrulanamadı.');
+      setPlanIdentity({ id: plan.id, version: plan.version });
+      setSavedDcmUrl(dcmUrl);
+      setTreatmentDcmFile(null);
+      initialSnapshot.current = snapshot;
+      updateSnapshotAfterSave.current = true;
+      setToothDrafts(previous => {
+        const next: Record<string, DraftItem[]> = {};
+        for (const [tooth, items] of Object.entries(previous)) next[tooth] = items.map(item => {
+          const saved = plan.treatments.find((row: any) => row.id === item.id || row.metadata?.clientKey === item.id);
+          return saved ? { ...item, id: saved.id, status: saved.status, locked: saved.locked, materials: saved.materials, dcmUrl: saved.dcmUrl } : item;
         });
-      }
-
-      if (!res.ok) {
-        console.error('Kayıt hatası:', await res.text());
-        throw new Error('Kayıt başarısız');
-      }
-
-      onSaved();
+        return next;
+      });
+      if (closeAfter) { stopListening(); onSaved(); }
+      else toast.success('Plan taslağı kaydedildi.');
     } catch (error) {
-      console.error(error);
-      toast.error('Kayıt sırasında bir hata oluştu.');
+      toast.error(error instanceof Error ? error.message : 'Plan kaydedilemedi.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
+  if (planLoading || planLoadError || baseDataLoading || baseDataError) {
+    return (
+      <div role="dialog" aria-modal="true" aria-label="Tedavi planı" style={{ position: 'fixed', inset: 0, background: 'var(--modal-overlay)', display: 'grid', placeItems: 'center', zIndex: 100000 }}>
+        <div style={{ background: 'var(--card-bg)', color: 'var(--foreground)', border: '1px solid var(--input-border)', padding: 24, borderRadius: 12 }}>
+          <p role="status">{planLoading || baseDataLoading ? 'Tedavi planı ve katalog yükleniyor…' : planLoadError || baseDataError}</p>
+          {(planLoadError || baseDataError) && <button type="button" onClick={() => setLoadAttempt(value => value + 1)} style={{ ...inputStyle, cursor: 'pointer' }}>Yeniden dene</button>}
+          <button type="button" onClick={onClose} style={{ ...inputStyle, marginLeft: 8, cursor: 'pointer' }}>Kapat</button>
+        </div>
+      </div>
+    );
+  }
+
+  const openToothContext = (tooth: number, event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, teeth: selectedTeeth.includes(tooth) ? selectedTeeth : [tooth] });
+  };
+  const updateSurfaces = (tooth: number, surfaces: string[]) => {
+    if ((toothDrafts[tooth] || []).some(item => item.locked)) return;
+    setToothSurfaces(previous => ({ ...previous, [tooth]: surfaces }));
+    setToothDrafts(previous => ({ ...previous, [tooth]: (previous[tooth] || []).map(item => ({ ...item, surface: surfaces.join('') || undefined })) }));
+  };
+  const updateSection = (tooth: number, section: string | null) => {
+    if ((toothDrafts[tooth] || []).some(item => item.locked)) return;
+    setToothSections(previous => { const next = { ...previous }; if (section) next[tooth] = section; else delete next[tooth]; return next; });
+    setToothDrafts(previous => ({ ...previous, [tooth]: (previous[tooth] || []).map(item => ({ ...item, section: section || undefined })) }));
+  };
+
+  if (!advancedView) {
+    return <PineTreatmentPlanView
+      identity={planIdentity} patient={{ ...patientInfo, ...contactOverride }} event={selectedEvent} doctors={doctors}
+      attachments={planAttachments} setAttachments={setPlanAttachments} setUploading={setMediaUploading}
+      drafts={toothDrafts} setDrafts={setToothDrafts} selected={selectedTeeth} setSelected={setSelectedTeeth}
+      procedures={procTemplates} setProcedures={setProcTemplates} indications={indTemplates} setIndications={setIndTemplates} indicationIds={indicationIds} setIndicationIds={setIndicationIds} inventory={inventory}
+      add={handleDropTreatment} clickTooth={handleToothClick} jaw={jawSelection} mode={odontogramMode} setMode={setOdontogramMode}
+      onContextMenu={openToothContext} contextMenu={contextMenu} setContextMenu={setContextMenu}
+      detailTooth={selectedToothForDetails} setDetailTooth={setSelectedToothForDetails}
+      toothSurfaces={toothSurfaces} toothSections={toothSections} updateSurfaces={updateSurfaces} updateSection={updateSection}
+      selectionMode={selectionMode} setSelectionMode={setSelectionMode} quickSelect={handleQuickSelect}
+      notificationChannels={notifyPatient ? notificationChannels(notificationType) : []}
+      setNotificationChannels={(channels: NotificationChannel[]) => { setNotificationType(channels.join(',')); setNotifyPatient(channels.length > 0); setNotificationChanged(true); }}
+      onContactChange={setContactOverride} periodic={isPeriodic} periodDays={periodDays}
+      setPeriodic={(value: boolean) => { setIsPeriodic(value); setNotificationChanged(true); }}
+      setPeriodDays={(value: number) => { setPeriodDays(value); setNotificationChanged(true); }}
+      consultations={consultations} setConsultations={setConsultations}
+
+      changeJaw={handleQuickSelect}
+      odontogram3d={<Odontogram3D jawFilter="all" selectedTeeth={selectedTeeth} toothDrafts={toothDrafts} onToothClick={handleToothClick} onDropTreatment={handleDropTreatment} onContextMenu={openToothContext}
+        toothSurfaces={toothSurfaces} onUpdateSurfaces={updateSurfaces} toothSections={toothSections} onUpdateSection={updateSection}
+        defectMarkers={defectMarkers} onAddDefectMarker={marker => setDefectMarkers(previous => [...previous, marker])} onRemoveDefectMarker={id => setDefectMarkers(previous => previous.filter(marker => marker.id !== id))} onClearAllSelections={() => setSelectedTeeth([])} height={440} />}
+      defaultDoctor={defaultDoctorId} setDefaultDoctor={setDefaultDoctorId} pricing={pricing} discount={discount} setDiscount={setDiscount} discountFixed={discountFixed} setDiscountFixed={setDiscountFixed}
+      note={planNote} setNote={setPlanNote} saving={saving} save={handleSave} print={handlePrint} close={handleModalClose}
+      showClose={showCloseDialog} setShowClose={setShowCloseDialog} discard={() => { stopListening(); onClose(); }}
+      toggleVoice={toggleListening} listening={isListening} voiceStarting={isVoiceStarting} analyzing={isAnalyzing} voiceError={voiceError} transcript={transcript}
+    />;
+  }
+
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000 }}>
-      <div style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '95%', maxWidth: 1800, maxHeight: '98vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', position: 'relative' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000 }}>
+      <div className="treatment-plan-modal" style={{ background: 'var(--background)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: 24, width: '95%', maxWidth: 1800, maxHeight: '98vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', position: 'relative' }}>
+        {showCloseDialog && (
+          <div role="dialog" aria-modal="true" aria-labelledby="unsaved-plan-title" onKeyDown={event => { if (event.key === 'Escape') setShowCloseDialog(false); }} style={{ position: 'fixed', inset: 0, background: 'var(--modal-overlay)', display: 'grid', placeItems: 'center', zIndex: 100002 }}>
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', borderRadius: 12, padding: 24, maxWidth: 460 }}>
+              <h3 id="unsaved-plan-title">Kaydedilmemiş değişiklikler</h3>
+              <p>Planı kapatmadan önce değişikliklerinizi kaydedebilirsiniz.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => { setShowCloseDialog(false); void handleSave({ closeAfter: true, allowEmpty: true }); }} style={{ ...inputStyle, background: 'var(--btn-clinic-primary-bg)', color: 'var(--btn-clinic-primary-fg)', cursor: 'pointer' }}>Kaydet</button>
+                <button type="button" onClick={() => { stopListening(); onClose(); }} style={{ ...inputStyle, cursor: 'pointer' }}>Değişiklikleri bırak</button>
+                <button type="button" autoFocus onClick={() => setShowCloseDialog(false)} style={{ ...inputStyle, cursor: 'pointer' }}>Devam et</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, position: 'relative', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+            <button type="button" onClick={() => { if (mediaUploading) { toast.error('Görünüm değiştirmeden önce yüklemeyi tamamlayın veya iptal edin.'); return; } setAdvancedView(false); }} style={{ ...inputStyle, cursor: 'pointer' }}>Plan görünümüne dön</button>
             <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--foreground)' }}>
-              {editingGroup ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}
+              {planIdentity ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}
             </h3>
+            <span style={{ color: 'var(--foreground-2)', fontWeight: 600 }}>{patientInfo?.name || selectedEvent?.title || 'Hasta'}</span>
 
             <input
               value={groupName}
@@ -1662,7 +1815,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               </div>
             )}
           </div>
-          <button onClick={handleModalClose} aria-label="Tedavi planını kapat" style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
+          <button onClick={handleModalClose} aria-label="Tedavi planını kapat" style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
 
           {/* Expanded Assistant Panel */}
           {assistantPanelOpen && (
@@ -1824,7 +1977,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 )}
 
                 {isAnalyzing && (
-                  <div style={{ background: 'var(--background)', border: '1px solid #3b82f6', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ background: 'var(--background)', border: '1px solid var(--badge-clinic-border)', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600 }}>⚙️ AI komutu analiz ediyor ve tedaviye uyguluyor...</span>
                   </div>
                 )}
@@ -1903,7 +2056,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                 </span>
                               )}
                               {cmd.status === 'applied' && (
-                                <span style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 7px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+                                <span style={{ background: 'var(--input-bg)', color: '#60a5fa', border: '1px solid var(--input-border)', padding: '2px 7px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
                                   🖐️ Dişe Sürükle
                                 </span>
                               )}
@@ -1912,7 +2065,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
                             <button
                               onClick={() => deleteCommand(cmd.id)}
-                              style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
+                              style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
                               title="Listeden Kaldır"
                             >
                               <Trash2 size={14} />
@@ -2083,7 +2236,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                               <button
                                 onClick={() => deleteCommand(cmd.id)}
                                 style={{
-                                  background: 'transparent',
+                                  background: 'var(--card-bg)',
                                   color: '#ef4444',
                                   border: 'none',
                                   borderRadius: 6,
@@ -2136,6 +2289,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           {/* LEFT COLUMN */}
           <div style={{ flex: '2.5 1 640px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', paddingRight: 8 }}>
 
+            <PatientConsentPanel patientId={selectedEvent.patientId} />
+
+            <PlanMediaPanel patientId={selectedEvent.patientId} attachments={planAttachments} onChange={setPlanAttachments} onUploadingChange={setMediaUploading} />
+
             {/* DICOM / Tedavi Görüntüleri Kartı (Akordeon & Kompakt Tasarım) */}
             <div style={{
               borderRadius: 8,
@@ -2153,7 +2310,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   justifyContent: 'space-between',
                   gap: 10,
                   cursor: 'pointer',
-                  background: isDicomSectionOpen ? 'var(--card-inner)' : 'var(--card-bg)',
+                  background: isDicomSectionOpen ? 'var(--input-bg)' : 'var(--card-bg)',
                   borderBottom: isDicomSectionOpen ? '1px solid var(--input-border)' : 'none',
                   userSelect: 'none',
                 }}
@@ -2210,8 +2367,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         fontWeight: 600,
                         padding: '3px 8px',
                         borderRadius: 5,
-                        border: '1px solid rgba(239,68,68,0.3)',
-                        background: 'rgba(239,68,68,0.08)',
+                        border: '1px solid var(--input-border)',
+                        background: 'var(--input-bg)',
                         color: 'var(--danger)',
                         cursor: 'pointer',
                         display: 'flex',
@@ -2253,12 +2410,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               {isDicomSectionOpen && (
                 <div style={{ padding: 12 }}>
                   <DicomViewer
+                    dcmUrl={treatmentDcmFile ? null : savedDcmUrl}
                     file={treatmentDcmFile}
                     onFileChange={(file) => {
                       setTreatmentDcmFile(file);
                       if (file) setIsDicomSectionOpen(true);
                     }}
-                    onFileClear={() => setTreatmentDcmFile(null)}
+                    onFileClear={() => { setTreatmentDcmFile(null); setSavedDcmUrl(null); }}
                     isModal={false}
                   />
                 </div>
@@ -2271,6 +2429,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 16 }}>🦷</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground, #f8fafc)' }}>Odontogram</span>
+                  <select aria-label="Çene seçimi" value={jawSelection} onChange={event => handleQuickSelect(event.target.value as 'all' | 'upper' | 'lower')} style={{ ...inputStyle, padding: '5px 8px' }}>
+                    <option value="all">Tüm ağız</option><option value="upper">Üst çene</option><option value="lower">Alt çene</option>
+                  </select>
                   <span style={{ fontSize: 11, color: 'var(--foreground-2, #94a3b8)' }}>
                     {selectedTeeth.length > 0 ? `(${selectedTeeth.length} diş seçili)` : 'Hedef dişleri seçin veya işlem sürükleyin'}
                   </span>
@@ -2283,7 +2444,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       }}
                       title="Diş seçimini temizle; tedaviler ve yüzeyler korunur"
                       style={{
-                        background: '#ef444415',
+                        background: 'var(--input-bg)',
                         color: '#ef4444',
                         border: '1px solid #ef444440',
                         borderRadius: 4,
@@ -2314,7 +2475,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       borderRadius: 4,
                       border: 'none',
                       cursor: 'pointer',
-                      background: odontogramMode === '2d' ? 'var(--brand, #2563eb)' : 'transparent',
+                      background: odontogramMode === '2d' ? 'var(--brand, #2563eb)' : 'var(--card-bg)',
                       color: odontogramMode === '2d' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                       display: 'flex',
                       alignItems: 'center',
@@ -2334,7 +2495,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       borderRadius: 4,
                       border: 'none',
                       cursor: 'pointer',
-                      background: odontogramMode === '3d' ? 'var(--brand, #2563eb)' : 'transparent',
+                      background: odontogramMode === '3d' ? 'var(--brand, #2563eb)' : 'var(--card-bg)',
                       color: odontogramMode === '3d' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                       display: 'flex',
                       alignItems: 'center',
@@ -2364,7 +2525,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 8,
-                  background: isQuickSelectOpen ? 'rgba(0,0,0,0.12)' : 'transparent',
+                  background: isQuickSelectOpen ? 'var(--input-bg)' : 'var(--card-bg)',
                   borderBottom: isQuickSelectOpen ? '1px solid var(--border, #334155)' : 'none'
                 }}>
                   {/* Sol Taraf: Aç / Kapat Butonu & Başlık */}
@@ -2373,7 +2534,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       type="button"
                       onClick={() => setIsQuickSelectOpen(prev => !prev)}
                       style={{
-                        background: isQuickSelectOpen ? '#1e3a8a' : 'var(--background, #1e293b)',
+                        background: isQuickSelectOpen ? 'var(--btn-clinic-primary-bg)' : 'var(--btn-clinic-blue-bg)',
                         border: `1px solid ${isQuickSelectOpen ? '#3b82f6' : 'var(--border, #334155)'}`,
                         color: isQuickSelectOpen ? '#ffffff' : 'var(--foreground, #f8fafc)',
                         padding: '4px 10px',
@@ -2418,7 +2579,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           borderRadius: 4,
                           border: 'none',
                           cursor: 'pointer',
-                          background: selectionMode === 'inspect' ? '#2563eb' : 'transparent',
+                          background: selectionMode === 'inspect' ? '#2563eb' : 'var(--card-bg)',
                           color: selectionMode === 'inspect' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                           display: 'flex',
                           alignItems: 'center',
@@ -2438,7 +2599,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           borderRadius: 4,
                           border: 'none',
                           cursor: 'pointer',
-                          background: selectionMode === 'batch' ? '#2563eb' : 'transparent',
+                          background: selectionMode === 'batch' ? '#2563eb' : 'var(--card-bg)',
                           color: selectionMode === 'batch' ? '#ffffff' : 'var(--foreground-2, #94a3b8)',
                           display: 'flex',
                           alignItems: 'center',
@@ -2541,8 +2702,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             fontWeight: 600,
                             borderRadius: 5,
                             border: `1px solid ${isQActive ? 'var(--accent, #3b82f6)' : 'var(--border, #334155)'}`,
-                            background: isQActive ? 'rgba(37,99,235,0.2)' : 'var(--background, #1e293b)',
-                            color: isQActive ? '#60a5fa' : 'var(--foreground-2, #cbd5e1)',
+                            background: isQActive ? 'var(--badge-clinic-bg)' : 'var(--btn-clinic-blue-bg)',
+                            color: isQActive ? 'var(--badge-clinic-fg)' : 'var(--btn-clinic-blue-fg)',
                             cursor: 'pointer',
                             transition: 'all 0.15s ease'
                           }}
@@ -2609,7 +2770,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   transition: 'all 0.2s ease'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
                       <span>🎯</span> Seçili ({selectedTeeth.length}):
                     </span>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 60, overflowY: 'auto', flex: 1 }}>
@@ -2617,9 +2778,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         <span
                           key={t}
                           style={{
-                            background: '#1e3a8a',
-                            color: '#ffffff',
-                            border: '1px solid #3b82f6',
+                            background: 'var(--badge-clinic-bg)',
+                            color: 'var(--badge-clinic-fg)',
+                            border: '1px solid var(--badge-clinic-border)',
                             padding: '2px 7px',
                             borderRadius: 4,
                             fontSize: 11,
@@ -2637,9 +2798,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                               setSelectedTeeth(prev => prev.filter(x => x !== t));
                             }}
                             style={{
-                              background: 'none',
+                              background: 'var(--card-bg)',
                               border: 'none',
-                              color: '#93c5fd',
+                              color: 'var(--badge-clinic-fg)',
                               cursor: 'pointer',
                               padding: 0,
                               fontSize: 12,
@@ -2664,7 +2825,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       fontWeight: 600,
                       borderRadius: 4,
                       border: '1px solid #dc2626',
-                      background: 'rgba(220,38,38,0.15)',
+                      background: 'var(--input-bg)',
                       color: '#f87171',
                       cursor: 'pointer',
                       whiteSpace: 'nowrap',
@@ -2702,7 +2863,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           const rawVal = e.dataTransfer.getData("value") || e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
                           const rawType = e.dataTransfer.getData("type");
                           if (!rawVal) return;
-                          const targets = selectedTeeth.includes(n) ? selectedTeeth : [n];
+                          const targets = [n];
                           try {
                             const parsed = JSON.parse(rawVal);
                             handleDropTreatment(targets, { type: rawType, ...parsed });
@@ -2734,7 +2895,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           const rawVal = e.dataTransfer.getData("value") || e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
                           const rawType = e.dataTransfer.getData("type");
                           if (!rawVal) return;
-                          const targets = selectedTeeth.includes(n) ? selectedTeeth : [n];
+                          const targets = [n];
                           try {
                             const parsed = JSON.parse(rawVal);
                             handleDropTreatment(targets, { type: rawType, ...parsed });
@@ -2749,6 +2910,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               ) : (
                 /* ── MOD 2: OMFATLAS TABANLI 3D ANATOMİK GÖRÜNÜM ── */
                 <Odontogram3D
+                  jawFilter="all"
                   selectedTeeth={selectedTeeth}
                   toothDrafts={toothDrafts}
                   onToothClick={(fdi, e) => handleToothClick(fdi, e)}
@@ -2860,7 +3022,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             let appliedCount = 0;
                             for (const tooth of Object.keys(next)) {
                               next[tooth] = next[tooth].map(item => {
-                                if (item.doctorId !== defaultDoctorId) {
+                                if (!item.locked && item.doctorId !== defaultDoctorId) {
                                   appliedCount++;
                                   return { ...item, doctorId: defaultDoctorId };
                                 }
@@ -2935,8 +3097,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       >
                         <span style={{ flex: 1, pointerEvents: 'none' }}>{proc.name}</span> <span style={{ opacity: 0.5, fontSize: '0.7rem', pointerEvents: 'none' }}>{proc.price} ₺</span>
                         <div style={{ width: 12, height: 12, borderRadius: '50%', background: proc.color || '#3b82f6', marginLeft: 4 }} />
-                        <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({ type: 'procedure', index: i }); setNewTemplateType('procedure'); setNewTemplateInput(proc.name); setNewTemplatePrice(proc.price); setNewTemplateColor(proc.color || '#3b82f6'); setNewTemplateMaterials(proc.materials || []); }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); setProcTemplates(prev => prev.filter((_, idx) => idx !== i)); }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({ type: 'procedure', index: i }); setNewTemplateType('procedure'); setNewTemplateInput(proc.name); setNewTemplatePrice(proc.price); setNewTemplateColor(proc.color || '#3b82f6'); setNewTemplateMaterials(proc.materials || []); setNewTemplateScope(proc.scope || 'tooth'); }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); void archiveCatalogTemplate(proc.id, 'procedure', proc.name); }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
                       </div>
                     )
                   })}
@@ -2962,7 +3124,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   {activeSelectionMaterials.length > 0 && (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {activeSelectionMaterials.map((m, mIdx) => (
-                        <div key={mIdx} style={{ background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: 4, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
+                        <div key={mIdx} style={{ background: 'var(--input-bg)', padding: '4px 8px', borderRadius: 4, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
                           {m.name}
                           <input
                             type="number"
@@ -2974,7 +3136,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             }}
                             style={{ ...inputStyle, width: 40, padding: '2px 4px', fontSize: '0.75rem', textAlign: 'center', height: 20 }}
                           />
-                          <button onClick={() => setActiveSelectionMaterials(prev => prev.filter((_, i) => i !== mIdx))} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
+                          <label style={{ color: 'var(--foreground-2)' }}>Satış ₺ <input aria-label={`${m.name} satış bedeli`} type="number" min="0" step="0.01" value={(m.unitSalePriceMinor || 0) / 100} onChange={e => setActiveSelectionMaterials(previous => previous.map((item, i) => i === mIdx ? { ...item, unitSalePriceMinor: Math.round(Number(e.target.value) * 100) } : item))} style={{ ...inputStyle, width: 70, padding: 4 }} /></label>
+                          <button onClick={() => setActiveSelectionMaterials(prev => prev.filter((_, i) => i !== mIdx))} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
                         </div>
                       ))}
                     </div>
@@ -3008,18 +3171,18 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           e.dataTransfer.setData("type", "mixed");
                           e.dataTransfer.setData("value", JSON.stringify({ procedures: payloadProcs, indications: payloadInds }));
                         }}
-                        style={{ padding: '6px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', boxShadow: isSelected ? '0 0 0 2px #ef4444' : 'none', borderRadius: 20, fontSize: '0.8rem', color: '#ef4444', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}
+                        style={{ padding: '6px 12px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', boxShadow: isSelected ? '0 0 0 2px #ef4444' : 'none', borderRadius: 20, fontSize: '0.8rem', color: '#ef4444', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}
                       >
                         <span style={{ pointerEvents: 'none' }}>{ind}</span>
-                        <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({ type: 'indication', index: i }); setNewTemplateType('indication'); setNewTemplateInput(ind); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); setIndTemplates(prev => prev.filter((_, idx) => idx !== i)); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setEditingTemplate({ type: 'indication', index: i }); setNewTemplateType('indication'); setNewTemplateInput(ind); }} style={{ background: 'var(--card-bg)', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex' }}><Pencil size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); void archiveCatalogTemplate(indicationIds[ind], 'indication', ind); }} style={{ background: 'var(--card-bg)', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
                       </div>
                     )
                   })}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, background: 'var(--card-inner)', border: '1px solid var(--input-border)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 8 }}>
                 <span style={{ color: 'var(--foreground-2)', fontSize: '0.78rem' }}>
                   {selectedTemplates.procedures.length + selectedTemplates.indications.length > 0
                     ? `${selectedTemplates.procedures.length + selectedTemplates.indications.length} şablon seçildi`
@@ -3053,7 +3216,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   {newTemplateType === 'procedure' && (
                     <>
                       <input type="number" value={newTemplatePrice || ''} onChange={e => setNewTemplatePrice(Number(e.target.value))} placeholder="Fiyat (₺)" style={{ ...inputStyle, width: 80, padding: '6px', fontSize: '0.8rem' }} />
-                      <input type="color" value={newTemplateColor} onChange={e => setNewTemplateColor(e.target.value)} style={{ width: 32, height: 32, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} title="İşlem Rengi" />
+                      <select aria-label="Tedavi kapsamı" value={newTemplateScope} onChange={event => setNewTemplateScope(event.target.value as 'tooth' | 'jaw' | 'mouth')} style={{ ...inputStyle, padding: 6 }}>
+                        <option value="tooth">Diş başına</option><option value="jaw">Çene başına</option><option value="mouth">Tüm ağız</option>
+                      </select>
+                      <input type="color" value={newTemplateColor} onChange={e => setNewTemplateColor(e.target.value)} style={{ width: 32, height: 32, padding: 0, border: 'none', background: 'var(--card-bg)', cursor: 'pointer' }} title="İşlem Rengi" />
                       <select onChange={e => {
                         const itemId = e.target.value;
                         if (!itemId) return;
@@ -3069,36 +3235,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       </select>
                     </>
                   )}
-                  <button onClick={() => {
-                    if (!newTemplateInput.trim()) return;
-                    if (editingTemplate) {
-                      if (editingTemplate.type === 'procedure') {
-                        const arr = [...procTemplates];
-                        arr[editingTemplate.index] = { name: newTemplateInput.trim(), price: newTemplatePrice, color: newTemplateColor, materials: [...newTemplateMaterials] };
-                        setProcTemplates(arr);
-                      } else {
-                        const arr = [...indTemplates];
-                        arr[editingTemplate.index] = newTemplateInput.trim();
-                        setIndTemplates(arr);
-                      }
-                      setEditingTemplate(null);
-                    } else {
-                      if (newTemplateType === 'procedure') {
-                        setProcTemplates(prev => [...prev, { name: newTemplateInput.trim(), price: newTemplatePrice, color: newTemplateColor, materials: [...newTemplateMaterials] }]);
-                      } else {
-                        setIndTemplates(prev => Array.from(new Set([...prev, newTemplateInput.trim()])));
-                      }
-                    }
-                    setNewTemplateInput(''); setNewTemplatePrice(0); setNewTemplateMaterials([]);
-                  }} style={{ padding: '6px 12px', borderRadius: 6, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>{editingTemplate ? 'Kaydet' : 'Ekle'}</button>
+                  <button disabled={catalogSaving} onClick={() => void saveCatalogTemplate()} style={{ padding: '6px 12px', borderRadius: 6, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem' }}>{editingTemplate ? 'Kaydet' : 'Ekle'}</button>
                   {editingTemplate && (
-                    <button onClick={() => { setEditingTemplate(null); setNewTemplateInput(''); setNewTemplatePrice(0); setNewTemplateMaterials([]); }} style={{ padding: '6px 12px', borderRadius: 6, background: 'transparent', color: 'var(--foreground)', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.8rem' }}>İptal</button>
+                    <button onClick={() => { setEditingTemplate(null); setNewTemplateInput(''); setNewTemplatePrice(0); setNewTemplateMaterials([]); }} style={{ padding: '6px 12px', borderRadius: 6, background: 'var(--card-bg)', color: 'var(--foreground)', border: '1px solid var(--glass-border)', cursor: 'pointer', fontSize: '0.8rem' }}>İptal</button>
                   )}
                 </div>
                 {newTemplateType === 'procedure' && newTemplateMaterials.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                     {newTemplateMaterials.map((m, mIdx) => (
-                      <div key={mIdx} style={{ background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: 4, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
+                      <div key={mIdx} style={{ background: 'var(--input-bg)', padding: '4px 8px', borderRadius: 4, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
                         {m.name}
                         <input
                           type="number"
@@ -3110,7 +3255,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           }}
                           style={{ ...inputStyle, width: 40, padding: '2px 4px', fontSize: '0.75rem', textAlign: 'center', height: 20 }}
                         />
-                        <button onClick={() => setNewTemplateMaterials(prev => prev.filter((_, i) => i !== mIdx))} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
+                        <button onClick={() => setNewTemplateMaterials(prev => prev.filter((_, i) => i !== mIdx))} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={12} /></button>
                       </div>
                     ))}
                   </div>
@@ -3125,6 +3270,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               </button>
               {isNotesSectionOpen && (
               <div style={{ padding: 16, borderTop: '1px solid var(--input-border)' }}>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                <label htmlFor="plan-consultation-note" style={{ color: 'var(--foreground)', fontWeight: 700 }}>Bu plana ait konsültasyon notu</label>
+                <textarea id="plan-consultation-note" value={planNote} onChange={event => setPlanNote(event.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+                <button type="button" disabled={saving} onClick={() => void handleSave({ closeAfter: false, allowEmpty: true })} style={{ ...inputStyle, alignSelf: 'flex-start', cursor: 'pointer' }}>Notu kaydet</button>
+                <span style={{ color: 'var(--foreground-3)', fontSize: 12 }}>Aşağıdaki notlar hastanın genel geçmişine aittir.</span>
+              </div>
 
               <div style={{ display: 'flex', flexDirection: 'row', gap: 12, marginBottom: 16, alignItems: 'flex-start' }}>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3187,7 +3339,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     {editingConsultationId ? 'Güncelle' : 'Kaydet'}
                   </button>
                   {editingConsultationId && (
-                    <button onClick={() => { setEditingConsultationId(null); setNewConsultation(''); setNewDisease(''); }} style={{ padding: '8px 16px', background: 'transparent', color: 'var(--foreground)', borderRadius: 6, border: '1px solid var(--glass-border)', cursor: 'pointer', height: 38, whiteSpace: 'nowrap' }}>İptal</button>
+                    <button onClick={() => { setEditingConsultationId(null); setNewConsultation(''); setNewDisease(''); }} style={{ padding: '8px 16px', background: 'var(--card-bg)', color: 'var(--foreground)', borderRadius: 6, border: '1px solid var(--glass-border)', cursor: 'pointer', height: 38, whiteSpace: 'nowrap' }}>İptal</button>
                   )}
                 </div>
               </div>
@@ -3195,7 +3347,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               {consultations.length > 0 && (
                 <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: 6, background: 'var(--glass-bg)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
-                    <thead style={{ background: 'transparent' }}>
+                    <thead style={{ background: 'var(--card-bg)' }}>
                       <tr>
                         <th style={{ padding: '6px 8px', borderBottom: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>Konsültasyon</th>
                         <th style={{ padding: '6px 8px', borderBottom: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>Hastalık</th>
@@ -3208,7 +3360,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           <td style={{ padding: '6px 8px' }}>{c.consultationNote}</td>
                           <td style={{ padding: '6px 8px' }}>{c.diseaseNote || '-'}</td>
                           <td style={{ padding: '6px 8px', display: 'flex', gap: 6 }}>
-                            <button onClick={() => { setEditingConsultationId(c.id); setNewConsultation(c.consultationNote || ''); setNewDisease(c.diseaseNote || ''); }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}><Pencil size={14} /></button>
+                            <button onClick={() => { setEditingConsultationId(c.id); setNewConsultation(c.consultationNote || ''); setNewDisease(c.diseaseNote || ''); }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}><Pencil size={14} /></button>
                             <button onClick={() => {
                               setConfirmModal({
                                 isOpen: true,
@@ -3222,7 +3374,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   setConsultations(updated);
                                 }
                               });
-                            }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}><Trash2 size={14} /></button>
+                            }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}><Trash2 size={14} /></button>
                           </td>
                         </tr>
                       ))}
@@ -3251,7 +3403,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: 8, background: 'var(--glass-bg)' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
-                      <thead style={{ background: 'rgba(0,0,0,0.2)', color: 'var(--foreground-2)' }}>
+                      <thead style={{ background: 'var(--input-bg)', color: 'var(--foreground-2)' }}>
                         <tr>
                           <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)' }}>Diş</th>
                           <th style={{ padding: '8px 12px', borderBottom: '1px solid var(--glass-border)' }}>İşlem</th>
@@ -3270,20 +3422,20 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                 key={`${tooth}-${draft.id}`}
                                 style={{
                                   borderBottom: '1px solid var(--glass-border)',
-                                  background: isSelectedRow ? 'var(--glass-bg)' : 'transparent',
+                                  background: isSelectedRow ? 'var(--glass-bg)' : 'var(--card-bg)',
                                   transition: 'all 0.2s'
                                 }}
                               >
                                 <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--accent)' }}>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    <span>#{tooth}</span>
+                                    <span>{targetLabel(tooth)}</span>
                                     {(draft.surface || (toothSurfaces[Number(tooth)] && toothSurfaces[Number(tooth)].length > 0)) && (
                                       <span
                                         title="Seçili Diş Yüzeyleri"
                                         style={{
-                                          background: '#1e3a8a',
-                                          color: '#93c5fd',
-                                          border: '1px solid #3b82f6',
+                                          background: 'var(--badge-clinic-bg)',
+                                          color: 'var(--badge-clinic-fg)',
+                                          border: '1px solid var(--badge-clinic-border)',
                                           borderRadius: 4,
                                           padding: '1px 5px',
                                           fontSize: 10,
@@ -3305,7 +3457,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       <span
                                         title="Anatomik Bölüm"
                                         style={{
-                                          background: '#312e81',
+                                          background: 'var(--badge-clinic-bg)',
                                           color: '#c7d2fe',
                                           border: '1px solid #6366f1',
                                           borderRadius: 4,
@@ -3321,9 +3473,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       <span
                                         title="3D Lezyon/Çürük Noktaları"
                                         style={{
-                                          background: '#831843',
-                                          color: '#fbcfe8',
-                                          border: '1px solid #f43f5e',
+                                          background: 'var(--badge-clinic-bg)',
+                                          color: 'var(--badge-clinic-fg)',
+                                          border: '1px solid var(--badge-clinic-border)',
                                           borderRadius: 4,
                                           padding: '1px 5px',
                                           fontSize: 10,
@@ -3340,6 +3492,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                   <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <select
                                       value={draft.doctorId || ''}
+                                      disabled={draft.locked}
                                       onChange={(e) => {
                                         const chosenDocId = e.target.value || null;
                                         if (chosenDocId && selectedEvent?.startTime) {
@@ -3388,16 +3541,16 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                 <td style={{ padding: '8px 12px', color: 'var(--foreground)' }}>
                                   {draft.indications && draft.indications.length > 0 ? draft.indications.join(', ') : <span style={{ color: 'var(--foreground-3)' }}>-</span>}
                                 </td>
-                                <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{draft.price} ₺</td>
+                                <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{(draft.price + draft.materials.reduce((sum, material) => sum + (Number(material.unitSalePriceMinor || 0) * Number(material.quantity) / 100), 0)).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
                                 <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                                    <button onClick={(e) => {
+                                    <button disabled={draft.locked} onClick={(e) => {
                                       e.stopPropagation();
                                       setSelectedToothForDetails(tooth);
-                                    }} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }} title="Detayları Düzenle">
+                                    }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }} title="Detayları Düzenle">
                                       <Pencil size={14} />
                                     </button>
-                                    <button onClick={(e) => {
+                                    <button disabled={draft.locked} onClick={(e) => {
                                       e.stopPropagation();
                                       setToothDrafts(prev => {
                                         const next = { ...prev };
@@ -3405,9 +3558,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                         if (next[tooth].length === 0) delete next[tooth];
                                         return next;
                                       });
-                                    }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="İşlemi Sil">
+                                    }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="İşlemi Sil">
                                       <X size={14} />
                                     </button>
+                                    {draft.locked && <span title="Tamamlanmış veya ödemeye bağlı tedavi" style={{ color: 'var(--foreground-3)', fontSize: 11 }}>Kilitli</span>}
                                   </div>
                                 </td>
                               </tr>
@@ -3423,22 +3577,23 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     <div style={{ width: 250, padding: 16, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
                         <span>Ara Toplam:</span>
-                        <span>{Object.values(toothDrafts).reduce((sum, drafts) => sum + drafts.reduce((s, p) => s + p.price, 0), 0)} ₺</span>
+                        <span>{pricing ? (pricing.subtotalMinor / 100).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) : '—'} ₺</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
-                        <span>İskonto:</span>
+                        <span>İskonto (%):</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 120 }}>
-                          <input type="number" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: '100%', padding: '4px 8px', fontSize: '0.8rem', textAlign: 'right' }} />
-                          <select value={discountType} onChange={e => setDiscountType(e.target.value as 'amount' | 'percentage')} style={{ ...inputStyle, padding: '4px', fontSize: '0.8rem', background: 'var(--glass-bg)', border: 'none', cursor: 'pointer' }}>
-                            <option value="amount">₺</option>
-                            <option value="percentage">%</option>
-                          </select>
+                          <input aria-label="Yüzde iskonto" type="number" min="0" max="100" step="0.01" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: '100%', padding: '4px 8px', fontSize: '0.8rem', textAlign: 'right' }} />
                         </div>
                       </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
+                        <span>Manuel iskonto (₺):</span>
+                        <input aria-label="Manuel iskonto" type="number" min="0" step="0.01" value={discountFixed || ''} onChange={e => setDiscountFixed(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: 120, padding: '4px 8px', textAlign: 'right' }} />
+                      </div>
+                      {!pricing && <span role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>Fiyat veya iskonto geçersiz.</span>}
                       <div style={{ height: 1, background: 'var(--glass-border)' }} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)' }}>
                         <span>Genel Toplam:</span>
-                        <span>{Math.max(0, Object.values(toothDrafts).reduce((sum, drafts) => sum + drafts.reduce((s, p) => s + p.price, 0), 0) - (discountType === 'percentage' ? (Object.values(toothDrafts).reduce((sum, drafts) => sum + drafts.reduce((s, p) => s + p.price, 0), 0) * (discount / 100)) : discount))} ₺</span>
+                        <span>{pricing ? (pricing.totalMinor / 100).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) : '—'} ₺</span>
                       </div>
                     </div>
                   </div>
@@ -3500,8 +3655,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                   Yazdır
                 </button>
-                <button onClick={handleModalClose} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 600 }}>İptal</button>
-                <button onClick={handleSave} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Kaydet</button>
+                <button onClick={handleModalClose} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontWeight: 600 }}>İptal</button>
+                <button disabled={saving} onClick={() => void handleSave()} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', cursor: saving ? 'wait' : 'pointer', fontWeight: 600 }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</button>
               </div>
             </div>
           </div>
@@ -3514,26 +3669,26 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         const drafts = toothDrafts[tooth];
 
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100005 }} {...toothDetailsBackdropDismiss}>
+          <div style={{ position: 'fixed', inset: 0, background: 'var(--modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100005 }} {...toothDetailsBackdropDismiss}>
             <div style={{ background: 'var(--background)', width: 1400, maxWidth: '98vw', height: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 16, border: '1px solid var(--glass-border)', boxShadow: '0 24px 48px rgba(0,0,0,0.4)', overflow: 'hidden', position: 'relative' }} onClick={e => e.stopPropagation()}>
               
               <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--glass-bg)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--foreground)' }}>Diş #{tooth} Detayları</h3>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--foreground)' }}>{targetLabel(tooth)} Detayları</h3>
                   {editingGroup && editingGroup.creatorName && (
-                    <span style={{ fontSize: '0.75rem', padding: '4px 8px', borderRadius: 12, background: 'rgba(255,255,255,0.1)', border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
+                    <span style={{ fontSize: '0.75rem', padding: '4px 8px', borderRadius: 12, background: 'var(--input-bg)', border: '1px solid var(--glass-border)', color: 'var(--foreground-2)' }}>
                       Oluşturan: {editingGroup.creatorName} {editingGroup.creatorRole && `(${editingGroup.creatorRole})`}
                     </span>
                   )}
                 </div>
-                <button onClick={() => setSelectedToothForDetails(null)} style={{ background: 'none', border: 'none', color: 'var(--foreground-2)', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
+                <button onClick={() => setSelectedToothForDetails(null)} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--foreground-2)', cursor: 'pointer', padding: 4 }}><X size={20} /></button>
               </div>
 
               <div style={{ padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
                 {/* 3D Anatomik Yüzey ve Bölüm Hızlı Seçici */}
-                <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span>📐 Diş Yüzeyleri (MODBL) & Anatomik Bölüm</span>
                     </div>
                   </div>
@@ -3541,7 +3696,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                     {/* Yüzey Butonları */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Yüzeyler:</span>
+                      <span style={{ fontSize: 11, color: 'var(--foreground-2)', fontWeight: 600 }}>Yüzeyler:</span>
                       {['M', 'O', 'D', 'B', 'L'].map(surf => {
                         const toothNum = Number(tooth);
                         const curSurfaces = toothSurfaces[toothNum] || [];
@@ -3569,8 +3724,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                               fontSize: 12,
                               cursor: 'pointer',
                               border: isSel ? '2px solid #3b82f6' : '1px solid #334155',
-                              background: isSel ? '#2563eb' : '#1e293b',
-                              color: '#ffffff'
+                              background: isSel ? 'var(--btn-clinic-primary-bg)' : 'var(--btn-clinic-blue-bg)',
+                              color: isSel ? 'var(--btn-clinic-primary-fg)' : 'var(--btn-clinic-blue-fg)'
                             }}
                           >
                             {surf}
@@ -3599,9 +3754,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             fontSize: 11,
                             fontWeight: 700,
                             cursor: 'pointer',
-                            background: '#1e293b',
-                            color: '#93c5fd',
-                            border: '1px solid #334155'
+                            background: 'var(--btn-clinic-blue-bg)',
+                            color: 'var(--badge-clinic-fg)',
+                            border: '1px solid var(--input-border)'
                           }}
                         >
                           {preset}
@@ -3611,8 +3766,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
                     {/* Bölüm Seçimi */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Bölüm:</span>
-                      {['Kuron', 'Kole (Servikal)', 'Kök & Apeks'].map(sec => {
+                      <span style={{ fontSize: 11, color: 'var(--foreground-2)', fontWeight: 600 }}>Bölüm:</span>
+                      {[{ value: 'crown', label: 'Kuron' }, { value: 'cervical', label: 'Kole (Servikal)' }, { value: 'root', label: 'Kök & Apeks' }].map(({ value: sec, label }) => {
                         const toothNum = Number(tooth);
                         const curSec = toothSections[toothNum];
                         const isSel = curSec === sec;
@@ -3643,11 +3798,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                               fontWeight: 600,
                               cursor: 'pointer',
                               border: isSel ? '2px solid #6366f1' : '1px solid #334155',
-                              background: isSel ? '#4f46e5' : '#1e293b',
-                              color: '#ffffff'
+                              background: isSel ? 'var(--btn-clinic-primary-bg)' : 'var(--btn-clinic-blue-bg)',
+                              color: isSel ? 'var(--btn-clinic-primary-fg)' : 'var(--btn-clinic-blue-fg)'
                             }}
                           >
-                            {sec}
+                            {label}
                           </button>
                         );
                       })}
@@ -3670,7 +3825,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                             }
                             return next;
                           });
-                        }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="İşlemi Sil"><Trash2 size={16} /></button>
+                        }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }} title="İşlemi Sil"><Trash2 size={16} /></button>
                       </div>
                     </div>
 
@@ -3727,7 +3882,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         {proc.materials.length > 0 && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {proc.materials.map((m: any, mIdx: number) => (
-                              <div key={mIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.15)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+                              <div key={mIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--input-bg)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
                                 <div style={{ fontSize: '0.85rem', color: 'var(--foreground)', fontWeight: 500 }}>{m.name}</div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -3750,6 +3905,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       })
                                     }} style={{ ...inputStyle, width: 60, padding: '4px 8px', fontSize: '0.9rem', textAlign: 'center' }} />
                                   </div>
+                                  <label style={{ color: 'var(--foreground-2)', fontSize: 12 }}>Satış ₺
+                                    <input aria-label={`${m.name} satış bedeli`} type="number" min="0" step="0.01" value={(m.unitSalePriceMinor || 0) / 100} onChange={e => {
+                                      const unitSalePriceMinor = Math.round(Number(e.target.value) * 100);
+                                      setToothDrafts(previous => ({ ...previous, [tooth]: previous[tooth].map(item => item.id === proc.id
+                                        ? { ...item, materials: item.materials.map((material, index) => index === mIdx ? { ...material, unitSalePriceMinor } : material) } : item) }));
+                                    }} style={{ ...inputStyle, width: 80, marginLeft: 5 }} />
+                                  </label>
                                   <button onClick={() => {
                                     setToothDrafts(prev => {
                                       const next = { ...prev };
@@ -3763,7 +3925,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                       }
                                       return next;
                                     })
-                                  }} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={16} /></button>
+                                  }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={16} /></button>
                                 </div>
                               </div>
                             ))}
@@ -3809,24 +3971,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                   key={i}
                   style={{ padding: '6px 12px', fontSize: 12, cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-bg)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'var(--card-bg)'}
                   onClick={() => {
-                    setToothDrafts(prev => {
-                      const next = { ...prev };
-                      contextMenu.teeth.forEach(t => {
-                        const tk = String(t);
-                        next[tk] = next[tk] ? [...next[tk]] : [];
-                        if (!next[tk].find((x: any) => x.name === p.name)) {
-                          next[tk].push({
-                            id: Math.random().toString(36).substring(7),
-                            name: p.name, price: p.price, indications: [], doctorId: defaultDoctorId, materials: [...(p.materials || []).map((m: any) => ({ ...m }))],
-                            color: p.color
-                          });
-                        }
-                      });
-                      return next;
-                    });
-                    // Close menu
+                    handleDropTreatment(contextMenu.teeth, { procedures: [p], indications: [] });
                     setContextMenu(null);
                   }}
                 >
@@ -3849,7 +3996,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       display: 'flex', justifyContent: 'space-between'
                     }}
                     onMouseEnter={e => { if (canAddIndication) e.currentTarget.style.background = 'var(--glass-bg)' }}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'var(--card-bg)'}
                     onClick={() => {
                       if (!canAddIndication) {
                         toast.error('Endikasyon ekleyebilmek için seçili dişlerin tümünde en az bir işlem bulunmalıdır.');

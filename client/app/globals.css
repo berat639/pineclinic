@@ -740,6 +740,12 @@ body {
   color: #ffffff !important;
 }
 
+/* The global light-mode text rule must not override the treatment buttons'
+   own foreground color, especially white labels on medical-blue buttons. */
+[data-theme="light"] .admin-content .treatment-plan-modal button * {
+  color: inherit !important;
+}
+
 /* Primary button in light mode: solid vibrant medical blue matching reference screenshot */
 [data-theme="light"] .btn-primary {
   background: var(--accent, #1d4ed8) !important;

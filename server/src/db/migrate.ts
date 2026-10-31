@@ -1,4 +1,5 @@
 import { integrationDDL } from '../integrations/managed/schema'
+import { treatmentPlanningDDL } from './treatment-planning-schema'
 /**
  * Database migration — raw SQL CREATE TABLE IF NOT EXISTS.
  * No generated files needed. Safe to run multiple times.
@@ -1160,6 +1161,7 @@ async function runMigrations() {
   }
 
   for (const ddl of integrationDDL) await sql.unsafe(ddl)
+  for (const ddl of treatmentPlanningDDL) await sql.unsafe(ddl)
 
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()

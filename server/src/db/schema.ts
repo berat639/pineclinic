@@ -300,6 +300,93 @@ export const treatmentPlans = pgTable('treatment_plans', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+// Extra planning data is kept separately so older containers can continue to
+// read the original treatment tables during a rolling deployment.
+export const treatmentGroupDetails = pgTable('treatment_group_details', {
+  groupId: uuid('group_id').primaryKey().references(() => treatmentGroups.id),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  version: integer('version').notNull().default(1),
+  idempotencyKey: text('idempotency_key'),
+  requestHash: text('request_hash'),
+  consultationNote: text('consultation_note').notNull().default(''),
+  discountPercentBps: integer('discount_percent_bps').notNull().default(0),
+  discountFixedMinor: bigint('discount_fixed_minor', { mode: 'number' }).notNull().default(0),
+  metadata: jsonb('metadata').notNull().default({}),
+}, (t) => [uniqueIndex('treatment_group_details_request_idx').on(t.clinicId, t.idempotencyKey)])
+
+export const treatmentPlanDetails = pgTable('treatment_plan_details', {
+  treatmentId: uuid('treatment_id').primaryKey().references(() => treatmentPlans.id),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  basePriceMinor: bigint('base_price_minor', { mode: 'number' }).notNull().default(0),
+  netPriceMinor: bigint('net_price_minor', { mode: 'number' }).notNull().default(0),
+  materials: jsonb('materials').notNull().default([]),
+  metadata: jsonb('metadata').notNull().default({}),
+  stockState: text('stock_state').notNull().default('planned'),
+})
+
+export const treatmentCatalog = pgTable('treatment_catalog', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  nameKey: text('name_key').notNull(),
+  scope: text('scope').notNull().default('tooth'),
+  priceMinor: bigint('price_minor', { mode: 'number' }).notNull().default(0),
+  color: text('color').notNull().default('#0284c7'),
+  materials: jsonb('materials').notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('treatment_catalog_active_name_idx').on(t.clinicId, t.kind, t.nameKey).where(sql`${t.active} = true`)])
+
+export const patientConsentRequests = pgTable('patient_consent_requests', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  deliveryChannel: text('delivery_channel').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  requestKey: text('request_key').notNull(),
+  status: text('status').notNull().default('pending'),
+  textVersion: text('text_version').notNull(),
+  textSnapshot: text('text_snapshot').notNull(),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  respondedAt: timestamp('responded_at', { withTimezone: true }),
+}, (t) => [uniqueIndex('patient_consent_request_key_idx').on(t.clinicId, t.requestKey)])
+
+export const patientConsentPreferences = pgTable('patient_consent_preferences', {
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  channel: text('channel').notNull(),
+  status: text('status').notNull(),
+  textVersion: text('text_version').notNull(),
+  requestId: uuid('request_id').notNull().references(() => patientConsentRequests.id),
+  respondedAt: timestamp('responded_at', { withTimezone: true }).notNull(),
+}, (t) => [primaryKey({ columns: [t.clinicId, t.patientId, t.channel] })])
+
+export const planAttachments = pgTable('plan_attachments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
+  patientId: uuid('patient_id').notNull().references(() => patients.id),
+  groupId: uuid('group_id').references(() => treatmentGroups.id),
+  kind: text('kind').notNull(),
+  status: text('status').notNull().default('pending'),
+  requestKey: text('request_key').notNull(),
+  totalBytes: bigint('total_bytes', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('plan_attachment_request_idx').on(t.clinicId, t.requestKey)])
+
+export const planAttachmentFiles = pgTable('plan_attachment_files', {
+  attachmentId: uuid('attachment_id').notNull().references(() => planAttachments.id),
+  fileIndex: integer('file_index').notNull(),
+  name: text('name').notNull(),
+  contentType: text('content_type').notNull(),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+  uploadedBytes: bigint('uploaded_bytes', { mode: 'number' }).notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.attachmentId, t.fileIndex] })])
+
 // Junction table: links appointments to treatment plan items (many-to-many)
 // One treatment can be done across multiple appointments (sessions), one appointment can include many treatments
 export const appointmentTreatments = pgTable('appointment_treatments', {

@@ -29,8 +29,10 @@ export async function sendSMS({
     const success = data.startsWith('00')
     
     return { success, response: data }
-  } catch (err: any) {
-    console.error('NetGSM Error:', err)
-    return { success: false, error: err.message || 'Bilinmeyen hata' }
+  } catch {
+    // Errors can contain the complete provider URL, including credentials and
+    // message content. Never copy them into logs or API responses.
+    console.error('NetGSM isteği tamamlanamadı.')
+    return { success: false, error: 'Gönderim sonucu doğrulanamadı' }
   }
 }

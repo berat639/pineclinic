@@ -322,11 +322,20 @@ export async function recordIncomingMessage(clinic: Clinic, message: IncomingWha
   })
 }
 
-export async function enqueueWhatsAppNotification(clinic: Clinic, phone: string, text: string, deduplicationKey: string): Promise<void> {
+export async function enqueueWhatsAppNotification(clinic: Clinic, phone: string, text: string, deduplicationKey: string, patientId: string): Promise<void> {
   const normalized = normalizePhone(phone)
   await db.transaction(async tx => {
+    const matchingPatients = await tx.select({ id: patients.id }).from(patients)
+      .where(and(eq(patients.clinicId, clinic.id), patientPhoneMatches(normalized))).limit(2)
+    if (matchingPatients.length !== 1 || matchingPatients[0].id !== patientId) throw new Error('Telefon hastaya tekil olarak eşleşmiyor.')
     const conversation = await ensureConversation(tx, clinic, `${normalized.slice(1)}@s.whatsapp.net`, normalized)
+    if (conversation.patientId && conversation.patientId !== patientId) throw new Error('Konuşma farklı bir hastaya bağlı.')
+    if (!conversation.patientId) await tx.update(whatsappConversations).set({ patientId }).where(eq(whatsappConversations.id, conversation.id))
     await tx.insert(whatsappMessages).values({ conversationId: conversation.id, externalId: deduplicationKey,
-      direction: 'notification', text, replyText: text, status: 'reply_ready' }).onConflictDoNothing()
+      direction: 'notification', text, replyText: text, status: 'reply_ready' }).onConflictDoUpdate({
+      target: [whatsappMessages.conversationId, whatsappMessages.externalId],
+      set: { status: 'reply_ready', error: null, availableAt: new Date(), updatedAt: new Date() },
+      setWhere: sql`${whatsappMessages.status} IN ('skipped', 'held')`,
+    })
   })
 }

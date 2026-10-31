@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, ilike, or, inArray } from 'drizzle-orm'
+import { eq, ne, desc, and, gte, lte, sql, ilike, or, inArray } from 'drizzle-orm'
 import { db } from '../client'
 import {
   users,
@@ -22,7 +22,9 @@ import {
   patientDiseases,
   materialUsages,
   installmentPlans,
-  whatsappConversations
+  whatsappConversations,
+  patientConsentRequests,
+  planAttachments,
 } from '../schema'
 import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
@@ -570,14 +572,14 @@ export async function getPatientTreatmentGroups(patientId: string) {
     creatorRole: users.role,
   }).from(treatmentGroups)
     .leftJoin(users, eq(treatmentGroups.createdById, users.id))
-    .where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId)))
+    .where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId), ne(treatmentGroups.status, 'cancelled')))
     .orderBy(desc(treatmentGroups.createdAt))
   
   // For each group, fetch its treatment plans + attached sessions
   const result = []
   for (const group of groups) {
     const plans = await db.select().from(treatmentPlans)
-      .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id)))
+      .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id), ne(treatmentPlans.status, 'cancelled')))
       .orderBy(desc(treatmentPlans.createdAt))
     
     for (const p of plans) {
@@ -600,7 +602,7 @@ export async function getPatientTreatmentGroups(patientId: string) {
   
   // Also fetch ungrouped treatments + attached sessions
   const ungrouped = await db.select().from(treatmentPlans)
-    .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), sql`group_id IS NULL`))
+    .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'), sql`group_id IS NULL`))
     .orderBy(desc(treatmentPlans.createdAt))
 
   for (const p of ungrouped) {
@@ -637,7 +639,7 @@ export async function getAppointmentTreatments(appointmentId: string) {
     status: treatmentPlans.status
   }).from(appointmentTreatments)
     .innerJoin(treatmentPlans, eq(appointmentTreatments.treatmentPlanId, treatmentPlans.id))
-    .where(and(eq(appointmentTreatments.appointmentId, appointmentId), eq(treatmentPlans.clinicId, clinicId)))
+    .where(and(eq(appointmentTreatments.appointmentId, appointmentId), eq(treatmentPlans.clinicId, clinicId), ne(treatmentPlans.status, 'cancelled')))
     .orderBy(appointmentTreatments.sessionNumber)
 }
 
@@ -645,7 +647,7 @@ export async function linkTreatmentToAppointment(appointmentId: string, treatmen
   const clinicId = requireClinicId()
   const [valid] = await db.select({ id: treatmentPlans.id }).from(treatmentPlans)
     .innerJoin(dentalAppointments, eq(dentalAppointments.id, appointmentId))
-    .where(and(eq(treatmentPlans.id, treatmentPlanId), eq(treatmentPlans.clinicId, clinicId), eq(dentalAppointments.clinicId, clinicId))).limit(1)
+    .where(and(eq(treatmentPlans.id, treatmentPlanId), eq(treatmentPlans.clinicId, clinicId), eq(dentalAppointments.clinicId, clinicId), eq(treatmentPlans.patientId, dentalAppointments.patientId))).limit(1)
   if (!valid) throw new Error('Randevu veya tedavi bu kliniğe ait değil')
   // Check if already linked
   const existing = await db.select().from(appointmentTreatments)
@@ -665,7 +667,7 @@ export async function unlinkTreatmentFromAppointment(appointmentId: string, trea
   const clinicId = requireClinicId()
   const [valid] = await db.select({ id: treatmentPlans.id }).from(treatmentPlans)
     .innerJoin(dentalAppointments, eq(dentalAppointments.id, appointmentId))
-    .where(and(eq(treatmentPlans.id, treatmentPlanId), eq(treatmentPlans.clinicId, clinicId), eq(dentalAppointments.clinicId, clinicId))).limit(1)
+    .where(and(eq(treatmentPlans.id, treatmentPlanId), eq(treatmentPlans.clinicId, clinicId), eq(dentalAppointments.clinicId, clinicId), eq(treatmentPlans.patientId, dentalAppointments.patientId))).limit(1)
   if (!valid) return false
   const rows = await db.delete(appointmentTreatments)
     .where(and(eq(appointmentTreatments.appointmentId, appointmentId), eq(appointmentTreatments.treatmentPlanId, treatmentPlanId)))
@@ -737,7 +739,7 @@ export async function deleteTreatmentGroup(id: string): Promise<boolean> {
 
 export async function getPatientTreatments(patientId: string) {
   const clinicId = requireClinicId()
-  const plans = await db.select().from(treatmentPlans).where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId))).orderBy(desc(treatmentPlans.createdAt))
+  const plans = await db.select().from(treatmentPlans).where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'))).orderBy(desc(treatmentPlans.createdAt))
 
   for (const p of plans) {
     const sessions = await db.select({
@@ -1544,13 +1546,15 @@ export async function updateTreatmentGroupFull(groupId: string, data: {
 export class PatientArchiveRequiredError extends Error {
   readonly code = 'PATIENT_ARCHIVE_REQUIRED'
   constructor(readonly patientIds: string[]) {
-    super('Randevusu veya ödemesi olan hasta kalıcı olarak silinemez; arşivlenmelidir.')
+    super('Randevu, ödeme, tedavi veya onam geçmişi olan hasta kalıcı olarak silinemez; arşivlenmelidir.')
   }
 }
 
 export async function deletePatientsBulk(patientIds: string[]) {
   const clinicId = requireClinicId()
   await ensurePatientArchiveSchema()
+  const { ensureTreatmentPlanningSchema } = await import('../treatment-planning-schema')
+  await ensureTreatmentPlanningSchema()
   if (!patientIds || patientIds.length === 0) return { deletedCount: 0 }
 
   const validPatients = await db
@@ -1561,13 +1565,19 @@ export async function deletePatientsBulk(patientIds: string[]) {
   const validIds = validPatients.map(p => p.id)
   if (validIds.length === 0) return { deletedCount: 0 }
 
-  const [appointmentRows, paymentRows] = await Promise.all([
+  const [appointmentRows, paymentRows, treatmentRows, consentRows, attachmentRows] = await Promise.all([
     db.select({ patientId: dentalAppointments.patientId }).from(dentalAppointments)
       .where(and(eq(dentalAppointments.clinicId, clinicId), inArray(dentalAppointments.patientId, validIds))),
     db.select({ patientId: patientPayments.patientId }).from(patientPayments)
       .where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.patientId, validIds))),
+    db.select({ patientId: treatmentPlans.patientId }).from(treatmentPlans)
+      .where(and(eq(treatmentPlans.clinicId, clinicId), inArray(treatmentPlans.patientId, validIds))),
+    db.select({ patientId: patientConsentRequests.patientId }).from(patientConsentRequests)
+      .where(and(eq(patientConsentRequests.clinicId, clinicId), inArray(patientConsentRequests.patientId, validIds))),
+    db.select({ patientId: planAttachments.patientId }).from(planAttachments)
+      .where(and(eq(planAttachments.clinicId, clinicId), inArray(planAttachments.patientId, validIds))),
   ])
-  const protectedIds = new Set([...appointmentRows, ...paymentRows].map(row => row.patientId).filter((id): id is string => Boolean(id)))
+  const protectedIds = new Set([...appointmentRows, ...paymentRows, ...treatmentRows, ...consentRows, ...attachmentRows].map(row => row.patientId).filter((id): id is string => Boolean(id)))
   if (protectedIds.size > 0) {
     throw new PatientArchiveRequiredError([...protectedIds])
   }

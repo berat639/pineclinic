@@ -16,6 +16,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY package.json ./
 COPY server/ ./server/
+# Shared, dependency-free pricing rules are used by both server and client.
+COPY client/lib/treatment-pricing.ts ./client/lib/treatment-pricing.ts
+COPY client/lib/notification-channels.ts ./client/lib/notification-channels.ts
 COPY data/ ./data/
 
 RUN chmod +x /app/server/docker-entrypoint.sh

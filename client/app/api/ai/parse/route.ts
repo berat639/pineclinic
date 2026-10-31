@@ -1,4 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { fetchBackend } from '@/lib/backend-request'
+import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
+
+const requestWindows = new Map<string, { count: number; until: number }>()
 
 // Türkçe yazıyla söylenen diş numaralarını ve bitişik/kırpılmış FDI serilerini normalize eder
 function normalizeDentalSpeechInput(rawText: string): string {
@@ -78,12 +82,29 @@ function normalizeDentalSpeechInput(rawText: string): string {
   return text
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    const token = req.cookies.get('token')?.value
+    if (!token) return NextResponse.json({ error: 'Oturum gerekli' }, { status: 401 })
+    const authResponse = await fetchBackend('/api/auth/me', {
+      headers: { cookie: `token=${token}`, ...getTenantForwardingHeaders(req) }, cache: 'no-store',
+    })
+    if (!authResponse.ok) return NextResponse.json({ error: 'Oturum geçersiz' }, { status: authResponse.status === 401 ? 401 : 403 })
+    const user = await authResponse.json()
+    if (!user?.id || !user?.clinicId || !['yonetici', 'moderator', 'hekim', 'host'].includes(user.role))
+      return NextResponse.json({ error: 'Yetki yok' }, { status: 403 })
+    const now = Date.now()
+    const key = `${user.clinicId}:${user.id}`
+    const window = requestWindows.get(key)
+    if (!window || window.until <= now) requestWindows.set(key, { count: 1, until: now + 60_000 })
+    else if (window.count >= 30) return NextResponse.json({ error: 'Çok fazla istek. Bir dakika sonra tekrar deneyin.' }, { status: 429 })
+    else window.count++
+    if (requestWindows.size > 1000) for (const [entry, value] of requestWindows) if (value.until <= now) requestWindows.delete(entry)
     const { text: rawText, procNames = [], indNames = [], diseaseNames = [], consultationNames = [] } = await req.json()
-    if (!rawText) {
-      return NextResponse.json({ error: 'Text is required' }, { status: 400 })
-    }
+    const lists = [procNames, indNames, diseaseNames, consultationNames]
+    if (typeof rawText !== 'string' || !rawText.trim() || rawText.length > 2000 || lists.some(list =>
+      !Array.isArray(list) || list.length > 200 || list.some(value => typeof value !== 'string' || value.length > 120)))
+      return NextResponse.json({ error: 'Komut veya katalog verisi geçersiz' }, { status: 400 })
     const text = normalizeDentalSpeechInput(String(rawText))
 
     const apiKey = process.env.GEMINI_API_KEY
@@ -275,13 +296,13 @@ Format:
     try {
       parsed = JSON.parse(contentText)
     } catch (e) {
-      console.error('AI JSON Parse Error:', e, contentText)
+      console.error('AI JSON Parse Error')
       // markdown temizlemeyi deneyelim
       try {
         const cleaned = contentText.replace(/```json/g, '').replace(/```/g, '').trim()
         parsed = JSON.parse(cleaned)
       } catch (e2) {
-        return NextResponse.json({ error: 'Parse Error', raw: contentText })
+        return NextResponse.json({ error: 'Komut ayrıştırılamadı' }, { status: 422 })
       }
     }
 

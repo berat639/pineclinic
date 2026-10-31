@@ -405,7 +405,6 @@ const app = new Elysia()
       }
       return { 
         id: patient.id,
-        name: patient.name,
         smsOptOut: patient.smsOptOut,
         emailOptOut: patient.emailOptOut,
         whatsappOptOut: patient.whatsappOptOut 
@@ -424,17 +423,41 @@ const app = new Elysia()
       const patientId = params.id
       const b = body as any
       
-      await db.update(patients).set({
-        smsOptOut: !!b.smsOptOut,
-        emailOptOut: !!b.emailOptOut,
-        whatsappOptOut: !!b.whatsappOptOut
-      }).where(and(eq(patients.id, patientId), eq(patients.clinicId, requireClinicId())))
+      const update: { smsOptOut?: boolean; emailOptOut?: boolean; whatsappOptOut?: boolean } = {}
+      if (b.smsOptOut === true) update.smsOptOut = true
+      if (b.emailOptOut === true) update.emailOptOut = true
+      if (b.whatsappOptOut === true) update.whatsappOptOut = true
+      const channels: ('sms' | 'email' | 'whatsapp')[] = []
+      if (update.smsOptOut) channels.push('sms')
+      if (update.emailOptOut) channels.push('email')
+      if (update.whatsappOptOut) channels.push('whatsapp')
+      if (channels.length) {
+        const [patient] = await db.update(patients).set(update).where(and(eq(patients.id, patientId), eq(patients.clinicId, requireClinicId()))).returning({ id: patients.id })
+        if (!patient) { set.status = 404; return { error: 'Hasta bulunamadı' } }
+        const { revokePatientConsent } = await import('./services/patient-consent')
+        await revokePatientConsent(requireClinicId(), patientId, channels)
+      }
       
       return { success: true }
     } catch (e: any) {
       set.status = 500
       return { error: 'Sunucu hatası' }
     }
+  })
+
+  .get('/api/public/patient-consent/:token', async ({ params, set }) => {
+    const { getConsentForm } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    set.headers['cache-control'] = 'no-store'
+    try { return await getConsentForm(params.token, requireClinicId()) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/public/patient-consent/:token', async ({ params, body, set }) => {
+    const { submitConsentForm } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    set.headers['cache-control'] = 'no-store'
+    try { return await submitConsentForm(params.token, requireClinicId(), (body as any)?.answers) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
 
   .use(whatsappPlugin)
@@ -687,7 +710,16 @@ const app = new Elysia()
     
     if (Object.keys(updateData).length === 0) return { success: true }
     
-    await db.update(patients).set(updateData).where(and(eq(patients.id, params.id), eq(patients.clinicId, requireClinicId())))
+    const [patient] = await db.update(patients).set(updateData).where(and(eq(patients.id, params.id), eq(patients.clinicId, requireClinicId()))).returning({ id: patients.id })
+    if (!patient) { set.status = 404; return { error: 'Hasta bulunamadı' } }
+    const revoked: ('sms' | 'email' | 'whatsapp')[] = []
+    if (updateData.smsOptOut === true) revoked.push('sms')
+    if (updateData.emailOptOut === true) revoked.push('email')
+    if (updateData.whatsappOptOut === true) revoked.push('whatsapp')
+    if (revoked.length) {
+      const { revokePatientConsent } = await import('./services/patient-consent')
+      await revokePatientConsent(requireClinicId(), params.id, revoked)
+    }
     return { success: true }
   })
   .delete('/api/dental/patients/:id', async ({ params, set }) => {
@@ -696,6 +728,7 @@ const app = new Elysia()
       const res = await deletePatient(params.id)
       return res
     } catch (e: any) {
+      if (e?.code === 'PATIENT_ARCHIVE_REQUIRED') { set.status = 409; return { error: e.message, code: e.code, patientIds: e.patientIds } }
       set.status = 500
       return { error: e.message || 'Hasta silinemedi' }
     }
@@ -751,6 +784,87 @@ const app = new Elysia()
     const { getPatientTreatmentGroups } = await import('./db/repositories/dental')
     return await getPatientTreatmentGroups(params.id)
   })
+  .get('/api/dental/treatment-catalog', async () => {
+    const { listTreatmentCatalog } = await import('./services/treatment-catalog')
+    return listTreatmentCatalog(requireClinicId())
+  })
+  .get('/api/dental/consent-settings', async ({ cookie, request }) => {
+    const { consentSettings } = await import('./services/patient-consent')
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    return { ...(await consentSettings(requireClinicId())), canEdit: !!user && ['yonetici', 'moderator'].includes(user.role) }
+  })
+  .put('/api/dental/consent-settings', async ({ body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator'].includes(user.role)) { set.status = 403; return { error: 'Onam metnini düzenleme yetkisi yok' } }
+    const { saveConsentSettings } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await saveConsentSettings(requireClinicId(), (body as any)?.text) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .get('/api/dental/patients/:id/consent', async ({ params, set }) => {
+    const { getPatientConsent } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await getPatientConsent(params.id, requireClinicId()) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .get('/api/dental/patients/:id/notification-deliveries', async ({ params, set }) => {
+    const { getPatientConsent } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    const { db } = await import('./db/client')
+    const { sql } = await import('drizzle-orm')
+    try {
+      const clinicId = requireClinicId()
+      await getPatientConsent(params.id, clinicId)
+      return await db.execute(sql`SELECT treatment_id, due_date, channel, status, updated_at FROM patient_notification_deliveries
+        WHERE clinic_id = ${clinicId} AND patient_id = ${params.id} ORDER BY updated_at DESC LIMIT 20`)
+    } catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/dental/patients/:id/consent-requests', async ({ params, body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'hekim', 'host'].includes(user.role)) { set.status = 403; return { error: 'Yetki yok' } }
+    const { requestPatientConsent } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    const b = (body || {}) as { deliveryChannel: 'sms' | 'whatsapp' | 'email'; requestKey: string }
+    const tenantHost = currentTenant()?.hostname || ''
+    const hostname = tenantHost === 'localhost' || tenantHost === '127.0.0.1' ? `${tenantHost}:3000` : tenantHost
+    try { return await requestPatientConsent({ patientId: params.id, clinicId: requireClinicId(), userId: user.id, deliveryChannel: b.deliveryChannel, requestKey: b.requestKey, hostname }) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/dental/patients/:id/consent-in-clinic', async ({ params, body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'hekim', 'host'].includes(user.role)) { set.status = 403; return { error: 'Yetki yok' } }
+    const { grantInClinicPatientConsent } = await import('./services/patient-consent')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    const b = (body || {}) as { channels?: Array<'sms' | 'whatsapp' | 'email' | 'assistant_call'> }
+    try { return await grantInClinicPatientConsent({ patientId: params.id, clinicId: requireClinicId(), userId: user.id, channels: b.channels }) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/dental/treatment-catalog', async ({ body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'hekim'].includes(user.role)) { set.status = 403; return { error: 'Katalog düzenleme yetkisi yok' } }
+    const { saveTreatmentCatalog } = await import('./services/treatment-catalog')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await saveTreatmentCatalog(requireClinicId(), body as any) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .put('/api/dental/treatment-catalog/:id', async ({ params, body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'hekim'].includes(user.role)) { set.status = 403; return { error: 'Katalog düzenleme yetkisi yok' } }
+    const { saveTreatmentCatalog } = await import('./services/treatment-catalog')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await saveTreatmentCatalog(requireClinicId(), body as any, params.id) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .delete('/api/dental/treatment-catalog/:id', async ({ params, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'hekim'].includes(user.role)) { set.status = 403; return { error: 'Katalog düzenleme yetkisi yok' } }
+    const { archiveTreatmentCatalog } = await import('./services/treatment-catalog')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      if (!await archiveTreatmentCatalog(requireClinicId(), params.id)) { set.status = 404; return { error: 'Katalog kaydı bulunamadı' } }
+      return { success: true }
+    } catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
   .post('/api/dental/patients/:id/treatment-groups', async ({ params, body, set, cookie }) => {
     const { authenticateRequest } = await import('./middleware/auth')
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
@@ -759,20 +873,27 @@ const app = new Elysia()
     if (!b.name) { set.status = 400; return { error: 'name gerekli' } }
     return await createTreatmentGroup({ patientId: params.id, name: b.name, description: b.description, createdById: user?.id })
   })
-  .put("/api/dental/treatment-groups/:id/full", async ({ params, body, set, cookie }) => {
-    const { authenticateRequest } = await import('./middleware/auth')
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    const { updateTreatmentGroupFull } = await import("./db/repositories/dental")
-    const b = body as any
-    if (!b.name || !b.patientId || !b.treatments) { set.status = 400; return { error: "Missing fields" } }
-    return await updateTreatmentGroupFull(params.id, { 
-      name: b.name, 
-      description: b.description, 
-      patientId: b.patientId, 
-      treatments: b.treatments, 
-      updatedById: user?.id,
-      appointmentId: b.appointmentId
-    })
+  .get('/api/dental/treatment-groups/:id', async ({ params, set }) => {
+    const { getTreatmentPlan, TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      const plan = await getTreatmentPlan(params.id, requireClinicId())
+      if (!plan) { set.status = 404; return { error: 'Plan bulunamadı' } }
+      return plan
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
+    }
+  })
+  .put('/api/dental/treatment-groups/:id/full', async ({ params, body, set, cookie, request }) => {
+    const { saveTreatmentPlan, TreatmentPlanError } = await import('./services/treatment-planning')
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    try {
+      return await saveTreatmentPlan(body as any, requireClinicId(), user.id, params.id)
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
+    }
   })
   .put('/api/dental/treatment-groups/:id', async ({ params, body, cookie }) => {
     const { authenticateRequest } = await import('./middleware/auth')
@@ -782,10 +903,15 @@ const app = new Elysia()
     return await updateTreatmentGroup(params.id, { name: b.name, description: b.description, status: b.status, updatedById: user?.id })
   })
   .delete('/api/dental/treatment-groups/:id', async ({ params, set }) => {
-    const { deleteTreatmentGroup } = await import('./db/repositories/dental')
-    const success = await deleteTreatmentGroup(params.id)
-    if (!success) { set.status = 404; return { error: 'Not found' } }
-    return { success: true }
+    const { cancelTreatmentGroup, TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      const success = await cancelTreatmentGroup(params.id, requireClinicId())
+      if (!success) { set.status = 404; return { error: 'Plan bulunamadı' } }
+      return { success: true }
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
+    }
   })
   .get('/api/dental/patients/:id/treatments', async ({ params }) => {
     const { getPatientTreatments, getPatientTreatmentGroups } = await import('./db/repositories/dental')
@@ -793,191 +919,84 @@ const app = new Elysia()
     const groups = await getPatientTreatmentGroups(params.id)
     return { treatments, groups: groups.groups }
   })
-  .post('/api/dental/patients/:id/treatments/bulk', async ({ params, body, set, cookie }) => {
-    const { authenticateRequest } = await import('./middleware/auth')
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    const { createTreatmentGroup, createTreatmentPlan } = await import('./db/repositories/dental')
-    const b = body as any
-    if (!b.treatments || !Array.isArray(b.treatments)) { set.status = 400; return { error: 'Missing treatments array' } }
-    
-    // Create treatment group
-    const groupName = b.groupName || `Tedavi Planı - ${new Date().toLocaleDateString('tr-TR')}`
-    const group = await createTreatmentGroup({ patientId: params.id, name: groupName, createdById: user?.id })
-    if (!group) { set.status = 500; return { error: 'Failed to create group' } }
-    
-    const results = []
-    
-    const { db } = await import('./db/client')
-    const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
-    const { and, eq, sql } = await import('drizzle-orm')
-    const clinicId = requireClinicId()
-    
-    for (const t of b.treatments) {
-      const treatmentResult = await createTreatmentPlan({
-        patientId: params.id,
-        doctorId: t.doctorId || b.doctorId,
-        procedureName: t.procedureName,
-        toothNumber: t.toothNumber,
-        indication: t.indication,
-        cost: t.cost,
-        status: t.status || 'planned',
-        dcmUrl: t.dcmUrl,
-        clinicId,
-        groupId: group.id,
-        isPeriodic: t.isPeriodic,
-        periodDays: t.periodDays,
-        nextNotificationDate: t.nextNotificationDate,
-        notifyPatient: t.notifyPatient,
-        notificationType: t.notificationType
-      })
-      results.push(treatmentResult)
-      
-      // Process materials for this treatment
-      if (t.materials && Array.isArray(t.materials) && t.materials.length > 0) {
-        try {
-          for (const mat of t.materials) {
-            if (!mat.inventoryItemId || !mat.quantity) continue
-            await db.update(inventoryItems)
-              .set({ quantity: sql`quantity - ${mat.quantity}` })
-              .where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId)))
-            
-            await db.insert(inventoryMovements).values({
-              clinicId,
-              itemId: mat.inventoryItemId,
-              type: 'cikis',
-              quantity: mat.quantity,
-              notes: `Tedavi (Toplu): ${t.procedureName}`,
-            })
-            
-            const [item] = await db.select().from(inventoryItems).where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId))).limit(1)
-            if (item) {
-              if (t.doctorId || b.doctorId) {
-                await db.insert(materialUsages).values({
-                  clinicId,
-                  doctorId: t.doctorId || b.doctorId,
-                  patientId: params.id,
-                  inventoryItemId: mat.inventoryItemId,
-                  quantity: mat.quantity,
-                  date: new Date().toISOString().split('T')[0]
-                })
-              }
-              await db.insert(expenses).values({
-                clinicId,
-                category: 'malzeme',
-                itemName: item.name,
-                quantity: mat.quantity,
-                unitCost: item.costPerUnit,
-                totalCost: mat.quantity * item.costPerUnit,
-                date: new Date().toISOString().split('T')[0],
-                notes: `Tedavi (Toplu): ${t.procedureName}`
-              })
-            }
-          }
-        } catch (err) {
-          console.error("Error processing materials for bulk:", err)
-        }
-      }
+  .post('/api/dental/patients/:id/treatments/bulk', async ({ params, body, set, cookie, request }) => {
+    const { saveTreatmentPlan, TreatmentPlanError } = await import('./services/treatment-planning')
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    const b = body as Record<string, unknown>
+    try {
+      const plan = await saveTreatmentPlan({ ...b, patientId: params.id, name: b.name || b.groupName } as any, requireClinicId(), user.id)
+      return { success: true, groupId: plan?.id, count: plan?.treatments.length, treatments: plan?.treatments, plan }
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
     }
-    
-    // Auto-link to appointment if appointmentId provided
-    if (b.appointmentId) {
-      const { linkTreatmentToAppointment } = await import('./db/repositories/dental')
-      for (const item of results) {
-        if (item?.id) {
-          await linkTreatmentToAppointment(b.appointmentId, item.id, 1).catch(() => {})
-        }
-      }
-    }
-
-    return { success: true, groupId: group.id, count: results.length, treatments: results }
   })
   .post('/api/dental/patients/:id/treatments', async ({ params, body, set }) => {
-    const { createTreatmentPlan } = await import('./db/repositories/dental')
-    const b = body as any
-    if (!b.procedureName || b.cost === undefined) { set.status = 400; return { error: 'Missing fields' } }
-    const treatmentResult = await createTreatmentPlan({ 
-      patientId: params.id, 
-      doctorId: b.doctorId,
-      procedureName: b.procedureName, 
-      toothNumber: b.toothNumber, 
-      indication: b.indication, 
-      cost: b.cost, 
-      status: b.status,
-      dcmUrl: b.dcmUrl,
-      clinicId: requireClinicId(),
-      groupId: b.groupId,
-      isPeriodic: b.isPeriodic,
-      periodDays: b.periodDays,
-      nextNotificationDate: b.nextNotificationDate,
-      notifyPatient: b.notifyPatient,
-      notificationType: b.notificationType
-    })
-    
-    // Process used materials if any
-    if (b.materials && Array.isArray(b.materials) && b.materials.length > 0) {
-      try {
-        const { db } = await import('./db/client')
-        const { inventoryItems, inventoryMovements, materialUsages, expenses } = await import('./db/schema')
-        const { and, eq, sql } = await import('drizzle-orm')
-        const clinicId = requireClinicId()
-        
-        for (const mat of b.materials) {
-          if (!mat.inventoryItemId || !mat.quantity) continue
-          
-          // Deduct stock
-          await db.update(inventoryItems)
-            .set({ quantity: sql`quantity - ${mat.quantity}` })
-            .where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId)))
-            
-          // Record movement
-          await db.insert(inventoryMovements).values({
-            clinicId,
-            itemId: mat.inventoryItemId,
-            type: 'cikis',
-            quantity: mat.quantity,
-            notes: `Tedavi (Modal): ${b.procedureName}`,
-          })
-          
-          // Fetch item to get cost
-          const [item] = await db.select().from(inventoryItems).where(and(eq(inventoryItems.id, mat.inventoryItemId), eq(inventoryItems.clinicId, clinicId))).limit(1)
-          
-          if (item) {
-            // Record usage
-            if (b.doctorId) {
-              await db.insert(materialUsages).values({
-                clinicId,
-                doctorId: b.doctorId,
-                patientId: params.id,
-                inventoryItemId: mat.inventoryItemId,
-                quantity: mat.quantity,
-                date: new Date().toISOString().split('T')[0]
-              })
-            }
-            
-            // Record expense
-            await db.insert(expenses).values({
-              clinicId,
-              category: 'malzeme',
-              itemName: item.name,
-              quantity: mat.quantity,
-              unitCost: item.costPerUnit,
-              totalCost: mat.quantity * item.costPerUnit,
-              date: new Date().toISOString().split('T')[0],
-              notes: `Tedavi (Modal): ${b.procedureName}`
-            })
-          }
-        }
-      } catch (err) {
-        console.error("Error processing materials:", err)
-      }
+    const { createStandaloneTreatment, TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      return await createStandaloneTreatment(params.id, body as any, requireClinicId())
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
     }
-    return treatmentResult;
-    
   })
   .get('/api/dental/inventory', async () => {
     const { db } = await import('./db/client')
     const { inventoryItems } = await import('./db/schema')
     return db.select().from(inventoryItems).where(eq(inventoryItems.clinicId, requireClinicId())).orderBy(inventoryItems.name)
+  })
+  .get('/api/dental/attachment-settings', async ({ cookie, request }) => {
+    const { attachmentLimits } = await import('./services/plan-attachments')
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    return { ...(await attachmentLimits(requireClinicId())), canEdit: !!user && ['yonetici', 'moderator'].includes(user.role) }
+  })
+  .put('/api/dental/attachment-settings', async ({ body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator'].includes(user.role)) { set.status = 403; return { error: 'Dosya ayarlarını düzenleme yetkisi yok' } }
+    const { saveAttachmentLimits } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await saveAttachmentLimits(requireClinicId(), body) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/dental/patients/:id/attachments', async ({ params, body, set }) => {
+    const { createPlanAttachment } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await createPlanAttachment(requireClinicId(), params.id, body as any) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .get('/api/dental/patients/:id/attachments/:attachmentId', async ({ params, set }) => {
+    const { getPlanAttachment } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await getPlanAttachment(requireClinicId(), params.id, params.attachmentId) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .put('/api/dental/patients/:id/attachments/:attachmentId/files/:fileIndex', async ({ params, query, request, set }) => {
+    const { uploadPlanChunk, readLimitedChunk } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      if (!/^\d+$/.test(params.fileIndex) || typeof query.offset !== 'string' || !/^\d+$/.test(query.offset)) throw new TreatmentPlanError('Dosya konumu geçersiz')
+      const chunk = await readLimitedChunk(request)
+      return await uploadPlanChunk(requireClinicId(), params.id, params.attachmentId, Number(params.fileIndex), Number(query.offset), chunk)
+    } catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/dental/patients/:id/attachments/:attachmentId/finish', async ({ params, set }) => {
+    const { finishPlanAttachment } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await finishPlanAttachment(requireClinicId(), params.id, params.attachmentId) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .get('/api/dental/patients/:id/attachments/:attachmentId/files/:fileIndex', async ({ params, set }) => {
+    const { getPlanAttachmentFile } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      if (!/^\d+$/.test(params.fileIndex)) throw new TreatmentPlanError('Dosya kimliği geçersiz')
+      const file = await getPlanAttachmentFile(requireClinicId(), params.id, params.attachmentId, Number(params.fileIndex))
+      set.headers['content-type'] = file.contentType
+      set.headers['cache-control'] = 'no-store'
+      set.headers['x-content-type-options'] = 'nosniff'
+      return Bun.file(file.path)
+    } catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
   .get('/api/dental/patients/:id/consultations', async ({ params }) => {
     const { getPatientConsultations } = await import('./db/repositories/dental')
@@ -1061,7 +1080,7 @@ const app = new Elysia()
     return new Response(raw);
   })
   .put('/api/dental/treatments/:id', async ({ params, body, set }) => {
-    const { updateTreatmentPlan } = await import('./db/repositories/dental')
+    const { completeTreatmentItem, TreatmentPlanError } = await import('./services/treatment-planning')
     const { db } = await import('./db/client')
     const { appointmentTreatments, dentalAppointments, shifts } = await import('./db/schema')
     const { eq, and } = await import('drizzle-orm')
@@ -1095,13 +1114,23 @@ const app = new Elysia()
       }
     }
 
-    return await updateTreatmentPlan(params.id, { status: b.status, groupId: b.groupId, doctorId: b.doctorId })
+    try {
+      return await completeTreatmentItem(params.id, requireClinicId(), { status: b.status, groupId: b.groupId, doctorId: b.doctorId })
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
+    }
   })
   .delete('/api/dental/treatments/:id', async ({ params, set }) => {
-    const { deleteTreatmentPlan } = await import('./db/repositories/dental')
-    const success = await deleteTreatmentPlan(params.id)
-    if (!success) { set.status = 404; return { error: 'Not found' } }
-    return { success: true }
+    const { cancelTreatmentItem, TreatmentPlanError } = await import('./services/treatment-planning')
+    try {
+      const success = await cancelTreatmentItem(params.id, requireClinicId())
+      if (!success) { set.status = 404; return { error: 'Tedavi bulunamadı' } }
+      return { success: true }
+    } catch (error) {
+      if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
+      throw error
+    }
   })
   .get('/api/dental/patients/:id/payments', async ({ params }) => {
     const { getPatientPayments } = await import('./db/repositories/dental')
@@ -1445,9 +1474,22 @@ const app = new Elysia()
     const b = (body ?? {}) as { phone?: string; to?: string; target?: string }
     const phone = b.phone || b.to || b.target
     if (!phone) { set.status = 400; return { error: 'phone numarası zorunludur' } }
-    const { getSetting } = await import('./db/repositories/settings')
     const clinicId = requireClinicId()
+    const { db } = await import('./db/client')
+    const { patients } = await import('./db/schema')
+    const { and, eq } = await import('drizzle-orm')
+    const { patientPhoneMatches } = await import('./db/repositories/whatsapp')
+    const { hasPatientConsent } = await import('./services/patient-consent')
+    let matched
+    try {
+      matched = await db.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, clinicId), patientPhoneMatches(phone))).limit(2)
+    } catch { set.status = 400; return { error: 'Telefon numarası geçersiz' } }
+    if (matched.length !== 1 || !await hasPatientConsent(clinicId, matched[0].id, 'assistant_call')) {
+      set.status = 403
+      return { error: 'Hasta eşleşmesi veya doğrulanmış asistan arama izni bulunamadı' }
+    }
     const { initiateOutboundCall } = await import('./services/asterisk-ami')
+    if (!await hasPatientConsent(clinicId, matched[0].id, 'assistant_call')) { set.status = 403; return { error: 'Asistan arama izni yok' } }
     const res = await initiateOutboundCall(phone, clinicId)
     if (!res.success) { set.status = 500; return { error: res.message } }
     return { success: true, message: 'Dış arama başlatıldı' }
@@ -2591,6 +2633,18 @@ app.ws('/ws', {
     } catch (e) { console.error('[DoctorLeaves] Startup ensure table error:', e) }
 
     try {
+      const { ensureTreatmentPlanningSchema } = await import('./db/treatment-planning-schema')
+      await ensureTreatmentPlanningSchema()
+    } catch (e) { console.error('[TreatmentPlanning] Startup ensure schema error:', e) }
+
+    const cleanDetachedAttachments = async () => {
+      try { await (await import('./services/plan-attachments')).cleanupPlanAttachments() }
+      catch { console.error('[TreatmentPlanning] Geçici ek temizliği tamamlanamadı.') }
+    }
+    setTimeout(() => void cleanDetachedAttachments(), 60_000)
+    setInterval(() => void cleanDetachedAttachments(), 60 * 60 * 1000)
+
+    try {
       const { ensureShiftPlanningTables } = await import('./db/repositories/shift-planning')
       await ensureShiftPlanningTables()
     } catch (e) { console.error('[ShiftPlanning] Startup ensure table error:', e) }
@@ -2638,16 +2692,19 @@ app.ws('/ws', {
     }
     console.log('')
     
-    try {
-      const { importLegacyIntegrations } = await import('./integrations/managed/legacy')
-      await importLegacyIntegrations()
-      const { startIntegrationReconciler } = await import('./integrations/managed/asterisk')
-      startIntegrationReconciler()
-    } catch { console.error('[Integrations] Başlangıç eşitlemesi tamamlanamadı; mevcut kayıtlar korundu.') }
-    // Start Cron Jobs
-    startReminderCron()
-    const { startWhatsAppWorker } = await import('./queue/whatsapp-queue')
-    startWhatsAppWorker()
+    if (process.env.VOICEAI_BACKGROUND_JOBS_ENABLED !== '0') {
+      try {
+        const { importLegacyIntegrations } = await import('./integrations/managed/legacy')
+        await importLegacyIntegrations()
+        const { startIntegrationReconciler } = await import('./integrations/managed/asterisk')
+        startIntegrationReconciler()
+      } catch { console.error('[Integrations] Başlangıç eşitlemesi tamamlanamadı; mevcut kayıtlar korundu.') }
+      startReminderCron()
+      const { startWhatsAppWorker } = await import('./queue/whatsapp-queue')
+      startWhatsAppWorker()
+    } else {
+      console.log('[Background] Hatırlatmalar, WhatsApp işleyicisi ve entegrasyon eşitlemesi kapalı.')
+    }
   })
 
 export type App = typeof app

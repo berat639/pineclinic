@@ -17,6 +17,7 @@ function OptOutContent() {
     whatsappOptOut: false,
     name: ''
   })
+  const [original, setOriginal] = useState({ smsOptOut: false, emailOptOut: false, whatsappOptOut: false })
 
   useEffect(() => {
     if (!patientId) {
@@ -31,6 +32,7 @@ function OptOutContent() {
         return res.json()
       })
       .then(data => {
+        setOriginal({ smsOptOut: !!data.smsOptOut, emailOptOut: !!data.emailOptOut, whatsappOptOut: !!data.whatsappOptOut })
         setPrefs({
           smsOptOut: !!data.smsOptOut,
           emailOptOut: !!data.emailOptOut,
@@ -84,13 +86,15 @@ function OptOutContent() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>Bildirim Tercihleri</h1>
-        <p style={styles.greeting}>Merhaba <b>{prefs.name}</b>,</p>
+        <p style={styles.greeting}>Merhaba,</p>
         <p style={styles.subtitle}>Aşağıdan kliniğimizden almak istemediğiniz bildirim türlerini seçebilirsiniz. İşaretlediğiniz kanallardan size bildirim <b>gönderilmeyecektir</b>.</p>
+        <p style={styles.subtitle}>Kapatılmış bir kanalı tekrar açmak için klinikten yeni tercih formu isteyin.</p>
 
         <form onSubmit={handleSave} style={styles.form}>
           <label style={styles.label}>
             <input 
               type="checkbox" 
+              disabled={original.smsOptOut}
               checked={prefs.smsOptOut} 
               onChange={e => setPrefs({...prefs, smsOptOut: e.target.checked})}
               style={styles.checkbox}
@@ -101,6 +105,7 @@ function OptOutContent() {
           <label style={styles.label}>
             <input 
               type="checkbox" 
+              disabled={original.whatsappOptOut}
               checked={prefs.whatsappOptOut} 
               onChange={e => setPrefs({...prefs, whatsappOptOut: e.target.checked})}
               style={styles.checkbox}
@@ -111,6 +116,7 @@ function OptOutContent() {
           <label style={styles.label}>
             <input 
               type="checkbox" 
+              disabled={original.emailOptOut}
               checked={prefs.emailOptOut} 
               onChange={e => setPrefs({...prefs, emailOptOut: e.target.checked})}
               style={styles.checkbox}
@@ -143,33 +149,34 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-    background: '#f8fafc',
+    background: 'var(--background)',
     padding: 20,
     fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
   },
   card: {
-    background: 'white',
+    background: 'var(--card-bg)',
+    color: 'var(--foreground)',
     padding: '30px 40px',
     borderRadius: 16,
-    boxShadow: '0 10px 25px rgba(0,0,0,0.05)',
+    border: '1px solid var(--input-border)',
     width: '100%',
     maxWidth: 450
   },
   title: {
     margin: '0 0 20px 0',
     fontSize: '1.4rem',
-    color: '#0f172a',
+    color: 'var(--foreground)',
     textAlign: 'center'
   },
   greeting: {
     margin: '0 0 10px 0',
     fontSize: '1.1rem',
-    color: '#334155'
+    color: 'var(--foreground-2)'
   },
   subtitle: {
     margin: '0 0 24px 0',
     fontSize: '0.9rem',
-    color: '#64748b',
+    color: 'var(--foreground-2)',
     lineHeight: 1.5
   },
   form: {
@@ -182,10 +189,11 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 12,
     fontSize: '0.95rem',
-    color: '#334155',
+    color: 'var(--foreground)',
     cursor: 'pointer',
     padding: '12px 16px',
-    border: '1px solid #e2e8f0',
+    border: '1px solid var(--input-border)',
+    background: 'var(--card-inner)',
     borderRadius: 8,
     transition: 'background 0.2s'
   },
@@ -193,13 +201,13 @@ const styles: Record<string, React.CSSProperties> = {
     width: 18,
     height: 18,
     cursor: 'pointer',
-    accentColor: '#3b82f6'
+    accentColor: 'var(--accent)'
   },
   button: {
     marginTop: 10,
     padding: '12px',
-    background: '#3b82f6',
-    color: 'white',
+    background: 'var(--btn-clinic-primary-bg)',
+    color: 'var(--btn-clinic-primary-fg)',
     border: 'none',
     borderRadius: 8,
     fontSize: '1rem',
@@ -209,11 +217,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   successBox: {
     padding: '10px 14px',
-    background: '#dcfce7',
-    color: '#166534',
+    background: 'var(--card-inner)',
+    color: 'var(--foreground)',
     borderRadius: 8,
     fontSize: '0.85rem',
     textAlign: 'center',
-    border: '1px solid #bbf7d0'
+    border: '1px solid var(--input-border)'
   }
 }

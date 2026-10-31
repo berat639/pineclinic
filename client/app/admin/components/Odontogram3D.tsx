@@ -95,6 +95,7 @@ export interface DefectMarker {
 }
 
 interface Odontogram3DProps {
+  jawFilter?: 'all' | 'upper' | 'lower';
   selectedTeeth: number[];
   toothDrafts: Record<string, any[]>;
   onToothClick: (toothNumber: number, event: React.MouseEvent) => void;
@@ -112,6 +113,7 @@ interface Odontogram3DProps {
 }
 
 export default function Odontogram3D({
+  jawFilter = 'all',
   selectedTeeth,
   toothDrafts,
   onToothClick,
@@ -440,6 +442,13 @@ export default function Odontogram3D({
     updateToothMaterials();
   }, [updateToothMaterials]);
 
+  useEffect(() => {
+    if (!threeRef.current) return;
+    threeRef.current.teethMeshes.forEach((mesh, fdi) => {
+      mesh.visible = jawFilter === 'all' || (jawFilter === 'upper' ? fdi < 30 : fdi >= 30);
+    });
+  }, [jawFilter, loading]);
+
   // Kemik Opaklığı / Görünürlüğü Değişimi
   useEffect(() => {
     if (!threeRef.current) return;
@@ -505,6 +514,7 @@ export default function Odontogram3D({
     markerMeshes.length = 0;
 
     defectMarkers.forEach(marker => {
+      if (jawFilter !== 'all' && (jawFilter === 'upper' ? marker.fdi >= 30 : marker.fdi < 30)) return;
       const color = marker.type === 'curuk' ? '#ef4444' : marker.type === 'catlak' ? '#f59e0b' : '#a855f7';
       const geo = new THREE.SphereGeometry(0.0022, 16, 16);
       const mat = new THREE.MeshStandardMaterial({
@@ -518,7 +528,7 @@ export default function Odontogram3D({
       scene.add(mesh);
       markerMeshes.push(mesh);
     });
-  }, [defectMarkers]);
+  }, [defectMarkers, jawFilter, loading]);
 
   // ── Tema Değişiminde Sahne Arka Planı Güncellemesi ───────────────────────
   useEffect(() => {
@@ -811,7 +821,7 @@ export default function Odontogram3D({
     const { camera, teethMeshes, raycaster } = threeRef.current;
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-    const meshes = Array.from(teethMeshes.values());
+    const meshes = Array.from(teethMeshes.values()).filter(mesh => mesh.visible);
     const intersects = raycaster.intersectObjects(meshes, false);
 
     if (intersects.length > 0) {
@@ -872,7 +882,7 @@ export default function Odontogram3D({
     const { camera, teethMeshes, raycaster } = threeRef.current;
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-    const meshes = Array.from(teethMeshes.values());
+    const meshes = Array.from(teethMeshes.values()).filter(mesh => mesh.visible);
     const intersects = raycaster.intersectObjects(meshes, false);
 
     if (intersects.length > 0) {
@@ -913,7 +923,7 @@ export default function Odontogram3D({
     const { camera, teethMeshes, raycaster } = threeRef.current;
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-    const meshes = Array.from(teethMeshes.values());
+    const meshes = Array.from(teethMeshes.values()).filter(mesh => mesh.visible);
     const intersects = raycaster.intersectObjects(meshes, false);
 
     if (intersects.length > 0) {
@@ -936,7 +946,7 @@ export default function Odontogram3D({
     const { camera, teethMeshes, raycaster } = threeRef.current;
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-    const meshes = Array.from(teethMeshes.values());
+    const meshes = Array.from(teethMeshes.values()).filter(mesh => mesh.visible);
     const intersects = raycaster.intersectObjects(meshes, false);
 
     if (intersects.length > 0) {
@@ -984,7 +994,7 @@ export default function Odontogram3D({
     const { camera, teethMeshes, raycaster } = threeRef.current;
     raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-    const meshes = Array.from(teethMeshes.values());
+    const meshes = Array.from(teethMeshes.values()).filter(mesh => mesh.visible);
     const intersects = raycaster.intersectObjects(meshes, false);
 
     let targetFdi: number | null = null;
@@ -994,14 +1004,7 @@ export default function Odontogram3D({
     }
 
     if (targetFdi) {
-      // Hedeflenen dişi seçili dişlerle birlikte veya tekil olarak uygula
-      const targets = selectedTeeth.includes(targetFdi) && selectedTeeth.length > 1
-        ? selectedTeeth 
-        : [targetFdi];
-      onDropTreatment(targets, dropPayload);
-    } else if (selectedTeeth.length > 0) {
-      // Boşluğa bırakıldıysa seçili tüm dişlere uygula
-      onDropTreatment(selectedTeeth, dropPayload);
+      onDropTreatment([targetFdi], dropPayload);
     }
 
     setDropTargetTooth(null);
