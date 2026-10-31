@@ -5,7 +5,8 @@ import { clinics, patientConsentPreferences, patientConsentRequests, patients } 
 import { ensureTreatmentPlanningSchema } from '../db/treatment-planning-schema'
 import { getSetting, setSetting } from '../db/repositories/settings'
 import { credentialsFor } from '../db/repositories/whatsapp'
-import { activeConfig } from '../integrations/managed/store'
+import type { Config } from '../integrations/managed/model'
+import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
 import { normalizePhone, sendWhatsAppText } from '../integrations/whatsapp'
 import { sendEmail } from './email'
 import { sendSMS } from './netgsm'
@@ -64,16 +65,20 @@ type Sender = (channel: DeliveryChannel, patient: typeof patients.$inferSelect, 
 const sendForm: Sender = async (channel, patient, clinic, link) => {
   const message = `Bildirim tercihlerinizi görüntülemek ve yanıtlamak için: ${link}`
   if (channel === 'sms') {
-    const config = await activeConfig(clinic.id, 'sms')
+    let config = await activeConfig(clinic.id, 'sms')
+    if (!config) {
+      const row = await getRow(clinic.id, 'sms')
+      if (row?.draft) config = decrypt(row.draft as Config)
+    }
     const usercode = config?.username || clinic.netgsmUsercode
     const password = config?.password || clinic.netgsmPassword
     const senderId = config?.senderId || clinic.smsSenderId
     if (!patient.phone || !usercode || !password || !senderId) throw new Error('SMS bağlantısı veya telefon numarası eksik')
     const response = await sendSMS({ usercode, password, senderId, phone: normalizePhone(patient.phone), message })
-    if (!response.success) throw new Error('SMS gönderilemedi')
+    if (!response.success) throw new Error(response.reason || 'SMS gönderilemedi')
   } else if (channel === 'email') {
     if (!patient.email) throw new Error('E-posta adresi eksik')
-    await sendEmail({ to: patient.email, subject: 'Bildirim tercihleri', text: message })
+    await sendEmail({ clinicId: clinic.id, to: patient.email, subject: 'Bildirim tercihleri', text: message })
   } else {
     if (!patient.phone || !clinic.whatsappEnabled) throw new Error('WhatsApp bağlantısı veya telefon numarası eksik')
     await sendWhatsAppText(normalizePhone(patient.phone), credentialsFor(clinic), message)

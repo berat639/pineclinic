@@ -38,8 +38,8 @@ export function validateConfig(service: Service, input: Record<string, unknown>,
   if (service === 'sms') return { username, password, senderId: safeText(input.senderId, 'Gönderici başlığı', 32) }
   const host = safeText(input.host, 'SMTP sunucusu', 253)
   if (!/^[a-zA-Z0-9.-]+$/.test(host)) throw new SetupError('SMTP sunucusu geçersiz')
-  const secure = input.secure === 'ssl' ? 'ssl' : 'tls'
   const port = Number(input.port)
+  const secure = port === 465 ? 'ssl' : (input.secure === 'ssl' ? 'ssl' : 'tls')
   if (!Number.isInteger(port) || port < 1 || port > 65535 || (port === 465 && secure !== 'ssl') || (secure === 'ssl' && port !== 465)) throw new SetupError('SMTP port/güvenlik eşleşmesi geçersiz')
   const fromAddress = safeText(input.fromAddress || username, 'Gönderici e-postası')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fromAddress)) throw new SetupError('Gönderici e-postası geçersiz')

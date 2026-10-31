@@ -1,16 +1,23 @@
 import nodemailer from 'nodemailer'
-import { activeConfig } from '../integrations/managed/store'
+import type { Config } from '../integrations/managed/model'
+import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
 import { requireClinicId } from '../tenancy/context'
 
 export interface SendEmailOptions {
+  clinicId?: string
   to: string | string[]
   subject: string
   text?: string
   html?: string
 }
 
-export async function sendEmail({ to, subject, text, html }: SendEmailOptions) {
-  const settings = await activeConfig(requireClinicId(), 'smtp')
+export async function sendEmail({ clinicId, to, subject, text, html }: SendEmailOptions) {
+  const targetClinicId = clinicId || requireClinicId()
+  let settings = await activeConfig(targetClinicId, 'smtp')
+  if (!settings) {
+    const row = await getRow(targetClinicId, 'smtp')
+    if (row?.draft) settings = decrypt(row.draft as Config)
+  }
 
   // Kontrol: Ayarlar eksik mi?
   if (!settings?.host || !settings.port || !settings.username || !settings.password) {

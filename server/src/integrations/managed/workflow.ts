@@ -55,13 +55,20 @@ export async function beginTest(id: string, service: Service, body: Record<strin
       }
     } else if (service === 'sms') {
       const result = await sendSMS({usercode:c.username,password:c.password,senderId:c.senderId!,phone:target,message:'Klinik entegrasyon test mesajı.'})
-      if (!result.success) throw new SetupError('SMS sağlayıcısı test gönderimini kabul etmedi')
+      if (!result.success) throw new SetupError(result.reason || 'SMS sağlayıcısı test gönderimini kabul etmedi')
     } else {
       const transport = smtpTransport(c)
       try {
         await transport.verify()
         const info = await transport.sendMail({from:{name:c.fromName || 'Klinik',address:c.fromAddress!},to:target,subject:'Klinik bağlantı testi',text:'Klinik e-posta entegrasyonu test mesajı.'})
         if (!info.accepted?.length) throw new SetupError('SMTP alıcıyı kabul etmedi')
+      } catch (smtpErr: any) {
+        if (smtpErr instanceof SetupError) throw smtpErr
+        const code = String(smtpErr?.code || '')
+        if (code === 'EAUTH') throw new SetupError('SMTP kullanıcı adı veya parolası hatalı (Kurumsal/Gmail hesaplarında Uygulama Şifresi gerekebilir)')
+        if (code === 'ECONNECTION' || code === 'ETIMEDOUT') throw new SetupError('SMTP sunucusuna bağlanılamadı; sunucu adresini ve portu (587 veya 465) kontrol edin')
+        if (code === 'ESOCKET') throw new SetupError('SMTP güvenlik (SSL/TLS) bağlantısı kurulamadı; port 465 veya 587 deneyin')
+        throw smtpErr
       } finally { transport.close() }
     }
     await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id} AND status='pending'`)
