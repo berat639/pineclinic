@@ -2291,6 +2291,10 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                               setPatientInfo((prev: any) => prev ? { ...prev, ...contact } : prev);
                               fetchData();
                             }}
+                            onConsentChange={(nextOptOuts) => {
+                              setPatientInfo((prev: any) => prev ? { ...prev, ...nextOptOuts } : prev);
+                              fetchData();
+                            }}
                           />
                         </div>
                       )}

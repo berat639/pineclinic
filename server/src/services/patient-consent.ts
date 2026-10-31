@@ -145,7 +145,9 @@ export async function grantInClinicPatientConsent(input: { patientId: string; cl
   if (!UUID.test(input.patientId)) throw new TreatmentPlanError('Hasta kimliği geçersiz')
   let settings = await consentSettings(input.clinicId)
   if (!settings.version) settings = await saveConsentSettings(input.clinicId, DEFAULT_CONSENT_TEXT)
-  const activeChannels = input.channels?.length ? input.channels.filter((c): c is ConsentChannel => CONSENT_CHANNELS.includes(c)) : [...CONSENT_CHANNELS]
+  const activeChannels = Array.isArray(input.channels)
+    ? input.channels.filter((c): c is ConsentChannel => CONSENT_CHANNELS.includes(c))
+    : [...CONSENT_CHANNELS]
   return db.transaction(async tx => {
     const [patient] = await tx.select().from(patients).where(and(eq(patients.clinicId, input.clinicId), eq(patients.id, input.patientId))).for('update')
     if (!patient) throw new TreatmentPlanError('Hasta bulunamadı', 404)
@@ -166,7 +168,7 @@ export async function grantInClinicPatientConsent(input: { patientId: string; cl
       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
     }).returning()
     for (const channel of CONSENT_CHANNELS) {
-      const status = activeChannels.includes(channel) ? 'granted' : 'refused'
+      const status = activeChannels.includes(channel) ? 'granted' : 'revoked'
       await tx.insert(patientConsentPreferences).values({
         clinicId: input.clinicId,
         patientId: input.patientId,
@@ -186,7 +188,7 @@ export async function grantInClinicPatientConsent(input: { patientId: string; cl
       whatsappOptOut: !activeChannels.includes('whatsapp'),
       emailOptOut: !activeChannels.includes('email'),
     }).where(and(eq(patients.id, input.patientId), eq(patients.clinicId, input.clinicId)))
-    return { id: record.id, status: 'responded' }
+    return { id: record.id, status: 'responded', channels: activeChannels }
   })
 }
 

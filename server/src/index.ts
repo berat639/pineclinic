@@ -791,7 +791,11 @@ const app = new Elysia()
   .get('/api/dental/consent-settings', async ({ cookie, request }) => {
     const { consentSettings } = await import('./services/patient-consent')
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
-    return { ...(await consentSettings(requireClinicId())), canEdit: !!user && ['yonetici', 'moderator'].includes(user.role) }
+    return {
+      ...(await consentSettings(requireClinicId())),
+      canEdit: !!user && ['yonetici', 'moderator'].includes(user.role),
+      canManageConsent: !!user && ['yonetici', 'moderator', 'hekim', 'host'].includes(user.role),
+    }
   })
   .put('/api/dental/consent-settings', async ({ body, set, cookie, request }) => {
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)

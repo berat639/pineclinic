@@ -88,7 +88,16 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
         <div style={headerStyle}>🛡️ Bildirim Onamı & İletişim İzinleri (KVKK)</div>
         {patient?.id && (
           <div style={{ marginBottom: 10 }}>
-            <PatientConsentPanel patientId={patient.id} />
+            <PatientConsentPanel
+              patientId={patient.id}
+              onConsentChange={(nextOptOuts) => {
+                if (onConsentChange) {
+                  if (nextOptOuts.smsOptOut !== Boolean(patient.smsOptOut)) onConsentChange('smsOptOut', nextOptOuts.smsOptOut)
+                  if (nextOptOuts.emailOptOut !== Boolean(patient.emailOptOut)) onConsentChange('emailOptOut', nextOptOuts.emailOptOut)
+                  if (nextOptOuts.whatsappOptOut !== Boolean(patient.whatsappOptOut)) onConsentChange('whatsappOptOut', nextOptOuts.whatsappOptOut)
+                }
+              }}
+            />
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
