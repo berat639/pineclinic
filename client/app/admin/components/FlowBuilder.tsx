@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dagre from '@dagrejs/dagre'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FieldData {
@@ -742,11 +743,12 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div>
                       <label style={{ fontSize: 11, color: 'var(--foreground-3)', display: 'block', marginBottom: 6 }}>Aktarılacak Hedef (Rehberden Seç veya Numara Yaz)</label>
-                      <input 
+                      <PhoneMaskedInput
+                        mode="phoneOrLabel"
                         list="phonebook-options"
-                        value={d.transferNumber || ''} 
-                        onChange={e => updateSelectedNode({ transferNumber: e.target.value })} 
-                        placeholder="Örn: resepsiyon, banko veya +90538..." 
+                        value={d.transferNumber || ''}
+                        onValueChange={transferNumber => updateSelectedNode({ transferNumber })}
+                        placeholder="Örn: resepsiyon, banko veya 0 (538) 000 00 00"
                         style={inputStyle}
                       />
                       <datalist id="phonebook-options">

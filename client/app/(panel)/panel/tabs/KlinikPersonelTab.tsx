@@ -10,6 +10,7 @@ import WeeklyTemplateModal from '../../../admin/components/WeeklyTemplateModal'
 import MonthlyTemplateModal from '../../../admin/components/MonthlyTemplateModal'
 import ShiftBatchApplyModal from '../../../admin/components/ShiftBatchApplyModal'
 import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 import {
   DailyShiftTemplate,
   WeeklyShiftTemplate,
@@ -527,7 +528,7 @@ export default function KlinikPersonelTab() {
           </div>
           <div>
             <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Telefon</label>
-            <input placeholder="05xxxxxxxxx" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} />
+            <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={form.phone} onValueChange={phone => setForm({ ...form, phone })} style={inputStyle} />
           </div>
           <div>
             <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Rol *</label>
@@ -783,10 +784,10 @@ export default function KlinikPersonelTab() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Telefon</label>
-                  <input
+                  <PhoneMaskedInput
                     value={editForm.phone}
-                    onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
-                    placeholder="05xxxxxxxxx"
+                    onValueChange={phone => setEditForm({ ...editForm, phone })}
+                    placeholder="0 (5XX) XXX XX XX"
                     style={inputStyle}
                   />
                 </div>

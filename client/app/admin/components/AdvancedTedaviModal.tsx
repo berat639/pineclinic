@@ -13,6 +13,7 @@ import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 import type { DefectMarker } from './Odontogram3D';
 import { calculateTreatmentPrices } from '../../../lib/treatment-pricing';
 import { treatmentTargets, type TreatmentScope } from '../../../lib/treatment-targets';
+import { PhoneMaskedInput } from '@/lib/phone-mask';
 
 const Odontogram3D = dynamic(() => import('./Odontogram3D'), {
   ssr: false,
@@ -3636,7 +3637,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       {(!patientInfo?.phone && (notificationType === 'sms' || notificationType === 'whatsapp' || notificationType === 'both')) && (
                         <div style={{ marginTop: 8 }}>
                           <label style={{ display: 'block', fontSize: '0.75rem', color: '#ef4444', marginBottom: 4 }}>⚠️ Hastanın telefonu eksik, lütfen girin:</label>
-                          <input type="tel" value={missingPhone} onChange={e => setMissingPhone(e.target.value)} placeholder="0555..." style={{ ...inputStyle, width: '100%', borderColor: '#ef4444' }} />
+                          <PhoneMaskedInput value={missingPhone} onValueChange={setMissingPhone} placeholder="0 (5XX) XXX XX XX" style={{ ...inputStyle, width: '100%', borderColor: '#ef4444' }} />
                         </div>
                       )}
                       {(!patientInfo?.email && (notificationType === 'email' || notificationType === 'both')) && (

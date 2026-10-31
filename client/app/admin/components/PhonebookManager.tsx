@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { toast } from 'react-hot-toast'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 interface PhonebookEntry {
   label: string
@@ -105,13 +106,13 @@ export default function PhonebookManager() {
             outline: 'none', width: '100%'
           }}
         />
-        <input
+        <PhoneMaskedInput
           value={newNumber}
-          onChange={e => setNewNumber(e.target.value)}
-          placeholder="Numara (Örn: +90555...)"
+          onValueChange={setNewNumber}
+          placeholder="Numara (Örn: 0 (555) 000 00 00)"
           style={{
-            padding: '8px 12px', fontSize: 12, background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--foreground)',
+            padding: '8px 12px', fontSize: 12, background: 'var(--input-bg, #0f172a)',
+            border: '1px solid var(--input-border, #334155)', borderRadius: 6, color: 'var(--foreground)',
             outline: 'none', width: '100%'
           }}
         />

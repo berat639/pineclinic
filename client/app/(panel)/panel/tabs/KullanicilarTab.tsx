@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
 import { Pencil, Trash2, User as UserIcon, Lock, Check, X } from 'lucide-react'
 import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
@@ -147,7 +148,7 @@ export default function KullanicilarTab() {
             <option value="host">Resepsiyon</option>
             <option value="yonetici">Yönetici</option>
           </select>
-          <input placeholder="Telefon (opsiyonel)" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} />
+          <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX (opsiyonel)" value={form.phone} onValueChange={phone => setForm({ ...form, phone })} style={inputStyle} />
           {form.role === 'hekim' && (
             <>
               <input placeholder="Uzmanlık (ör. Ortodonti)" value={form.specialty} onChange={e => setForm({ ...form, specialty: e.target.value })} style={inputStyle} />
@@ -261,7 +262,7 @@ export default function KullanicilarTab() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Telefon</label>
-                  <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} style={inputStyle} />
+                  <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editForm.phone} onValueChange={phone => setEditForm({ ...editForm, phone })} style={inputStyle} />
                 </div>
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Rol</label>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 interface VipAssistant {
   id: string
@@ -428,11 +429,10 @@ export default function VipAssistantTab() {
                 <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
                   Telefon Numarası *
                 </label>
-                <input
-                  type="text"
-                  placeholder="05056397351"
+                <PhoneMaskedInput
+                  placeholder="0 (505) 639 73 51"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onValueChange={setPhone}
                   required
                   style={{
                     width: '100%',

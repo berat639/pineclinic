@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { UserRoundPlus, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 interface AddPatientModalProps {
   isOpen: boolean
@@ -168,11 +169,10 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
               Telefon
             </label>
-            <input
-              type="text"
-              placeholder="05XXXXXXXXX"
+            <PhoneMaskedInput
+              placeholder="0 (5XX) XXX XX XX"
               value={newPatient.phone}
-              onChange={(e) => setNewPatient({ ...newPatient, phone: e.target.value })}
+              onValueChange={(phone) => setNewPatient({ ...newPatient, phone })}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',

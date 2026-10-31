@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PromptEditor from '../../../admin/components/PromptEditor'
 import FlowBuilder from '../../../admin/components/FlowBuilder'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 type InnerTab = 'flow_inbound' | 'flow_outbound' | 'system' | 'phonebook'
 
@@ -385,10 +386,10 @@ export default function AyarlarTab() {
                   placeholder="Birim Adı (Örn: Resepsiyon, Dr. Ahmet)"
                   style={{ ...inputStyle, flex: 1, minWidth: 160 }}
                 />
-                <input
+                <PhoneMaskedInput
                   value={newNumber}
-                  onChange={e => setNewNumber(e.target.value)}
-                  placeholder="Telefon / Dahili (Örn: 08503096119)"
+                  onValueChange={setNewNumber}
+                  placeholder="Telefon (Örn: 0 (850) 309 61 19)"
                   style={{ ...inputStyle, flex: 1, minWidth: 160 }}
                 />
                 <button onClick={addPhonebookEntry} disabled={phonebookSaving || !newLabel.trim() || !newNumber.trim()} style={{ ...buttonStyle, background: 'var(--accent)', color: '#fff' }}>
@@ -429,10 +430,10 @@ export default function AyarlarTab() {
           <div className="glass-card" style={cardStyle}>
             <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Dış Arama CallerID (Numarası)</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
+              <PhoneMaskedInput
                 value={outboundCallerId}
-                onChange={e => setOutboundCallerId(e.target.value)}
-                placeholder="Örn: 08503096119"
+                onValueChange={setOutboundCallerId}
+                placeholder="Örn: 0 (850) 309 61 19"
                 style={{ ...inputStyle, flex: 1, minWidth: 160 }}
               />
               <button onClick={saveCallerId} disabled={callerIdSaving || !outboundCallerId.trim()} style={buttonStyle}>

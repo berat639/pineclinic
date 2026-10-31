@@ -4,6 +4,7 @@ import FlowBuilder from './FlowBuilder'
 import WhatsAppConversationsCard from './WhatsAppConversationsCard'
 import VoiceAiSettings from './VoiceAiSettings'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 function Spinner() {
   return (
@@ -916,13 +917,13 @@ export default function KnowledgeTab() {
                     <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
                       Robotun dış arama yaparken karşı tarafın ekranında görünecek NetGSM çıkış numarası:
                     </p>
-                    <input
+                    <PhoneMaskedInput
                       value={outboundCallerId}
-                      onChange={(e) => setOutboundCallerId(e.target.value)}
-                      placeholder="08503096119"
+                      onValueChange={setOutboundCallerId}
+                      placeholder="0 (850) 309 61 19"
                       style={{
                         width: '100%', padding: '8px 12px', fontSize: 13,
-                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'var(--input-bg, #0f172a)', border: '1px solid var(--input-border, #334155)',
                         borderRadius: 8, color: 'var(--foreground)', outline: 'none',
                       }}
                     />
@@ -1043,14 +1044,14 @@ export default function KnowledgeTab() {
                 <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
                   Hedef Telefon Numarası
                 </label>
-                <input
+                <PhoneMaskedInput
                   value={callPhone}
-                  onChange={e => setCallPhone(e.target.value)}
-                  placeholder="Örn: 05xxxxxxxxx"
+                  onValueChange={setCallPhone}
+                  placeholder="Örn: 0 (5XX) XXX XX XX"
                   required
                   style={{
-                    width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
+                    width: '100%', padding: '9px 12px', background: 'var(--input-bg, #0f172a)',
+                    border: '1px solid var(--input-border, #334155)', borderRadius: 10, color: 'var(--foreground)',
                     fontSize: '0.875rem', outline: 'none',
                   }}
                 />

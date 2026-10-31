@@ -15,6 +15,7 @@ import ConfirmModal from './ConfirmModal';
 import AddPatientModal from './AddPatientModal';
 import PatientConsentPanel from './PatientConsentPanel';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 import DicomViewer from './DicomViewer'
 
@@ -2999,7 +3000,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                 </select>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Ad soyad<input value={aiReviewName} onChange={e => setAiReviewName(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Telefon<input value={aiReviewPhone} onChange={e => setAiReviewPhone(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Telefon<PhoneMaskedInput value={aiReviewPhone} onValueChange={setAiReviewPhone} placeholder="0 (5XX) XXX XX XX" style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>Başlangıç<input type="datetime-local" value={aiReviewStart} onChange={e => setAiReviewStart(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>

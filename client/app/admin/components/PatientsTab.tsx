@@ -7,6 +7,7 @@ import PatientConsentPanel from './PatientConsentPanel'
 import Pagination from './Pagination'
 import AddPatientModal from './AddPatientModal'
 import ConfirmModal from './ConfirmModal'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 interface Patient {
   id: string
@@ -1170,7 +1171,7 @@ export default function PatientsTab() {
               
               <div>
                 <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Telefon</label>
-                <input type="text" placeholder="05XXXXXXXXX" value={editFormData.phone} onChange={e => setEditFormData({...editFormData, phone: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
+                <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editFormData.phone} onValueChange={phone => setEditFormData({...editFormData, phone})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
 
               <div>

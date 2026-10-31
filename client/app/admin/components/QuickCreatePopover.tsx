@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ChevronRight } from 'lucide-react';
 import FancyHourPicker from './FancyHourPicker';
-import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
+import { PhoneMaskedInput } from '@/lib/phone-mask';
 
 interface Props {
   x: number;
@@ -617,7 +618,7 @@ export default function QuickCreatePopover({
                       </button>
                     </div>
                     <input type="text" placeholder="Ad Soyad (Zorunlu)" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
-                    <input type="text" placeholder="Telefon (İsteğe Bağlı)" value={phone} onChange={e => setPhone(e.target.value)} style={inputStyle} />
+                    <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX (İsteğe Bağlı)" value={phone} onValueChange={setPhone} style={inputStyle} />
                     <input type="text" placeholder="TC Kimlik No (İsteğe Bağlı)" value={tc} onChange={e => setTc(e.target.value)} style={inputStyle} />
                   </div>
                 )}

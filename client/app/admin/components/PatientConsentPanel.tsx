@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Bell, FileText, Send, ShieldCheck } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { consentAllows, NOTIFICATION_CHANNELS, notificationLabels as labels, type NotificationChannel } from '../../../lib/notification-channels'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 import PlanDialog from './PlanDialog'
 import styles from './PineTreatmentPlan.module.css'
 
@@ -271,7 +272,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
           <p className={styles.dialogDescription}>{settings?.canEdit ? 'Metin değişirse mevcut izinler yeni metin için yenilenmelidir.' : 'Metni klinik yöneticisi düzenleyebilir.'}</p>
         </> : <>
           <p className={styles.dialogDescription}>{pendingChannel === 'email' ? 'E-posta bildirimi için hastanın e-posta adresi kayıtlı değil. Hasta kaydını güncelleyin.' : `${pendingChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} bildirimi için hastanın cep telefonu numarası kayıtlı değil. Hasta kaydını güncelleyin.`}</p>
-          <label htmlFor="consent-phone">Cep telefonu numarası</label><input id="consent-phone" autoFocus={pendingChannel !== 'email'} className={styles.input} type="tel" autoComplete="tel" placeholder="05XX XXX XX XX" pattern="[+0-9 ()-]{10,20}" required={pendingChannel !== 'email'} value={contact.phone || ''} onChange={event => setContact({ ...contact, phone: event.target.value })} />
+          <label htmlFor="consent-phone">Cep telefonu numarası</label><PhoneMaskedInput id="consent-phone" autoFocus={pendingChannel !== 'email'} className={styles.input} placeholder="0 (5XX) XXX XX XX" pattern="[+0-9 ()-]{10,20}" required={pendingChannel !== 'email'} value={contact.phone || ''} onValueChange={phone => setContact({ ...contact, phone })} />
           <label htmlFor="consent-email">E-posta adresi</label><input id="consent-email" autoFocus={pendingChannel === 'email'} className={styles.input} type="email" autoComplete="email" placeholder="ornek@eposta.com" required={pendingChannel === 'email'} value={contact.email || ''} onChange={event => setContact({ ...contact, email: event.target.value })} />
         </>}
         {dialogError && <p role="alert">{dialogError}</p>}

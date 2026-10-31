@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { PhoneMaskedInput } from '@/lib/phone-mask'
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
@@ -120,7 +121,7 @@ export default function UsersTab() {
             <option value="hekim">Hekim</option>
             <option value="yonetici">Yönetici</option>
           </select>
-          <input placeholder="Telefon" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} />
+          <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX" value={form.phone} onValueChange={phone => setForm({ ...form, phone })} style={inputStyle} />
           {form.role === 'hekim' && (
             <>
               <input placeholder="Uzmanlık (ör. Ortodonti)" value={form.specialty} onChange={e => setForm({ ...form, specialty: e.target.value })} style={inputStyle} />
