@@ -51,6 +51,28 @@ export function stripTrCountryCodeOnPaste(appended: string, masked: { unmaskedVa
   return appended
 }
 
+/**
+ * Matches a stored phone number against a user search query regardless of
+ * leading `0`, `+90`, `90`, spaces, or parentheses (e.g. searching `8503096119`
+ * or `0 (850) 309 61 19` matches `08503096119`, `+908503096119`, or `8503096119`).
+ */
+export function matchesPhoneSearch(phoneValue: string | null | undefined, query: string | null | undefined): boolean {
+  if (!phoneValue || !query) return false
+  const q = query.trim().toLowerCase()
+  if (!q) return false
+  const rawPhone = String(phoneValue).toLowerCase()
+  if (rawPhone.includes(q)) return true
+  if (!/^[\d+\s()-]+$/.test(q)) return false
+  const qDigits = q.replace(/\D/g, '')
+  if (!qDigits) return false
+  const pDigits = rawPhone.replace(/\D/g, '')
+  const pNorm = normalizeTrPhone(rawPhone)
+  if (pDigits.includes(qDigits) || pNorm.includes(qDigits)) return true
+  const qNorm = normalizeTrPhone(qDigits)
+  const qNat = qNorm.startsWith('0') ? qNorm.slice(1) : qNorm
+  return Boolean(qNat && (pDigits.includes(qNat) || pNorm.includes(qNat)))
+}
+
 export interface PhoneMaskedInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
   value: string

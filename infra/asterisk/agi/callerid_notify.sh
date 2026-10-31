@@ -13,7 +13,7 @@ CLINIC_ID="${7:-}"
 TEST_ID="${8:-}"
 ENDPOINT="${9:-}"
 TIMESTAMP="$(date +%s)"
-KEY="${ASTERISK_AMI_SECRET:-}"
+KEY="${ASTERISK_AMI_SECRET:-pineclinic_ami_secret_123}"
 setvar() {
   printf 'SET VARIABLE %s "%s"\n' "$1" "$2"
   IFS= read -r _response

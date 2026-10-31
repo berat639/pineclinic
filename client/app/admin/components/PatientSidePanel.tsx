@@ -4,6 +4,7 @@ import PatientListItem from './PatientListItem'
 import PatientProfileCard from './PatientProfileCard'
 import PatientTreatmentHistory from './PatientTreatmentHistory'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
+import { matchesPhoneSearch } from '@/lib/phone-mask'
 
 interface PatientSidePanelProps {
   isOpen: boolean
@@ -60,7 +61,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients, doctors, s
     const lower = searchTerm.toLowerCase()
     return patients.filter(p => 
       p.name.toLowerCase().includes(lower) || 
-      (p.phone && p.phone.includes(searchTerm))
+      matchesPhoneSearch(p.phone, searchTerm)
     )
   }, [patients, searchTerm])
 

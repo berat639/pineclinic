@@ -5,7 +5,7 @@
 
 [global]
 type=global
-endpoint_identifier_order=ip,username,anonymous
+endpoint_identifier_order=line,ip,username,anonymous
 
 ;
 ; Transports
@@ -44,6 +44,7 @@ transport=transport-${NETGSM_SIP_TRANSPORT}
 outbound_auth=netgsm-auth
 server_uri=sip:${NETGSM_SIP_HOST}:${NETGSM_SIP_PORT}\;transport=${NETGSM_SIP_TRANSPORT}
 client_uri=sip:${NETGSM_SIP_USER}@${NETGSM_SIP_HOST}\;transport=${NETGSM_SIP_TRANSPORT}
+contact_user=${NETGSM_SIP_USER}
 retry_interval=60
 expiration=3600
 
@@ -82,12 +83,14 @@ match=${NETGSM_SIP_HOST},185.88.7.0/24,sip.netgsm.com.tr
 ; Provider ingress only; DID ownership is enforced by the signed backend resolver.
 [netgsm-ingress]
 type=endpoint
+transport=transport-${NETGSM_SIP_TRANSPORT}
 context=from-netgsm
 disallow=all
-allow=alaw,ulaw
+allow=alaw,ulaw,slin,slin16
 direct_media=no
 rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
+tos_audio=ef
 
 #include managed/clinics.conf

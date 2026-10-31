@@ -31,11 +31,10 @@ export async function saveConfig(id: string, service: Service, input: Record<str
     if (row && Number(input.revision) !== row.revision) throw new SetupError('Ayarlar başka bir işlemde değişti. Yenileyin.', 409)
     const config = encrypt(validateConfig(service, input, row ? decrypt(row.draft as Config) : undefined))
     if (service === 'phone') {
-      const active = row?.active as Config | undefined
-      const claims = [ ['sip', config.username], ...(config.numbers || []).map(n => ['phone', n]), ...(active?.numbers || []).map(n => ['phone',n]), ...(active ? [['sip',active.username]] : []) ]
+      const claims = [ ['sip', config.username], ...(config.numbers || []).map(n => ['phone', n]) ]
       for (const [kind,value] of claims) {
         if (kind === 'phone') {
-          const legacy = await tx.execute(sql`SELECT clinic_id,phone_number FROM clinic_phone_numbers WHERE clinic_id<>${id}`)
+          const legacy = await tx.execute(sql`SELECT clinic_id,phone_number FROM clinic_phone_numbers WHERE clinic_id<>${id} AND is_active=true`)
           if (legacy.some(p => { try { return phone(String(p.phone_number)) === value } catch { return false } })) throw new SetupError('Numara başka bir kliniğe atanmış',409)
         }
         const [owner] = await tx.execute(sql`SELECT clinic_id FROM integration_claims WHERE kind=${kind} AND value=${value}`)
@@ -43,11 +42,48 @@ export async function saveConfig(id: string, service: Service, input: Record<str
       }
       await tx.execute(sql`DELETE FROM integration_claims WHERE clinic_id=${id}`)
       for (const [kind,value] of claims) await tx.execute(sql`INSERT INTO integration_claims(kind,value,clinic_id) VALUES(${kind},${value},${id}) ON CONFLICT DO NOTHING`)
+      const retainedNumbers = new Set(config.numbers || [])
+      const existingPhones = await tx.execute(sql`SELECT id,phone_number FROM clinic_phone_numbers WHERE clinic_id=${id}`)
+      for (const p of existingPhones) {
+        let norm = ''
+        try { norm = phone(String(p.phone_number)) } catch {}
+        if (!norm || !retainedNumbers.has(norm)) {
+          await tx.execute(sql`DELETE FROM clinic_phone_numbers WHERE id=${p.id}`)
+        }
+      }
+      for (const num of config.numbers || []) {
+        await tx.execute(sql`DELETE FROM clinic_phone_numbers WHERE phone_number=${num} AND clinic_id<>${id} AND is_active=false`)
+        await tx.execute(sql`INSERT INTO clinic_phone_numbers(clinic_id,phone_number,is_active,is_primary) VALUES(${id},${num},${Boolean(row?.enabled)},${num===config.callerId}) ON CONFLICT(phone_number) DO UPDATE SET clinic_id=${id},is_active=EXCLUDED.is_active,is_primary=EXCLUDED.is_primary`)
+      }
     }
-    await tx.execute(sql`INSERT INTO managed_integrations(clinic_id,service,draft,updated_by) VALUES(${id},${service},${JSON.stringify(config)}::jsonb,${user}) ON CONFLICT(clinic_id,service) DO UPDATE SET draft=EXCLUDED.draft,revision=managed_integrations.revision+1,updated_by=${user},updated_at=now()`)
+    await tx.execute(sql`INSERT INTO managed_integrations(clinic_id,service,draft,active,updated_by) VALUES(${id},${service},${JSON.stringify(config)}::jsonb,NULL,${user}) ON CONFLICT(clinic_id,service) DO UPDATE SET draft=EXCLUDED.draft,active=CASE WHEN managed_integrations.active IS NOT NULL THEN EXCLUDED.draft ELSE NULL END,revision=managed_integrations.revision+1,updated_by=${user},updated_at=now()`)
     await audit(tx,id,user,'integration.save',service)
     return { ok: true }
+  }).then(async res => {
+    if (service === 'phone') {
+      const { reconcileAsterisk } = await import('./asterisk')
+      await reconcileAsterisk().catch(() => {})
+    }
+    return res
   })
+}
+export async function removeConfig(id: string, service: Service, user: string) {
+  await ensureIntegrations(); await clinicExists(id)
+  await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('managed-integrations',0))`)
+    if (service === 'phone') {
+      await tx.execute(sql`DELETE FROM integration_claims WHERE clinic_id=${id}`)
+      await tx.execute(sql`DELETE FROM clinic_phone_numbers WHERE clinic_id=${id}`)
+    }
+    await tx.execute(sql`UPDATE integration_tests SET status='cancelled',expires_at=now() WHERE clinic_id=${id} AND service=${service} AND expires_at>now()`)
+    await tx.execute(sql`DELETE FROM managed_integrations WHERE clinic_id=${id} AND service=${service}`)
+    await audit(tx,id,user,'integration.delete',service)
+  })
+  if (service === 'phone') {
+    const { reconcileAsterisk } = await import('./asterisk')
+    await reconcileAsterisk().catch(() => {})
+  }
+  return { ok: true }
 }
 export async function integrationView(id: string, platform = false) {
   await ensureIntegrations(); await clinicExists(id)

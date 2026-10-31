@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer'
 import { db } from '../../db/client'
 import { sendSMS } from '../../services/netgsm'
 import { sendAmiAction } from '../../services/asterisk-ami'
-import { Config, Service, SetupError, endpointId, phone, safeText } from './model'
+import { Config, Service, SetupError, endpointId, phone, safeText, sipDialNumber } from './model'
 import { audit, clinicExists, decrypt, ensureIntegrations, getRow } from './store'
 import { reconcileAsterisk, registered } from './asterisk'
 
@@ -85,10 +85,17 @@ export async function beginTest(id: string, service: Service, body: Record<strin
     const c = created.config!
     if (service === 'phone') {
       await reconcileAsterisk()
-      // Registration is asynchronous; the test remains pending and can be refreshed.
+      // Registration is asynchronous; wait briefly for PJSIP TCP registration on outbound/transfer tests.
       if (kind !== 'inbound') {
-        if (!await registered(id)) throw new SetupError('SIP kaydı henüz hazır değil (Unregistered). 💡 Öneri: 1) SIP kullanıcı adı ve SIP şifresini (Web panel şifresi değil, Ses/Santral SIP şifresi) kontrol edin. 2) NetGSM Ses Paketinizde sunucu IP adresinin güvenilir IP listesinde tanımlı olduğundan emin olun.')
-        const result = await sendAmiAction({Action:'Originate',Channel:`PJSIP/${target.replace('+','')}@${endpointId(id)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:c.callerId!.replace('+',''),Variable:`CUSTOMER_NUMBER=${target},VOICEAI_CLINIC_ID=${id},VOICEAI_TEST_ID=${created.id}`,Async:'true'})
+        let isReg = await registered(id)
+        for (let attempt = 0; !isReg && attempt < 5; attempt++) {
+          await new Promise(r => setTimeout(r, 1000))
+          isReg = await registered(id)
+        }
+        if (!isReg) throw new SetupError('SIP kaydı henüz hazır değil (Unregistered). 💡 Öneri: 1) SIP kullanıcı adı ve SIP şifresini (Web panel şifresi değil, Ses/Santral SIP şifresi) kontrol edin. 2) NetGSM Ses Paketinizde sunucu IP adresinin güvenilir IP listesinde tanımlı olduğundan emin olun.')
+        const dialTarget = sipDialNumber(target)
+        const dialCallerId = sipDialNumber(c.callerId!)
+        const result = await sendAmiAction({Action:'Originate',Channel:`PJSIP/${dialTarget}@${endpointId(id)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:dialCallerId,Variable:`CUSTOMER_NUMBER=${target},VOICEAI_CLINIC_ID=${id},VOICEAI_TEST_ID=${created.id}`,Async:'true'})
         if (!result.success) throw new SetupError(`${result.message} 💡 Öneri: Çıkış numarasının Gelen numaralar listesinde yer aldığından ve test numarasının +90 5XX... cep telefonu olduğundan emin olun.`)
       }
     } else if (service === 'sms') {
@@ -155,18 +162,36 @@ export async function setEnabled(id: string, service: Service, enabled: boolean,
     if (!row || row.revision !== revision) throw new SetupError('Ayarlar değişmiş. Ekranı yenileyin.',409)
     if (enabled) {
       const tests = await tx.execute(sql`SELECT kind FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND revision=${revision} AND status='confirmed' AND confirmed_at>now()-interval '24 hours'`)
-      const required = service === 'phone' ? ['inbound','outbound',...((row.draft as Config).transferNumber ? ['transfer'] : [])] : ['delivery']
-      if (required.some(kind => !tests.some(t => t.kind === kind))) throw new SetupError('Gerekli testleri tamamlayıp teslimatı/çift yönlü sesi doğrulayın',409)
-      if (service === 'phone' && !await registered(id)) throw new SetupError('SIP kaydı aktif değil',409)
+      if (service === 'phone') {
+        await reconcileAsterisk().catch(() => {})
+        if (!await registered(id)) throw new SetupError('SIP kaydı aktif değil',409)
+      } else {
+        const required = ['delivery']
+        if (required.some(kind => !tests.some(t => t.kind === kind))) throw new SetupError('Gerekli testleri tamamlayıp teslimatı/çift yönlü sesi doğrulayın',409)
+      }
       await tx.execute(sql`UPDATE managed_integrations SET enabled=true,active=draft,active_revision=revision,legacy=false,updated_by=${user},updated_at=now() WHERE clinic_id=${id} AND service=${service}`)
       if (service === 'phone') {
         const c = row.draft as Config
         await tx.execute(sql`UPDATE clinic_phone_numbers SET is_active=false,is_primary=false WHERE clinic_id=${id}`)
-        for (const number of c.numbers || []) await tx.execute(sql`INSERT INTO clinic_phone_numbers(clinic_id,phone_number,is_active,is_primary) VALUES(${id},${number},true,${number===c.callerId}) ON CONFLICT(phone_number) DO UPDATE SET is_active=true,is_primary=EXCLUDED.is_primary WHERE clinic_phone_numbers.clinic_id=${id}`)
+        for (const number of c.numbers || []) {
+          await tx.execute(sql`DELETE FROM clinic_phone_numbers WHERE phone_number=${number} AND clinic_id<>${id} AND is_active=false`)
+          await tx.execute(sql`INSERT INTO clinic_phone_numbers(clinic_id,phone_number,is_active,is_primary) VALUES(${id},${number},true,${number===c.callerId}) ON CONFLICT(phone_number) DO UPDATE SET clinic_id=${id},is_active=true,is_primary=EXCLUDED.is_primary`)
+        }
       }
     } else {
       await tx.execute(sql`UPDATE managed_integrations SET enabled=false,updated_by=${user},updated_at=now() WHERE clinic_id=${id} AND service=${service}`)
       await tx.execute(sql`UPDATE integration_tests SET expires_at=now() WHERE clinic_id=${id} AND service=${service} AND expires_at>now()`)
+      if (service === 'phone') {
+        await tx.execute(sql`UPDATE clinic_phone_numbers SET is_active=false,is_primary=false WHERE clinic_id=${id}`)
+        const draft = row.draft as Config | undefined
+        await tx.execute(sql`DELETE FROM integration_claims WHERE clinic_id=${id}`)
+        if (draft) {
+          const draftClaims = [['sip', draft.username], ...(draft.numbers || []).map(n => ['phone', n])]
+          for (const [kind, value] of draftClaims) {
+            await tx.execute(sql`INSERT INTO integration_claims(kind,value,clinic_id) VALUES(${kind},${value},${id}) ON CONFLICT DO NOTHING`)
+          }
+        }
+      }
     }
     await audit(tx,id,user,enabled?'integration.activate':'integration.deactivate',service)
   })

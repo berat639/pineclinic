@@ -6,7 +6,7 @@ import {
   listPlatformClinics,
 } from '../db/repositories/platform-clinics'
 import { hasMatchingRequestOrigin, isPlatformAdminRequest } from '../platform/access'
-import { activateWhatsApp, configureWhatsAppSetup, prepareWhatsAppQr, publicWhatsAppConfig, refreshWhatsAppConnection } from '../db/repositories/whatsapp'
+import { activateWhatsApp, clearWhatsAppSetup, configureWhatsAppSetup, prepareWhatsAppQr, publicWhatsAppConfig, refreshWhatsAppConnection } from '../db/repositories/whatsapp'
 import { credentialsFor } from '../db/repositories/whatsapp'
 import { requestEvolutionQr } from '../integrations/whatsapp'
 
@@ -35,6 +35,12 @@ export const platformPlugin = new Elysia({ prefix: '/api/platform' })
     try { return await configureWhatsAppSetup(params.clinicId, body) }
     catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'WhatsApp kurulumu kaydedilemedi.' } }
   }, { params: clinicParams, body: t.Object({ expectedPhone: t.String({ minLength: 8, maxLength: 32 }) }) })
+  .delete('/clinics/:clinicId/whatsapp', async ({ params, cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) { set.status = 404; return { error: 'Sayfa bulunamadı.' } }
+    if (!(await requirePlatformAdmin(cookie, request, set))) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
+    try { return await clearWhatsAppSetup(params.clinicId) }
+    catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'WhatsApp numarası kaldırılamadı.' } }
+  }, { params: clinicParams })
   .post('/clinics/:clinicId/whatsapp/connect', async ({ params, cookie, request, set }) => {
     if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) { set.status = 404; return { error: 'Sayfa bulunamadı.' } }
     if (!(await requirePlatformAdmin(cookie, request, set))) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }

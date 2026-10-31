@@ -15,7 +15,7 @@ import ConfirmModal from './ConfirmModal';
 import AddPatientModal from './AddPatientModal';
 import PatientConsentPanel from './PatientConsentPanel';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
-import { PhoneMaskedInput } from '@/lib/phone-mask'
+import { PhoneMaskedInput, matchesPhoneSearch } from '@/lib/phone-mask'
 
 import DicomViewer from './DicomViewer'
 
@@ -806,7 +806,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     // 3. Filter by search query
     const results = Array.from(personMap.values()).filter(person => {
       const nameMatch = person.name.toLowerCase().includes(q);
-      const phoneMatch = person.phone ? person.phone.includes(q) : false;
+      const phoneMatch = matchesPhoneSearch(person.phone, patientSearchQuery);
       const apptMatch = person.appointments.some(a => a.title?.toLowerCase().includes(q));
       return nameMatch || phoneMatch || apptMatch;
     });
@@ -820,7 +820,15 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
   }, [patients, events, patientSearchQuery]);
 
   const filteredEvents = patientSearchQuery
-    ? events.filter(e => e.title?.toLowerCase().includes(patientSearchQuery.toLowerCase()))
+    ? events.filter(e => {
+        const q = patientSearchQuery.toLowerCase();
+        if (e.title?.toLowerCase().includes(q) || matchesPhoneSearch((e as any).phone, patientSearchQuery)) return true;
+        if (e.patientId) {
+          const p = patients.find(pt => pt.id === e.patientId);
+          if (p && (p.name?.toLowerCase().includes(q) || matchesPhoneSearch(p.phone, patientSearchQuery))) return true;
+        }
+        return false;
+      })
     : events;
 
   return (
@@ -2995,7 +3003,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                   <option value="__new__">+ Yeni hasta oluştur</option>
                   {patients.filter(p => {
                     const query = aiReviewPatientQuery.trim().toLocaleLowerCase('tr-TR')
-                    return !query || `${p.name || ''} ${p.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query)
+                    return !query || `${p.name || ''} ${p.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query) || matchesPhoneSearch(p.phone, aiReviewPatientQuery)
                   }).map(p => <option key={p.id} value={p.id}>{p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
                 </select>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>

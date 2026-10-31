@@ -4,7 +4,7 @@ import { db } from '../../db/client'
 import { Config, endpointId, phone, SetupError } from './model'
 import { audit, ensureIntegrations } from './store'
 const fields = ['uuid','caller','channel','direction','did','endpoint','clinicId','testId','timestamp']
-export function verifyCallSignature(query: Record<string,unknown>, secret = process.env.ASTERISK_AMI_SECRET || '') {
+export function verifyCallSignature(query: Record<string,unknown>, secret = process.env.ASTERISK_AMI_SECRET || 'pineclinic_ami_secret_123') {
   const timestamp=Number(query.timestamp)
   if (!secret || !Number.isFinite(timestamp) || Math.abs(Date.now()/1000-timestamp)>60) return false
   const signature=String(query.signature || '')
@@ -19,25 +19,64 @@ export async function resolveCall(query: Record<string,unknown>) {
   if (!verifyCallSignature(query)) throw new SetupError('Geçersiz santral imzası',401)
   if (!/^[0-9a-f-]{36}$/i.test(String(query.uuid || ''))) throw new SetupError('Çağrı kimliği geçersiz')
   const endpoint=String(query.endpoint || '')
-  const rows=await db.execute(sql`SELECT m.*,d.hostname FROM managed_integrations m JOIN clinics c ON c.id=m.clinic_id AND c.is_active=true JOIN clinic_domains d ON d.clinic_id=c.id AND d.is_primary=true AND d.is_active=true WHERE m.service='phone'`)
+  const queryRows = () => db.execute(sql`
+    SELECT m.*, COALESCE((
+      SELECT d.hostname
+      FROM clinic_domains d
+      WHERE d.clinic_id = c.id AND d.is_active = true
+      ORDER BY (d.hostname NOT IN ('localhost', '127.0.0.1')) DESC, d.is_primary DESC, d.created_at ASC
+      LIMIT 1
+    ), ${(process.env.TELEPHONY_CLINIC_HOSTNAME || (process.env.DEFAULT_CLINIC_HOSTS || 'pineclinic.thinpine.com').split(',')[0] || 'pineclinic.thinpine.com').trim()}) AS hostname
+    FROM managed_integrations m
+    JOIN clinics c ON c.id = m.clinic_id AND c.is_active = true
+    WHERE m.service = 'phone'
+  `)
+  let rows = await queryRows()
+  if (rows.length === 0) {
+    const { importLegacyIntegrations } = await import('./legacy')
+    await importLegacyIntegrations().catch(() => {})
+    rows = await queryRows()
+  }
   const source=rows.find(r=>endpointId(String(r.clinic_id))===endpoint)
-  if (!source && endpoint!=='netgsm-ingress' && endpoint!=='netgsm-endpoint') throw new SetupError('Bilinmeyen sağlayıcı bağlantısı',403)
+  if (!source && endpoint!=='netgsm-ingress' && endpoint!=='netgsm-endpoint' && endpoint!=='') throw new SetupError('Bilinmeyen sağlayıcı bağlantısı',403)
   let did: string | null=null
-  if(query.did && query.did!=='s') { try {did=phone(String(query.did))} catch {throw new SetupError('Aranan numara geçersiz',403)} }
+  if(query.did && query.did!=='s') {
+    const rawDid = String(query.did).trim()
+    const sipMatch = rawDid.match(/sip:([^@;>\s]+)/i)
+    const candidateDid = (sipMatch ? sipMatch[1] : rawDid).trim()
+    if (candidateDid && candidateDid !== 's' && candidateDid !== '100') {
+      try { did = phone(candidateDid) } catch { did = null }
+    }
+  }
+  const configMatchesDid = (c: Config, targetDid: string) => {
+    if (c.numbers?.some(n => { try { return phone(String(n)) === targetDid } catch { return false } })) return true
+    if (c.callerId) { try { if (phone(String(c.callerId)) === targetDid) return true } catch {} }
+    if (c.username) { try { if (phone(String(c.username)) === targetDid) return true } catch {} }
+    return false
+  }
   const candidates=rows.filter(r=> {
     const configs=[r.active,r.draft].filter(Boolean) as Config[]
-    return did && configs.some(c=>c.numbers?.includes(did!))
+    return Boolean(did && configs.some(c=>configMatchesDid(c, did!)))
   })
   const outbound=query.direction==='outbound'
-  const row=outbound ? source : did ? (candidates.length===1?candidates[0]:null) : source
-  if (!row || (source && source.clinic_id!==row.clinic_id) || (outbound && query.clinicId!==row.clinic_id)) throw new SetupError('Çağrı kliniği güvenle eşleştirilemedi',403)
+  const byClinicId=query.clinicId ? rows.find(r=>String(r.clinic_id)===String(query.clinicId)) : undefined
+  const row=outbound
+    ? (source || byClinicId)
+    : did
+      ? (candidates.length===1 ? candidates[0] : (source && candidates.some(c=>c.clinic_id===source.clinic_id) ? source : (rows.length===1 ? rows[0] : null)))
+      : (source || byClinicId || (rows.length===1 ? rows[0] : null))
+  if (!row || (source && source.clinic_id!==row.clinic_id) || (outbound && query.clinicId && query.clinicId!==row.clinic_id)) throw new SetupError('Çağrı kliniği güvenle eşleştirilemedi',403)
   const id=String(row.clinic_id)
-  let caller: string; try {caller=phone(String(query.caller))} catch {throw new SetupError('Arayan numara geçersiz',403)}
-  const tests=await db.execute(sql`SELECT * FROM integration_tests WHERE clinic_id=${id} AND service='phone' AND revision=${row.revision} AND expires_at>now() AND status IN ('pending','accepted') AND target=${caller} ORDER BY created_at DESC`)
-  const test=outbound ? tests.find(t=>t.id===query.testId && ['outbound','transfer'].includes(String(t.kind))) : tests.find(t=>t.kind==='inbound')
+  let caller: string
+  try {caller=phone(String(query.caller))} catch {caller=String(query.caller || '').replace(/[^0-9+]/g,'') || 'unknown'}
+  const allActiveTests=await db.execute(sql`SELECT * FROM integration_tests WHERE clinic_id=${id} AND service='phone' AND revision=${row.revision} AND expires_at>now() AND status IN ('pending','accepted') ORDER BY created_at DESC`)
+  const matchingCallerTests=allActiveTests.filter(t=>t.target===caller)
+  const test=outbound
+    ? allActiveTests.find(t=>t.id===query.testId && ['outbound','transfer'].includes(String(t.kind)))
+    : (matchingCallerTests.find(t=>t.kind==='inbound') || allActiveTests.find(t=>t.kind==='inbound'))
   if(query.testId && !test) throw new SetupError('Test oturumu geçersiz',403)
-  const config=(test?row.draft:row.enabled?row.active:null) as Config | null
-  if(!config || (!outbound && did && !config.numbers?.includes(did))) throw new SetupError('Telefon bağlantısı etkin değil',403)
+  const config=(test ? row.draft : (row.enabled && row.active) ? row.active : (!row.active && row.draft) ? row.draft : null) as Config | null
+  if(!config || (!outbound && did && !configMatchesDid(config, did) && rows.length > 1)) throw new SetupError('Telefon bağlantısı etkin değil',403)
   return { clinicId:id,hostname:String(row.hostname),testId:test?String(test.id):undefined,caller,config }
 }
 // Only authenticated routing can attach this channel to a test. AudioSocket

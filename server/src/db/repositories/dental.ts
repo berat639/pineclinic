@@ -864,8 +864,15 @@ export async function listAllPayments(opts?: {
     conditions.push(eq(patientPayments.status, opts.status))
   }
   if (opts?.search && opts.search.trim()) {
-    const q = `%${opts.search.trim()}%`
-    conditions.push(or(ilike(patients.name, q), ilike(patients.phone, q)))
+    const rawSearch = opts.search.trim()
+    const q = `%${rawSearch}%`
+    const digitsOnly = rawSearch.replace(/\D/g, '').replace(/^(?:0090|90|0)/, '')
+    if (digitsOnly.length >= 3 && /^[\d+\s()-]+$/.test(rawSearch)) {
+      const dq = `%${digitsOnly}%`
+      conditions.push(or(ilike(patients.name, q), ilike(patients.phone, q), sql`regexp_replace(coalesce(${patients.phone}, ''), '[^0-9]', '', 'g') LIKE ${dq}`))
+    } else {
+      conditions.push(or(ilike(patients.name, q), ilike(patients.phone, q)))
+    }
   }
 
   const whereExpr = conditions.length ? and(...conditions) : undefined

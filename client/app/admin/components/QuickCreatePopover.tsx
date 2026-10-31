@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ChevronRight } from 'lucide-react';
 import FancyHourPicker from './FancyHourPicker';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
-import { PhoneMaskedInput } from '@/lib/phone-mask';
+import { PhoneMaskedInput, matchesPhoneSearch } from '@/lib/phone-mask';
 
 interface Props {
   x: number;
@@ -100,7 +100,7 @@ export default function QuickCreatePopover({
     const q = patientSearchQuery.trim().toLowerCase();
     if (!q) return uniquePatients.slice(0, 10);
     return uniquePatients.filter(p => 
-      p.name?.toLowerCase().includes(q) || (p.phone && p.phone.includes(q))
+      p.name?.toLowerCase().includes(q) || matchesPhoneSearch(p.phone, patientSearchQuery)
     ).slice(0, 15);
   }, [uniquePatients, patientSearchQuery]);
 

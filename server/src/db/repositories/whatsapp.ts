@@ -202,6 +202,32 @@ export async function disconnectWhatsApp(id: string) {
   return publicWhatsAppConfig(updated)
 }
 
+/** Clears the clinic's WhatsApp phone number and disconnects any active Evolution session. */
+export async function clearWhatsAppSetup(id: string) {
+  try {
+    const clinic = await ensureAutomaticEvolutionConfig(id)
+    const creds = credentialsFor(clinic)
+    await evolutionRequest(creds, `/instance/logout/${encodeURIComponent(creds.instanceName)}`, undefined, 'DELETE')
+  } catch {}
+  const [updated] = await db.update(clinics).set({
+    evolutionConnectionState: 'close',
+    whatsappSetupStatus: 'not_started',
+    whatsappExpectedPhone: null,
+    whatsappLinkedPhone: null,
+    whatsappNumberVerifiedAt: null,
+    whatsappTestPhone: null,
+    whatsappTestCodeHash: null,
+    whatsappTestExpiresAt: null,
+    whatsappTestVerifiedAt: null,
+    whatsappEnabled: false,
+    whatsappAiEnabled: false,
+    whatsappActivatedAt: null,
+    whatsappActivatedBy: null,
+  }).where(eq(clinics.id, id)).returning()
+  if (!updated) throw new Error('Klinik bulunamadı.')
+  return publicWhatsAppConfig(updated)
+}
+
 /** Keeps a delayed migration from turning a WhatsApp setup request into a 500. */
 export async function ensureWhatsAppSetupSchema() {
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_setup_status text NOT NULL DEFAULT 'not_started'`)

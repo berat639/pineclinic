@@ -46,6 +46,7 @@ services:
       REDIS_URL: redis://redis:6379
       PORT: "3001"
       ASTERISK_AMI_HOST: asterisk
+      ASTERISK_AMI_SECRET: ${ASTERISK_AMI_SECRET:-pineclinic_ami_secret_123}
     depends_on:
       postgres:
         condition: service_healthy

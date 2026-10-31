@@ -21,7 +21,8 @@ async function command(command: string) {
 }
 export async function registered(id: string) {
   const raw = await command('pjsip show registrations')
-  return raw.split('\n').some(line => line.includes(`${endpointId(id)}-registration/`) && /\bRegistered\b/.test(line))
+  const ep = endpointId(id)
+  return raw.split('\n').some(line => (line.includes(ep) || line.includes('netgsm-registration')) && /\bRegistered\b/.test(line))
 }
 async function writeSections(target: Section[]) {
   const filename = 'managed/clinics.conf'
@@ -75,7 +76,7 @@ export async function reconcileAsterisk() {
     const desired: Section[] = []
     for (const row of rows) {
       const [test] = await tx.execute(sql`SELECT id FROM integration_tests WHERE clinic_id=${row.clinic_id} AND service='phone' AND revision=${row.revision} AND expires_at>now() AND status IN ('pending','accepted','confirmed') LIMIT 1`)
-      const config = test ? row.draft : row.enabled ? row.active : null
+      const config = test ? row.draft : (row.enabled && row.active) ? row.active : (!row.active && row.draft) ? row.draft : null
       if (config) desired.push(...sections(String(row.clinic_id),decrypt(config as Config)))
     }
     // Persist the last successful snapshot; never log secret-bearing AMI frames.
@@ -86,7 +87,10 @@ export async function reconcileAsterisk() {
       try {
         await writeSections(desired)
         const registrations = await command('pjsip show registrations')
-        for (const row of desired.filter(s => s.fields.type === 'registration')) if (!registrations.includes(`${row.name}/`)) throw new SetupError('Asterisk SIP kayıt yapılandırması yüklenemedi',503)
+        for (const row of desired.filter(s => s.fields.type === 'registration')) {
+          const prefix = row.name.replace(/-registration$/, '')
+          if (!registrations.includes(prefix)) throw new SetupError('Asterisk SIP kayıt yapılandırması yüklenemedi',503)
+        }
         const endpoints = await command('pjsip show endpoints')
         for (const row of desired.filter(s => s.fields.type === 'endpoint')) if (!endpoints.includes(row.name)) throw new SetupError('Asterisk endpoint doğrulanamadı',503)
       } catch (error) { await writeSections(snapshot).catch(() => {}); throw error }

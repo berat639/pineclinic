@@ -19,6 +19,9 @@ export function phone(value: string): string {
   if (!/^90[1-9]\d{9}$/.test(digits)) throw new SetupError('Geçerli bir Türkiye telefon numarası girin')
   return `+${digits}`
 }
+export function sipDialNumber(value: string): string {
+  return phone(value).replace(/^\+90/, '0')
+}
 export function safeText(value: unknown, label: string, max = 160): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || /[\r\n\x00-\x1f]/.test(value)) throw new SetupError(`${label} geçersiz`)
   return value.trim()

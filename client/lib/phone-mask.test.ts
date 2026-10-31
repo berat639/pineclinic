@@ -6,6 +6,7 @@ import {
   normalizeTrPhone,
   formatTrPhoneDisplay,
   stripTrCountryCodeOnPaste,
+  matchesPhoneSearch,
 } from './phone-mask'
 
 describe('phone-mask utilities & IMask integration', () => {
@@ -61,5 +62,17 @@ describe('phone-mask utilities & IMask integration', () => {
     m4.append('08503096119', { input: true })
     expect(m4.value).toBe('0 (850) 309 61 19')
     expect(m4.unmaskedValue).toBe('08503096119')
+  })
+
+  it('matches phone search queries across 8503096119, 08503096119, +908503096119 and formatted strings', () => {
+    expect(matchesPhoneSearch('08503096119', '8503096119')).toBe(true)
+    expect(matchesPhoneSearch('08503096119', '08503096119')).toBe(true)
+    expect(matchesPhoneSearch('08503096119', '0 (850) 309 61 19')).toBe(true)
+    expect(matchesPhoneSearch('08503096119', '+90 850 309 61 19')).toBe(true)
+    expect(matchesPhoneSearch('8503096119', '08503096119')).toBe(true)
+    expect(matchesPhoneSearch('+908503096119', '8503096119')).toBe(true)
+    expect(matchesPhoneSearch('05321234567', '532 123')).toBe(true)
+    expect(matchesPhoneSearch('05321234567', '8503096119')).toBe(false)
+    expect(matchesPhoneSearch('08503096119', 'ahmet')).toBe(false)
   })
 })

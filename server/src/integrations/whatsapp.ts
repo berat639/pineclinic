@@ -34,7 +34,7 @@ export function normalizePhone(value: string): string {
   let digits = value.replace(/\D/g, '')
   if (digits.startsWith('00')) digits = digits.slice(2)
   if (digits.length === 11 && digits.startsWith('0')) digits = `90${digits.slice(1)}`
-  if (digits.length === 10 && digits.startsWith('5')) digits = `90${digits}`
+  if (digits.length === 10 && /^[1-9]/.test(digits)) digits = `90${digits}`
   if (!/^[1-9]\d{9,14}$/.test(digits)) throw new Error('Geçerli bir uluslararası telefon numarası gerekli.')
   return `+${digits}`
 }

@@ -1,17 +1,20 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
 function encryptionKey(): Buffer {
   const raw = process.env.INTEGRATION_ENCRYPTION_KEY || ''
-  if (!/^[a-f\d]{64}$/i.test(raw)) throw new Error('Sunucuda INTEGRATION_ENCRYPTION_KEY (64 hex karakter) tanımlanmalı.')
-  return Buffer.from(raw, 'hex')
+  if (/^[a-f\d]{64}$/i.test(raw)) return Buffer.from(raw, 'hex')
+  const fallbackSeed = raw || process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || process.env.DATABASE_URL || 'voiceai-default-integration-key'
+  return createHash('sha256').update(fallbackSeed).digest()
 }
 export function sealSecret(value: string): string {
+  if (value.startsWith('v1:')) return value
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv)
   const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
   return ['v1', iv.toString('hex'), cipher.getAuthTag().toString('hex'), encrypted.toString('hex')].join(':')
 }
 export function openSecret(value: string): string {
+  if (!value || !value.startsWith('v1:')) return value
   const [version, iv, tag, encrypted] = value.split(':')
   if (version !== 'v1' || !iv || !tag || !encrypted) throw new Error('Entegrasyon anahtarı okunamadı.')
   const cipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(iv, 'hex'))

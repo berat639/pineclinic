@@ -7,7 +7,7 @@ import PatientConsentPanel from './PatientConsentPanel'
 import Pagination from './Pagination'
 import AddPatientModal from './AddPatientModal'
 import ConfirmModal from './ConfirmModal'
-import { PhoneMaskedInput } from '@/lib/phone-mask'
+import { PhoneMaskedInput, matchesPhoneSearch } from '@/lib/phone-mask'
 
 interface Patient {
   id: string
@@ -458,7 +458,7 @@ export default function PatientsTab() {
     const q = searchTerm.toLowerCase()
     return (
       (p.name && p.name.toLowerCase().includes(q)) ||
-      (p.phone && p.phone.includes(q)) ||
+      matchesPhoneSearch(p.phone, searchTerm) ||
       (p.tcIdentity && p.tcIdentity.includes(q)) ||
       (p.email && p.email.toLowerCase().includes(q))
     )

@@ -1438,7 +1438,11 @@ const app = new Elysia()
     const { resolveCall } = await import('./integrations/managed/routing')
     let resolved
     try { resolved = await resolveCall(query) }
-    catch { set.status=403; return {ok:false,error:'Çağrı yetkilendirilemedi'} }
+    catch (err) {
+      console.error('[Telephony] /api/telephony/register reddedildi:', err instanceof Error ? err.message : err, { caller: query.caller, did: query.did, direction: query.direction, endpoint: query.endpoint })
+      set.status=403
+      return {ok:false,error:'Çağrı yetkilendirilemedi'}
+    }
     const uuid = String(query.uuid)
     const caller = resolved.caller
     const channel = String(query.channel || '')

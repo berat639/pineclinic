@@ -66,30 +66,46 @@ export async function sendAmiAction(action: Record<string, string>, timeoutMs = 
 export async function transferCall(channel: string, targetNumber: string, clinicId?: string): Promise<{ success: boolean; message: string }> {
   const { requireClinicId } = await import('../tenancy/context')
   const { activeConfig, decrypt, getRow } = await import('../integrations/managed/store')
-  const { endpointId, phone } = await import('../integrations/managed/model')
+  const { endpointId, phone, sipDialNumber } = await import('../integrations/managed/model')
   const { db } = await import('../db/client')
   const { sql } = await import('drizzle-orm')
   const id = clinicId || requireClinicId()
   const [test] = await db.execute(sql`SELECT * FROM integration_tests WHERE clinic_id=${id} AND service='phone' AND kind='transfer' AND evidence->>'channel'=${channel} AND expires_at>now() AND status='accepted' LIMIT 1`)
-  const row = test ? await getRow(id,'phone') : null
-  const config = row && row.revision===test?.revision ? decrypt(row.draft as import('../integrations/managed/model').Config) : await activeConfig(id,'phone')
+  const row = await getRow(id,'phone')
+  let config = row && row.revision===test?.revision ? decrypt(row.draft as import('../integrations/managed/model').Config) : await activeConfig(id,'phone')
+  if (!config && row?.draft) config = decrypt(row.draft as import('../integrations/managed/model').Config)
   if (!config) return {success:false,message:'Telefon bağlantısı etkin değil'}
   const expected = await sendAmiAction({Action:'Getvar',Channel:channel,Variable:'VOICEAI_CLINIC_ID'})
   if (!expected.success || !expected.raw?.includes(`Value: ${id}\r\n`)) return {success:false,message:'Çağrı kliniği doğrulanamadı'}
   const target = test ? config.transferNumber : phone(targetNumber)
   if (!target) return {success:false,message:'Aktarım numarası tanımlı değil'}
-  for (const [Variable,Value] of Object.entries({VOICEAI_ENDPOINT:endpointId(id),VOICEAI_CALLER_ID:config.callerId!.replace('+','')})) {
+  const dialCallerId = sipDialNumber(config.callerId!)
+  const dialTarget = sipDialNumber(target)
+  for (const [Variable,Value] of Object.entries({VOICEAI_ENDPOINT:endpointId(id),VOICEAI_CALLER_ID:dialCallerId})) {
     const result=await sendAmiAction({Action:'Setvar',Channel:channel,Variable,Value})
     if(!result.success)return result
   }
-  return sendAmiAction({Action:'Redirect',Channel:channel,Context:'dynamic-forward',Exten:target.replace('+',''),Priority:'1'})
+  return sendAmiAction({Action:'Redirect',Channel:channel,Context:'dynamic-forward',Exten:dialTarget,Priority:'1'})
 }
 
 export async function initiateOutboundCall(customerNumber: string, clinicId: string): Promise<{ success: boolean; message: string }> {
-  const { activeConfig } = await import('../integrations/managed/store')
-  const { endpointId, phone } = await import('../integrations/managed/model')
-  const config=await activeConfig(clinicId,'phone')
+  const { activeConfig, decrypt, getRow } = await import('../integrations/managed/store')
+  const { endpointId, phone, sipDialNumber } = await import('../integrations/managed/model')
+  let config = await activeConfig(clinicId,'phone')
+  if (!config) {
+    let row = await getRow(clinicId, 'phone')
+    if (!row) {
+      const { importLegacyIntegrations } = await import('../integrations/managed/legacy')
+      await importLegacyIntegrations().catch(() => {})
+      row = await getRow(clinicId, 'phone')
+    }
+    if (row?.draft) config = decrypt(row.draft as import('../integrations/managed/model').Config)
+  }
   if(!config)return {success:false,message:'Klinik telefon bağlantısı etkin değil'}
+  const { reconcileAsterisk } = await import('../integrations/managed/asterisk')
+  await reconcileAsterisk().catch(() => {})
   const number=phone(customerNumber)
-  return sendAmiAction({Action:'Originate',Channel:`PJSIP/${number.replace('+','')}@${endpointId(clinicId)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:config.callerId!.replace('+',''),Variable:`CUSTOMER_NUMBER=${number},VOICEAI_CLINIC_ID=${clinicId}`,Async:'true'})
+  const dialNumber=sipDialNumber(number)
+  const dialCallerId=sipDialNumber(config.callerId!)
+  return sendAmiAction({Action:'Originate',Channel:`PJSIP/${dialNumber}@${endpointId(clinicId)}`,Context:'outbound-ai',Exten:'s',Priority:'1',CallerID:dialCallerId,Variable:`CUSTOMER_NUMBER=${number},VOICEAI_CLINIC_ID=${clinicId}`,Async:'true'})
 }

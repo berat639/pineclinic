@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia'
 import { authenticateRequest } from '../middleware/auth'
 import { hasMatchingRequestOrigin, isPlatformAdminRequest } from '../platform/access'
 import { serviceOf, SetupError } from '../integrations/managed/model'
-import { integrationView, saveConfig } from '../integrations/managed/store'
+import { integrationView, removeConfig, saveConfig } from '../integrations/managed/store'
 import { beginTest, cancelTest, confirmTest, setEnabled, testInfo } from '../integrations/managed/workflow'
 const params = t.Object({clinicId:t.String({format:'uuid'}),service:t.Union([t.Literal('phone'),t.Literal('sms'),t.Literal('smtp')])})
 export const platformIntegrations = new Elysia({prefix:'/api/platform/clinics'})
@@ -38,3 +38,7 @@ export const platformIntegrations = new Elysia({prefix:'/api/platform/clinics'})
     const user=await authenticateRequest(cookie.token?.value as string,request)
     return setEnabled(params.clinicId,serviceOf(params.service),false,body.revision,user!.id)
   },{params,body:t.Object({revision:t.Number()})})
+  .delete('/:clinicId/integrations/:service',async ({params,cookie,request})=>{
+    const user=await authenticateRequest(cookie.token?.value as string,request)
+    return removeConfig(params.clinicId,serviceOf(params.service),user!.id)
+  },{params})
