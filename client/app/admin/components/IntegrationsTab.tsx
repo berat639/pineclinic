@@ -156,10 +156,31 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicyState>(DEFAULT_NOTIFICATION_POLICY_STATE)
   const [savingPolicy, setSavingPolicy] = useState(false)
 
-  // Clinic General Working Hours State
-  const [clinicStartTime, setClinicStartTime] = useState('08:00')
-  const [clinicEndTime, setClinicEndTime] = useState('20:00')
-  const [savingWorkingHours, setSavingWorkingHours] = useState(false)
+  // Klinik Personeli Granular Permissions State
+  type StaffPermItem = {
+    viewShiftPlanner: boolean
+    editShifts: boolean
+    manageLeaves: boolean
+    editClinicWorkingHours: boolean
+    manageStaff: boolean
+  }
+  const [staffPermissions, setStaffPermissions] = useState<{ hekim: StaffPermItem; host: StaffPermItem }>({
+    hekim: {
+      viewShiftPlanner: true,
+      editShifts: false,
+      manageLeaves: true,
+      editClinicWorkingHours: false,
+      manageStaff: false,
+    },
+    host: {
+      viewShiftPlanner: true,
+      editShifts: true,
+      manageLeaves: true,
+      editClinicWorkingHours: false,
+      manageStaff: false,
+    },
+  })
+  const [savingStaffPerms, setSavingStaffPerms] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationOverview>(emptyIntegrationOverview)
@@ -215,35 +236,32 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       })
       .catch(() => {})
 
-    fetch('/api/dental/working-hours')
+    fetch('/api/admin/settings/staff-permissions')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.startTime) setClinicStartTime(data.startTime)
-        if (data?.endTime) setClinicEndTime(data.endTime)
+        if (data?.hekim && data?.host) {
+          setStaffPermissions({ hekim: data.hekim, host: data.host })
+        }
       })
       .catch(() => {})
   }, [apiPrefix])
 
-  const saveClinicWorkingHours = async (overrideStart?: string, overrideEnd?: string) => {
-    const nextStart = overrideStart ?? clinicStartTime
-    const nextEnd = overrideEnd ?? clinicEndTime
-    setSavingWorkingHours(true)
+  const saveStaffPermissions = async () => {
+    setSavingStaffPerms(true)
     try {
-      const res = await fetch('/api/admin/settings/working-hours', {
+      const res = await fetch('/api/admin/settings/staff-permissions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startTime: nextStart, endTime: nextEnd }),
+        body: JSON.stringify(staffPermissions),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data) throw new Error(data?.error || 'Klinik mesai saatleri kaydedilemedi')
-      setClinicStartTime(data.startTime)
-      setClinicEndTime(data.endTime)
-      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: data }))
-      showToast('success', `Klinik genel mesai saatleri güncellendi: ${data.startTime} – ${data.endTime}${data.isOvernight ? ' (Gece / Ertesi Gün)' : ''}`)
+      if (!res.ok || !data) throw new Error(data?.error || 'Klinik personeli yetkileri kaydedilemedi')
+      if (data.permissions) setStaffPermissions(data.permissions)
+      showToast('success', 'Klinik Personeli sekmesi rol ve işlem yetkileri güncellendi')
     } catch (err: any) {
-      showToast('error', err.message || 'Klinik mesai saatleri kaydedilemedi')
+      showToast('error', err.message || 'Yetkiler kaydedilemedi')
     } finally {
-      setSavingWorkingHours(false)
+      setSavingStaffPerms(false)
     }
   }
 
@@ -312,7 +330,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const [rolesRes, policyRes] = await Promise.all([
+      const [rolesRes, policyRes, staffPermRes] = await Promise.all([
         fetch('/api/admin/settings/roles', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -323,10 +341,15 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(notificationPolicy)
         }),
+        fetch('/api/admin/settings/staff-permissions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(staffPermissions)
+        }),
       ])
 
-      if (!rolesRes.ok || !policyRes.ok) throw new Error('Kaydedilemedi')
-      showToast('success', 'Rol ve bildirim önceliği ayarları başarıyla kaydedildi')
+      if (!rolesRes.ok || !policyRes.ok || !staffPermRes.ok) throw new Error('Kaydedilemedi')
+      showToast('success', 'Rol, yetki ve bildirim önceliği ayarları başarıyla kaydedildi')
     } catch (err: any) {
       showToast('error', err.message || 'Hata oluştu')
     } finally {
@@ -395,82 +418,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
               PNG, JPG veya WEBP formatlarında, maksimum 2 MB boyutunda görsel yükleyebilirsiniz.
             </p>
           </div>
-        </div>
-      </SettingsCard>
-
-      {/* Klinik Genel Mesai Saatleri */}
-      <SettingsCard
-        title="🕒 Klinik Genel Mesai Saatleri (Takvim Saat Aralığı)"
-        description="Hekim bazlı vardiyalara ek olarak kliniğin genel açılış ve kapanış saatlerini belirleyin (ör. Sabah 08:00 – Gece 02:00). İnteraktif takvimdeki saat cetveli bu aralığa göre otomatik şekillenir."
-      >
-        <div className={styles.policyGrid}>
-          <Field label="Klinik Açılış Saati">
-            <select
-              className={styles.select}
-              value={clinicStartTime}
-              onChange={(e) => setClinicStartTime(e.target.value)}
-            >
-              {Array.from({ length: 48 }, (_, idx) => {
-                const total = idx * 30
-                const t = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-                return <option key={`int-start-${t}`} value={t}>{t}</option>
-              })}
-            </select>
-          </Field>
-          <Field label="Klinik Kapanış Saati (Gece Vardiyası Destekli)">
-            <select
-              className={styles.select}
-              value={clinicEndTime}
-              onChange={(e) => setClinicEndTime(e.target.value)}
-            >
-              {Array.from({ length: 48 }, (_, idx) => {
-                const total = (idx + 1) * 30
-                const t = total === 1440 ? '24:00' : `${String(Math.floor((total % 1440) / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-                const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
-                const eH = parseInt(t.split(':')[0] || '20', 10)
-                const isNight = t !== '24:00' && eH <= sH
-                return <option key={`int-end-${t}`} value={t}>{t}{isNight ? ' (Gece / Ertesi Gün)' : ''}</option>
-              })}
-            </select>
-          </Field>
-        </div>
-        <div className={styles.policyToggleRow}>
-          <button
-            type="button"
-            className={styles.orderBtn}
-            onClick={() => saveClinicWorkingHours('08:00', '20:00')}
-          >
-            Standart (08:00 – 20:00)
-          </button>
-          <button
-            type="button"
-            className={styles.orderBtn}
-            onClick={() => saveClinicWorkingHours('08:00', '02:00')}
-          >
-            Sabah 08:00 – Gece 02:00
-          </button>
-          <button
-            type="button"
-            className={styles.orderBtn}
-            onClick={() => saveClinicWorkingHours('09:00', '19:00')}
-          >
-            Gündüz (09:00 – 19:00)
-          </button>
-          <button
-            type="button"
-            className={styles.orderBtn}
-            onClick={() => saveClinicWorkingHours('00:00', '24:00')}
-          >
-            24 Saat Açık (00:00 – 24:00)
-          </button>
-          <button
-            type="button"
-            className={styles.saveButton}
-            onClick={() => saveClinicWorkingHours()}
-            disabled={savingWorkingHours}
-          >
-            {savingWorkingHours ? 'Kaydediliyor...' : 'Genel Mesai Saatlerini Kaydet'}
-          </button>
         </div>
       </SettingsCard>
 
@@ -658,6 +605,67 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           ))}
         </div>
       </section>
+
+      {/* Klinik Personeli Sekmesi Rol ve Yetki Ayarları */}
+      <SettingsCard
+        title="🛡️ Klinik Personeli Sekmesi Rol ve Yetki Ayarları"
+        description="Yönetici (yonetici) rolü her zaman tüm yetkilere sahiptir. Hekim ve Kayıt/Resepsiyon Personeli (host) rollerinin Klinik Personeli sekmesi içindeki alanlarda hangi işlemleri yapabileceğini belirleyin."
+      >
+        <div className={styles.roleList}>
+          {([
+            { key: 'hekim' as const, title: 'Hekim Rolü (hekim)' },
+            { key: 'host' as const, title: 'Kayıt / Resepsiyon Personeli Rolü (host)' },
+          ]).map((roleMeta) => {
+            const perms = staffPermissions[roleMeta.key]
+            const permDefs: Array<{ k: keyof StaffPermItem; label: string }> = [
+              { k: 'viewShiftPlanner', label: 'Mesai Planla Sekmesini Görüntüleyebilir' },
+              { k: 'editShifts', label: 'Mesai Ekleyebilir / Düzenleyebilir / Silebilir' },
+              { k: 'manageLeaves', label: 'İzin ve Kapalı Saat Ekleyebilir / Kaldırabilir' },
+              { k: 'editClinicWorkingHours', label: 'Klinik Genel Mesai Saatini Değiştirebilir' },
+              { k: 'manageStaff', label: 'Personel Davet Edebilir / Hesap Dondurabilir' },
+            ]
+            return (
+              <div key={roleMeta.key} className={styles.roleGroup}>
+                <div className={styles.roleName}>{roleMeta.title}</div>
+                <div className={styles.permissionList}>
+                  {permDefs.map((def) => (
+                    <label key={def.k} className={styles.permission}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(perms?.[def.k])}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          setStaffPermissions((prev) => ({
+                            ...prev,
+                            [roleMeta.key]: {
+                              ...prev[roleMeta.key],
+                              [def.k]: checked,
+                            },
+                          }))
+                        }}
+                      />
+                      {def.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className={styles.policyActionRow} style={{ marginTop: 12 }}>
+          <p className={styles.policyHint}>
+            🔒 Klinik yöneticisi dışındaki kullanıcılar yalnızca burada izin verdiğiniz işlem butonlarını görür ve kullanabilir.
+          </p>
+          <button
+            type="button"
+            className={styles.saveButton}
+            disabled={savingStaffPerms}
+            onClick={saveStaffPermissions}
+          >
+            {savingStaffPerms ? 'Kaydediliyor...' : 'Klinik Personeli Yetkilerini Kaydet'}
+          </button>
+        </div>
+      </SettingsCard>
 
       <div className={styles.footer}>
         <button

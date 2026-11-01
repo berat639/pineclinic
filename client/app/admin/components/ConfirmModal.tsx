@@ -66,7 +66,7 @@ export default function ConfirmModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -80,11 +80,11 @@ export default function ConfirmModal({
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%',
-          maxWidth: '420px',
+          maxWidth: '460px',
           background: 'var(--card-bg, #1e293b)',
-          borderRadius: '16px',
-          border: '1px solid var(--input-border, #334155)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+          borderRadius: '14px',
+          border: '1.5px solid var(--input-border, #334155)',
+          boxShadow: 'var(--pc-neo-card)',
           padding: '24px',
           position: 'relative',
           display: 'flex',

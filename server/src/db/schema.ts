@@ -608,6 +608,29 @@ export const clinicMemberships = pgTable('clinic_memberships', {
   index('clinic_memberships_user_idx').on(t.userId),
 ])
 
+export const staffInvitations = pgTable('staff_invitations', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  role: text('role').notNull().default('hekim'),
+  specialty: text('specialty'),
+  color: text('color'),
+  tokenHash: text('token_hash').notNull().unique(),
+  status: text('status').notNull().default('pending'), // pending | accepted | revoked | expired
+  kvkkTextVersion: text('kvkk_text_version').notNull(),
+  kvkkTextSnapshot: text('kvkk_text_snapshot').notNull(),
+  kvkkAcceptedAt: timestamp('kvkk_accepted_at', { withTimezone: true }),
+  invitedBy: uuid('invited_by').references(() => users.id),
+  acceptedUserId: uuid('accepted_user_id').references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+}, (t) => [
+  index('staff_invitations_clinic_status_idx').on(t.clinicId, t.status),
+  index('staff_invitations_email_idx').on(t.clinicId, t.email),
+])
+
 export const userSessions = pgTable('user_sessions', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').notNull().references(() => users.id),

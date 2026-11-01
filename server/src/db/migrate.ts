@@ -1136,6 +1136,30 @@ async function runMigrations() {
   await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_clinic_date_idx ON doctor_leaves (clinic_id, date)`
   await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_doctor_date_idx ON doctor_leaves (doctor_id, date)`
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS staff_invitations (
+      id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id          UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      email              TEXT NOT NULL,
+      name               TEXT NOT NULL,
+      role               TEXT NOT NULL DEFAULT 'hekim',
+      specialty          TEXT,
+      color              TEXT,
+      token_hash         TEXT NOT NULL UNIQUE,
+      status             TEXT NOT NULL DEFAULT 'pending',
+      kvkk_text_version  TEXT NOT NULL,
+      kvkk_text_snapshot TEXT NOT NULL,
+      kvkk_accepted_at   TIMESTAMPTZ,
+      invited_by         UUID REFERENCES users(id),
+      accepted_user_id   UUID REFERENCES users(id),
+      expires_at         TIMESTAMPTZ NOT NULL,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      accepted_at        TIMESTAMPTZ
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS staff_invitations_clinic_status_idx ON staff_invitations (clinic_id, status)`
+  await sql`CREATE INDEX IF NOT EXISTS staff_invitations_email_idx ON staff_invitations (clinic_id, email)`
+
   // Copy legacy global settings into the default clinic without removing the
   // old table yet; this keeps rollback and mixed-version deployments safe.
   await sql`

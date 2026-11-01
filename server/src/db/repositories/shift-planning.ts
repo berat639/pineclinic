@@ -11,6 +11,7 @@ export type ShiftPlanInput = {
   endTime: string
   shiftType: string
   overwriteShiftIds?: string[]
+  overwriteAll?: boolean
 }
 
 type ShiftSnapshot = { userId: string; date: string; startTime: string; endTime: string; shiftType: string; notes: string | null }
@@ -91,8 +92,14 @@ export async function applyShiftPlan(clinicId: string, actorId: string | null, r
   if (!requestId || requestId.length > 120) throw new Error('Geçerli işlem anahtarı gerekli.')
   const rows = await candidates(clinicId, input)
   const overwriteIds = new Set(input.overwriteShiftIds || [])
-  const changes = rows.filter(row => row.state === 'create' || (row.state === 'existing' && overwriteIds.has(row.existingId!)))
-  if (!changes.length) throw new Error('Kaydedilecek yeni veya değiştirilecek mesai yok.')
+  const shouldOverwrite = (existingId?: string) => Boolean(input.overwriteAll || (existingId && overwriteIds.has(existingId)))
+  const changes = rows.filter(row => row.state === 'create' || (row.state === 'existing' && shouldOverwrite(row.existingId)))
+  if (!changes.length) {
+    if (rows.some(r => r.state === 'same')) {
+      return { operationId: '', repeated: false, created: 0, updated: 0, count: 0 }
+    }
+    throw new Error('Kaydedilecek yeni veya değiştirilecek mesai yok (seçili günlerde personel izinli olabilir).')
+  }
   return db.transaction(async tx => {
     const [operation] = await tx.insert(shiftPlanOperations).values({ clinicId, requestId, createdBy: actorId }).onConflictDoNothing().returning()
     if (!operation) {
@@ -109,7 +116,7 @@ export async function applyShiftPlan(clinicId: string, actorId: string | null, r
       // serially instead of creating duplicate rows.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${clinicId}:${row.userId}:${row.date}`}))`)
       const [currentForSlot] = await tx.select().from(shifts).where(and(eq(shifts.clinicId, clinicId), eq(shifts.userId, row.userId), eq(shifts.date, row.date))).limit(1)
-      if (row.state === 'same' || row.state === 'leave' || (row.state === 'existing' && !overwriteIds.has(row.existingId!))) continue
+      if (row.state === 'same' || row.state === 'leave' || (row.state === 'existing' && !shouldOverwrite(row.existingId))) continue
       if (row.state === 'create') {
         if (currentForSlot) continue
         const [saved] = await tx.insert(shifts).values({ clinicId, ...snapshot, createdBy: actorId }).returning()
@@ -117,7 +124,7 @@ export async function applyShiftPlan(clinicId: string, actorId: string | null, r
         created++
       } else {
         const current = currentForSlot
-        if (!current || current.id !== row.existingId) throw new Error('Mesai kaydı değişti; önizlemeyi yenileyin.')
+        if (!current || current.id !== row.existingId) throw new Error('Mesai kaydı değişti; lütfen tekrar deneyin.')
         const before: ShiftSnapshot = { userId: current.userId, date: current.date, startTime: current.startTime, endTime: current.endTime, shiftType: current.shiftType, notes: current.notes }
         const [saved] = await tx.update(shifts).set({ startTime: row.startTime, endTime: row.endTime, shiftType: row.shiftType }).where(and(eq(shifts.id, row.existingId!), eq(shifts.clinicId, clinicId))).returning()
         await tx.insert(shiftPlanOperationItems).values({ operationId: operation.id, shiftId: saved.id, action: 'updated', beforeState: before, afterState: snapshot })

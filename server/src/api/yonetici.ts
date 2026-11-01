@@ -601,10 +601,71 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     return { ok: true }
   })
 
-  // ── User Management (CRUD) ────────────────────────────────────────────────
+  // ── User Management & KVKK Email Invitations ───────────────────────────────
+  .get('/users/invitations', async ({ cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission, listStaffInvitations, getClinicSmtpStatus } = await import('../services/staff-invitations')
+    const clinicId = requireClinicId()
+    if (!user || !(await hasClinicStaffPermission(clinicId, user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
+    const [invitations, smtpStatus] = await Promise.all([
+      listStaffInvitations(clinicId),
+      getClinicSmtpStatus(clinicId),
+    ])
+    return { invitations, smtpStatus }
+  })
+
+  .post('/users/invite', async ({ body, cookie, set, request }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission, createStaffInvitation } = await import('../services/staff-invitations')
+    const clinicId = requireClinicId()
+    if (!user || !(await hasClinicStaffPermission(clinicId, user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
+
+    const b = (body || {}) as any
+    const hostname = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
+    try {
+      const invitation = await createStaffInvitation({
+        clinicId,
+        invitedBy: user.id || null,
+        name: b.name,
+        email: b.email,
+        role: b.role || 'hekim',
+        specialty: b.specialty,
+        color: b.color,
+        hostname,
+      })
+      return { ok: true, invitation }
+    } catch (err: any) {
+      set.status = 400
+      return { error: err?.message || 'Davet gönderilemedi.' }
+    }
+  })
+
+  .delete('/users/invitations/:id', async ({ params, cookie, set }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission, revokeStaffInvitation } = await import('../services/staff-invitations')
+    const clinicId = requireClinicId()
+    if (!user || !(await hasClinicStaffPermission(clinicId, user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
+    const ok = await revokeStaffInvitation(clinicId, params.id)
+    if (!ok) { set.status = 404; return { error: 'Davet bulunamadı' } }
+    return { ok: true }
+  })
+
   .post('/users', async ({ body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission } = await import('../services/staff-invitations')
+    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
 
     const b = body as any
     if (!b.email || !b.name || !b.password || !b.role) {
@@ -633,8 +694,12 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .put('/users/:id', async ({ params, body, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission } = await import('../services/staff-invitations')
+    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
 
     const { updateUser } = await import('../db/repositories/users')
     const b = body as any
@@ -654,8 +719,12 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
   })
 
   .delete('/users/:id', async ({ params, cookie, set }) => {
-    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
-    if (!user || !requireYonetici(user, set)) return { error: 'Yetki yok' }
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    const { hasClinicStaffPermission } = await import('../services/staff-invitations')
+    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'manageStaff'))) {
+      set.status = 403; return { error: 'Yetki yok' }
+    }
 
     if (user.id === params.id) {
       set.status = 400; return { error: 'Kendi hesabınızı silemezsiniz' }

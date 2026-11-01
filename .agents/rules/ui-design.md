@@ -38,4 +38,15 @@ trigger: always_on
 - **FORBIDDEN IN LIGHT MODE**: Creating buttons with black, charcoal, or dark-slate backgrounds (`#1e293b`, `#0f172a`, `#000000`) and colored text is STRICTLY FORBIDDEN in light mode. Light mode must be clean, luminous, and clinical.
 - **DARK MODE CLINICAL IDENTITY**: Dark mode must use deep medical night blues (`#0b1329`, `#0f172a`, `#132238`) with vibrant medical blue (`#38bdf8`, `#60a5fa`) and mint accents (`#34d399`), rather than flat muddy grays.
 
+## 5. Neomorphism & Claymorphism Ratio (Tedavi Planlama / `PineTreatmentPlan.module.css` Standard)
+- While strictly keeping all surfaces 100% opaque (no glassmorphism/blur), apply the exact Neomorphism + Claymorphism depth ratio used in `PineTreatmentPlan.module.css`:
+  - **Neomorphism (`--pc-neo-card`, `--pc-neo-subcard`, `--pc-neo-inset`)**: Outer extruded tactile shadows on solid cards/subcards and clean inset shadows (`--pc-neo-inset`) on all `input`, `select`, search boxes, and segmented tab tracks.
+  - **Claymorphism (`--pc-clay-btn`, `--pc-clay-pale`, `--pc-clay-primary`, `--pc-clay-total`)**: 3D inner-rim highlights and soft outer elevation on buttons, badges, pills, and interactive cells. Primary blue buttons (`#075cff` / `#2563eb`) use `--pc-clay-primary` with pure `#ffffff` text/icons.
+
+## 6. Standard Modal Architecture ("Yeni Randevu" / `QuickCreatePopover` Standard)
+- Every form/action modal (except full-screen workspaces like Odontogram/Treatment Planning) MUST match the exact dimensions, colors, and backdrop of **Yeni Randevu (`QuickCreatePopover.tsx`)**:
+  - **Backdrop**: Fixed `inset: 0`, `background: var(--modal-overlay)` (`rgba(15, 23, 42, 0.6)`), never transparent or missing.
+  - **Modal Container**: `width: min(460px, calc(100vw - 24px))`, `maxWidth: 460px`, `maxHeight: 90vh`, `borderRadius: 14px`, solid `background: var(--card-bg)`, `border: 1px solid var(--pc-border, var(--input-border))`, with Neomorphism & Claymorphism tokens applied throughout.
+  - **Header & Footer**: Header with `padding: 15px 20px`, `background: var(--card-inner)`, `32x32px` rounded-8px `#2563eb` (`#ffffff` icon, `--pc-clay-primary`) badge, title + subtitle, and `28x28px` close button (`--pc-clay-btn`).
+
 

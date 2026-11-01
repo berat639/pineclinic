@@ -1417,97 +1417,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           )}
         </div>
 
-        {/* Klinik Genel Mesai Saatleri (Takvim Saat Aralığı) */}
-        <div
-          style={{
-            marginTop: 6,
-            padding: '10px 12px',
-            borderRadius: 10,
-            background: 'var(--card-inner, #f1f5f9)',
-            border: '1px solid var(--input-border, #cbd5e1)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Clock size={14} color="var(--accent, #0284c7)" /> Klinik Genel Mesai
-            </span>
-            {workingHours.isOvernight && (
-              <span
-                style={{
-                  fontSize: '0.64rem',
-                  fontWeight: 700,
-                  padding: '2px 6px',
-                  borderRadius: 999,
-                  background: 'var(--badge-clinic-bg, #e0f2fe)',
-                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                  color: 'var(--badge-clinic-text, #0369a1)',
-                }}
-              >
-                Gece Vardiyası
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 6 }}>
-            <select
-              value={workingHours.startTime}
-              disabled={workingHoursSaving}
-              onChange={(e) => handleSaveClinicWorkingHours(e.target.value, workingHours.endTime)}
-              aria-label="Klinik açılış saati"
-              style={{
-                padding: '6px 8px',
-                borderRadius: 7,
-                border: '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.76rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              {Array.from({ length: 24 }, (_, h) => {
-                const label = `${String(h).padStart(2, '0')}:00`
-                return <option key={`start-${label}`} value={label}>{label}</option>
-              })}
-            </select>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground-3)' }}>–</span>
-            <select
-              value={workingHours.endTime}
-              disabled={workingHoursSaving}
-              onChange={(e) => handleSaveClinicWorkingHours(workingHours.startTime, e.target.value)}
-              aria-label="Klinik kapanış saati"
-              style={{
-                padding: '6px 8px',
-                borderRadius: 7,
-                border: '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.76rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              {Array.from({ length: 24 }, (_, i) => {
-                const h = i + 1 // 01:00 .. 24:00
-                const val = h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`
-                const startH = parseInt(workingHours.startTime.split(':')[0] || '8', 10)
-                const isNight = h < 24 && h <= startH
-                return (
-                  <option key={`end-${val}`} value={val}>
-                    {val}{isNight ? ' (Gece)' : ''}
-                  </option>
-                )
-              })}
-            </select>
-          </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--foreground-3)', lineHeight: 1.35 }}>
-            Takvim saat dilimleri: <strong>{workingHours.startTime} – {workingHours.endTime}</strong>
-            {workingHours.isOvernight ? ' (Ertesi gün gece)' : ''}
-          </div>
-        </div>
-
         {/* Takvimlerim (Doctor Filter) */}
         <div style={{ marginTop: 8, position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -3749,27 +3658,66 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
               x={shiftContextMenu.x}
               y={shiftContextMenu.y}
               doctorId={shiftContextMenu.doctorId}
+              doctorName={doctors.find(d => d.id === shiftContextMenu.doctorId)?.name}
               date={shiftContextMenu.date}
               onClose={() => setShiftContextMenu(null)}
               onOpenLeaveModal={(docId, dt) => {
                 setLeaveModalState({ isOpen: true, doctorId: docId, date: dt })
               }}
               onSave={async (shift) => {
-                await fetch('/api/shifts', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(shift)
-                })
-                setShiftContextMenu(null)
-                window.location.reload()
+                try {
+                  if (shift.repeatMode === 'weekly' || shift.repeatMode === 'monthly') {
+                    const base = new Date(`${shift.date}T12:00:00`)
+                    let rangeStart = shift.date
+                    let rangeEnd = shift.date
+                    if (shift.repeatMode === 'weekly') {
+                      const day = base.getDay()
+                      const diffToMon = (day + 6) % 7
+                      const mon = new Date(base)
+                      mon.setDate(base.getDate() - diffToMon)
+                      const sun = new Date(mon)
+                      sun.setDate(mon.getDate() + 6)
+                      rangeStart = mon.toISOString().slice(0, 10)
+                      rangeEnd = sun.toISOString().slice(0, 10)
+                    } else {
+                      const first = new Date(base.getFullYear(), base.getMonth(), 1, 12, 0, 0)
+                      const last = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12, 0, 0)
+                      rangeStart = first.toISOString().slice(0, 10)
+                      rangeEnd = last.toISOString().slice(0, 10)
+                    }
+                    await fetch('/api/shifts/plan/apply', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        doctorIds: [shift.userId],
+                        startDate: rangeStart,
+                        endDate: rangeEnd,
+                        daysOfWeek: [1, 2, 3, 4, 5, 6],
+                        slots: [{ startTime: shift.startTime, endTime: shift.endTime, shiftType: shift.shiftType }],
+                        overwriteAll: true,
+                      }),
+                    })
+                  } else {
+                    await fetch('/api/shifts', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(shift),
+                    })
+                  }
+                  setShiftContextMenu(null)
+                  toast.success('Mesai güncellendi')
+                  fetchData()
+                } catch {
+                  toast.error('Mesai kaydedilemedi')
+                }
               }}
             />
           </div>
         )}
 
         {aiReviewModal && (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 10050, background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-            <div role="dialog" aria-modal="true" style={{ width: 'min(560px, 100%)', maxHeight: '92vh', overflowY: 'auto', background: 'var(--card-bg)', border: '1px solid var(--input-border)', borderRadius: 12, padding: 20, boxShadow: '0 12px 32px rgba(15, 23, 42, 0.22)' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 10050, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div role="dialog" aria-modal="true" style={{ width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto', background: 'var(--card-bg)', border: '1.5px solid var(--input-border)', borderRadius: 14, padding: 20, boxShadow: 'var(--pc-neo-card)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', marginBottom: 16 }}>
                 <div><div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--foreground)' }}>Randevu Doğrulama</div><div style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginTop: 3 }}>Alınan bilgileri kontrol edin, hastayı eşleştirin ve geçici rezervasyonu doğrulayın.</div></div>
                 <button onClick={() => setAiReviewModal(null)} aria-label="Kapat" style={{ border: '1px solid var(--input-border)', background: 'var(--card-inner)', color: 'var(--foreground)', borderRadius: 6, cursor: 'pointer', padding: '4px 8px' }}>✕</button>

@@ -87,6 +87,9 @@ export async function updateUser(id: string, data: Partial<{
       eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
     ))
   }
+  if (updated && data.active === false) {
+    await deleteAllUserSessions(id)
+  }
   return updated ?? null
 }
 
@@ -116,13 +119,49 @@ export async function deleteAllUserSessions(userId: string) {
 
 export async function deleteUser(id: string) {
   const clinicId = currentClinicId()
+  await deleteAllUserSessions(id)
   if (clinicId) {
     const rows = await db.delete(clinicMemberships).where(and(
       eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
     )).returning({ userId: clinicMemberships.userId })
+    if (rows.length === 0) return false
+
+    const remainingMemberships = await db.select({ clinicId: clinicMemberships.clinicId })
+      .from(clinicMemberships)
+      .where(eq(clinicMemberships.userId, id))
+      .limit(1)
+
+    if (remainingMemberships.length === 0) {
+      try {
+        await db.delete(users).where(eq(users.id, id))
+      } catch {
+        // KVKK uyumlu anonimleştirme: geçmiş randevu/tedavi bütünlüğünü koruyarak kişisel verileri temizle
+        await db.update(users).set({
+          email: `kvkk-removed-${id}@anonim.local`,
+          name: 'Kaldırılan Personel (KVKK)',
+          phone: null,
+          avatar: null,
+          passwordHash: 'KVKK_REMOVED',
+          active: false,
+          updatedAt: new Date(),
+        }).where(eq(users.id, id))
+      }
+    }
+    return true
+  }
+  try {
+    const rows = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id })
+    return rows.length > 0
+  } catch {
+    const rows = await db.update(users).set({
+      email: `kvkk-removed-${id}@anonim.local`,
+      name: 'Kaldırılan Personel (KVKK)',
+      phone: null,
+      avatar: null,
+      passwordHash: 'KVKK_REMOVED',
+      active: false,
+      updatedAt: new Date(),
+    }).where(eq(users.id, id)).returning({ id: users.id })
     return rows.length > 0
   }
-  await deleteAllUserSessions(id)
-  const rows = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id })
-  return rows.length > 0
 }

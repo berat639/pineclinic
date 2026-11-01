@@ -24,6 +24,15 @@
    - **Koyu (Dark) Mod Buton ve Renk Kuralları (Sağlığı Çağrıştıran Medikal Gece Mavisi):**
      - Koyu modda kasvetli, ölü siyah veya çamurlu renkler yerine; sağlığı ve modern medikal teknolojiyi çağrıştıran derin klinik gece mavisi (`#0b1329`, `#0f172a`, `#132238`), canlı sağlık mavisi (`#38bdf8`, `#60a5fa`) ve nane yeşili (`#34d399`) vurgular kullanılmalıdır.
      - İkincil butonlar derin klinik mavi zemin (`#132238`), medikal mavi sınır (`#1e40af`) ve parlak mavi metin (`#60a5fa`) ile şık ve sağlık odaklı olmalıdır.
+5. **Tedavi Planlama Oranında Neomorphism & Claymorphism Tasarım Standardı (`PineTreatmentPlan.module.css` Standardı)**:
+   - Cam efekti (`backdrop-filter: blur`) ve yarı saydamlık yasağı kesinlikle korunarak, tüm bileşenlerde **Tedavi Planlama (`PineTreatmentPlan.module.css`)** ekranındaki **Neomorphism ve Claymorphism** oranı (`--pc-neo-card`, `--pc-neo-subcard`, `--pc-neo-inset`, `--pc-clay-btn`, `--pc-clay-pale`, `--pc-clay-primary`, `--pc-clay-total`) kullanılmalıdır:
+     - **Neomorphism (Opak Kartlar, Alt Kartlar ve Girdi Alanları):** Ana kartlarda `--pc-neo-card`, iç grup kutularında `--pc-neo-subcard`, tüm `input` / `select` / arama kutularında ve sekme kanallarında içe gömülü `--pc-neo-inset` gölge derinliği kullanılmalıdır.
+     - **Claymorphism (Butonlar, Rozetler ve Etkileşimli Öğeler):** İkincil butonlar ve seçilebilir öğelerde `--pc-clay-btn`, açık mavi bilgi/seçim rozetlerinde `--pc-clay-pale`, birincil mavi (`#075cff` / `#2563eb`, metin her zaman `#ffffff`) butonlarda `--pc-clay-primary` 3 boyutlu dokunsal gölge yapısı kullanılmalıdır.
+6. **Standart Modal Mimarisi ("Yeni Randevu" / `QuickCreatePopover` Boyut, Renk ve Karartma Standardı)**:
+   - Uygulamadaki tüm işlem ve form modalları (Odontogram / Tedavi Planı gibi tam ekran çalışma alanları hariç) **Yeni Randevu (`QuickCreatePopover.tsx`)** modalının renk, genişlik, büyüklük ve arka plan karartma standardına birebir uymalıdır:
+     - **Arka Plan Karartması (Backdrop):** Her zaman sabit `background: var(--modal-overlay)` (`rgba(15, 23, 42, 0.6)`), asla şeffaf/bozuk veya bulanık (`blur`) olmamalıdır.
+     - **Modal Boyutu ve Gövdesi:** `width: min(460px, calc(100vw - 24px))`, `maxWidth: 460px`, `maxHeight: 90vh`, `borderRadius: 14px`, opak `background: var(--card-bg)` (Light: `#ffffff` / `#f4f8fe`, Dark: `#1e293b` / `#0f172a`), `border: 1px solid var(--pc-border, var(--input-border))` ve `boxShadow: var(--pc-neo-card)` ile birlikte Neomorphism & Claymorphism kuralları geçerli olmalıdır.
+     - **Modal Başlığı (Header) ve Alt Bar (Footer):** Üst başlık `padding: 15px 20px`, `background: var(--card-inner)`, sol tarafta `32x32px` (`borderRadius: 8px`, `background: #2563eb`, `color: #ffffff`, `boxShadow: var(--pc-clay-primary)`) ikon kutusu, net başlık/alt başlık ve sağda `28x28px` kapatma (`X`) butonu içermelidir.
 
 
 ## Project Isolation Rules

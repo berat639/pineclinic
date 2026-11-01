@@ -298,6 +298,7 @@ export default function QuickCreatePopover({
     outline: 'none',
     width: '100%',
     boxSizing: 'border-box',
+    boxShadow: 'var(--pc-neo-inset)',
   };
 
   const labelStyle: React.CSSProperties = {
@@ -386,6 +387,7 @@ export default function QuickCreatePopover({
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '1rem',
+                boxShadow: 'var(--pc-clay-primary)',
               }}
             >
               📅
@@ -425,6 +427,7 @@ export default function QuickCreatePopover({
               alignItems: 'center',
               justifyContent: 'center',
               color: textCol,
+              boxShadow: 'var(--pc-clay-btn)',
             }}
           >
             <X size={16} />
@@ -457,6 +460,7 @@ export default function QuickCreatePopover({
                   : `1px solid ${borderCol}`,
               background: patientMode === 'select' ? brandBlue : cardBg,
               color: patientMode === 'select' ? '#ffffff' : textCol,
+              boxShadow: patientMode === 'select' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
               transition: 'all 0.15s ease',
             }}
           >
@@ -482,6 +486,7 @@ export default function QuickCreatePopover({
                   : `1px solid ${borderCol}`,
               background: patientMode === 'create' ? brandBlue : cardBg,
               color: patientMode === 'create' ? '#ffffff' : textCol,
+              boxShadow: patientMode === 'create' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
               transition: 'all 0.15s ease',
             }}
           >
@@ -510,6 +515,7 @@ export default function QuickCreatePopover({
                 padding: '14px',
                 borderRadius: '10px',
                 border: `1px solid ${borderCol}`,
+                boxShadow: 'var(--pc-neo-subcard)',
               }}
             >
               {patientMode === 'select' ? (
@@ -1040,6 +1046,7 @@ export default function QuickCreatePopover({
               cursor: 'pointer',
               fontSize: '0.86rem',
               fontWeight: 600,
+              boxShadow: 'var(--pc-clay-btn)',
             }}
           >
             İptal
@@ -1058,6 +1065,7 @@ export default function QuickCreatePopover({
               fontWeight: 700,
               fontSize: '0.86rem',
               opacity: isSaveDisabled ? 0.5 : 1,
+              boxShadow: isSaveDisabled ? 'none' : 'var(--pc-clay-primary)',
               transition: 'all 0.15s ease',
             }}
           >

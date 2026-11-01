@@ -473,6 +473,34 @@ const app = new Elysia()
     try { return await submitPublicAppointmentResponse(params.token, (body || {}) as Record<string, unknown>) }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
+  .get('/api/public/staff-invite/:token', async ({ params, set }) => {
+    const { getPublicStaffInvite } = await import('./services/staff-invitations')
+    set.headers['cache-control'] = 'no-store'
+    try {
+      return await getPublicStaffInvite(params.token)
+    } catch (error: any) {
+      set.status = 404
+      return { error: error?.message || 'Davet bağlantısı geçersiz veya süresi dolmuş.' }
+    }
+  })
+  .post('/api/public/staff-invite/:token/accept', async ({ params, body, set, request }) => {
+    const { acceptPublicStaffInvite } = await import('./services/staff-invitations')
+    set.headers['cache-control'] = 'no-store'
+    const b = (body || {}) as any
+    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null
+    try {
+      return await acceptPublicStaffInvite(params.token, {
+        name: b.name,
+        phone: b.phone,
+        password: b.password,
+        kvkkAccepted: Boolean(b.kvkkAccepted),
+        ipAddress: ipAddress || undefined,
+      })
+    } catch (error: any) {
+      set.status = 400
+      return { error: error?.message || 'Hesap oluşturulamadı.' }
+    }
+  })
 
   .use(whatsappPlugin)
 
@@ -2223,13 +2251,57 @@ const app = new Elysia()
   .put('/api/admin/settings/working-hours', async ({ body, set, cookie, request }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined, request)
-    if (!user || !['yonetici', 'moderator', 'host'].includes(user.role)) {
+    const { hasClinicStaffPermission } = await import('./services/staff-invitations')
+    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'editClinicWorkingHours'))) {
       set.status = 403
-      return { error: 'Klinik genel mesai saatlerini yalnızca yönetici değiştirebilir' }
+      return { error: 'Klinik genel mesai saatlerini değiştirme yetkiniz bulunmuyor' }
     }
     const { setClinicWorkingHours } = await import('./db/repositories/settings')
     const workingHours = await setClinicWorkingHours((body || {}) as Record<string, unknown>)
     return { success: true, workingHours }
+  })
+  .get('/api/dental/staff-permissions', async ({ cookie, request }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined, request)
+    const { getClinicStaffPermissions } = await import('./services/staff-invitations')
+    const config = await getClinicStaffPermissions(requireClinicId())
+    const role = user?.role || 'yonetici'
+    const effective =
+      role === 'yonetici' || role === 'moderator'
+        ? {
+            viewShiftPlanner: true,
+            editShifts: true,
+            manageLeaves: true,
+            editClinicWorkingHours: true,
+            manageStaff: true,
+          }
+        : role === 'hekim'
+          ? config.hekim
+          : role === 'host'
+            ? config.host
+            : {
+                viewShiftPlanner: true,
+                editShifts: false,
+                manageLeaves: false,
+                editClinicWorkingHours: false,
+                manageStaff: false,
+              }
+    return { role, config, effective }
+  })
+  .get('/api/admin/settings/staff-permissions', async () => {
+    const { getClinicStaffPermissions } = await import('./services/staff-invitations')
+    return await getClinicStaffPermissions(requireClinicId())
+  })
+  .put('/api/admin/settings/staff-permissions', async ({ body, set, cookie, request }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator'].includes(user.role)) {
+      set.status = 403
+      return { error: 'Klinik personeli rol yetkilerini yalnızca yönetici değiştirebilir' }
+    }
+    const { saveClinicStaffPermissions } = await import('./services/staff-invitations')
+    const config = await saveClinicStaffPermissions(requireClinicId(), body)
+    return { success: true, config }
   })
 
   // ── Knowledge Categories ────────────────────────────────────────────────────

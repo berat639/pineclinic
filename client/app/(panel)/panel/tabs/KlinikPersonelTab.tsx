@@ -1,50 +1,30 @@
 'use client'
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
+import { toast } from 'react-hot-toast'
 import { useAuth } from '../../../../lib/auth-context'
 import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
 import DoctorLeaveModal from '../../../admin/components/DoctorLeaveModal'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
-import ShiftPlanner from './ShiftPlanner'
-import WeeklyTemplateModal from '../../../admin/components/WeeklyTemplateModal'
-import MonthlyTemplateModal from '../../../admin/components/MonthlyTemplateModal'
-import ShiftBatchApplyModal from '../../../admin/components/ShiftBatchApplyModal'
+import ShiftPlanner, { type StaffPlannerPermissions } from './ShiftPlanner'
 import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
 import { PhoneMaskedInput } from '@/lib/phone-mask'
 import {
-  DailyShiftTemplate,
-  WeeklyShiftTemplate,
-  MonthlyShiftTemplate,
-  DEFAULT_DAILY_TEMPLATES,
-  DEFAULT_WEEKLY_TEMPLATES,
-  DEFAULT_MONTHLY_TEMPLATES,
-  DAY_NAMES_TR,
-  DAY_SHORT_TR
-} from '../../../admin/types/shiftTemplates'
-import {
   User as UserIcon,
   Mail,
-  Phone,
-  Shield,
-  Palette,
-  Lock,
   Check,
   X,
   Pencil,
   Trash2,
-  Calendar,
-  CalendarDays,
+  CalendarOff,
   Clock,
-  Zap,
-  Layers,
-  Sliders,
   Plus,
-  Filter,
-  Sparkles,
-  RotateCcw
+  ShieldAlert,
+  Copy,
+  Send,
+  Snowflake,
+  Play,
 } from 'lucide-react'
-
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
 
 interface User {
   id: string
@@ -70,65 +50,140 @@ interface ShiftItem {
   notes?: string | null
 }
 
+interface StaffInvitationItem {
+  id: string
+  email: string
+  name: string
+  role: string
+  phone?: string | null
+  specialty?: string | null
+  color?: string | null
+  token: string
+  status: string
+  expiresAt: string
+  createdAt: string
+}
+
+interface SmtpStatus {
+  configured: boolean
+  enabled: boolean
+  ready: boolean
+  fromAddress: string | null
+  message: string
+}
+
+const neoCardStyle: React.CSSProperties = {
+  background: 'var(--card-bg)',
+  border: '1.5px solid var(--input-border)',
+  borderRadius: 14,
+  boxShadow: 'var(--pc-neo-card)',
+}
+
+const neoSubCardStyle: React.CSSProperties = {
+  background: 'var(--card-inner)',
+  border: '1px solid var(--input-border)',
+  borderRadius: 12,
+  boxShadow: 'var(--pc-neo-subcard)',
+}
+
 const inputStyle: React.CSSProperties = {
   padding: '9px 12px',
-  borderRadius: 8,
-  border: '1px solid var(--input-border)',
+  borderRadius: 10,
+  border: '1.5px solid var(--input-border)',
   background: 'var(--input-bg)',
   color: 'var(--foreground)',
+  boxShadow: 'var(--pc-neo-inset)',
   fontSize: '0.82rem',
+  fontWeight: 600,
   outline: 'none',
   fontFamily: 'inherit',
   width: '100%',
-  boxSizing: 'border-box'
+  boxSizing: 'border-box',
 }
 
-const btnStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 8,
-  border: 'none',
-  background: 'var(--accent, #3b82f6)',
-  color: '#fff',
+const clayPrimaryBtnStyle: React.CSSProperties = {
+  padding: '9px 16px',
+  borderRadius: 10,
+  border: '1px solid #0284c7',
+  background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+  color: '#ffffff',
+  boxShadow: 'var(--pc-clay-primary)',
   fontSize: '0.8rem',
-  fontWeight: 600,
+  fontWeight: 750,
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6
+  justifyContent: 'center',
+  gap: 6,
 }
 
-const ROLE_META: Record<string, { label: string; color: string; bg: string }> = {
-  yonetici: { label: 'Yönetici', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
-  hekim: { label: 'Hekim', color: 'var(--accent, #3b82f6)', bg: 'rgba(59,130,246,0.1)' },
-  host: { label: 'Resepsiyon', color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
+const clayOutlineBtnStyle: React.CSSProperties = {
+  padding: '9px 14px',
+  borderRadius: 10,
+  border: '1px solid var(--input-border)',
+  background: 'var(--input-bg)',
+  color: 'var(--foreground)',
+  boxShadow: 'var(--pc-clay-btn)',
+  fontSize: '0.8rem',
+  fontWeight: 700,
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+}
+
+const ROLE_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  yonetici: { label: 'Yönetici', color: '#0369a1', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
+  hekim: { label: 'Hekim', color: '#0284c7', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
+  host: { label: 'Kayıt / Resepsiyon', color: '#15803d', bg: 'var(--btn-mint-bg, #f0fdf4)', border: 'var(--btn-mint-border, #86efac)' },
 }
 
 export default function KlinikPersonelTab() {
-  const editUserBackdropDismiss = useBackdropDismiss(() => setEditingUser(null))
   const { user } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [shifts, setShifts] = useState<ShiftItem[]>([])
-  const [showUserForm, setShowUserForm] = useState(false)
-  const [form, setForm] = useState({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' })
-  const [error, setError] = useState('')
-  const [workspace, setWorkspace] = useState<'planner' | 'people' | 'templates'>('planner')
+  const [invitations, setInvitations] = useState<StaffInvitationItem[]>([])
+  const [smtpStatus, setSmtpStatus] = useState<SmtpStatus>({
+    configured: true,
+    enabled: true,
+    ready: true,
+    fromAddress: null,
+    message: '',
+  })
+  const [permissions, setPermissions] = useState<StaffPlannerPermissions>({
+    viewShiftPlanner: true,
+    editShifts: true,
+    manageLeaves: true,
+    editClinicWorkingHours: true,
+    manageStaff: true,
+  })
 
-  // Calendar View & Navigation state
-  const [calendarView, setCalendarView] = useState<'week' | 'month'>('week')
-  const [weekOffset, setWeekOffset] = useState(0)
-  const [monthOffset, setMonthOffset] = useState(0)
-  const [doctorFilter, setDoctorFilter] = useState('all')
+  const [workspace, setWorkspace] = useState<'planner' | 'people'>('planner')
 
-  // Single shift form state
-  const [shiftForm, setShiftForm] = useState({ userId: '', date: '', startTime: '09:00', endTime: '18:00', shiftType: 'Tam Gün' })
-  const [showShiftForm, setShowShiftForm] = useState(false)
-  const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number, y: number, doctorId: string, date: string } | null>(null)
+  // Invite Modal State (Yeni Randevu 460px Standart Modal)
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const inviteBackdropDismiss = useBackdropDismiss(() => setShowInviteModal(false))
+  const [inviteForm, setInviteForm] = useState({
+    email: '',
+    name: '',
+    role: 'hekim',
+    phone: '',
+    specialty: '',
+    color: '#0284c7',
+  })
+  const [inviteError, setInviteError] = useState('')
+  const [sendingInvite, setSendingInvite] = useState(false)
+
+  // Context Menu & Leave Modal State
+  const [shiftContextMenu, setShiftContextMenu] = useState<{ x: number; y: number; doctorId: string; date: string } | null>(null)
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false)
   const [leaveDoctorId, setLeaveDoctorId] = useState<string | undefined>(undefined)
   const [leaveDate, setLeaveDate] = useState<string | undefined>(undefined)
 
-  // Edit user state
+  // Edit User Modal State (Yeni Randevu 460px Standart Modal)
   const [editingUser, setEditingUser] = useState<User | null>(null)
+  const editUserBackdropDismiss = useBackdropDismiss(() => setEditingUser(null))
   const [editForm, setEditForm] = useState<{
     name: string
     email: string
@@ -137,125 +192,108 @@ export default function KlinikPersonelTab() {
     specialty: string
     color: string
     active: boolean
-    password?: string
-  }>({ name: '', email: '', phone: '', role: 'hekim', specialty: '', color: '#60a5fa', active: true, password: '' })
+  }>({ name: '', email: '', phone: '', role: 'hekim', specialty: '', color: '#0284c7', active: true })
   const [editError, setEditError] = useState('')
   const [isSavingUser, setIsSavingUser] = useState(false)
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<User | null>(null)
 
-  // Templates Management State
-  const [templatesTab, setTemplatesTab] = useState<'daily' | 'weekly' | 'monthly'>('weekly')
-  const [dailyTemplates, setDailyTemplates] = useState<DailyShiftTemplate[]>(DEFAULT_DAILY_TEMPLATES)
-  const [weeklyTemplates, setWeeklyTemplates] = useState<WeeklyShiftTemplate[]>(DEFAULT_WEEKLY_TEMPLATES)
-  const [monthlyTemplates, setMonthlyTemplates] = useState<MonthlyShiftTemplate[]>(DEFAULT_MONTHLY_TEMPLATES)
-
-  // Daily template form
-  const [newDailyName, setNewDailyName] = useState('')
-  const [newDailyRange, setNewDailyRange] = useState<[number, number]>([9, 17])
-
-  // Modals for creating/editing templates and batch assignment
-  const [isWeeklyModalOpen, setIsWeeklyModalOpen] = useState(false)
-  const [editingWeeklyTemplate, setEditingWeeklyTemplate] = useState<WeeklyShiftTemplate | null>(null)
-
-  const [isMonthlyModalOpen, setIsMonthlyModalOpen] = useState(false)
-  const [editingMonthlyTemplate, setEditingMonthlyTemplate] = useState<MonthlyShiftTemplate | null>(null)
-
-  const [isBatchApplyOpen, setIsBatchApplyOpen] = useState(false)
-  const [batchModalConfig, setBatchModalConfig] = useState<{
-    initialUserId?: string
-    initialMode?: 'weekly' | 'monthly' | 'daily'
-    initialWeeklyTemplateId?: string
-    initialMonthlyTemplateId?: string
-  }>({})
-
-  // Clear shifts confirm
-  const [confirmClearModal, setConfirmClearModal] = useState<{ isOpen: boolean; title: string; startDate: string; endDate: string } | null>(null)
-
-  // Load templates from localStorage
-  useEffect(() => {
-    try {
-      const storedDaily = localStorage.getItem('shiftDailyTemplates') || localStorage.getItem('shiftTemplates')
-      if (storedDaily) {
-        const parsed = JSON.parse(storedDaily)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // normalize format if old format {name, start, end}
-          setDailyTemplates(parsed.map((p, idx) => ({
-            id: p.id || `dt-${idx + 1}`,
-            name: p.name,
-            start: p.start,
-            end: p.end,
-            color: p.color || '#3b82f6'
-          })))
-        }
-      }
-
-      const storedWeekly = localStorage.getItem('shiftWeeklyTemplates')
-      if (storedWeekly) {
-        const parsed = JSON.parse(storedWeekly)
-        if (Array.isArray(parsed) && parsed.length > 0) setWeeklyTemplates(parsed)
-      }
-
-      const storedMonthly = localStorage.getItem('shiftMonthlyTemplates')
-      if (storedMonthly) {
-        const parsed = JSON.parse(storedMonthly)
-        if (Array.isArray(parsed) && parsed.length > 0) setMonthlyTemplates(parsed)
-      }
-    } catch {}
-  }, [])
-
-  const saveDailyTemplates = (t: DailyShiftTemplate[]) => {
-    setDailyTemplates(t)
-    localStorage.setItem('shiftDailyTemplates', JSON.stringify(t))
-    localStorage.setItem('shiftTemplates', JSON.stringify(t))
-    window.dispatchEvent(new Event('shiftTemplatesUpdated'))
-  }
-
-  const saveWeeklyTemplates = (t: WeeklyShiftTemplate[]) => {
-    setWeeklyTemplates(t)
-    localStorage.setItem('shiftWeeklyTemplates', JSON.stringify(t))
-  }
-
-  const saveMonthlyTemplates = (t: MonthlyShiftTemplate[]) => {
-    setMonthlyTemplates(t)
-    localStorage.setItem('shiftMonthlyTemplates', JSON.stringify(t))
-  }
-
   const fetchData = useCallback(() => {
-    fetch(`/api/admin/users`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then(setUsers)
+    fetch('/api/admin/users', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setUsers(Array.isArray(list) ? list : []))
       .catch(() => {})
 
-    fetch(`/api/shifts`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then(setShifts)
+    fetch('/api/shifts', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setShifts(Array.isArray(list) ? list : []))
+      .catch(() => {})
+
+    fetch('/api/dental/staff-permissions', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.effective) {
+          setPermissions(data.effective)
+          if (data.effective.viewShiftPlanner === false) {
+            setWorkspace('people')
+          }
+        }
+        if (data?.smtpStatus) {
+          setSmtpStatus(data.smtpStatus)
+        }
+      })
+      .catch(() => {})
+
+    fetch('/api/yonetici/users/invitations', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.invitations && Array.isArray(data.invitations)) {
+          setInvitations(data.invitations)
+        }
+        if (data?.smtpStatus) {
+          setSmtpStatus(data.smtpStatus)
+        }
+      })
       .catch(() => {})
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
-  // User Actions
-  async function addUser(e: React.FormEvent) {
-    e.preventDefault(); setError('')
-    const res = await fetch(`/api/yonetici/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(form)
-    })
-    const data = await res.json()
-    if (res.ok) {
-      setUsers([...users, { ...data, active: true }])
-      setShowUserForm(false)
-      setForm({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' })
-      import('react-hot-toast').then(m => m.toast.success('Yeni kullanıcı oluşturuldu'))
+  const canManageStaff = user?.role === 'yonetici' || user?.role === 'super_admin' || permissions.manageStaff
+  const canManageLeaves = user?.role === 'yonetici' || user?.role === 'super_admin' || permissions.manageLeaves
+
+  // KVKK-Compliant Email Staff Invite
+  async function handleInviteSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setInviteError('')
+    if (!smtpStatus.ready) {
+      setInviteError(smtpStatus.message || 'E-Posta (SMTP) entegrasyonu tamamlanmadan personel daveti gönderilemez.')
+      return
+    }
+    setSendingInvite(true)
+    try {
+      const res = await fetch('/api/yonetici/users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(inviteForm),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setInviteError(data.error || 'Davet gönderilemedi.')
+        return
+      }
+      setShowInviteModal(false)
+      setInviteForm({ email: '', name: '', role: 'hekim', phone: '', specialty: '', color: '#0284c7' })
+      toast.success('KVKK uyumlu davet e-postası personele gönderildi.')
       fetchData()
-    } else {
-      setError(data.error || 'Hata')
+    } catch {
+      setInviteError('Bağlantı hatası oluştu.')
+    } finally {
+      setSendingInvite(false)
+    }
+  }
+
+  async function handleRevokeInvitation(id: string) {
+    try {
+      const res = await fetch(`/api/yonetici/users/invitations/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (res.ok) {
+        setInvitations((prev) => prev.filter((item) => item.id !== id))
+        toast.success('Davet iptal edildi.')
+      } else {
+        toast.error('Davet iptal edilemedi.')
+      }
+    } catch {
+      toast.error('Davet iptal edilirken hata oluştu.')
     }
   }
 
   const openEditModal = (u: User) => {
+    if (!canManageStaff) return
     setEditingUser(u)
     setEditForm({
       name: u.name || '',
@@ -263,9 +301,8 @@ export default function KlinikPersonelTab() {
       phone: u.phone || '',
       role: u.role || 'hekim',
       specialty: u.specialty || '',
-      color: u.color || '#60a5fa',
+      color: u.color || '#0284c7',
       active: u.active ?? true,
-      password: ''
     })
     setEditError('')
   }
@@ -276,36 +313,52 @@ export default function KlinikPersonelTab() {
     setIsSavingUser(true)
     setEditError('')
     try {
-      const payload: any = {
+      const payload: Record<string, unknown> = {
         name: editForm.name,
         email: editForm.email,
         phone: editForm.phone,
         role: editForm.role,
         specialty: editForm.role === 'hekim' ? editForm.specialty : null,
         color: editForm.role === 'hekim' ? editForm.color : null,
-        active: editForm.active
-      }
-      if (editForm.password && editForm.password.trim().length >= 6) {
-        payload.password = editForm.password.trim()
+        active: editForm.active,
       }
       const res = await fetch(`/api/yonetici/users/${editingUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Güncelleme başarısız')
 
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...payload } : u))
       setEditingUser(null)
-      import('react-hot-toast').then(m => m.toast.success('Kullanıcı güncellendi'))
+      toast.success('Personel bilgileri güncellendi.')
       fetchData()
     } catch (err: any) {
       setEditError(err.message || 'Hata oluştu')
-      import('react-hot-toast').then(m => m.toast.error(err.message || 'Hata oluştu'))
+      toast.error(err.message || 'Hata oluştu')
     } finally {
       setIsSavingUser(false)
+    }
+  }
+
+  async function handleToggleFreezeUser(u: User, e?: React.MouseEvent) {
+    if (e) e.stopPropagation()
+    if (!canManageStaff) return
+    try {
+      const nextActive = !u.active
+      const res = await fetch(`/api/yonetici/users/${u.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ active: nextActive }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Hesap durumu güncellenemedi')
+      toast.success(nextActive ? `${u.name} hesabı yeniden aktifleştirildi.` : `${u.name} hesabı donduruldu ve aktif oturumları kapatıldı.`)
+      fetchData()
+    } catch (err: any) {
+      toast.error(err.message || 'İşlem başarısız')
     }
   }
 
@@ -313,619 +366,874 @@ export default function KlinikPersonelTab() {
     try {
       const res = await fetch(`/api/yonetici/users/${u.id}`, {
         method: 'DELETE',
-        credentials: 'include'
+        credentials: 'include',
       })
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Silinemedi')
+        throw new Error(data.error || 'Kaldırılamadı')
       }
-      setUsers(prev => prev.filter(x => x.id !== u.id))
+      setUsers((prev) => prev.filter((x) => x.id !== u.id))
       setEditingUser(null)
       setConfirmDeleteUser(null)
-      import('react-hot-toast').then(m => m.toast.success('Kullanıcı başarıyla silindi'))
+      toast.success(data.message || 'Personel KVKK uyumlu olarak sistemden kaldırıldı.')
       fetchData()
     } catch (err: any) {
-      import('react-hot-toast').then(m => m.toast.error(err.message || 'Silme işlemi başarısız'))
+      toast.error(err.message || 'Silme işlemi başarısız')
     }
   }
 
-  // Single Shift Actions
-  async function createShift(e: React.FormEvent) {
-    e.preventDefault()
-    const res = await fetch(`/api/shifts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(shiftForm)
-    })
-    if (res.ok) {
-      fetchData()
-      setShowShiftForm(false)
-      import('react-hot-toast').then(m => m.toast.success('Vardiya kaydedildi'))
-    } else {
-      const d = await res.json()
-      import('react-hot-toast').then(m => m.toast.error(d.error || 'Vardiya kaydedilemedi'))
-    }
-  }
-
-  async function deleteShift(id: string) {
-    await fetch(`/api/shifts/${id}`, { method: 'DELETE', credentials: 'include' })
-    setShifts(shifts.filter(s => s.id !== id))
-    import('react-hot-toast').then(m => m.toast.success('Vardiya silindi'))
-  }
-
-  async function handleClearShifts(startDate: string, endDate: string) {
-    try {
-      const res = await fetch('/api/shifts/clear', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          userId: doctorFilter !== 'all' ? doctorFilter : undefined
-        })
-      })
-      if (res.ok) {
-        fetchData()
-        setConfirmClearModal(null)
-        import('react-hot-toast').then(m => m.toast.success('Belirtilen dönemdeki vardiyalar temizlendi'))
-      }
-    } catch {
-      import('react-hot-toast').then(m => m.toast.error('Temizleme işlemi başarısız oldu'))
-    }
-  }
-
-  // Week View Calculations
-  const startOfWeek = useMemo(() => {
-    const d = new Date()
-    const day = d.getDay()
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1) + weekOffset * 7
-    const result = new Date(d.setDate(diff))
-    return result
-  }, [weekOffset])
-
-  const weekDays = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(startOfWeek)
-      d.setDate(d.getDate() + i)
-      return d.toISOString().split('T')[0]!
-    })
-  }, [startOfWeek])
-
-  const currentWeekStartStr = weekDays[0]!
-
-  // Month View Calculations
-  const activeMonthDate = useMemo(() => {
-    const d = new Date()
-    d.setMonth(d.getMonth() + monthOffset)
-    return d
-  }, [monthOffset])
-
-  const currentMonthStr = useMemo(() => {
-    return `${activeMonthDate.getFullYear()}-${String(activeMonthDate.getMonth() + 1).padStart(2, '0')}`
-  }, [activeMonthDate])
-
-  const monthGridDays = useMemo(() => {
-    const year = activeMonthDate.getFullYear()
-    const month = activeMonthDate.getMonth()
-
-    const firstDayOfMonth = new Date(year, month, 1)
-    const daysInMonth = new Date(year, month + 1, 0).getDate()
-    const startDayOfWeek = (firstDayOfMonth.getDay() + 6) % 7 // 0=Mon, 6=Sun
-
-    const prevMonthDays = new Date(year, month, 0).getDate()
-
-    const grid = []
-
-    // Previous month padding
-    for (let i = startDayOfWeek - 1; i >= 0; i--) {
-      const dayNum = prevMonthDays - i
-      const d = new Date(year, month - 1, dayNum)
-      grid.push({
-        dateStr: d.toISOString().split('T')[0]!,
-        dayNumber: dayNum,
-        isCurrentMonth: false,
-        isToday: d.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]
-      })
-    }
-
-    // Current month days
-    for (let i = 1; i <= daysInMonth; i++) {
-      const d = new Date(year, month, i)
-      grid.push({
-        dateStr: d.toISOString().split('T')[0]!,
-        dayNumber: i,
-        isCurrentMonth: true,
-        isToday: d.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]
-      })
-    }
-
-    // Next month padding to fill grid to multiple of 7
-    const remaining = 7 - (grid.length % 7)
-    if (remaining < 7) {
-      for (let i = 1; i <= remaining; i++) {
-        const d = new Date(year, month + 1, i)
-        grid.push({
-          dateStr: d.toISOString().split('T')[0]!,
-          dayNumber: i,
-          isCurrentMonth: false,
-          isToday: d.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]
-        })
-      }
-    }
-
-    return grid
-  }, [activeMonthDate])
-
-  // Filtered shifts
-  const displayShifts = useMemo(() => {
-    if (doctorFilter === 'all') return shifts
-    return shifts.filter(s => s.userId === doctorFilter)
-  }, [shifts, doctorFilter])
-
-  // Quick Open Batch Modal with pre-config
-  const openBatchModal = (config: {
-    initialUserId?: string
-    initialMode?: 'weekly' | 'monthly' | 'daily'
-    initialWeeklyTemplateId?: string
-    initialMonthlyTemplateId?: string
-  } = {}) => {
-    setBatchModalConfig(config)
-    setIsBatchApplyOpen(true)
-  }
+  const pendingInvitations = invitations.filter((inv) => inv.status === 'pending')
 
   return (
     <div style={{ width: '100%' }}>
-      <nav aria-label="Klinik personeli bölümleri" style={{ display: 'flex', gap: 4, marginBottom: 18, padding: 4, width: 'fit-content', borderRadius: 10, background: 'var(--card-inner)', border: '1px solid var(--input-border)' }}>
-        {([['planner', 'Mesai Planı'], ['people', 'Personeller'], ['templates', 'Şablonlar']] as const).map(([id, text]) => <button key={id} onClick={() => setWorkspace(id)} aria-pressed={workspace === id} style={{ minHeight: 40, padding: '0 14px', border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700, background: workspace === id ? 'var(--accent)' : 'var(--input-bg)', color: workspace === id ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-2)' }}>{text}</button>)}
-      </nav>
-      {workspace === 'planner' && <ShiftPlanner users={users} shifts={shifts} onChanged={fetchData} onOpenLeave={(userId, date) => { setLeaveDoctorId(userId || users[0]?.id); setLeaveDate(date); setIsLeaveModalOpen(true) }} />}
-      {workspace === 'people' && <>
-      {/* ── Personel Listesi ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Klinik Personeli</h2>
-        <span style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', background: 'var(--glass-bg)', padding: '2px 8px', borderRadius: 12, border: '1px solid var(--glass-border)' }}>
-          {users.length} kişi
-        </span>
-        <button onClick={() => setShowUserForm(!showUserForm)} style={btnStyle}>
-          {showUserForm ? 'İptal' : '+ Yeni Personel Ekle'}
-        </button>
-        <button
-          onClick={() => {
-            setLeaveDoctorId(undefined)
-            setLeaveDate(new Date().toISOString().split('T')[0])
-            setIsLeaveModalOpen(true)
-          }}
+      {/* Zorunlu E-Posta (SMTP) Entegrasyon Uyarı Banner'ı */}
+      {!smtpStatus.ready && (users.length === 0 || workspace === 'people' || showInviteModal) && (
+        <div
+          role="alert"
           style={{
-            ...btnStyle,
-            background: 'var(--card-bg, #1e293b)',
-            border: '1px solid var(--input-border, #334155)',
-            color: 'var(--foreground, #ffffff)',
+            ...neoSubCardStyle,
+            padding: '14px 16px',
+            marginBottom: 16,
+            border: '1.5px solid var(--danger, #ef4444)',
             display: 'flex',
-            alignItems: 'center',
-            gap: 6
+            alignItems: 'flex-start',
+            gap: 12,
           }}
-          title="Hekimlerin izinli veya kapalı olduğu saatleri yönetin"
         >
-          🏖️ Hekim İzin / Kapalı Saat Yönetimi
-        </button>
-      </div>
-
-      {showUserForm && (
-        <form onSubmit={addUser} className="glass-card" style={{ padding: 18, marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 12, borderRadius: 12 }}>
-          <div>
-            <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Ad Soyad *</label>
-            <input placeholder="Örn: Dr. Ahmet Yılmaz" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required style={inputStyle} />
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: 'var(--danger, #ef4444)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <ShieldAlert size={19} color="#ffffff" />
           </div>
-          <div>
-            <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>E-posta *</label>
-            <input placeholder="ahmet@klinik.com" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required style={inputStyle} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--danger, #ef4444)', marginBottom: 3 }}>
+              E-Posta (SMTP) Entegrasyonu Tamamlanmalı
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--foreground)', lineHeight: 1.45, fontWeight: 600 }}>
+              {smtpStatus.message ||
+                'Kliniğin KVKK uyumlu olarak yeni hekim veya personel davet edebilmesi için E-Posta (SMTP) entegrasyonunun yapılandırılmış ve aktif olması zorunludur. Lütfen Entegrasyonlar (Ayarlar) sekmesinden E-Posta kurulumunu tamamlayın.'}
+            </div>
           </div>
-          <div>
-            <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Şifre * (En az 6 karakter)</label>
-            <input placeholder="••••••••" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={6} style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Telefon</label>
-            <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={form.phone} onValueChange={phone => setForm({ ...form, phone })} style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Rol *</label>
-            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ ...inputStyle, cursor: 'pointer' }}>
-              <option value="hekim">Hekim</option>
-              <option value="host">Resepsiyon</option>
-              <option value="yonetici">Yönetici</option>
-            </select>
-          </div>
-          {form.role === 'hekim' && (
-            <>
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Uzmanlık</label>
-                <input placeholder="Örn: Ortodonti, Çene Cerrahisi" value={form.specialty} onChange={e => setForm({ ...form, specialty: e.target.value })} style={inputStyle} />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Takvim Rengi</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
-                  <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} style={{ width: 44, height: 34, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }} />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--foreground-2)' }}>{form.color}</span>
-                </div>
-              </div>
-            </>
-          )}
-          <div style={{ gridColumn: '1/-1', display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
-            <button type="button" onClick={() => setShowUserForm(false)} style={{ ...btnStyle, background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--foreground)' }}>Vazgeç</button>
-            <button type="submit" style={btnStyle}>Personeli Kaydet</button>
-          </div>
-          {error && <div style={{ gridColumn: '1/-1', fontSize: '0.75rem', color: '#ef4444', fontWeight: 600 }}>{error}</div>}
-        </form>
+        </div>
       )}
 
-      {/* User cards - responsive modern grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 12, marginBottom: 36 }}>
-        {users.map(u => {
-          const role = ROLE_META[u.role] || ROLE_META.host
-          return (
-            <div
-              key={u.id}
-              className="glass-card"
-              onClick={() => openEditModal(u)}
-              style={{
-                padding: '14px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                borderRadius: 12,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                border: '1px solid var(--glass-border)',
-                background: 'var(--glass-bg)',
-                position: 'relative'
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.4)'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--glass-border)'
-                e.currentTarget.style.transform = 'none'
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId: u.id, date: new Date().toISOString().split('T')[0]! })
-              }}
-            >
-              {/* Avatar / Color Indicator */}
-              <div style={{
-                width: 36,
-                height: 36,
-                borderRadius: '50%',
-                background: u.color ? `${u.color}22` : 'rgba(59, 130, 246, 0.12)',
-                border: `2px solid ${u.color || 'var(--accent)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: u.color || 'var(--accent)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                flexShrink: 0
-              }}>
-                {u.name?.charAt(0)?.toUpperCase() || 'P'}
-              </div>
+      {/* Üst Sekme Seçici (Yalnızca Mesai Planı ve Personeller — Şablonlar kaldırıldı) */}
+      <nav
+        aria-label="Klinik personeli bölümleri"
+        style={{
+          display: 'inline-flex',
+          gap: 4,
+          marginBottom: 16,
+          padding: 4,
+          borderRadius: 12,
+          background: 'var(--card-inner)',
+          border: '1px solid var(--input-border)',
+          boxShadow: 'var(--pc-neo-inset)',
+        }}
+      >
+        {permissions.viewShiftPlanner !== false && (
+          <button
+            type="button"
+            onClick={() => setWorkspace('planner')}
+            aria-pressed={workspace === 'planner'}
+            style={{
+              minHeight: 38,
+              padding: '0 16px',
+              border: workspace === 'planner' ? '1px solid #0284c7' : '1px solid transparent',
+              borderRadius: 9,
+              cursor: 'pointer',
+              fontWeight: 750,
+              fontSize: 13,
+              background: workspace === 'planner' ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'transparent',
+              color: workspace === 'planner' ? '#ffffff' : 'var(--foreground-2)',
+              boxShadow: workspace === 'planner' ? 'var(--pc-clay-primary)' : 'none',
+            }}
+          >
+            <span style={{ color: workspace === 'planner' ? '#ffffff' : 'inherit' }}>Mesai Planı</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setWorkspace('people')}
+          aria-pressed={workspace === 'people'}
+          style={{
+            minHeight: 38,
+            padding: '0 16px',
+            border: workspace === 'people' ? '1px solid #0284c7' : '1px solid transparent',
+            borderRadius: 9,
+            cursor: 'pointer',
+            fontWeight: 750,
+            fontSize: 13,
+            background: workspace === 'people' ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'transparent',
+            color: workspace === 'people' ? '#ffffff' : 'var(--foreground-2)',
+            boxShadow: workspace === 'people' ? 'var(--pc-clay-primary)' : 'none',
+          }}
+        >
+          <span style={{ color: workspace === 'people' ? '#ffffff' : 'inherit' }}>
+            Personeller ({users.length})
+          </span>
+        </button>
+      </nav>
 
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {u.name}
+      {/* SEKME 1: MESAİ PLANI */}
+      {workspace === 'planner' && permissions.viewShiftPlanner !== false && (
+        <ShiftPlanner
+          users={users}
+          shifts={shifts}
+          permissions={permissions}
+          onChanged={fetchData}
+          onOpenLeave={(userId, date) => {
+            setLeaveDoctorId(userId || users[0]?.id)
+            setLeaveDate(date)
+            setIsLeaveModalOpen(true)
+          }}
+        />
+      )}
+
+      {/* SEKME 2: PERSONELLER & KVKK DAVET YÖNETİMİ */}
+      {workspace === 'people' && (
+        <section style={{ ...neoCardStyle, padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--foreground)', margin: 0 }}>
+                Klinik Personeli & Hekimler
+              </h2>
+              <span
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 750,
+                  color: 'var(--badge-clinic-text, #0369a1)',
+                  background: 'var(--badge-clinic-bg, #e0f2fe)',
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                }}
+              >
+                {users.length} kayıtlı · {users.filter((u) => u.active !== false).length} aktif
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {canManageLeaves && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLeaveDoctorId(undefined)
+                    setLeaveDate(new Date().toISOString().split('T')[0])
+                    setIsLeaveModalOpen(true)
+                  }}
+                  style={clayOutlineBtnStyle}
+                >
+                  <CalendarOff size={15} /> İzin / Kapalı Saat Yönetimi
+                </button>
+              )}
+
+              {canManageStaff && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteError('')
+                    setShowInviteModal(true)
+                  }}
+                  className="btn-clinic-primary"
+                  style={clayPrimaryBtnStyle}
+                >
+                  <Mail size={15} color="#ffffff" />
+                  <span style={{ color: '#ffffff' }}>+ E-Posta ile Personel Davet Et</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Bekleyen E-Posta Davetleri */}
+          {pendingInvitations.length > 0 && (
+            <div style={{ ...neoSubCardStyle, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--foreground)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Mail size={15} color="var(--accent)" /> Bekleyen Personel Davetleri ({pendingInvitations.length})
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 10 }}>
+                {pendingInvitations.map((inv) => {
+                  const roleMeta = ROLE_META[inv.role] || ROLE_META.host
+                  const inviteLink = typeof window !== 'undefined' ? `${window.location.origin}/invite/${inv.token}` : `/invite/${inv.token}`
+                  return (
+                    <div
+                      key={inv.id}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        background: 'var(--card-bg)',
+                        border: '1px solid var(--input-border)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 750, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {inv.name}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--foreground-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {inv.email}
+                        </div>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            marginTop: 4,
+                            fontSize: '0.65rem',
+                            fontWeight: 750,
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            background: roleMeta.bg,
+                            border: `1px solid ${roleMeta.border}`,
+                            color: roleMeta.color,
+                          }}
+                        >
+                          {roleMeta.label} · Onay Bekliyor
+                        </span>
+                      </div>
+                      {canManageStaff && (
+                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(inviteLink)
+                              toast.success('Davet bağlantısı panoya kopyalandı')
+                            }}
+                            style={{ ...clayOutlineBtnStyle, padding: '6px 8px', fontSize: '0.7rem' }}
+                            title="Davet bağlantısını kopyala"
+                          >
+                            <Copy size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRevokeInvitation(inv.id)}
+                            style={{
+                              ...clayOutlineBtnStyle,
+                              padding: '6px 8px',
+                              fontSize: '0.7rem',
+                              border: '1px solid var(--danger)',
+                              color: 'var(--danger)',
+                            }}
+                            title="Daveti iptal et"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Personel Kartları */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 310px), 1fr))', gap: 12 }}>
+            {users.map((u) => {
+              const role = ROLE_META[u.role] || ROLE_META.host
+              return (
+                <div
+                  key={u.id}
+                  onClick={() => openEditModal(u)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setShiftContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      doctorId: u.id,
+                      date: new Date().toISOString().split('T')[0]!,
+                    })
+                  }}
+                  style={{
+                    ...neoSubCardStyle,
+                    padding: '14px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    cursor: canManageStaff ? 'pointer' : 'default',
+                    opacity: u.active === false ? 0.72 : 1,
+                  }}
+                >
+                  {/* Avatar */}
+                  <div
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 999,
+                      background: u.color || '#0284c7',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '0.88rem',
+                      flexShrink: 0,
+                      boxShadow: 'var(--pc-clay-btn)',
+                    }}
+                  >
+                    {u.name?.charAt(0)?.toUpperCase() || 'P'}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 750, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {u.name}
+                    </div>
+                    <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {u.email}
+                    </div>
+                    {u.specialty && (
+                      <div style={{ fontSize: '0.69rem', color: 'var(--accent)', marginTop: 2, fontWeight: 700 }}>
+                        {u.specialty}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Rozetler ve Hızlı Aksiyonlar */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          padding: '2px 7px',
+                          borderRadius: 6,
+                          background: role.bg,
+                          border: `1px solid ${role.border}`,
+                          color: role.color,
+                          fontWeight: 750,
+                        }}
+                      >
+                        {role.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          padding: '2px 7px',
+                          borderRadius: 6,
+                          background: u.active ? 'var(--btn-mint-bg, #f0fdf4)' : 'var(--card-bg)',
+                          border: u.active ? '1px solid var(--btn-mint-border, #86efac)' : '1px solid var(--danger, #ef4444)',
+                          color: u.active ? 'var(--btn-mint-text, #15803d)' : 'var(--danger, #ef4444)',
+                          fontWeight: 750,
+                        }}
+                      >
+                        {u.active ? 'Aktif' : 'Donduruldu'}
+                      </span>
+                    </div>
+
+                    {canManageStaff && (
+                      <div style={{ display: 'flex', gap: 5 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleFreezeUser(u, e)}
+                          style={{
+                            ...clayOutlineBtnStyle,
+                            padding: '4px 8px',
+                            fontSize: '0.68rem',
+                            borderRadius: 7,
+                          }}
+                          title={u.active ? 'Hesabı Dondur' : 'Hesabı Aktifleştir'}
+                        >
+                          {u.active ? <Snowflake size={11} /> : <Play size={11} />}
+                          {u.active ? 'Dondur' : 'Aktifleştir'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openEditModal(u)
+                          }}
+                          style={{
+                            ...clayOutlineBtnStyle,
+                            padding: '4px 7px',
+                            fontSize: '0.68rem',
+                            borderRadius: 7,
+                          }}
+                          title="Düzenle / KVKK Kaldır"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {u.email}
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ── MODAL 1: KVKK Uyumlu E-Posta İle Personel Davet Modalı (Yeni Randevu 460px Standart Modal) ── */}
+      {showInviteModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100020,
+            padding: 16,
+          }}
+          {...inviteBackdropDismiss}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="E-Posta ile Personel Davet Et"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: 'var(--card-bg)',
+              borderRadius: 14,
+              border: '1.5px solid var(--input-border)',
+              boxShadow: 'var(--pc-neo-card)',
+              padding: 20,
+              boxSizing: 'border-box',
+              color: 'var(--foreground)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+                    boxShadow: 'var(--pc-clay-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Mail size={17} color="#ffffff" />
                 </div>
-                {u.specialty && (
-                  <div style={{ fontSize: '0.68rem', color: 'var(--accent)', marginTop: 2, fontWeight: 500 }}>
-                    {u.specialty}
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--foreground)' }}>
+                    Personel Davet Et (KVKK Uyumlu)
+                  </h3>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)' }}>
+                    Şifreyi ve KVKK açık rızasını personel kendi e-postasından belirler
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--card-inner)',
+                  color: 'var(--foreground-2)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {!smtpStatus.ready && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  background: 'var(--card-inner)',
+                  border: '1px solid var(--danger)',
+                  color: 'var(--danger)',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  marginBottom: 12,
+                }}
+              >
+                ⚠️ {smtpStatus.message || 'E-Posta (SMTP) entegrasyonu aktif değil. Davet göndermeden önce SMTP ayarlarını tamamlayın.'}
+              </div>
+            )}
+
+            <form onSubmit={handleInviteSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ ...neoSubCardStyle, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    Ad Soyad *
+                  </label>
+                  <input
+                    placeholder="Örn: Dr. Ahmet Yılmaz"
+                    value={inviteForm.name}
+                    onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                    required
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    Kurumsal / Kişisel E-Posta *
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="ornek@klinik.com"
+                    value={inviteForm.email}
+                    onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                    required
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      Rol *
+                    </label>
+                    <select
+                      value={inviteForm.role}
+                      onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
+                      style={{ ...inputStyle, cursor: 'pointer' }}
+                    >
+                      <option value="hekim">Hekim</option>
+                      <option value="host">Kayıt / Resepsiyon</option>
+                      <option value="yonetici">Yönetici</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      Telefon (Opsiyonel)
+                    </label>
+                    <PhoneMaskedInput
+                      placeholder="0 (5XX) XXX XX XX"
+                      value={inviteForm.phone}
+                      onValueChange={(phone) => setInviteForm({ ...inviteForm, phone })}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+
+                {inviteForm.role === 'hekim' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                        Uzmanlık Alanı
+                      </label>
+                      <input
+                        placeholder="Örn: Ortodonti"
+                        value={inviteForm.specialty}
+                        onChange={(e) => setInviteForm({ ...inviteForm, specialty: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                        Takvim Rengi
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
+                        <input
+                          type="color"
+                          value={inviteForm.color}
+                          onChange={(e) => setInviteForm({ ...inviteForm, color: e.target.value })}
+                          style={{ width: 42, height: 34, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent' }}
+                        />
+                        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--foreground-2)' }}>{inviteForm.color}</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Status & Role Badges */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: 6, background: role.bg, color: role.color, fontWeight: 700 }}>
-                    {role.label}
-                  </span>
-                  <span style={{
-                    fontSize: '0.65rem',
-                    padding: '2px 6px',
-                    borderRadius: 6,
-                    background: u.active ? 'rgba(34, 197, 94, 0.12)' : 'rgba(148, 163, 184, 0.12)',
-                    color: u.active ? '#22c55e' : '#94a3b8',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3
-                  }}>
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: u.active ? '#22c55e' : '#94a3b8' }} />
-                    {u.active ? 'Aktif' : 'Pasif'}
-                  </span>
+              {inviteError && (
+                <div
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 10,
+                    background: 'var(--card-inner)',
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠️ {inviteError}
                 </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openBatchModal({ initialUserId: u.id, initialMode: 'weekly' })
-                    }}
-                    title="Bu personele şablon ata"
-                    style={{
-                      background: 'rgba(59, 130, 246, 0.1)',
-                      border: '1px solid rgba(59, 130, 246, 0.25)',
-                      color: 'var(--accent, #60a5fa)',
-                      fontSize: '0.68rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      padding: '2px 6px',
-                      borderRadius: 4
-                    }}
-                  >
-                    <Zap size={11} /> Şablon Ata
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openEditModal(u)
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--foreground-3)',
-                      fontSize: '0.72rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      padding: '2px 4px',
-                      borderRadius: 4
-                    }}
-                  >
-                    <Pencil size={12} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+              )}
 
-      {/* ── Kullanıcı Düzenleme Modalı ── */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button type="button" onClick={() => setShowInviteModal(false)} style={clayOutlineBtnStyle}>
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingInvite || !smtpStatus.ready}
+                  className="btn-clinic-primary"
+                  style={{
+                    ...clayPrimaryBtnStyle,
+                    opacity: sendingInvite || !smtpStatus.ready ? 0.6 : 1,
+                  }}
+                >
+                  <Send size={14} color="#ffffff" />
+                  <span style={{ color: '#ffffff' }}>
+                    {sendingInvite ? 'Gönderiliyor…' : 'Davet E-Postası Gönder'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL 2: Personel Düzenleme / Dondurma / KVKK Kaldırma Modalı (Yeni Randevu 460px Standart Modal) ── */}
       {editingUser && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 999999,
-            padding: 16
+            zIndex: 100020,
+            padding: 16,
           }}
           {...editUserBackdropDismiss}
         >
           <div
-            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Personel Düzenle"
+            onClick={(e) => e.stopPropagation()}
             style={{
               width: '100%',
-              maxWidth: 520,
-              background: 'var(--card-bg, #1e293b)',
-              borderRadius: 16,
-              border: '1px solid var(--input-border, #334155)',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-              padding: 24,
-              position: 'relative',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 16
+              maxWidth: 460,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: 'var(--card-bg)',
+              borderRadius: 14,
+              border: '1.5px solid var(--input-border)',
+              boxShadow: 'var(--pc-neo-card)',
+              padding: 20,
+              boxSizing: 'border-box',
+              color: 'var(--foreground)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  background: editForm.color ? `${editForm.color}22` : 'rgba(59, 130, 246, 0.12)',
-                  border: `2px solid ${editForm.color || 'var(--accent)'}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: editForm.color || 'var(--accent)'
-                }}>
-                  <UserIcon size={20} />
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    background: editForm.color || '#0284c7',
+                    boxShadow: 'var(--pc-clay-btn)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                  }}
+                >
+                  <UserIcon size={17} color="#ffffff" />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground)' }}>Personel Düzenle</h3>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>{editingUser.email}</div>
+                  <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--foreground)' }}>
+                    Personel Bilgileri & Yetki
+                  </h3>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)' }}>{editingUser.email}</div>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingUser(null)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 4 }}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--card-inner)',
+                  color: 'var(--foreground-2)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
               >
-                <X size={20} />
+                <X size={15} />
               </button>
             </div>
 
-            <form onSubmit={handleUpdateUser} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Ad Soyad *</label>
-                  <input
-                    value={editForm.name}
-                    onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                    required
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>E-posta *</label>
-                  <input
-                    type="email"
-                    value={editForm.email}
-                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
-                    required
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Telefon</label>
-                  <PhoneMaskedInput
-                    value={editForm.phone}
-                    onValueChange={phone => setEditForm({ ...editForm, phone })}
-                    placeholder="0 (5XX) XXX XX XX"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Rol</label>
-                  <select
-                    value={editForm.role}
-                    onChange={e => setEditForm({ ...editForm, role: e.target.value })}
-                    style={{ ...inputStyle, cursor: 'pointer' }}
-                  >
-                    <option value="hekim">Hekim</option>
-                    <option value="host">Resepsiyon</option>
-                    <option value="yonetici">Yönetici</option>
-                  </select>
-                </div>
-              </div>
-
-              {editForm.role === 'hekim' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <form onSubmit={handleUpdateUser} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ ...neoSubCardStyle, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Uzmanlık</label>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      Ad Soyad *
+                    </label>
                     <input
-                      value={editForm.specialty}
-                      onChange={e => setEditForm({ ...editForm, specialty: e.target.value })}
-                      placeholder="Örn: Ortodonti, Pedodonti"
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      required
                       style={inputStyle}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>Takvim Rengi</label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
-                      <input
-                        type="color"
-                        value={editForm.color}
-                        onChange={e => setEditForm({ ...editForm, color: e.target.value })}
-                        style={{ width: 44, height: 34, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }}
-                      />
-                      <span style={{ fontSize: '0.8rem', color: 'var(--foreground-2)', fontWeight: 600 }}>{editForm.color}</span>
-                    </div>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      E-Posta *
+                    </label>
+                    <input
+                      type="email"
+                      value={editForm.email}
+                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                      required
+                      style={inputStyle}
+                    />
                   </div>
                 </div>
-              )}
 
-              <div style={{ padding: 12, borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <Lock size={14} color="var(--foreground-3)" /> Yeni Şifre Belirle <span style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', fontWeight: 400 }}>(İsteğe bağlı, boş bırakılırsa değişmez)</span>
-                </label>
-                <input
-                  type="password"
-                  placeholder="En az 6 karakterli yeni şifre"
-                  value={editForm.password || ''}
-                  onChange={e => setEditForm({ ...editForm, password: e.target.value })}
-                  style={inputStyle}
-                  minLength={6}
-                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      Telefon
+                    </label>
+                    <PhoneMaskedInput
+                      value={editForm.phone}
+                      onValueChange={(phone) => setEditForm({ ...editForm, phone })}
+                      placeholder="0 (5XX) XXX XX XX"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      Rol
+                    </label>
+                    <select
+                      value={editForm.role}
+                      onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                      style={{ ...inputStyle, cursor: 'pointer' }}
+                    >
+                      <option value="hekim">Hekim</option>
+                      <option value="host">Kayıt / Resepsiyon</option>
+                      <option value="yonetici">Yönetici</option>
+                    </select>
+                  </div>
+                </div>
+
+                {editForm.role === 'hekim' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                        Uzmanlık
+                      </label>
+                      <input
+                        value={editForm.specialty}
+                        onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
+                        placeholder="Örn: Ortodonti"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                        Takvim Rengi
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
+                        <input
+                          type="color"
+                          value={editForm.color}
+                          onChange={(e) => setEditForm({ ...editForm, color: e.target.value })}
+                          style={{ width: 42, height: 34, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent' }}
+                        />
+                        <span style={{ fontSize: '0.76rem', color: 'var(--foreground-2)', fontWeight: 700 }}>{editForm.color}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
+              {/* Hesap Dondurma / Aktifleştirme Kartı */}
+              <div
+                style={{
+                  ...neoSubCardStyle,
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground)' }}>Hesap Durumu</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)' }}>Pasif yapılan personel sisteme giriş yapamaz.</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 750, color: 'var(--foreground)' }}>
+                    Hesap Durumu ({editForm.active ? 'Aktif' : 'Donduruldu'})
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--foreground-2)' }}>
+                    Dondurulan personel sisteme giriş yapamaz, geçmiş tıbbi kayıtları korunur.
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditForm({ ...editForm, active: !editForm.active })}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: 8,
-                    border: 'none',
-                    background: editForm.active ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                    color: editForm.active ? '#22c55e' : '#ef4444',
-                    fontWeight: 700,
-                    fontSize: '0.78rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
+                    ...clayOutlineBtnStyle,
+                    padding: '6px 12px',
+                    fontSize: '0.75rem',
+                    border: editForm.active ? '1px solid var(--btn-mint-border, #86efac)' : '1px solid var(--danger, #ef4444)',
+                    background: editForm.active ? 'var(--btn-mint-bg, #f0fdf4)' : 'var(--card-bg)',
+                    color: editForm.active ? 'var(--btn-mint-text, #15803d)' : 'var(--danger, #ef4444)',
                   }}
                 >
-                  {editForm.active ? <Check size={14} /> : <X size={14} />}
-                  {editForm.active ? 'Aktif' : 'Pasif'}
+                  {editForm.active ? <Check size={13} /> : <Snowflake size={13} />}
+                  {editForm.active ? 'Aktif' : 'Donduruldu'}
                 </button>
               </div>
 
               {editError && (
-                <div style={{ fontSize: '0.78rem', color: '#ef4444', fontWeight: 600, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)' }}>
+                <div
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 10,
+                    background: 'var(--card-inner)',
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                  }}
+                >
                   ⚠️ {editError}
                 </div>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
                 <button
                   type="button"
                   onClick={() => setConfirmDeleteUser(editingUser)}
                   style={{
-                    padding: '8px 14px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    color: '#ef4444',
-                    fontWeight: 600,
-                    fontSize: '0.78rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
+                    ...clayOutlineBtnStyle,
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
+                    padding: '8px 12px',
+                    fontSize: '0.76rem',
                   }}
                 >
-                  <Trash2 size={14} /> Kullanıcıyı Sil
+                  <Trash2 size={14} /> KVKK Uyumlu Kaldır
                 </button>
 
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    type="button"
-                    onClick={() => setEditingUser(null)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: 8,
-                      border: '1px solid var(--glass-border)',
-                      background: 'transparent',
-                      color: 'var(--foreground-2)',
-                      fontSize: '0.8rem',
-                      cursor: 'pointer'
-                    }}
-                  >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setEditingUser(null)} style={clayOutlineBtnStyle}>
                     Vazgeç
                   </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingUser}
-                    style={{
-                      ...btnStyle,
-                      padding: '8px 20px',
-                      background: 'var(--accent)',
-                      opacity: isSavingUser ? 0.7 : 1
-                    }}
-                  >
-                    {isSavingUser ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+                  <button type="submit" disabled={isSavingUser} className="btn-clinic-primary" style={clayPrimaryBtnStyle}>
+                    <span style={{ color: '#ffffff' }}>{isSavingUser ? 'Kaydediliyor…' : 'Kaydet'}</span>
                   </button>
                 </div>
               </div>
@@ -934,826 +1242,45 @@ export default function KlinikPersonelTab() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* KVKK Uyumlu Kaldırma Onay Modalı */}
       {confirmDeleteUser && (
         <ConfirmModal
           isOpen={true}
-          title="Kullanıcıyı Sil"
-          message={`"${confirmDeleteUser.name}" adlı kullanıcıyı sistemden kalıcı olarak silmek istediğinize emin misiniz?`}
-          confirmText="Evet, Sil"
+          title="Personeli KVKK Uyumlu Kaldır"
+          message={`"${confirmDeleteUser.name}" adlı personeli sistemden kaldırmak istediğinize emin misiniz? Geçmiş tıbbi/randevu kayıtları varsa KVKK gereği kişisel bilgileri anonimleştirilerek arşivlenir, yoksa tamamen silinir.`}
+          confirmText="Evet, KVKK Uyumlu Kaldır"
           cancelText="Vazgeç"
           variant="danger"
           onConfirm={() => handleDeleteUser(confirmDeleteUser)}
           onClose={() => setConfirmDeleteUser(null)}
         />
       )}
-      </>}
 
-      {/* ── Shift Takvimi Bölümü ── */}
-      <div style={{ display: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-          {/* Sol Başlık ve Görünüm Seçimi */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Calendar size={18} color="var(--accent)" /> Vardiya Takvimi
-            </h2>
-
-            {/* View Switch: Haftalık / Aylık */}
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)' }}>
-              <button
-                onClick={() => setCalendarView('week')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: calendarView === 'week' ? 'var(--accent, #3b82f6)' : 'transparent',
-                  color: calendarView === 'week' ? '#fff' : 'var(--foreground-3)',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <Calendar size={12} /> Haftalık
-              </button>
-              <button
-                onClick={() => setCalendarView('month')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: calendarView === 'month' ? 'var(--accent, #3b82f6)' : 'transparent',
-                  color: calendarView === 'month' ? '#fff' : 'var(--foreground-3)',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <CalendarDays size={12} /> Aylık
-              </button>
-            </div>
-
-            {/* Personel Filtresi */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Filter size={13} color="var(--foreground-3)" />
-              <select
-                value={doctorFilter}
-                onChange={e => setDoctorFilter(e.target.value)}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 6,
-                  border: '1px solid var(--glass-border)',
-                  background: 'var(--input-bg)',
-                  color: 'var(--foreground)',
-                  fontSize: '0.75rem',
-                  outline: 'none'
-                }}
-              >
-                <option value="all">Tüm Personel</option>
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Sağ Aksiyonlar & Navigasyon */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              onClick={() => openBatchModal({ initialMode: calendarView === 'month' ? 'monthly' : 'weekly' })}
-              style={{
-                ...btnStyle,
-                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
-                boxShadow: '0 2px 10px rgba(59, 130, 246, 0.3)'
-              }}
-            >
-              <Zap size={14} /> ⚡ Şablon Uygula
-            </button>
-
-            <button
-              onClick={() => setShowShiftForm(!showShiftForm)}
-              style={{
-                ...btnStyle,
-                background: showShiftForm ? 'rgba(239, 68, 68, 0.15)' : 'var(--glass-bg)',
-                border: '1px solid var(--glass-border)',
-                color: showShiftForm ? '#ef4444' : 'var(--foreground)'
-              }}
-            >
-              {showShiftForm ? '✕ İptal' : '+ Tekil Vardiya'}
-            </button>
-
-            <button
-              onClick={() => {
-                setLeaveDoctorId(doctorFilter !== 'all' ? doctorFilter : undefined)
-                setLeaveDate(new Date().toISOString().split('T')[0])
-                setIsLeaveModalOpen(true)
-              }}
-              style={{
-                ...btnStyle,
-                background: 'var(--card-bg, #1e293b)',
-                border: '1px solid var(--input-border, #334155)',
-                color: 'var(--foreground, #ffffff)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-              title="Hekimlerin izinli veya kapalı olduğu saatleri yönetin"
-            >
-              🏖️ İzin / Kapalı Saat
-            </button>
-
-          </div>
-        </div>
-
-        {/* Tekil Vardiya Ekleme Formu */}
-        {showShiftForm && (
-          <form onSubmit={createShift} className="glass-card" style={{ padding: 14, marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', borderRadius: 10, background: 'rgba(255,255,255,0.03)' }}>
-            <select
-              value={shiftForm.userId}
-              onChange={e => setShiftForm({ ...shiftForm, userId: e.target.value })}
-              required
-              style={{ ...inputStyle, width: 'auto', minWidth: 150 }}
-            >
-              <option value="">Personel Seç *</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name}{!u.active ? ' (deaktif)' : ''}</option>)}
-            </select>
-
-            <input
-              type="date"
-              value={shiftForm.date}
-              onChange={e => setShiftForm({ ...shiftForm, date: e.target.value })}
-              required
-              style={{ ...inputStyle, width: 'auto' }}
-            />
-
-            {/* Quick Template Picker */}
-            <select
-              value={shiftForm.shiftType}
-              onChange={e => {
-                const found = dailyTemplates.find(d => d.name === e.target.value)
-                if (found) {
-                  const sh = Math.floor(found.start).toString().padStart(2, '0')
-                  const sm = found.start % 1 === 0.5 ? '30' : '00'
-                  const eh = Math.floor(found.end).toString().padStart(2, '0')
-                  const em = found.end % 1 === 0.5 ? '30' : '00'
-                  setShiftForm({ ...shiftForm, shiftType: found.name, startTime: `${sh}:${sm}`, endTime: `${eh}:${em}` })
-                } else {
-                  setShiftForm({ ...shiftForm, shiftType: e.target.value })
-                }
-              }}
-              style={{ ...inputStyle, width: 'auto' }}
-            >
-              {dailyTemplates.map(d => (
-                <option key={d.id} value={d.name}>{d.name} ({d.start}:00-{d.end}:00)</option>
-              ))}
-              <option value="Özel">Özel Saat</option>
-            </select>
-
-            <input
-              type="time"
-              value={shiftForm.startTime}
-              onChange={e => setShiftForm({ ...shiftForm, startTime: e.target.value })}
-              style={{ ...inputStyle, width: 90 }}
-            />
-            <input
-              type="time"
-              value={shiftForm.endTime}
-              onChange={e => setShiftForm({ ...shiftForm, endTime: e.target.value })}
-              style={{ ...inputStyle, width: 90 }}
-            />
-
-            <button type="submit" style={{ ...btnStyle, background: 'var(--success, #10b981)' }}>
-              Kaydet
-            </button>
-          </form>
-        )}
-
-        {/* ── HAFTALIK GÖRÜNÜM (Week View Grid) ── */}
-        {calendarView === 'week' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 8 }}>
-            {weekDays.map(d => {
-              const dayShifts = displayShifts.filter(s => s.date === d)
-              const isToday = d === new Date().toISOString().split('T')[0]
-              return (
-                <div
-                  key={d}
-                  className="glass-card"
-                  style={{
-                    padding: 10,
-                    minHeight: 110,
-                    borderRadius: 10,
-                    border: isToday ? '1px solid var(--accent)' : '1px solid var(--glass-border)',
-                    borderLeft: isToday ? '3px solid var(--accent)' : undefined,
-                    cursor: 'context-menu',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId: doctorFilter !== 'all' ? doctorFilter : '', date: d })
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isToday ? 'var(--accent)' : 'var(--foreground)' }}>
-                      {new Date(d + 'T00:00').toLocaleDateString('tr-TR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setShiftForm({ ...shiftForm, date: d })
-                        setShowShiftForm(true)
-                      }}
-                      title="Bu güne vardiya ekle"
-                      style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
-                    >
-                      <Plus size={12} />
-                    </button>
-                  </div>
-
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {dayShifts.length === 0 ? (
-                      <div style={{ fontSize: '0.68rem', color: 'var(--foreground-3)', fontStyle: 'italic', padding: '4px 0' }}>—</div>
-                    ) : (
-                      dayShifts.map(s => {
-                        const doc = users.find(u => u.id === s.userId)
-                        const tagColor = doc?.color || s.userColor || 'var(--accent)'
-                        return (
-                          <div
-                            key={s.id}
-                            style={{
-                              fontSize: '0.68rem',
-                              padding: '4px 6px',
-                              borderRadius: 6,
-                              background: `${tagColor}18`,
-                              border: `1px solid ${tagColor}40`,
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 2
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {s.userName}
-                              </span>
-                              <button
-                                onClick={() => deleteShift(s.id)}
-                                title="Vardiyayı Sil"
-                                style={{ fontSize: '0.65rem', color: 'var(--danger, #ef4444)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            <div style={{ color: 'var(--foreground-3)', fontSize: '0.65rem', display: 'flex', justifyContent: 'space-between' }}>
-                              <span>{s.startTime}–{s.endTime}</span>
-                              <span style={{ color: tagColor, fontWeight: 600 }}>{s.shiftType}</span>
-                            </div>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* ── AYLIK GÖRÜNÜM (Month View Matrix) ── */}
-        {calendarView === 'month' && (
-          <div>
-            {/* Weekday headers */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>
-              {DAY_SHORT_TR.map((dName, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    textAlign: 'center',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    color: idx === 5 || idx === 6 ? '#f59e0b' : 'var(--foreground-2)',
-                    padding: '4px 0'
-                  }}
-                >
-                  {dName}
-                </div>
-              ))}
-            </div>
-
-            {/* Days Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-              {monthGridDays.map((item, idx) => {
-                const dayShifts = displayShifts.filter(s => s.date === item.dateStr)
-                return (
-                  <div
-                    key={idx}
-                    className="glass-card"
-                    style={{
-                      minHeight: 85,
-                      padding: 6,
-                      borderRadius: 8,
-                      border: item.isToday ? '1px solid var(--accent)' : '1px solid var(--glass-border)',
-                      background: item.isCurrentMonth ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255, 255, 255, 0.005)',
-                      opacity: item.isCurrentMonth ? 1 : 0.45,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'context-menu'
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId: doctorFilter !== 'all' ? doctorFilter : '', date: item.dateStr })
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <span style={{
-                        fontSize: '0.7rem',
-                        fontWeight: item.isToday ? 700 : 500,
-                        color: item.isToday ? '#fff' : (item.isCurrentMonth ? 'var(--foreground)' : 'var(--foreground-3)'),
-                        background: item.isToday ? 'var(--accent)' : 'transparent',
-                        padding: item.isToday ? '1px 5px' : 0,
-                        borderRadius: 4
-                      }}>
-                        {item.dayNumber}
-                      </span>
-
-                      <button
-                        onClick={() => {
-                          setShiftForm({ ...shiftForm, date: item.dateStr })
-                          setShowShiftForm(true)
-                        }}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 0 }}
-                        title="Vardiya Ekle"
-                      >
-                        <Plus size={10} />
-                      </button>
-                    </div>
-
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto', maxHeight: 60 }}>
-                      {dayShifts.map(s => {
-                        const doc = users.find(u => u.id === s.userId)
-                        const tagColor = doc?.color || s.userColor || 'var(--accent)'
-                        return (
-                          <div
-                            key={s.id}
-                            style={{
-                              fontSize: '0.62rem',
-                              padding: '2px 4px',
-                              borderRadius: 4,
-                              background: `${tagColor}20`,
-                              border: `1px solid ${tagColor}40`,
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}
-                            title={`${s.userName}: ${s.startTime}-${s.endTime} (${s.shiftType})`}
-                          >
-                            <span style={{ fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 65 }}>
-                              {s.userName.split(' ')[0]}
-                            </span>
-                            <span style={{ color: 'var(--foreground-3)', fontSize: '0.58rem' }}>
-                              {s.startTime.split(':')[0]}h
-                            </span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── VARDIYA ŞABLONLARI YÖNETİM BÖLÜMÜ ── */}
-      <div style={{ display: workspace === 'templates' ? undefined : 'none', marginTop: 0, padding: 20, background: 'var(--card-bg)', borderRadius: 14, border: '1px solid var(--input-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-          <div>
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--foreground)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sparkles size={16} color="var(--accent)" /> Mesai Şablonları
-            </h3>
-            <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
-              Günlük saat blokları, haftalık planlar ve aylık mesai şablonları
-            </div>
-          </div>
-
-          {/* Sub Tabs */}
-          <div style={{ display: 'flex', background: 'var(--card-inner)', padding: 3, borderRadius: 8, border: '1px solid var(--input-border)' }}>
-            <button
-              onClick={() => setTemplatesTab('weekly')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 6,
-                border: 'none',
-                background: templatesTab === 'weekly' ? 'var(--accent)' : 'var(--input-bg)',
-                color: templatesTab === 'weekly' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5
-              }}
-            >
-              <Calendar size={13} /> 📅 Haftalık Şablonlar ({weeklyTemplates.length})
-            </button>
-            <button
-              onClick={() => setTemplatesTab('monthly')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 6,
-                border: 'none',
-                background: templatesTab === 'monthly' ? 'var(--accent)' : 'var(--input-bg)',
-                color: templatesTab === 'monthly' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5
-              }}
-            >
-              <CalendarDays size={13} /> 🗓️ Aylık Şablonlar ({monthlyTemplates.length})
-            </button>
-            <button
-              onClick={() => setTemplatesTab('daily')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 6,
-                border: 'none',
-                background: templatesTab === 'daily' ? 'var(--accent)' : 'var(--input-bg)',
-                color: templatesTab === 'daily' ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground-3)',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5
-              }}
-            >
-              <Clock size={13} /> ⏱️ Günlük Saatler ({dailyTemplates.length})
-            </button>
-          </div>
-        </div>
-
-        {/* ── TAB 1: HAFTALIK ŞABLONLAR ── */}
-        {templatesTab === 'weekly' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-2)' }}>
-                7 günlük çalışma ve izin düzenini içeren şablonlar. Bir personele veya tüm ekibe tek tıkla uygulanabilir.
-              </div>
-              <button
-                onClick={() => {
-                  setEditingWeeklyTemplate(null)
-                  setIsWeeklyModalOpen(true)
-                }}
-                style={btnStyle}
-              >
-                + Yeni Haftalık Şablon
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: 12 }}>
-              {weeklyTemplates.map((wt) => (
-                <div
-                  key={wt.id}
-                  style={{
-                    padding: 14,
-                    background: 'rgba(255,255,255,0.02)',
-                    borderRadius: 10,
-                    border: '1px solid var(--glass-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: 12
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                        {wt.name}
-                      </div>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          onClick={() => {
-                            setEditingWeeklyTemplate(wt)
-                            setIsWeeklyModalOpen(true)
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
-                          title="Düzenle"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => saveWeeklyTemplates(weeklyTemplates.filter(w => w.id !== wt.id))}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--danger, #ef4444)', cursor: 'pointer', padding: 2 }}
-                          title="Sil"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {wt.description && (
-                      <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginBottom: 10 }}>
-                        {wt.description}
-                      </div>
-                    )}
-
-                    {/* 7 Days Preview Badges */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginTop: 8 }}>
-                      {[0, 1, 2, 3, 4, 5, 6].map(dIdx => {
-                        const plan = wt.days[dIdx as keyof typeof wt.days]
-                        const isOff = !plan || !plan.active
-                        return (
-                          <div
-                            key={dIdx}
-                            style={{
-                              padding: '4px 2px',
-                              borderRadius: 4,
-                              textAlign: 'center',
-                              background: isOff ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                              border: `1px solid ${isOff ? 'rgba(239, 68, 68, 0.25)' : 'rgba(59, 130, 246, 0.25)'}`
-                            }}
-                            title={`${DAY_NAMES_TR[dIdx]}: ${isOff ? 'İzinli' : `${plan.startTime}-${plan.endTime} (${plan.templateName || ''})`}`}
-                          >
-                            <div style={{ fontSize: '0.62rem', fontWeight: 700, color: isOff ? '#ef4444' : 'var(--foreground)' }}>
-                              {DAY_SHORT_TR[dIdx]}
-                            </div>
-                            <div style={{ fontSize: '0.58rem', color: isOff ? '#ef4444' : 'var(--accent)' }}>
-                              {isOff ? 'İzin' : plan.startTime.split(':')[0] + 'h'}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => openBatchModal({ initialMode: 'weekly', initialWeeklyTemplateId: wt.id })}
-                    style={{
-                      padding: '7px 12px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: 'rgba(59, 130, 246, 0.15)',
-                      color: 'var(--accent, #60a5fa)',
-                      fontWeight: 600,
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6
-                    }}
-                  >
-                    <Zap size={13} /> Bu Şablonu Personele Uygula
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── TAB 2: AYLIK ŞABLONLAR ── */}
-        {templatesTab === 'monthly' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-2)' }}>
-                Tüm ayı kapsayan 4 haftalık rotasyonlar veya kural tabanlı aylık çalışma modelleri.
-              </div>
-              <button
-                onClick={() => {
-                  setEditingMonthlyTemplate(null)
-                  setIsMonthlyModalOpen(true)
-                }}
-                style={{ ...btnStyle, background: '#a855f7' }}
-              >
-                + Yeni Aylık Şablon
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: 12 }}>
-              {monthlyTemplates.map((mt) => (
-                <div
-                  key={mt.id}
-                  style={{
-                    padding: 14,
-                    background: 'rgba(255,255,255,0.02)',
-                    borderRadius: 10,
-                    border: '1px solid var(--glass-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: 12
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                        {mt.name}
-                      </div>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          onClick={() => {
-                            setEditingMonthlyTemplate(mt)
-                            setIsMonthlyModalOpen(true)
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 2 }}
-                          title="Düzenle"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => saveMonthlyTemplates(monthlyTemplates.filter(m => m.id !== mt.id))}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--danger, #ef4444)', cursor: 'pointer', padding: 2 }}
-                          title="Sil"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {mt.description && (
-                      <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)', marginBottom: 8 }}>
-                        {mt.description}
-                      </div>
-                    )}
-
-                    <div style={{ padding: '6px 10px', borderRadius: 6, background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', fontSize: '0.72rem', color: 'var(--foreground-2)' }}>
-                      {mt.mode === 'weekly_rotation' ? (
-                        <div>
-                          <span style={{ fontWeight: 600, color: '#a855f7' }}>4 Haftalık Rotasyon:</span>{' '}
-                          4 haftalık döngü ile haftalık şablonları ardışık uygular.
-                        </div>
-                      ) : (
-                        <div>
-                          <span style={{ fontWeight: 600, color: '#a855f7' }}>Kural Tabanlı:</span>{' '}
-                          Hafta içi: {mt.weekdayShift?.startTime}–{mt.weekdayShift?.endTime} ({mt.weekdayShift?.shiftType})
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => openBatchModal({ initialMode: 'monthly', initialMonthlyTemplateId: mt.id })}
-                    style={{
-                      padding: '7px 12px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: 'rgba(168, 85, 247, 0.15)',
-                      color: '#c084fc',
-                      fontWeight: 600,
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6
-                    }}
-                  >
-                    <Zap size={13} /> Bu Şablonu Aya Uygula
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── TAB 3: GÜNLÜK SAAT ŞABLONLARI ── */}
-        {templatesTab === 'daily' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
-            {/* List */}
-            <div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Mevcut Günlük Saat Şablonları</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {dailyTemplates.map((t, idx) => (
-                  <div
-                    key={t.id || idx}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '10px 14px',
-                      background: 'rgba(255,255,255,0.03)',
-                      borderRadius: 8,
-                      border: '1px solid var(--glass-border)'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color || 'var(--accent)' }} />
-                        {t.name}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>
-                        {Math.floor(t.start).toString().padStart(2, '0')}:{(t.start % 1 === 0.5) ? '30' : '00'} – {Math.floor(t.end).toString().padStart(2, '0')}:{(t.end % 1 === 0.5) ? '30' : '00'}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <button
-                        onClick={() => openBatchModal({ initialMode: 'daily' })}
-                        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.75rem' }}
-                      >
-                        Personele Yay
-                      </button>
-                      <button
-                        onClick={() => saveDailyTemplates(dailyTemplates.filter((_, i) => i !== idx))}
-                        style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '0.78rem' }}
-                      >
-                        Sil
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Add Form */}
-            <div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', marginBottom: 8 }}>Yeni Saat Şablonu Ekle</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <input
-                  placeholder="Şablon Adı (Örn: Nöbetçi, Yarım Gün)"
-                  value={newDailyName}
-                  onChange={e => setNewDailyName(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <div style={{ padding: '0 8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 8 }}>
-                    <span>Başlangıç: {newDailyRange[0]}:00</span>
-                    <span>Bitiş: {newDailyRange[1]}:00</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={23}
-                      value={newDailyRange[0]}
-                      onChange={e => setNewDailyRange([Math.min(Number(e.target.value), newDailyRange[1] - 1), newDailyRange[1]])}
-                      style={{ flex: 1, accentColor: 'var(--accent)' }}
-                    />
-                    <input
-                      type="range"
-                      min={1}
-                      max={24}
-                      value={newDailyRange[1]}
-                      onChange={e => setNewDailyRange([newDailyRange[0], Math.max(Number(e.target.value), newDailyRange[0] + 1)])}
-                      style={{ flex: 1, accentColor: 'var(--accent)' }}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => {
-                    if (!newDailyName.trim()) return
-                    saveDailyTemplates([
-                      ...dailyTemplates,
-                      {
-                        id: `dt-${Date.now()}`,
-                        name: newDailyName.trim(),
-                        start: newDailyRange[0],
-                        end: newDailyRange[1],
-                        color: '#3b82f6'
-                      }
-                    ])
-                    setNewDailyName('')
-                    setNewDailyRange([9, 17])
-                  }}
-                  style={{ ...btnStyle, marginTop: 4, width: 'fit-content' }}
-                >
-                  + Şablonu Kaydet
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── MODALS ── */}
-      {/* Context Menu for assigning shift */}
+      {/* Sağ Tık Vardiya / İzin Menüsü */}
       {shiftContextMenu && (
         <ShiftContextMenu
           x={shiftContextMenu.x}
           y={shiftContextMenu.y}
           doctorId={shiftContextMenu.doctorId}
+          doctorName={users.find((u) => u.id === shiftContextMenu.doctorId)?.name}
           users={users}
           date={shiftContextMenu.date}
           onClose={() => setShiftContextMenu(null)}
-          onOpenLeaveModal={(docId, dt) => {
-            setLeaveDoctorId(docId)
-            setLeaveDate(dt)
-            setIsLeaveModalOpen(true)
-          }}
+          onOpenLeaveModal={
+            canManageLeaves
+              ? (docId, dt) => {
+                  setLeaveDoctorId(docId)
+                  setLeaveDate(dt)
+                  setIsLeaveModalOpen(true)
+                }
+              : undefined
+          }
           onSave={async (shift) => {
             await fetch('/api/shifts', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
-              body: JSON.stringify(shift)
+              body: JSON.stringify(shift),
             })
             setShiftContextMenu(null)
             fetchData()
@@ -1765,87 +1292,11 @@ export default function KlinikPersonelTab() {
       <DoctorLeaveModal
         isOpen={isLeaveModalOpen}
         onClose={() => setIsLeaveModalOpen(false)}
-        doctors={users.map(u => ({ id: u.id, name: u.name, specialty: u.specialty, color: u.color }))}
+        doctors={users.map((u) => ({ id: u.id, name: u.name, specialty: u.specialty, color: u.color }))}
         initialDoctorId={leaveDoctorId}
         initialDate={leaveDate || new Date().toISOString().split('T')[0]}
         onSuccess={() => fetchData()}
       />
-
-      {/* Haftalık Şablon Oluşturma/Düzenleme Modalı */}
-      {isWeeklyModalOpen && (
-        <WeeklyTemplateModal
-          isOpen={isWeeklyModalOpen}
-          template={editingWeeklyTemplate}
-          dailyTemplates={dailyTemplates}
-          onClose={() => {
-            setIsWeeklyModalOpen(false)
-            setEditingWeeklyTemplate(null)
-          }}
-          onSave={(updated) => {
-            if (editingWeeklyTemplate) {
-              saveWeeklyTemplates(weeklyTemplates.map(w => w.id === updated.id ? updated : w))
-            } else {
-              saveWeeklyTemplates([...weeklyTemplates, updated])
-            }
-            import('react-hot-toast').then(m => m.toast.success('Haftalık şablon kaydedildi'))
-          }}
-        />
-      )}
-
-      {/* Aylık Şablon Oluşturma/Düzenleme Modalı */}
-      {isMonthlyModalOpen && (
-        <MonthlyTemplateModal
-          isOpen={isMonthlyModalOpen}
-          template={editingMonthlyTemplate}
-          weeklyTemplates={weeklyTemplates}
-          dailyTemplates={dailyTemplates}
-          onClose={() => {
-            setIsMonthlyModalOpen(false)
-            setEditingMonthlyTemplate(null)
-          }}
-          onSave={(updated) => {
-            if (editingMonthlyTemplate) {
-              saveMonthlyTemplates(monthlyTemplates.map(m => m.id === updated.id ? updated : m))
-            } else {
-              saveMonthlyTemplates([...monthlyTemplates, updated])
-            }
-            import('react-hot-toast').then(m => m.toast.success('Aylık şablon kaydedildi'))
-          }}
-        />
-      )}
-
-      {/* Toplu Şablon Uygulama Modalı */}
-      {isBatchApplyOpen && (
-        <ShiftBatchApplyModal
-          isOpen={isBatchApplyOpen}
-          users={users}
-          weeklyTemplates={weeklyTemplates}
-          monthlyTemplates={monthlyTemplates}
-          dailyTemplates={dailyTemplates}
-          currentWeekStart={currentWeekStartStr}
-          currentMonth={currentMonthStr}
-          initialUserId={batchModalConfig.initialUserId}
-          initialMode={batchModalConfig.initialMode}
-          initialWeeklyTemplateId={batchModalConfig.initialWeeklyTemplateId}
-          initialMonthlyTemplateId={batchModalConfig.initialMonthlyTemplateId}
-          onClose={() => setIsBatchApplyOpen(false)}
-          onSuccess={() => fetchData()}
-        />
-      )}
-
-      {/* Confirm Clear Modal */}
-      {confirmClearModal && (
-        <ConfirmModal
-          isOpen={confirmClearModal.isOpen}
-          title={confirmClearModal.title}
-          message="Bu dönemdeki tüm seçili vardiyalar silinecek. Emin misiniz?"
-          confirmText="Evet, Temizle"
-          cancelText="Vazgeç"
-          variant="danger"
-          onConfirm={() => handleClearShifts(confirmClearModal.startDate, confirmClearModal.endDate)}
-          onClose={() => setConfirmClearModal(null)}
-        />
-      )}
     </div>
   )
 }

@@ -5,6 +5,13 @@ import { shifts, shiftSwapRequests, users } from '../db/schema'
 import { authenticateRequest } from '../middleware/auth'
 import { requireClinicId } from '../tenancy/context'
 import { applyShiftPlan, latestShiftPlanOperation, previewShiftPlan, undoShiftPlan } from '../db/repositories/shift-planning'
+import { hasClinicStaffPermission } from '../services/staff-invitations'
+
+async function canEditShifts(userRole: string | undefined | null): Promise<boolean> {
+  if (!userRole) return false
+  if (userRole === 'yonetici') return true
+  return hasClinicStaffPermission(requireClinicId(), userRole, 'editShifts')
+}
 
 export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
 
@@ -12,7 +19,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
     try { return await previewShiftPlan(requireClinicId(), body as any) }
     catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai önizlemesi oluşturulamadı.' } }
   })
@@ -21,7 +28,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
     const payload = body as any
     try { return await applyShiftPlan(requireClinicId(), user.id, String(payload.requestId || ''), payload.plan) }
     catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai planı kaydedilemedi.' } }
@@ -31,7 +38,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
     return latestShiftPlanOperation(requireClinicId())
   })
 
@@ -39,7 +46,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
     try { return await undoShiftPlan(requireClinicId(), params.operationId) }
     catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'Mesai işlemi geri alınamadı.' } }
   })
@@ -179,18 +186,24 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
 
     const b = body as any
     if (!b.userId || !b.date || !b.startTime || !b.endTime) {
       set.status = 400; return { error: 'userId, date, startTime, endTime gerekli' }
     }
 
-    // Conflict check
+    // Upsert if shift already exists on the same day
     const existing = await db.select().from(shifts)
       .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, b.userId), eq(shifts.date, b.date)))
     if (existing.length > 0) {
-      set.status = 409; return { error: 'Bu kullanıcının aynı güne zaten vardiyası var' }
+      const [updated] = await db.update(shifts).set({
+        startTime: b.startTime,
+        endTime: b.endTime,
+        shiftType: b.shiftType || 'Mesai',
+        notes: b.notes ?? existing[0].notes,
+      }).where(and(eq(shifts.id, existing[0].id), eq(shifts.clinicId, requireClinicId()))).returning()
+      return updated
     }
 
     const [created] = await db.insert(shifts).values({
@@ -199,7 +212,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
       date: b.date,
       startTime: b.startTime,
       endTime: b.endTime,
-      shiftType: b.shiftType || 'tam',
+      shiftType: b.shiftType || 'Mesai',
       notes: b.notes,
       createdBy: user.id,
     }).returning()
@@ -211,7 +224,7 @@ export const shiftsPlugin = new Elysia({ prefix: '/api/shifts' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
-    if (user.role !== 'yonetici') { set.status = 403; return { error: 'Yetki yok' } }
+    if (!(await canEditShifts(user.role))) { set.status = 403; return { error: 'Yetki yok' } }
 
     await db.delete(shifts).where(and(eq(shifts.id, params.id), eq(shifts.clinicId, requireClinicId())))
     return { ok: true }
