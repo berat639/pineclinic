@@ -78,18 +78,33 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     },
     {
       name: 'randevuGuncelle',
-      description: 'Mevcut bir randevunun tarih, saat veya diğer bilgilerini günceller.',
+      description: 'Mevcut bir randevunun tarih, saat, durum (onay/iptal/erteleme) veya diğer bilgilerini günceller.',
       parameters: {
         type: Type.OBJECT,
         properties: {
-          randevu_id: { type: Type.STRING, description: 'Güncellenecek randevu ID\'si' },
+          randevu_id: { type: Type.STRING, description: 'Güncellenecek randevu ID\'si (bilinmiyorsa boş bırakılabilir)' },
           musteri_adi: { type: Type.STRING, description: 'Müşteri adı soyadı' },
           telefon: { type: Type.STRING, description: 'Telefon numarası' },
           tarih: { type: Type.STRING, description: 'Yeni tarih (YYYY-MM-DD)' },
           saat: { type: Type.STRING, description: 'Yeni saat (HH:MM)' },
-          sorun_veya_talep: { type: Type.STRING, description: 'Şikayet / talep' },
+          durum: { type: Type.STRING, enum: ['confirmed', 'postponed', 'cancelled'], description: 'Hasta geleceğini onaylıyorsa confirmed, gelemeyeceğini/iptal ettiğini söylüyorsa cancelled, başka tarihe ertelemek istiyorsa postponed' },
+          sorun_veya_talep: { type: Type.STRING, description: 'Şikayet / talep / iptal veya erteleme nedeni' },
         },
-        required: ['randevu_id'],
+      },
+    },
+    {
+      name: 'randevuDurumBildir',
+      description: 'Hasta mevcut randevusuna geleceğini onayladığında (confirmed), gelemeyeceğini/iptal ettiğini söylediğinde (cancelled) veya ertelemek istediğinde (postponed) randevu durumunu interaktif takvimde günceller.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          durum: { type: Type.STRING, enum: ['confirm', 'postpone', 'cancel'], description: 'confirm = Geleceğim/Onaylıyorum, postpone = Ertelemek/Tarih değiştirmek istiyorum, cancel = Gelmiyorum/İptal' },
+          not: { type: Type.STRING, description: 'Hastanın belirttiği mazeret, iptal nedeni veya not' },
+          tercih_edilen_tarih: { type: Type.STRING, description: 'Erteleme talebinde hastanın tercih ettiği yeni tarih/gün bilgisi' },
+          randevu_id: { type: Type.STRING, description: 'Biliniyorsa randevu ID\'si' },
+          telefon: { type: Type.STRING, description: 'Hastanın telefon numarası' },
+        },
+        required: ['durum'],
       },
     },
     {

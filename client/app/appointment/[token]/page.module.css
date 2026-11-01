@@ -1,0 +1,206 @@
+.page {
+  min-height: 100vh;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--background, #f8fafc);
+  color: var(--foreground, #060d1a);
+}
+
+.card {
+  width: min(100%, 560px);
+  padding: 24px;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--input-border, #cbd5e1);
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--input-border, #cbd5e1);
+}
+
+.clinicBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--badge-clinic-bg, #e0f2fe);
+  border: 1px solid var(--badge-clinic-border, #bae6fd);
+  color: var(--badge-clinic-text, #0369a1);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--foreground, #060d1a);
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--foreground-2, #475569);
+}
+
+.detailsBox {
+  background: var(--card-inner, #f1f5f9);
+  border: 1px solid var(--input-border, #cbd5e1);
+  border-radius: 10px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.detailRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.86rem;
+}
+
+.detailLabel {
+  color: var(--foreground-2, #475569);
+  font-weight: 600;
+}
+
+.detailValue {
+  color: var(--foreground, #060d1a);
+  font-weight: 700;
+  text-align: right;
+}
+
+.treatmentPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.treatmentPill {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--badge-clinic-bg, #e0f2fe);
+  border: 1px solid var(--badge-clinic-border, #bae6fd);
+  color: var(--badge-clinic-text, #0369a1);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.actionsGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.btnConfirm {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--btn-clinic-primary-bg, #0284c7);
+  border: 1px solid var(--btn-clinic-primary-bg, #0284c7);
+  color: #ffffff !important;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btnPostpone {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--btn-clinic-secondary-bg, #eff6ff);
+  border: 1px solid var(--btn-clinic-secondary-border, #93c5fd);
+  color: var(--btn-clinic-secondary-text, #0284c7);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btnCancel {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--input-bg, #ffffff);
+  border: 1px solid var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.subForm {
+  background: var(--card-inner, #f1f5f9);
+  border: 1px solid var(--input-border, #cbd5e1);
+  border-radius: 10px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--foreground-2, #475569);
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--input-border, #cbd5e1);
+  background: var(--input-bg, #ffffff);
+  color: var(--foreground, #060d1a);
+  font: inherit;
+  font-size: 0.86rem;
+  box-sizing: border-box;
+}
+
+.statusBanner {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--btn-clinic-mint-bg, #f0fdf4);
+  border: 1px solid var(--btn-clinic-mint-border, #86efac);
+  color: var(--btn-clinic-mint-text, #15803d);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--danger, #dc2626);
+  background: var(--card-inner, #f1f5f9);
+  color: var(--danger, #dc2626);
+  font-size: 0.84rem;
+  font-weight: 600;
+}

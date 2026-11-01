@@ -7,7 +7,30 @@ import { searchKnowledge } from './knowledge'
 import { appointmentTime, createAssistantAppointment, updateWhatsAppAppointment } from './assistant-appointments'
 
 export interface WhatsAppToolContext { clinicId: string; conversationId: string; messageId: string; phone: string | null }
-export const WHATSAPP_TOOL_NAMES = new Set(['searchKnowledgeBase', 'musteriSorgula', 'gecmisRandevular', 'randevuMusaitlikKontrol', 'randevuOlustur', 'randevuGuncelle', 'hastaNotKaydet', 'insanaAktar'])
+export const WHATSAPP_TOOL_NAMES = new Set(['searchKnowledgeBase', 'musteriSorgula', 'gecmisRandevular', 'randevuMusaitlikKontrol', 'randevuOlustur', 'randevuGuncelle', 'randevuDurumBildir', 'hastaNotKaydet', 'insanaAktar'])
+
+async function findUpcomingPatientDentalAppointment(clinicId: string, phone: string, explicitId?: string) {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (explicitId && UUID_RE.test(explicitId)) {
+    const [byId] = await db.select().from(dentalAppointments)
+      .where(and(eq(dentalAppointments.id, explicitId), eq(dentalAppointments.clinicId, clinicId))).limit(1)
+    if (byId) return byId
+  }
+  const [patient] = await db.select({ id: patients.id }).from(patients)
+    .where(and(eq(patients.clinicId, clinicId), patientPhoneMatches(phone))).limit(1)
+  if (!patient) return null
+  const [upcoming] = await db.select().from(dentalAppointments)
+    .where(and(
+      eq(dentalAppointments.clinicId, clinicId),
+      eq(dentalAppointments.patientId, patient.id),
+      eq(dentalAppointments.isActive, true),
+      sql`${dentalAppointments.status} NOT IN ('cancelled', 'completed', 'no_show')`,
+      gte(dentalAppointments.startTime, new Date(Date.now() - 2 * 60 * 60 * 1000)),
+    ))
+    .orderBy(dentalAppointments.startTime)
+    .limit(1)
+  return upcoming ?? null
+}
 
 export async function executeWhatsAppTool(name: string, args: Record<string, unknown>, context: WhatsAppToolContext): Promise<Record<string, unknown>> {
   if (!WHATSAPP_TOOL_NAMES.has(name)) return { success: false, message: 'Bu araç WhatsApp kanalında kullanılamaz.' }
@@ -36,7 +59,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       if (!patient) return { kayitli: false, sonuc: 'Bu klinikte kayıtlı hasta bulunamadı.' }
       const history = await db.select({ id: appointments.id, tarih: appointments.date, saat: appointments.time }).from(appointments)
         .where(and(eq(appointments.clinicId, context.clinicId), eq(appointments.phone, context.phone!))).orderBy(desc(appointments.date)).limit(10)
-      const calendar = await db.select({ tarih: dentalAppointments.startTime, durum: dentalAppointments.status }).from(dentalAppointments)
+      const calendar = await db.select({ id: dentalAppointments.id, tarih: dentalAppointments.startTime, durum: dentalAppointments.status }).from(dentalAppointments)
         .where(and(eq(dentalAppointments.clinicId, context.clinicId), eq(dentalAppointments.patientId, patient.id))).orderBy(desc(dentalAppointments.startTime)).limit(10)
       return { kayitli: true, musteri_adi: patient.name, randevular: history, takvim: calendar }
     }
@@ -49,6 +72,33 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       if (name === 'randevuOlustur') {
         const created = await createAssistantAppointment({ ...args, telefon: context.phone }, { sessionId: `wa_${context.messageId}`, clinicId: context.clinicId, source: 'whatsapp_ai' }, tx)
         result = { success: true, id: created.id, message: `${created.date} ${created.time} için randevu talebi alındı; klinik onayı bekleniyor.` }
+      } else if (name === 'randevuDurumBildir' || (name === 'randevuGuncelle' && args.durum)) {
+        const rawDurum = String(args.durum || '')
+        const action = rawDurum === 'confirm' || rawDurum === 'confirmed'
+          ? 'confirm'
+          : rawDurum === 'postpone' || rawDurum === 'postponed'
+            ? 'postpone'
+            : 'cancel'
+        const targetAppt = await findUpcomingPatientDentalAppointment(context.clinicId, context.phone!, String(args.randevu_id || ''))
+        if (!targetAppt) throw new Error('Bu numaraya ait aktif ileri tarihli bir randevu bulunamadı.')
+        const { applyPatientAppointmentResponse } = await import('./appointment-notifications')
+        await applyPatientAppointmentResponse({
+          clinicId: context.clinicId,
+          appointmentId: targetAppt.id,
+          action,
+          note: String(args.not || args.sorun_veya_talep || '') || null,
+          preferredDate: String(args.tercih_edilen_tarih || args.tarih || '') || null,
+          channel: 'whatsapp',
+        })
+        result = {
+          success: true,
+          id: targetAppt.id,
+          message: action === 'confirm'
+            ? 'Randevunuz onaylandı olarak takvime işlendi.'
+            : action === 'postpone'
+              ? 'Erteleme talebiniz klinik takvimine iletildi; ekibimiz yeni saat için sizinle iletişime geçecektir.'
+              : 'Randevunuz iptal edildi ve klinik takviminde güncellendi.',
+        }
       } else if (name === 'randevuGuncelle') {
         result = await updateWhatsAppAppointment(tx, args, context.clinicId, context.phone!)
       } else if (name === 'hastaNotKaydet') {

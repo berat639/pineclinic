@@ -22,6 +22,56 @@ const roleTabs = [
   { id: 'klinik', label: 'Klinik Personeli' },
 ]
 
+type NotificationChannelKey = 'whatsapp' | 'sms' | 'email' | 'call'
+
+interface NotificationPolicyState {
+  channelPriority: NotificationChannelKey[]
+  enabledChannels: Record<NotificationChannelKey, boolean>
+  confirmationWaitHours: number
+  recallWaitHours: number
+  reminderLeadHours: number
+  instantAppointmentNotify: boolean
+  quietHoursEnabled: boolean
+  quietHoursStart: string
+  quietHoursEnd: string
+}
+
+const DEFAULT_NOTIFICATION_POLICY_STATE: NotificationPolicyState = {
+  channelPriority: ['whatsapp', 'sms', 'email', 'call'],
+  enabledChannels: {
+    whatsapp: true,
+    sms: true,
+    email: true,
+    call: true,
+  },
+  confirmationWaitHours: 4,
+  recallWaitHours: 48,
+  reminderLeadHours: 24,
+  instantAppointmentNotify: true,
+  quietHoursEnabled: true,
+  quietHoursStart: '21:00',
+  quietHoursEnd: '09:00',
+}
+
+const CHANNEL_META: Record<NotificationChannelKey, { title: string; desc: string }> = {
+  whatsapp: {
+    title: '💬 WhatsApp (Interaktif Mesaj & Onay Linki)',
+    desc: 'Ücretsiz / hızlı kanal. Hasta "Geleceğim / Ertele / Gelmiyorum" yanıtı verebilir.',
+  },
+  sms: {
+    title: '📱 SMS (NetGSM Kısa Mesaj & Onay Linki)',
+    desc: 'Yüksek ulaşım oranı. WhatsApp iletilemezse veya izin yoksa devreye girer.',
+  },
+  email: {
+    title: '✉️ E-Posta (SMTP Bilgilendirme & Onay Linki)',
+    desc: 'Detaylı randevu özeti ve tek tıkla yanıt bağlantısı gönderir.',
+  },
+  call: {
+    title: '📞 Asistan ile Sesli Arama (AI Sesli Teyit)',
+    desc: 'Son kademe. Yazılı kanallardan yanıt alınamazsa sesli asistan arayarak teyit alır.',
+  },
+}
+
 function SettingsCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return <section className={styles.card}>
     <h3 className={styles.cardTitle}>{title}</h3>
@@ -102,6 +152,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
     asistan: ['calendar', 'patients']
   })
 
+  // Notification Policy State
+  const [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicyState>(DEFAULT_NOTIFICATION_POLICY_STATE)
+  const [savingPolicy, setSavingPolicy] = useState(false)
+
   const [loading, setLoading] = useState(true)
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationOverview>(emptyIntegrationOverview)
   const [saving, setSaving] = useState(false)
@@ -146,7 +200,57 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       .then(r => r.json())
       .then(data => { if (data.logoUrl) setBrandingLogoUrl(data.logoUrl) })
       .catch(() => {})
+
+    fetch('/api/admin/settings/notification-policy')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && Array.isArray(data.channelPriority)) {
+          setNotificationPolicy({ ...DEFAULT_NOTIFICATION_POLICY_STATE, ...data })
+        }
+      })
+      .catch(() => {})
   }, [apiPrefix])
+
+  const moveChannelPriority = (index: number, direction: -1 | 1) => {
+    setNotificationPolicy(prev => {
+      const next = [...prev.channelPriority]
+      const targetIndex = index + direction
+      if (targetIndex < 0 || targetIndex >= next.length) return prev
+      const temp = next[index]
+      next[index] = next[targetIndex]
+      next[targetIndex] = temp
+      return { ...prev, channelPriority: next }
+    })
+  }
+
+  const togglePolicyChannel = (channel: NotificationChannelKey) => {
+    setNotificationPolicy(prev => ({
+      ...prev,
+      enabledChannels: {
+        ...prev.enabledChannels,
+        [channel]: !prev.enabledChannels[channel],
+      },
+    }))
+  }
+
+  const saveNotificationPolicy = async () => {
+    setSavingPolicy(true)
+    try {
+      const res = await fetch('/api/admin/settings/notification-policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notificationPolicy),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Bildirim önceliği kaydedilemedi')
+      if (data.policy) setNotificationPolicy(data.policy)
+      showToast('success', 'Bildirim kanal önceliği ve otomasyon kuralları kaydedildi')
+    } catch (err: any) {
+      showToast('error', err.message || 'Bildirim ayarları kaydedilemedi')
+    } finally {
+      setSavingPolicy(false)
+    }
+  }
 
   const addClinicPhone = async () => {
     if (!newPhone.trim()) return
@@ -172,14 +276,21 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const rolesRes = await fetch('/api/admin/settings/roles', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rolePermissions)
-      })
+      const [rolesRes, policyRes] = await Promise.all([
+        fetch('/api/admin/settings/roles', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rolePermissions)
+        }),
+        fetch('/api/admin/settings/notification-policy', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(notificationPolicy)
+        }),
+      ])
 
-      if (!rolesRes.ok) throw new Error('Kaydedilemedi')
-      showToast('success', 'Rol ayarları başarıyla kaydedildi')
+      if (!rolesRes.ok || !policyRes.ok) throw new Error('Kaydedilemedi')
+      showToast('success', 'Rol ve bildirim önceliği ayarları başarıyla kaydedildi')
     } catch (err: any) {
       showToast('error', err.message || 'Hata oluştu')
     } finally {
@@ -243,6 +354,136 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
               PNG, JPG veya WEBP formatlarında, maksimum 2 MB boyutunda görsel yükleyebilirsiniz.
             </p>
           </div>
+        </div>
+      </SettingsCard>
+
+      {/* Yönetici Bildirim Kanal Önceliği ve Otomasyon Kuralları */}
+      <SettingsCard
+        title="🔔 Bildirim Kanal Önceliği ve Otomasyon Kuralları"
+        description="Randevu bilgilendirmesi, 24 saat öncesi onay (Geleceğim / Gelmiyorum / Ertele) ve periyodik kontrol hatırlatmalarında kullanılacak kanalların öncelik sırasını belirleyin. Sistem hastanın iletişim onamları ile bu sırayı kesiştirir ve üst sıradaki kanal iletildiğinde/onaylandığında alt sıradaki ücretli kanalları tüketmez."
+      >
+        <div className={styles.priorityList}>
+          {notificationPolicy.channelPriority.map((ch, idx) => {
+            const meta = CHANNEL_META[ch] || { title: ch, desc: '' }
+            const isEnabled = notificationPolicy.enabledChannels[ch] !== false
+            return (
+              <div
+                key={ch}
+                className={`${styles.priorityItem} ${!isEnabled ? styles.priorityItemDisabled : ''}`}
+              >
+                <div className={styles.priorityLeft}>
+                  <span className={styles.priorityOrderBadge}>{idx + 1}.</span>
+                  <div className={styles.priorityInfo}>
+                    <span className={styles.priorityTitle}>{meta.title}</span>
+                    <span className={styles.priorityDesc}>{meta.desc}</span>
+                  </div>
+                </div>
+                <div className={styles.priorityControls}>
+                  <button
+                    type="button"
+                    className={styles.orderBtn}
+                    disabled={idx === 0}
+                    onClick={() => moveChannelPriority(idx, -1)}
+                    title="Önceliği Yükselt (Yukarı Taşı)"
+                    aria-label="Yukarı taşı"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.orderBtn}
+                    disabled={idx === notificationPolicy.channelPriority.length - 1}
+                    onClick={() => moveChannelPriority(idx, 1)}
+                    title="Önceliği Düşür (Aşağı Taşı)"
+                    aria-label="Aşağı taşı"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => togglePolicyChannel(ch)}
+                    className={`${styles.channelToggleBtn} ${isEnabled ? styles.channelToggleActive : styles.channelToggleInactive}`}
+                  >
+                    {isEnabled ? '✓ Aktif' : '✕ Pasif'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className={styles.policyRulesBox}>
+          <div className={styles.grid}>
+            <Field label="Randevu Öncesi Teyit Zamanı (Saat)">
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={notificationPolicy.reminderLeadHours}
+                onChange={e => setNotificationPolicy(prev => ({
+                  ...prev,
+                  reminderLeadHours: Math.max(1, Math.min(168, Number(e.target.value) || 24)),
+                }))}
+              />
+            </Field>
+            <Field label="Randevu Onayı Kademe Bekleme (Saat)">
+              <input
+                type="number"
+                min={1}
+                max={48}
+                value={notificationPolicy.confirmationWaitHours}
+                onChange={e => setNotificationPolicy(prev => ({
+                  ...prev,
+                  confirmationWaitHours: Math.max(1, Math.min(48, Number(e.target.value) || 4)),
+                }))}
+              />
+            </Field>
+            <Field label="Periyodik Kontrol Kademe Bekleme (Saat)">
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={notificationPolicy.recallWaitHours}
+                onChange={e => setNotificationPolicy(prev => ({
+                  ...prev,
+                  recallWaitHours: Math.max(1, Math.min(168, Number(e.target.value) || 48)),
+                }))}
+              />
+            </Field>
+          </div>
+
+          <div className={styles.policyCheckRow}>
+            <label className={styles.permission}>
+              <input
+                type="checkbox"
+                checked={notificationPolicy.instantAppointmentNotify}
+                onChange={e => setNotificationPolicy(prev => ({ ...prev, instantAppointmentNotify: e.target.checked }))}
+              />
+              Randevu oluşturulduğunda veya saati değiştiğinde anında bilgilendirme gönder
+            </label>
+            <label className={styles.permission}>
+              <input
+                type="checkbox"
+                checked={notificationPolicy.quietHoursEnabled}
+                onChange={e => setNotificationPolicy(prev => ({ ...prev, quietHoursEnabled: e.target.checked }))}
+              />
+              Sessiz Saat Koruması ({notificationPolicy.quietHoursStart} – {notificationPolicy.quietHoursEnd} arası bildirimleri sabah 09:00&apos;a ertele)
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.policyActionRow}>
+          <p className={styles.policyHint}>
+            💡 Hasta onay linkinden veya WhatsApp/Sesli Asistan üzerinden <strong>&quot;Geleceğim&quot;</strong>, <strong>&quot;Ertele&quot;</strong> veya <strong>&quot;Gelmiyorum&quot;</strong> dediğinde İnteraktif Takvim otomatik güncellenir.
+          </p>
+          <button
+            type="button"
+            className={styles.saveButton}
+            disabled={savingPolicy}
+            onClick={saveNotificationPolicy}
+          >
+            {savingPolicy ? 'Kaydediliyor...' : 'Bildirim Sırasını Kaydet'}
+          </button>
         </div>
       </SettingsCard>
 

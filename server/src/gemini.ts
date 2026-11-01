@@ -294,6 +294,66 @@ export async function createLiveSession(
       }
     }
 
+    if (name === 'randevuDurumBildir' || (name === 'randevuGuncelle' && args.durum)) {
+      const phone = String(args.telefon || options.callerPhone || lastPhoneUsed || '').trim()
+      const rawDurum = String(args.durum || '')
+      const action = rawDurum === 'confirm' || rawDurum === 'confirmed'
+        ? 'confirm'
+        : rawDurum === 'postpone' || rawDurum === 'postponed'
+          ? 'postpone'
+          : 'cancel'
+      try {
+        const { findPatientByPhone } = await import('./db/repositories/dental')
+        const { db } = await import('./db/client')
+        const { dentalAppointments } = await import('./db/schema')
+        const { and, eq, gte, sql } = await import('drizzle-orm')
+        const clinicId = options.clinicId
+        if (!clinicId) return { success: false, message: 'Klinik bağlamı bulunamadı.' }
+        let appointmentId = String(args.randevu_id || '')
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appointmentId)) {
+          appointmentId = ''
+          if (phone) {
+            const patient = await findPatientByPhone(phone, clinicId)
+            if (patient) {
+              const [upcoming] = await db.select({ id: dentalAppointments.id }).from(dentalAppointments)
+                .where(and(
+                  eq(dentalAppointments.clinicId, clinicId),
+                  eq(dentalAppointments.patientId, patient.id),
+                  eq(dentalAppointments.isActive, true),
+                  sql`${dentalAppointments.status} NOT IN ('cancelled', 'completed', 'no_show')`,
+                  gte(dentalAppointments.startTime, new Date(Date.now() - 2 * 60 * 60 * 1000)),
+                ))
+                .orderBy(dentalAppointments.startTime)
+                .limit(1)
+              if (upcoming) appointmentId = upcoming.id
+            }
+          }
+        }
+        if (!appointmentId) return { success: false, message: 'Aktif ileri tarihli randevu bulunamadı.' }
+        const { applyPatientAppointmentResponse } = await import('./services/appointment-notifications')
+        await applyPatientAppointmentResponse({
+          clinicId,
+          appointmentId,
+          action,
+          note: String(args.not || args.sorun_veya_talep || '') || null,
+          preferredDate: String(args.tercih_edilen_tarih || args.tarih || '') || null,
+          channel: 'voice',
+        })
+        return {
+          success: true,
+          id: appointmentId,
+          message: action === 'confirm'
+            ? 'Randevunuz onaylandı olarak takvime kaydedildi.'
+            : action === 'postpone'
+              ? 'Erteleme talebiniz takvime kaydedildi; ekibimiz yeni saat için dönüş sağlayacaktır.'
+              : 'Randevunuz iptal edildi ve takvimde güncellendi.',
+        }
+      } catch (err) {
+        console.error('[randevuDurumBildir] Hata:', err)
+        return { success: false, message: 'Randevu durumu güncellenemedi.' }
+      }
+    }
+
     if (name === 'randevuGuncelle') {
       const appointmentId = args.randevu_id as string
       const updateData: Parameters<typeof updateAppointment>[1] = {}

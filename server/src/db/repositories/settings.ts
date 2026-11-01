@@ -262,3 +262,113 @@ export async function setBranding(patch: Partial<BrandingSettings>): Promise<Bra
   await Promise.all(updates)
   return getBranding()
 }
+
+// ── Notification Policy & Channel Priority settings ─────────────────────────
+export type NotificationChannelKey = 'whatsapp' | 'sms' | 'email' | 'assistant_call'
+
+export const ALL_NOTIFICATION_CHANNELS: readonly NotificationChannelKey[] = [
+  'whatsapp',
+  'sms',
+  'email',
+  'assistant_call',
+] as const
+
+export interface NotificationPolicy {
+  channelPriority: NotificationChannelKey[]
+  enabledChannels: Record<NotificationChannelKey, boolean>
+  instantAppointmentNotify: boolean
+  instantDebounceMinutes: number
+  reminderLeadHours: number
+  confirmationWaitHours: number
+  recallWaitHours: number
+  quietHoursEnabled: boolean
+  quietHoursStart: string
+  quietHoursEnd: string
+}
+
+export const DEFAULT_NOTIFICATION_POLICY: NotificationPolicy = {
+  channelPriority: ['whatsapp', 'sms', 'email', 'assistant_call'],
+  enabledChannels: {
+    whatsapp: true,
+    sms: true,
+    email: true,
+    assistant_call: true,
+  },
+  instantAppointmentNotify: true,
+  instantDebounceMinutes: 2,
+  reminderLeadHours: 24,
+  confirmationWaitHours: 4,
+  recallWaitHours: 48,
+  quietHoursEnabled: true,
+  quietHoursStart: '21:00',
+  quietHoursEnd: '09:00',
+}
+
+const NOTIFICATION_POLICY_KEY = 'notification.policy'
+
+function normalizeNotificationPolicy(raw: Partial<NotificationPolicy> | null | undefined): NotificationPolicy {
+  const seen = new Set<NotificationChannelKey>()
+  const priority: NotificationChannelKey[] = []
+  if (Array.isArray(raw?.channelPriority)) {
+    for (const ch of raw.channelPriority) {
+      if ((ALL_NOTIFICATION_CHANNELS as readonly string[]).includes(ch) && !seen.has(ch as NotificationChannelKey)) {
+        seen.add(ch as NotificationChannelKey)
+        priority.push(ch as NotificationChannelKey)
+      }
+    }
+  }
+  for (const ch of ALL_NOTIFICATION_CHANNELS) {
+    if (!seen.has(ch)) priority.push(ch)
+  }
+
+  const enabled: Record<NotificationChannelKey, boolean> = {
+    whatsapp: raw?.enabledChannels?.whatsapp ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.whatsapp,
+    sms: raw?.enabledChannels?.sms ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.sms,
+    email: raw?.enabledChannels?.email ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.email,
+    assistant_call: raw?.enabledChannels?.assistant_call ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.assistant_call,
+  }
+
+  const clampInt = (val: unknown, fallback: number, min: number, max: number) => {
+    const n = Number(val)
+    if (!Number.isFinite(n)) return fallback
+    return Math.max(min, Math.min(max, Math.round(n)))
+  }
+
+  const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
+  return {
+    channelPriority: priority,
+    enabledChannels: enabled,
+    instantAppointmentNotify: typeof raw?.instantAppointmentNotify === 'boolean' ? raw.instantAppointmentNotify : DEFAULT_NOTIFICATION_POLICY.instantAppointmentNotify,
+    instantDebounceMinutes: clampInt(raw?.instantDebounceMinutes, DEFAULT_NOTIFICATION_POLICY.instantDebounceMinutes, 0, 30),
+    reminderLeadHours: clampInt(raw?.reminderLeadHours, DEFAULT_NOTIFICATION_POLICY.reminderLeadHours, 1, 168),
+    confirmationWaitHours: clampInt(raw?.confirmationWaitHours, DEFAULT_NOTIFICATION_POLICY.confirmationWaitHours, 1, 72),
+    recallWaitHours: clampInt(raw?.recallWaitHours, DEFAULT_NOTIFICATION_POLICY.recallWaitHours, 1, 168),
+    quietHoursEnabled: typeof raw?.quietHoursEnabled === 'boolean' ? raw.quietHoursEnabled : DEFAULT_NOTIFICATION_POLICY.quietHoursEnabled,
+    quietHoursStart: typeof raw?.quietHoursStart === 'string' && timePattern.test(raw.quietHoursStart) ? raw.quietHoursStart : DEFAULT_NOTIFICATION_POLICY.quietHoursStart,
+    quietHoursEnd: typeof raw?.quietHoursEnd === 'string' && timePattern.test(raw.quietHoursEnd) ? raw.quietHoursEnd : DEFAULT_NOTIFICATION_POLICY.quietHoursEnd,
+  }
+}
+
+export async function getNotificationPolicy(explicitClinicId?: string): Promise<NotificationPolicy> {
+  try {
+    const raw = await getSetting(NOTIFICATION_POLICY_KEY, explicitClinicId)
+    if (!raw) return { ...DEFAULT_NOTIFICATION_POLICY, channelPriority: [...DEFAULT_NOTIFICATION_POLICY.channelPriority], enabledChannels: { ...DEFAULT_NOTIFICATION_POLICY.enabledChannels } }
+    return normalizeNotificationPolicy(JSON.parse(raw))
+  } catch {
+    return { ...DEFAULT_NOTIFICATION_POLICY, channelPriority: [...DEFAULT_NOTIFICATION_POLICY.channelPriority], enabledChannels: { ...DEFAULT_NOTIFICATION_POLICY.enabledChannels } }
+  }
+}
+
+export async function setNotificationPolicy(patch: Partial<NotificationPolicy>, explicitClinicId?: string): Promise<NotificationPolicy> {
+  const current = await getNotificationPolicy(explicitClinicId)
+  const merged = normalizeNotificationPolicy({
+    ...current,
+    ...patch,
+    enabledChannels: {
+      ...current.enabledChannels,
+      ...(patch.enabledChannels || {}),
+    },
+  })
+  await setSetting(NOTIFICATION_POLICY_KEY, JSON.stringify(merged), explicitClinicId)
+  return merged
+}

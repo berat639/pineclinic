@@ -459,6 +459,20 @@ const app = new Elysia()
     try { return await submitConsentForm(params.token, requireClinicId(), (body as any)?.answers) }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
+  .get('/api/public/appointment/:token', async ({ params, set }) => {
+    const { getPublicAppointmentByToken } = await import('./services/appointment-notifications')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    set.headers['cache-control'] = 'no-store'
+    try { return await getPublicAppointmentByToken(params.token) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
+  .post('/api/public/appointment/:token', async ({ params, body, set }) => {
+    const { submitPublicAppointmentResponse } = await import('./services/appointment-notifications')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    set.headers['cache-control'] = 'no-store'
+    try { return await submitPublicAppointmentResponse(params.token, (body || {}) as Record<string, unknown>) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
 
   .use(whatsappPlugin)
 
@@ -586,6 +600,27 @@ const app = new Elysia()
       return await rejectAiAppointment(params.id, String((body as any)?.reason || ''), user.id)
     } catch (err: any) {
       set.status = 400; return { error: err.message || 'AI randevusu iptal edilemedi' }
+    }
+  })
+  .post('/api/dental/appointments/:id/patient-response', async ({ params, body, set }) => {
+    const b = (body || {}) as Record<string, unknown>
+    const action = String(b.action || '') as 'confirm' | 'postpone' | 'cancel'
+    if (!['confirm', 'postpone', 'cancel'].includes(action)) {
+      set.status = 400; return { error: 'Geçersiz işlem (confirm | postpone | cancel)' }
+    }
+    try {
+      const { applyPatientAppointmentResponse } = await import('./services/appointment-notifications')
+      return await applyPatientAppointmentResponse({
+        clinicId: requireClinicId(),
+        appointmentId: params.id,
+        action,
+        note: typeof b.note === 'string' ? b.note : null,
+        preferredDate: typeof b.preferredDate === 'string' ? b.preferredDate : null,
+        channel: 'link',
+      })
+    } catch (err: any) {
+      set.status = err.status || 400
+      return { error: err.message || 'Yanıt kaydedilemedi' }
     }
   })
   .get('/api/dental/appointments/:id/treatments', async ({ params }) => {
@@ -2161,6 +2196,19 @@ const app = new Elysia()
     const { setSetting } = await import('./db/repositories/settings')
     await setSetting('role_tab_permissions', JSON.stringify(body))
     return { success: true }
+  })
+  .get('/api/admin/settings/notification-policy', async () => {
+    const { getNotificationPolicy } = await import('./db/repositories/settings')
+    return await getNotificationPolicy()
+  })
+  .put('/api/admin/settings/notification-policy', async ({ body, set, cookie, request }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'host'].includes(user.role)) {
+      set.status = 403
+      return { error: 'Bildirim öncelik ayarlarını yalnızca yönetici değiştirebilir' }
+    }
+    const { setNotificationPolicy } = await import('./db/repositories/settings')
+    return await setNotificationPolicy((body || {}) as Record<string, unknown>)
   })
 
   // ── Knowledge Categories ────────────────────────────────────────────────────

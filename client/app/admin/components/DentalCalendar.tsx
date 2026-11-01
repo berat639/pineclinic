@@ -23,6 +23,9 @@ interface CalendarEvent {
   notes?: string
   timeConfirmed?: boolean
   hasTreatment?: boolean
+  patientResponseStatus?: string | null
+  patientResponseNote?: string | null
+  patientPreferredDate?: string | null
 }
 
 interface ShiftItem {
@@ -59,6 +62,52 @@ const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
 }
 
 const TIME_WARNING_STYLE = { bg: 'rgba(245,158,11,0.2)', border: '#f59e0b' }
+
+function getPatientStatusVisual(e: CalendarEvent) {
+  const status = e.status
+  const resp = e.patientResponseStatus
+  if (status === 'cancelled' || resp === 'cancelled') {
+    return {
+      prefix: '❌ ',
+      badge: 'İPTAL / GELMİYOR',
+      borderLeftColor: '#ef4444',
+      borderStyle: 'dashed',
+      bgOverride: 'rgba(239, 68, 68, 0.14)',
+      strike: true,
+    }
+  }
+  if (status === 'postponed' || resp === 'postponed') {
+    return {
+      prefix: '⏳ ',
+      badge: 'ERTELEME TALEBİ',
+      borderLeftColor: '#f59e0b',
+      borderStyle: 'dashed',
+      bgOverride: 'rgba(245, 158, 11, 0.18)',
+      strike: false,
+    }
+  }
+  if (status === 'confirmed' || resp === 'confirmed') {
+    return {
+      prefix: '✅ ',
+      badge: 'ONAYLANDI',
+      borderLeftColor: '#10b981',
+      borderStyle: 'solid',
+      bgOverride: null,
+      strike: false,
+    }
+  }
+  if (status === 'no_show') {
+    return {
+      prefix: '🚫 ',
+      badge: 'GELMEDİ',
+      borderLeftColor: '#ef4444',
+      borderStyle: 'dashed',
+      bgOverride: 'rgba(239, 68, 68, 0.12)',
+      strike: true,
+    }
+  }
+  return null
+}
 
 const DAYS_TR = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
 
@@ -674,6 +723,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                   const isTimeWarning = e.timeConfirmed === false
                   const doc = doctors.find(docItem => docItem.id === e.doctorId) || d
                   const docColor = doc?.color || '#3b82f6'
+                  const patientVisual = getPatientStatusVisual(e)
                   
                   let bg = doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)'
                   let borderLeftColor = docColor
@@ -682,6 +732,11 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                   if (isTimeWarning) {
                     bg = TIME_WARNING_STYLE.bg
                     borderLeftColor = TIME_WARNING_STYLE.border
+                  }
+                  if (patientVisual) {
+                    borderLeftColor = patientVisual.borderLeftColor
+                    borderStyle = patientVisual.borderStyle
+                    if (patientVisual.bgOverride) bg = patientVisual.bgOverride
                   }
                   
                   const colWidth = `((100% - 56px) / ${cols})`
@@ -694,11 +749,11 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                     <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle }} 
                          onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                          onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                         title={e.title}
+                         title={`${patientVisual ? `[${patientVisual.badge}] ` : ''}${e.title}`}
                          onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                     >
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
-                      <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
+                      <span className="rc-ev-title" style={{ pointerEvents: 'none', textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || (isTimeWarning ? '⚠️ ' : '')}{e.title}</span>
                       {!isShort && <span className="rc-ev-time" style={{ pointerEvents: 'none' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
                       {height > 56 && <span className="rc-ev-doc" style={{ pointerEvents: 'none' }}>{d.name}</span>}
                       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
@@ -922,6 +977,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               const docColor = doc?.color || '#3b82f6'
               const isTimeWarning = e.timeConfirmed === false
               const isUnassigned = !e.doctorId
+              const patientVisual = getPatientStatusVisual(e)
 
               let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
               let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
@@ -930,6 +986,11 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               if (isTimeWarning) {
                 bg = TIME_WARNING_STYLE.bg
                 borderLeftColor = TIME_WARNING_STYLE.border
+              }
+              if (patientVisual) {
+                borderLeftColor = patientVisual.borderLeftColor
+                borderStyle = patientVisual.borderStyle
+                if (patientVisual.bgOverride) bg = patientVisual.bgOverride
               }
 
               const colWidth = `((100% - 56px) / ${cols})`
@@ -940,17 +1001,17 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle, border: isUnassigned ? '1.5px dashed #f59e0b' : undefined, borderLeft: isUnassigned ? '4px solid #f59e0b' : undefined }} 
                      onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                      onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                     title={`${e.title}${isUnassigned ? ' — Doktor Atanmadı' : ''}`}
+                     title={`${patientVisual ? `[${patientVisual.badge}] ` : ''}${e.title}${isUnassigned ? ' — Doktor Atanmadı' : ''}`}
                      onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                 >
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
                   {isUnassigned ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, pointerEvents: 'none' }}>
                       <span style={{ fontSize: '0.58rem', color: '#f59e0b', fontWeight: 800 }}>⚠️ DOKTOR ATANMADI</span>
-                      <span className="rc-ev-title" style={{ fontWeight: 600 }}>{e.title}</span>
+                      <span className="rc-ev-title" style={{ fontWeight: 600, textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ''}{e.title}</span>
                     </div>
                   ) : (
-                    <span className="rc-ev-title" style={{ pointerEvents: 'none' }}>{isTimeWarning ? '⚠️ ' : ''}{e.title}</span>
+                    <span className="rc-ev-title" style={{ pointerEvents: 'none', textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || (isTimeWarning ? '⚠️ ' : '')}{e.title}</span>
                   )}
                   <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', colIdx)} />
                 </div>
@@ -1002,6 +1063,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 const docColor = doc?.color || '#3b82f6'
                 const isTimeWarning = e.timeConfirmed === false
                 const isUnassigned = !e.doctorId
+                const patientVisual = getPatientStatusVisual(e)
 
                 let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
                 let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
@@ -1011,10 +1073,15 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                   bg = TIME_WARNING_STYLE.bg
                   borderLeftColor = TIME_WARNING_STYLE.border
                 }
+                if (patientVisual) {
+                  borderLeftColor = patientVisual.borderLeftColor
+                  borderStyle = patientVisual.borderStyle
+                  if (patientVisual.bgOverride) bg = patientVisual.bgOverride
+                }
 
                 return (
                   <div id={`cal-event-${e.id}`} key={e.id} className="rc-month-ev" style={{ background: bg, borderLeftColor: borderLeftColor, borderStyle }} onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }}>
-                    <span className="rc-ev-title">{(isUnassigned || isTimeWarning) ? '⚠️ ' : ''}{e.title}</span>
+                    <span className="rc-ev-title" style={{ textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ((isUnassigned || isTimeWarning) ? '⚠️ ' : '')}{e.title}</span>
                     <span className="rc-ev-time">{new Date(e.startTime).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 )

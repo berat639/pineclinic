@@ -9,11 +9,21 @@ import { notificationChannels } from '../../../client/lib/notification-channels'
 import { activeConfig } from '../integrations/managed/store'
 import { enqueueWhatsAppNotification } from '../db/repositories/whatsapp'
 import { runWithTenantContext } from '../tenancy/context'
+import { getNotificationPolicy } from '../db/repositories/settings'
+import { processAppointmentNotificationJobs } from '../services/appointment-notifications'
 
 export function startReminderCron() {
-  console.log('[CRON] Starting reminder cron job...')
-  setInterval(() => { void processReminders().catch(() => console.error('[CRON] Hatırlatma taraması tamamlanamadı.')) }, 60 * 60 * 1000)
-  setTimeout(() => { void processReminders().catch(() => console.error('[CRON] İlk tarama tamamlanamadı.')) }, 5000)
+  console.log('[CRON] Starting reminder & appointment notification cron job...')
+  setInterval(() => {
+    void processAppointmentNotificationJobs().catch(() => console.error('[CRON] Randevu bildirim taraması tamamlanamadı.'))
+  }, 60 * 1000)
+  setInterval(() => {
+    void processReminders().catch(() => console.error('[CRON] Hatırlatma taraması tamamlanamadı.'))
+  }, 60 * 60 * 1000)
+  setTimeout(() => {
+    void processAppointmentNotificationJobs().catch(() => console.error('[CRON] İlk randevu bildirim taraması tamamlanamadı.'))
+    void processReminders().catch(() => console.error('[CRON] İlk tarama tamamlanamadı.'))
+  }, 5000)
 }
 
 class DeliveryConfigurationError extends Error {}
@@ -34,7 +44,12 @@ export async function processReminders() {
   for (const { treatment, patient, clinic } of due) {
     const dueDate = treatment.nextNotificationDate
     if (!dueDate) continue
-    const channels = notificationChannels(treatment.notificationType)
+    const rawChannels = notificationChannels(treatment.notificationType)
+    if (!rawChannels.length) continue
+    const policy = await getNotificationPolicy(clinic.id)
+    const channels = policy.channelPriority.filter(
+      ch => rawChannels.includes(ch) && policy.enabledChannels[ch] !== false,
+    )
     if (!channels.length) continue
     for (const channel of channels) {
       if (!await hasPatientConsent(clinic.id, patient.id, channel)) continue

@@ -374,8 +374,164 @@
   cursor: wait;
 }
 
+.priorityList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.priorityItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--integration-surface);
+  border: 1px solid var(--integration-border);
+  border-radius: 10px;
+}
+
+.priorityItemDisabled {
+  opacity: 0.65;
+}
+
+.priorityLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.priorityOrderBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--integration-selected-bg);
+  border: 1px solid var(--integration-selected-border);
+  color: var(--integration-link-text) !important;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.priorityInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.priorityTitle {
+  color: var(--integration-text) !important;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.priorityDesc {
+  color: var(--integration-text-muted) !important;
+  font-size: 12px;
+}
+
+.priorityControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.orderBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #132238;
+  border: 1px solid #1e40af;
+  color: #60a5fa !important;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+:global([data-theme='light']) .page .orderBtn {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #0284c7 !important;
+}
+
+.orderBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.channelToggleBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 82px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.channelToggleActive {
+  background: var(--integration-success-bg);
+  border-color: var(--integration-success-border);
+  color: var(--integration-success-text) !important;
+}
+
+.channelToggleInactive {
+  background: var(--integration-disabled-bg);
+  border-color: var(--integration-border-strong);
+  color: var(--integration-disabled-text) !important;
+}
+
+.policyRulesBox {
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--integration-surface);
+  border: 1px solid var(--integration-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.policyCheckRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding-top: 6px;
+}
+
+.policyActionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.policyHint {
+  color: var(--integration-text-muted) !important;
+  font-size: 12px;
+  margin: 0;
+}
+
 @media (max-width: 640px) {
   .card { padding: 18px; }
   .logoRow { align-items: flex-start; }
+  .priorityItem { flex-direction: column; align-items: stretch; }
+  .priorityControls { justify-content: flex-end; }
   .footer, .saveButton { width: 100%; }
 }

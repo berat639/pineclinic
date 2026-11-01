@@ -243,6 +243,11 @@ export const dentalAppointments = pgTable('dental_appointments', {
   reviewedBy: uuid('reviewed_by').references(() => users.id),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
+  patientResponseStatus: text('patient_response_status'),
+  patientResponseNote: text('patient_response_note'),
+  patientPreferredDate: text('patient_preferred_date'),
+  patientRespondedAt: timestamp('patient_responded_at', { withTimezone: true }),
+  patientResponseChannel: text('patient_response_channel'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   // Kept explicitly because the patient sidebar is ordered by the latest

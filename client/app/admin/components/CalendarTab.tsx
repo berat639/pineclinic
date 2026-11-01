@@ -127,6 +127,11 @@ interface CalendarEvent {
   intakePatientName?: string | null
   intakePatientPhone?: string | null
   reviewStatus?: string | null
+  patientResponseStatus?: string | null
+  patientResponseNote?: string | null
+  patientPreferredDate?: string | null
+  patientRespondedAt?: string | null
+  patientResponseChannel?: string | null
 }
 
 interface Patient {
@@ -515,6 +520,74 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
   }, [currentDate])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Real-time SSE listener for patient responses (Geleceğim / Ertele / Gelmiyorum) & AI appointments
+  useEffect(() => {
+    let es: EventSource | null = null
+    try {
+      es = new EventSource('/api/events')
+      es.onmessage = (msg) => {
+        try {
+          const payload = JSON.parse(msg.data)
+          if (payload.type === 'appointment_updated') {
+            fetchData()
+            const action = payload.action
+            const updatedAppt = payload.appointment
+            if (updatedAppt) {
+              setSelectedEvent(prev => prev && prev.id === updatedAppt.id ? { ...prev, ...updatedAppt } : prev)
+            }
+            if (action === 'confirm') {
+              toast.success(`✅ Hasta randevuyu onayladı: ${updatedAppt?.title || 'Randevu'}`)
+            } else if (action === 'postpone') {
+              toast(`⏳ Hasta erteleme talep etti: ${updatedAppt?.title || 'Randevu'}`, { icon: '⏳', duration: 6000 })
+            } else if (action === 'cancel') {
+              toast.error(`❌ Hasta gelemeyeceğini bildirdi (İptal): ${updatedAppt?.title || 'Randevu'}`, { duration: 6000 })
+            }
+          } else if (payload.type === 'new_appointment') {
+            fetchData()
+          }
+        } catch { }
+      }
+    } catch { }
+    return () => {
+      if (es) es.close()
+    }
+  }, [fetchData])
+
+  const handleQuickPatientResponse = async (appointmentId: string, action: 'confirm' | 'postpone' | 'cancel', note?: string) => {
+    try {
+      const res = await fetch(`/api/dental/appointments/${appointmentId}/patient-response`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, note }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Hasta yanıtı kaydedilemedi')
+      if (body.appointment) {
+        setEvents(prev => prev.map(ev => ev.id === body.appointment.id ? { ...ev, ...body.appointment } : ev))
+        setSelectedEvent(prev => prev && prev.id === body.appointment.id ? { ...prev, ...body.appointment } : prev)
+      }
+      if (action === 'confirm') toast.success('✅ Randevu "Gelecek (Onaylandı)" olarak işaretlendi')
+      else if (action === 'postpone') toast('⏳ Randevu "Erteleme Talebi" olarak işaretlendi', { icon: '⏳' })
+      else toast.error('❌ Randevu "Gelmeyecek (İptal)" olarak işaretlendi')
+      fetchData()
+    } catch (err: any) {
+      toast.error(err.message || 'Durum güncellenemedi')
+    }
+  }
+
+  const patientActionAlerts = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10)
+    return events.filter(ev => {
+      const dateStr = (ev.startTime || '').slice(0, 10)
+      if (dateStr < todayStr) return false
+      return (
+        ev.status === 'postponed' ||
+        ev.patientResponseStatus === 'postponed' ||
+        ev.patientResponseStatus === 'cancelled'
+      )
+    })
+  }, [events])
 
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
@@ -1487,6 +1560,60 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
         </div>
 
 
+        {patientActionAlerts.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              borderRadius: 10,
+              background: 'var(--card-inner, #f1f5f9)',
+              border: '1.5px solid #f59e0b',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', fontWeight: 700, color: 'var(--foreground)' }}>
+              <span>🔔 Hasta Erteleme / Gelmiyorum Bildirimleri ({patientActionAlerts.length}):</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {patientActionAlerts.slice(0, 6).map(alertEv => {
+                const isCancelled = alertEv.status === 'cancelled' || alertEv.patientResponseStatus === 'cancelled'
+                const dateLabel = new Date(alertEv.startTime).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
+                const timeLabel = new Date(alertEv.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+                return (
+                  <button
+                    key={alertEv.id}
+                    type="button"
+                    onClick={() => focusAppointmentOnCalendar(alertEv.id, alertEv.startTime, true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      border: isCancelled ? '1px solid #ef4444' : '1px solid #d97706',
+                      background: 'var(--input-bg, #ffffff)',
+                      color: isCancelled ? 'var(--danger, #ef4444)' : '#d97706',
+                      fontSize: '0.73rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                    title="Randevu detayını açmak ve yeni tarih belirlemek için tıklayın"
+                  >
+                    <span>{isCancelled ? '❌ Gelmiyor:' : '⏳ Erteleme:'}</span>
+                    <span style={{ color: 'var(--foreground)' }}>{alertEv.title.split(' - ')[0]}</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--foreground-2)' }}>({dateLabel} {timeLabel})</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <DentalCalendar
           doctors={doctors.filter(d => selectedDoctorIds.includes(d.id))}
           events={filteredEvents.filter(ev => !ev.doctorId || selectedDoctorIds.includes(ev.doctorId))}
@@ -2421,14 +2548,123 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           >
                             <option value="pending_review">⚠️ Doğrulama Bekliyor</option>
                             <option value="scheduled">📅 Planlandı</option>
+                            <option value="confirmed">✅ Onaylandı (Gelecek)</option>
                             <option value="in_progress">🔄 Devam Ediyor</option>
                             <option value="completed">✓ Tamamlandı</option>
-                            <option value="cancelled">❌ İptal</option>
+                            <option value="cancelled">❌ İptal / Gelmiyor</option>
                             <option value="postponed">⏳ Ertelendi</option>
                             <option value="no_show">🚫 Gelmedi</option>
                             <option value="pending_assignment">⚠️ Atama Bekliyor</option>
                             <option value="waiting_in_clinic">🏥 Klinikte Bekliyor</option>
                           </select>
+                        </div>
+                      </div>
+
+                      {/* ── Hasta Yanıt Durumu (Geleceğim / Ertele / Gelmiyorum) ── */}
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--input-border, #cbd5e1)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--foreground-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                            Hasta Teyit / Yanıt Durumu
+                          </span>
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            background: (selectedEvent.status === 'confirmed' || selectedEvent.patientResponseStatus === 'confirmed')
+                              ? 'var(--btn-clinic-mint-bg, #f0fdf4)'
+                              : (selectedEvent.status === 'cancelled' || selectedEvent.patientResponseStatus === 'cancelled')
+                                ? 'var(--input-bg, #ffffff)'
+                                : 'var(--badge-clinic-bg, #e0f2fe)',
+                            border: (selectedEvent.status === 'confirmed' || selectedEvent.patientResponseStatus === 'confirmed')
+                              ? '1px solid var(--btn-clinic-mint-border, #86efac)'
+                              : (selectedEvent.status === 'cancelled' || selectedEvent.patientResponseStatus === 'cancelled')
+                                ? '1px solid var(--danger, #ef4444)'
+                                : (selectedEvent.status === 'postponed' || selectedEvent.patientResponseStatus === 'postponed')
+                                  ? '1px solid #d97706'
+                                  : '1px solid var(--badge-clinic-border, #bae6fd)',
+                            color: (selectedEvent.status === 'confirmed' || selectedEvent.patientResponseStatus === 'confirmed')
+                              ? 'var(--btn-clinic-mint-text, #15803d)'
+                              : (selectedEvent.status === 'cancelled' || selectedEvent.patientResponseStatus === 'cancelled')
+                                ? 'var(--danger, #ef4444)'
+                                : (selectedEvent.status === 'postponed' || selectedEvent.patientResponseStatus === 'postponed')
+                                  ? '#d97706'
+                                  : 'var(--badge-clinic-text, #0369a1)',
+                          }}>
+                            {(selectedEvent.status === 'confirmed' || selectedEvent.patientResponseStatus === 'confirmed')
+                              ? '✅ Geleceğim (Onaylı)'
+                              : (selectedEvent.status === 'cancelled' || selectedEvent.patientResponseStatus === 'cancelled')
+                                ? '❌ Gelmiyorum (İptal)'
+                                : (selectedEvent.status === 'postponed' || selectedEvent.patientResponseStatus === 'postponed')
+                                  ? '⏳ Erteleme Talebi'
+                                  : '🕒 Yanıt Bekleniyor'}
+                          </span>
+                        </div>
+
+                        {(selectedEvent.patientPreferredDate || selectedEvent.patientResponseNote) && (
+                          <div style={{ padding: '7px 9px', borderRadius: 6, background: 'var(--input-bg, #ffffff)', border: '1px solid var(--input-border, #cbd5e1)', fontSize: '0.73rem', color: 'var(--foreground)' }}>
+                            {selectedEvent.patientPreferredDate && (
+                              <div style={{ fontWeight: 700, color: '#d97706' }}>
+                                📅 Talep Edilen Yeni Tarih: {selectedEvent.patientPreferredDate}
+                              </div>
+                            )}
+                            {selectedEvent.patientResponseNote && (
+                              <div style={{ color: 'var(--foreground-2)', marginTop: selectedEvent.patientPreferredDate ? 2 : 0 }}>
+                                💬 Hasta Notu: {selectedEvent.patientResponseNote}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickPatientResponse(selectedEvent.id, 'confirm')}
+                            style={{
+                              padding: '6px 6px',
+                              borderRadius: 6,
+                              border: '1px solid var(--btn-clinic-mint-border, #86efac)',
+                              background: 'var(--btn-clinic-mint-bg, #f0fdf4)',
+                              color: 'var(--btn-clinic-mint-text, #15803d)',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✅ Gelecek
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickPatientResponse(selectedEvent.id, 'postpone')}
+                            style={{
+                              padding: '6px 6px',
+                              borderRadius: 6,
+                              border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                              background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+                              color: 'var(--btn-clinic-secondary-text, #0284c7)',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ⏳ Ertele
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickPatientResponse(selectedEvent.id, 'cancel')}
+                            style={{
+                              padding: '6px 6px',
+                              borderRadius: 6,
+                              border: '1px solid var(--danger, #ef4444)',
+                              background: 'var(--input-bg, #ffffff)',
+                              color: 'var(--danger, #ef4444)',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ❌ Gelmiyor
+                          </button>
                         </div>
                       </div>
 

@@ -56,6 +56,11 @@ export function ensureAiAppointmentReviewSchema(): Promise<void> {
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES users(id)`)
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`)
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_status TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_note TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_preferred_date TEXT`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_responded_at TIMESTAMPTZ`)
+    await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_channel TEXT`)
     await db.execute(sql`ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`)
     await db.execute(sql`UPDATE dental_appointments SET updated_at = COALESCE(updated_at, created_at, now()) WHERE updated_at IS NULL`)
     await db.execute(sql`CREATE INDEX IF NOT EXISTS dental_appointments_patient_activity_idx ON dental_appointments (clinic_id, patient_id, updated_at DESC)`)
@@ -301,11 +306,21 @@ export async function createDentalAppointment(data: {
     type: data.type ?? 'general',
     notes: data.notes ?? null,
   }).returning()
+  if (row) {
+    import('../../services/appointment-notifications')
+      .then(({ scheduleAppointmentNotification }) =>
+        scheduleAppointmentNotification({ clinicId, appointmentId: row.id, kind: 'appointment_created' }),
+      )
+      .catch(() => {})
+  }
   return row
 }
 
 export async function deleteDentalAppointment(id: string): Promise<boolean> {
   const clinicId = requireClinicId()
+  import('../../services/appointment-notifications')
+    .then(({ cancelAppointmentNotifications }) => cancelAppointmentNotifications(clinicId, id))
+    .catch(() => {})
   const rows = await db.delete(dentalAppointments).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).returning({ id: dentalAppointments.id })
   return rows.length > 0
 }
@@ -688,6 +703,11 @@ export async function linkTreatmentToAppointment(appointmentId: string, treatmen
     sessionNumber,
     notes
   }).returning()
+  import('../../services/appointment-notifications')
+    .then(({ scheduleAppointmentNotification }) =>
+      scheduleAppointmentNotification({ clinicId, appointmentId, kind: 'appointment_created' }),
+    )
+    .catch(() => {})
   return row
 }
 
@@ -1181,11 +1201,26 @@ export async function updateDentalAppointment(id: string, data: {
   if (data.notes !== undefined) values.notes = data.notes
   if (data.type !== undefined) values.type = data.type
   if (data.complaint !== undefined) values.complaint = data.complaint
+  if (data.startTime !== undefined && existing?.status === 'postponed' && data.status === undefined) {
+    values.status = 'scheduled'
+    values.patientResponseStatus = null
+  }
   if (Object.keys(values).length === 0) return null
   const [row] = await db.update(dentalAppointments)
     .set({ ...values, updatedAt: new Date() })
     .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId)))
     .returning()
+  if (row) {
+    import('../../services/appointment-notifications')
+      .then(async ({ scheduleAppointmentNotification, cancelAppointmentNotifications }) => {
+        if (['cancelled', 'completed', 'no_show'].includes(row.status) || data.status === 'confirmed') {
+          await cancelAppointmentNotifications(clinicId, row.id)
+        } else if (data.startTime !== undefined) {
+          await scheduleAppointmentNotification({ clinicId, appointmentId: row.id, kind: 'appointment_rescheduled' })
+        }
+      })
+      .catch(() => {})
+  }
   return row ?? null
 }
 
@@ -1254,6 +1289,13 @@ export async function approveAiAppointment(id: string, data: {
       title: `${appointment.intakePatientName || appointment.title.split(' - ')[0]} - kontrol`, updatedAt: new Date(),
     }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
     if (!updated) throw new Error('Randevu aynı anda başka bir kullanıcı tarafından işlendi.')
+    return updated
+  }).then(updated => {
+    import('../../services/appointment-notifications')
+      .then(({ scheduleAppointmentNotification }) =>
+        scheduleAppointmentNotification({ clinicId, appointmentId: updated.id, kind: 'appointment_created' }),
+      )
+      .catch(() => {})
     return updated
   })
 }

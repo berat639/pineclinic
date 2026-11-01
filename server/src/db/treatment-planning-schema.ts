@@ -78,6 +78,37 @@ export const treatmentPlanningDDL = [
     size_bytes BIGINT NOT NULL, uploaded_bytes BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (attachment_id, file_index)
   )`,
+  `ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_status TEXT`,
+  `ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_note TEXT`,
+  `ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_preferred_date TEXT`,
+  `ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_responded_at TIMESTAMPTZ`,
+  `ALTER TABLE dental_appointments ADD COLUMN IF NOT EXISTS patient_response_channel TEXT`,
+  `CREATE TABLE IF NOT EXISTS appointment_notification_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    clinic_id UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    appointment_id UUID REFERENCES dental_appointments(id) ON DELETE CASCADE,
+    treatment_id UUID REFERENCES treatment_plans(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    step_index INTEGER NOT NULL DEFAULT 0,
+    channels JSONB NOT NULL DEFAULT '[]'::jsonb,
+    last_channel TEXT,
+    token_hash TEXT UNIQUE,
+    token_plain TEXT,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    dedupe_key TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    patient_response TEXT,
+    patient_response_note TEXT,
+    patient_preferred_date TEXT,
+    responded_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (clinic_id, dedupe_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS appointment_notification_jobs_due_idx ON appointment_notification_jobs (status, next_attempt_at)`,
+  `CREATE INDEX IF NOT EXISTS appointment_notification_jobs_appt_idx ON appointment_notification_jobs (clinic_id, appointment_id)`,
 ]
 
 let schemaPromise: Promise<void> | undefined
