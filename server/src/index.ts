@@ -2202,13 +2202,34 @@ const app = new Elysia()
     return await getNotificationPolicy()
   })
   .put('/api/admin/settings/notification-policy', async ({ body, set, cookie, request }) => {
-    const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined, request)
     if (!user || !['yonetici', 'moderator', 'host'].includes(user.role)) {
       set.status = 403
       return { error: 'Bildirim öncelik ayarlarını yalnızca yönetici değiştirebilir' }
     }
     const { setNotificationPolicy } = await import('./db/repositories/settings')
-    return await setNotificationPolicy((body || {}) as Record<string, unknown>)
+    const policy = await setNotificationPolicy((body || {}) as Record<string, unknown>)
+    return { success: true, policy }
+  })
+  .get('/api/dental/working-hours', async () => {
+    const { getClinicWorkingHours } = await import('./db/repositories/settings')
+    return await getClinicWorkingHours()
+  })
+  .get('/api/admin/settings/working-hours', async () => {
+    const { getClinicWorkingHours } = await import('./db/repositories/settings')
+    return await getClinicWorkingHours()
+  })
+  .put('/api/admin/settings/working-hours', async ({ body, set, cookie, request }) => {
+    const isAdmin = cookie.admin_auth?.value === 'true'
+    const user = isAdmin ? { role: 'yonetici' } : await authenticateRequest(cookie.token?.value as string | undefined, request)
+    if (!user || !['yonetici', 'moderator', 'host'].includes(user.role)) {
+      set.status = 403
+      return { error: 'Klinik genel mesai saatlerini yalnızca yönetici değiştirebilir' }
+    }
+    const { setClinicWorkingHours } = await import('./db/repositories/settings')
+    const workingHours = await setClinicWorkingHours((body || {}) as Record<string, unknown>)
+    return { success: true, workingHours }
   })
 
   // ── Knowledge Categories ────────────────────────────────────────────────────

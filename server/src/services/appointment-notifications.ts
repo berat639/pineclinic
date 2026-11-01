@@ -822,3 +822,4 @@ export async function submitPublicAppointmentResponse(
     patientResponseStatus: updated?.patientResponseStatus || null,
   }
 }
+

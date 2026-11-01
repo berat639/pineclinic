@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactN
 import { DayPicker } from 'react-day-picker'
 import 'react-day-picker/dist/style.css'
 import { tr } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus, RotateCcw, Search, Umbrella, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, Plus, RotateCcw, Search, Umbrella, Users } from 'lucide-react'
 
 type Staff = { id: string; name: string; role: string; active: boolean; color?: string }
 type Shift = { id: string; userId: string; userName: string; userColor?: string; date: string; startTime: string; endTime: string; shiftType: string }
@@ -14,10 +14,11 @@ type Repeat = 'once' | 'week' | 'month' | 'range'
 type PreviewRow = { userId: string; date: string; existingId?: string; state: 'create' | 'same' | 'existing' | 'leave'; leaveReason?: string | null }
 
 const DAYS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
-const TIME_OPTIONS = Array.from({ length: 31 }, (_, index) => {
-  const total = 6 * 60 + index * 30
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const total = index * 30
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 })
+const END_TIME_OPTIONS = [...TIME_OPTIONS.slice(1), '24:00', ...TIME_OPTIONS.slice(1, 17)]
 const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const localDate = (key: string) => new Date(`${key}T12:00:00`)
 const addDays = (key: string, days: number) => { const d = localDate(key); d.setDate(d.getDate() + days); return dateKey(d) }
@@ -44,12 +45,53 @@ export default function ShiftPlanner({ users, shifts, onChanged, onOpenLeave }: 
   const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()))
   const [search, setSearch] = useState('')
   const [role, setRole] = useState('all')
-  const [editor, setEditor] = useState<{ userIds: string[]; date: string; shift?: Shift } | null>(null)
+  const [editor, setEditor] = useState<{ userIds: string[]; date: string; shift?: Shift; defaultStartTime?: string; defaultEndTime?: string } | null>(null)
   const [lastOperation, setLastOperation] = useState<{ id: string; count: number } | null>(null)
   const [successNotice, setSuccessNotice] = useState('')
   const [undoError, setUndoError] = useState('')
   const [monthFocus, setMonthFocus] = useState(selectedDate)
   const [leaves, setLeaves] = useState<Leave[]>([])
+  const [clinicStartTime, setClinicStartTime] = useState('08:00')
+  const [clinicEndTime, setClinicEndTime] = useState('20:00')
+  const [clinicHoursSaving, setClinicHoursSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/dental/working-hours', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.startTime) setClinicStartTime(data.startTime)
+        if (data?.endTime) setClinicEndTime(data.endTime)
+      })
+      .catch(() => {})
+  }, [])
+
+  const saveClinicWorkingHours = async (overrideStart?: string, overrideEnd?: string) => {
+    const nextStart = overrideStart ?? clinicStartTime
+    const nextEnd = overrideEnd ?? clinicEndTime
+    setClinicHoursSaving(true)
+    setUndoError('')
+    try {
+      const response = await fetch('/api/admin/settings/working-hours', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ startTime: nextStart, endTime: nextEnd }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data) {
+        setUndoError(data?.error || 'Klinik genel mesai saatleri kaydedilemedi.')
+        return
+      }
+      setClinicStartTime(data.startTime)
+      setClinicEndTime(data.endTime)
+      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: data }))
+      setSuccessNotice(`Klinik genel mesai saatleri ${data.startTime} – ${data.endTime}${data.isOvernight ? ' (Gece / Ertesi Gün)' : ''} olarak güncellendi. Takvim saat aralıkları buna göre ayarlandı.`)
+    } catch {
+      setUndoError('Klinik genel mesai saatleri kaydedilirken bağlantı hatası oluştu.')
+    } finally {
+      setClinicHoursSaving(false)
+    }
+  }
 
   useEffect(() => { fetch('/api/shifts/plan/latest', { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(setLastOperation).catch(() => {}) }, [])
   useEffect(() => {
@@ -75,6 +117,123 @@ export default function ShiftPlanner({ users, shifts, onChanged, onOpenLeave }: 
   }
 
   return <section style={{ ...surface, padding: 18 }}>
+    {/* Klinik Genel Mesai Saatleri (Takvim Saat Aralığı) */}
+    <div style={{ ...surface, background: 'var(--card-inner)', padding: 14, marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Clock size={17} color="var(--accent)" />
+            <strong style={{ fontSize: 14, color: 'var(--foreground)' }}>Klinik Genel Mesai Saatleri (Takvim Saat Aralığı)</strong>
+            {(() => {
+              const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
+              const eH = parseInt(clinicEndTime.split(':')[0] || '20', 10)
+              const overnight = clinicEndTime !== '24:00' && eH <= sH
+              return overnight ? (
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--badge-clinic-bg, #e0f2fe)', border: '1px solid var(--badge-clinic-border, #bae6fd)', color: 'var(--badge-clinic-text, #0369a1)' }}>
+                  🌙 Gece Mesaisi ({clinicStartTime} – Ertesi Gün {clinicEndTime})
+                </span>
+              ) : null
+            })()}
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--foreground-2)' }}>
+            Hekim bazlı vardiyalara ek olarak kliniğin genel açılış-kapanış saatlerini belirleyin (örn. Sabah 08:00 – Gece 02:00). İnteraktif takvimdeki saat dilimleri bu aralığa göre oluşturulur.
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {([
+            ['08:00', '20:00', '08:00 – 20:00'],
+            ['08:00', '02:00', 'Sabah 08:00 – Gece 02:00'],
+            ['09:00', '19:00', '09:00 – 19:00'],
+            ['00:00', '24:00', '24 Saat Açık'],
+          ] as [string, string, string][]).map(([pStart, pEnd, pLabel]) => {
+            const active = clinicStartTime === pStart && clinicEndTime === pEnd
+            return (
+              <button
+                key={`${pStart}-${pEnd}`}
+                type="button"
+                onClick={() => {
+                  setClinicStartTime(pStart)
+                  setClinicEndTime(pEnd)
+                  saveClinicWorkingHours(pStart, pEnd)
+                }}
+                style={{
+                  minHeight: 32,
+                  padding: '0 10px',
+                  borderRadius: 7,
+                  border: active ? '1px solid var(--accent)' : '1px solid var(--input-border)',
+                  background: active ? 'var(--accent)' : 'var(--input-bg)',
+                  color: active ? '#ffffff' : 'var(--foreground)',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {pLabel}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+        <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)', minWidth: 150 }}>
+          Klinik Açılış Saati
+          <select value={clinicStartTime} onChange={e => setClinicStartTime(e.target.value)} style={input}>
+            {TIME_OPTIONS.map(t => (
+              <option key={`clinic-start-${t}`} value={t}>{t}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)', minWidth: 180 }}>
+          Klinik Kapanış Saati
+          <select value={clinicEndTime} onChange={e => setClinicEndTime(e.target.value)} style={input}>
+            {Array.from(new Set([...TIME_OPTIONS.slice(1), '24:00'])).map(t => {
+              const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
+              const eH = parseInt(t.split(':')[0] || '20', 10)
+              const isOvernightOption = t !== '24:00' && eH <= sH
+              return (
+                <option key={`clinic-end-${t}`} value={t}>
+                  {t}{isOvernightOption ? ' (Gece / Ertesi Gün)' : ''}
+                </option>
+              )
+            })}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={clinicHoursSaving}
+          onClick={() => saveClinicWorkingHours()}
+          style={{
+            minHeight: 40,
+            padding: '0 16px',
+            borderRadius: 8,
+            border: '1px solid var(--accent)',
+            background: 'var(--accent)',
+            color: '#ffffff',
+            fontWeight: 700,
+            cursor: clinicHoursSaving ? 'wait' : 'pointer',
+          }}
+        >
+          {clinicHoursSaving ? 'Kaydediliyor…' : 'Genel Mesai Saatini Kaydet'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const doctorIds = staff.filter(p => p.role === 'hekim').map(p => p.id)
+            setEditor({
+              userIds: doctorIds.length > 0 ? doctorIds : staff.map(p => p.id),
+              date: selectedDate,
+              defaultStartTime: clinicStartTime,
+              defaultEndTime: clinicEndTime === '24:00' ? '23:30' : clinicEndTime,
+            })
+          }}
+          style={secondaryButton}
+        >
+          Tüm Hekimlere Bu Saatleri Planla
+        </button>
+      </div>
+    </div>
+
     <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', border: '1px solid var(--input-border)', borderRadius: 9, overflow: 'hidden' }}>
@@ -120,7 +279,10 @@ function WeekView({ date, staff, shifts, onOpen }: { date: string; staff: Staff[
   const totalHours = (userId: string) => shifts.filter(item => item.userId === userId && dates.includes(item.date)).reduce((total, item) => {
     const [startHour, startMinute] = item.startTime.split(':').map(Number)
     const [endHour, endMinute] = item.endTime.split(':').map(Number)
-    return total + Math.max(0, endHour * 60 + endMinute - startHour * 60 - startMinute)
+    const startTotal = startHour * 60 + startMinute
+    let endTotal = endHour * 60 + endMinute
+    if (endTotal <= startTotal) endTotal += 1440
+    return total + Math.max(0, endTotal - startTotal)
   }, 0) / 60
   if (compact) {
     const activeDate = dates[dayIndex]
@@ -135,14 +297,14 @@ function MonthView({ date, selectedDate, staff, shifts, onSelect, onOpen }: { da
   return <div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>{DAYS.map(day => <strong key={day} style={{ textAlign: 'center', color: 'var(--foreground-2)', fontSize: 13 }}>{day}</strong>)}</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>{days.map(day => { const rows = shifts.filter(item => item.date === day); const inMonth = localDate(day).getMonth() === month.getMonth(); return <button key={day} onClick={() => onSelect(day)} aria-pressed={selectedDate === day} style={{ ...surface, minHeight: 94, padding: 8, background: selectedDate === day ? 'var(--card-inner)' : inMonth ? 'var(--card-bg)' : 'var(--input-bg)', cursor: 'pointer', textAlign: 'left', color: 'var(--foreground)' }}><strong>{localDate(day).getDate()}</strong><div style={{ marginTop: 8, color: rows.length ? 'var(--accent)' : 'var(--foreground-3)', fontSize: 12, fontWeight: 650 }}>{rows.length ? `${rows.length} planlı personel` : 'Mesai yok'}</div>{rows.slice(0, 2).map(item => <div key={item.id} style={{ fontSize: 11, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.userName.split(' ')[0]} · {item.startTime}</div>)}</button> })}</div><section style={{ ...surface, padding: 12, marginTop: 14, background: 'var(--card-inner)' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8 }}><strong>{label(selectedDate, { day: 'numeric', month: 'long', weekday: 'long' })}</strong><button onClick={() => onOpen('', selectedDate)} style={secondaryButton}>Mesai Ekle</button></div><div style={{ display: 'grid', gap: 6 }}>{staff.map(person => { const shift = focusedShifts.find(item => item.userId === person.id); return <button key={person.id} onClick={() => onOpen(person.id, selectedDate, shift)} style={{ ...surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44, padding: '7px 10px', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', textAlign: 'left' }}><span>{person.name}</span><span style={{ color: shift ? 'var(--accent)' : 'var(--foreground-3)' }}>{shift ? `${shift.startTime}–${shift.endTime}` : 'Mesai yok'}</span></button> })}</div>{staff.length === 0 && <Empty />}</section></div>
 }
 
-function ShiftEditor({ users, initial, onClose, onSaved }: { users: Staff[]; initial: { userIds: string[]; date: string; shift?: Shift }; onClose: () => void; onSaved: (operation: { id: string; count: number }) => void }) {
+function ShiftEditor({ users, initial, onClose, onSaved }: { users: Staff[]; initial: { userIds: string[]; date: string; shift?: Shift; defaultStartTime?: string; defaultEndTime?: string }; onClose: () => void; onSaved: (operation: { id: string; count: number }) => void }) {
   const [userIds, setUserIds] = useState(initial.userIds)
   const [startDate, setStartDate] = useState(initial.date)
   const [repeat, setRepeat] = useState<Repeat>('once')
   const [endDate, setEndDate] = useState(initial.date)
   const [weekdays, setWeekdays] = useState<number[]>([Math.max(0, (localDate(initial.date).getDay() + 6) % 7)])
-  const [startTime, setStartTime] = useState(initial.shift?.startTime || '09:00')
-  const [endTime, setEndTime] = useState(initial.shift?.endTime || '18:00')
+  const [startTime, setStartTime] = useState(initial.shift?.startTime || initial.defaultStartTime || '09:00')
+  const [endTime, setEndTime] = useState(initial.shift?.endTime || initial.defaultEndTime || '18:00')
   const [shiftType, setShiftType] = useState(initial.shift?.shiftType || 'Mesai')
   const [preview, setPreview] = useState<{ rows: PreviewRow[]; summary: Record<string, number> } | null>(null)
   const [overwriteIds, setOverwriteIds] = useState<string[]>(initial.shift ? [initial.shift.id] : [])

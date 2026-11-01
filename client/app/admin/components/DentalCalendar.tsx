@@ -38,11 +38,20 @@ interface ShiftItem {
   shiftType: string
 }
 
+export interface ClinicWorkingHours {
+  startTime: string
+  endTime: string
+  isOvernight?: boolean
+  slotStartHour: number
+  slotEndHour: number
+}
+
 interface Props {
   doctors: Doctor[]
   events: CalendarEvent[]
   shifts?: ShiftItem[]
   doctorLeaves?: DoctorLeaveItem[]
+  workingHours?: ClinicWorkingHours
   currentDate: string
   onEventClick: (eventId: string, event: CalendarEvent) => void
   view?: 'day' | 'week' | 'month'
@@ -114,8 +123,9 @@ const DAYS_TR = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
 function generateTimeSlots(start: number, end: number): string[] {
   const slots: string[] = []
   for (let h = start; h < end; h++) {
-    slots.push(`${h.toString().padStart(2, '0')}:00`)
-    slots.push(`${h.toString().padStart(2, '0')}:30`)
+    const normalizedH = ((h % 24) + 24) % 24
+    slots.push(`${normalizedH.toString().padStart(2, '0')}:00`)
+    slots.push(`${normalizedH.toString().padStart(2, '0')}:30`)
   }
   return slots
 }
@@ -151,11 +161,17 @@ function getMonthWeeks(dateStr: string): { label: string; startDate: string; end
   return weeks
 }
 
-function eventPosition(startTime: string, endTime: string, slotStartHour: number) {
+function eventPosition(startTime: string, endTime: string, slotStartHour: number, slotEndHour = 24) {
   const s = new Date(startTime), e = new Date(endTime)
-  const startMin = s.getHours() * 60 + s.getMinutes()
-  const endMin = e.getHours() * 60 + e.getMinutes()
-  const top = ((startMin - slotStartHour * 60) / 30) * 48
+  let startMin = s.getHours() * 60 + s.getMinutes()
+  let endMin = e.getHours() * 60 + e.getMinutes()
+  if (slotEndHour > 24 && startMin < slotStartHour * 60) {
+    startMin += 1440
+    endMin += 1440
+  } else if (endMin <= startMin) {
+    endMin += 1440
+  }
+  const top = Math.max(0, ((startMin - slotStartHour * 60) / 30) * 48)
   const height = Math.max(((endMin - startMin) / 30) * 48, 22)
   return { top, height }
 }
@@ -221,9 +237,11 @@ function getLocalYMD(dateStrOrObj: string | Date): string {
   }
 }
 
-export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
+export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], workingHours, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
+  const slotStartHour = typeof workingHours?.slotStartHour === 'number' ? workingHours.slotStartHour : 8;
+  const slotEndHour = typeof workingHours?.slotEndHour === 'number' ? Math.max(workingHours.slotEndHour, slotStartHour + 1) : 20;
 
   // Draft selection state for empty slot
   const [draftSelection, setDraftSelection] = useState<{
@@ -336,9 +354,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       // Draft selection logic
       setDraftSelection(prev => {
         if (prev && prev.active && gridRef.current) {
-          const gridRect = gridRef.current.getBoundingClientRect();
           // convert top & height to time
-          const startMins = 0 * 60 + Math.round(prev.top / 48 * 30);
+          const startMins = slotStartHour * 60 + Math.round(prev.top / 48 * 30);
           const endMins = startMins + Math.round(prev.height / 48 * 30);
           
           let doctorId: string | null = null;
@@ -352,8 +369,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
           }
 
           const formatTime = (mins: number) => {
-            const h = Math.floor(mins / 60);
-            const m = mins % 60;
+            const norm = ((mins % 1440) + 1440) % 1440;
+            const h = Math.floor(norm / 60);
+            const m = norm % 60;
             return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
           };
 
@@ -498,8 +516,16 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               const [sH, sM] = (shift.startTime || '00:00').split(':').map(Number);
               const [eH, eM] = (shift.endTime || '23:59').split(':').map(Number);
               const shiftStartMin = sH * 60 + (sM || 0);
-              const shiftEndMin = eH * 60 + (eM || 0);
-              return startMinOfDay >= shiftStartMin && endMinOfDay <= shiftEndMin;
+              let shiftEndMin = eH * 60 + (eM || 0);
+              if (shiftEndMin <= shiftStartMin) shiftEndMin += 1440;
+              let evStart = startMinOfDay;
+              let evEnd = endMinOfDay;
+              if (evEnd <= evStart) evEnd += 1440;
+              if (shiftEndMin > 1440 && evStart < shiftStartMin) {
+                evStart += 1440;
+                evEnd += 1440;
+              }
+              return evStart >= shiftStartMin && evEnd <= shiftEndMin;
             });
 
             if (!isCovered) {
@@ -546,7 +572,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [events, onEventUpdate, view, doctors, currentDate, onEmptySlotSelect]);
+  }, [events, onEventUpdate, view, doctors, currentDate, onEmptySlotSelect, slotStartHour, slotEndHour]);
 
   // Expose method to clear draft
   useEffect(() => {
@@ -560,8 +586,12 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     if (view === 'day' || view === 'week') {
       const timer = setTimeout(() => {
         if (!gridRef.current) return;
-        const currentHour = new Date().getHours();
-        const top = currentHour * 96; // 96px per hour (48px per 30 min)
+        let currentHour = new Date().getHours();
+        if (slotEndHour > 24 && currentHour < slotStartHour) {
+          currentHour += 24;
+        }
+        const offsetHours = Math.max(0, currentHour - slotStartHour);
+        const top = offsetHours * 96; // 96px per hour (48px per 30 min)
         
         let parent = gridRef.current.parentElement;
         while (parent) {
@@ -575,9 +605,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [view]);
+  }, [view, slotStartHour, slotEndHour]);
 
-  const slots = generateTimeSlots(0, 24)
+  const slots = generateTimeSlots(slotStartHour, slotEndHour)
 
   const globalUnassigned = events.filter(e => !e.doctorId)
 
@@ -645,12 +675,13 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
             const cellY = gridRect.top + window.scrollY + top;
 
-            const startMins = 0 * 60 + Math.round(top / 48 * 30);
+            const startMins = slotStartHour * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const doctorId = displayDoctors[colIdx]?.id || null;
             const formatTime = (mins: number) => {
-              const h = Math.floor(mins / 60);
-              const m = mins % 60;
+              const norm = ((mins % 1440) + 1440) % 1440;
+              const h = Math.floor(norm / 60);
+              const m = norm % 60;
               return `${currentDate}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
             };
 
@@ -662,7 +693,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
                 const lStart = (sH || 0) * 60 + (sM || 0);
                 const lEnd = (eH || 0) * 60 + (eM || 0);
-                return startMins < lEnd && endMins > lStart;
+                const normStart = ((startMins % 1440) + 1440) % 1440;
+                const normEnd = normStart + 30;
+                return normStart < lEnd && normEnd > lStart;
               });
               if (conflictLeave) {
                 const docName = displayDoctors[colIdx]?.name || 'Hekim';
@@ -675,10 +708,10 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, cellX, cellY);
             }
           }}>
-            {slots.map(slot => (
-              <div key={slot} style={{ display: 'contents' }}>
+            {slots.map((slot, slotIdx) => (
+              <div key={`${slot}-${slotIdx}`} style={{ display: 'contents' }}>
                 <div className="rc-time">{slot}</div>
-                {Array.from({ length: cols }).map((_, i) => <div key={`${slot}-${i}`} className="rc-cell" />)}
+                {Array.from({ length: cols }).map((_, i) => <div key={`${slot}-${slotIdx}-${i}`} className="rc-cell" />)}
               </div>
             ))}
             
@@ -701,9 +734,12 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
                 <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
                   {(() => {
-                    const s = 0 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const s = slotStartHour * 60 + Math.round(draftSelection.top / 48 * 30);
                     const e = s + Math.round(draftSelection.height / 48 * 30);
-                    const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
+                    const f = (m: number) => {
+                      const norm = ((m % 1440) + 1440) % 1440;
+                      return `${Math.floor(norm/60).toString().padStart(2,'0')}:${(norm%60).toString().padStart(2,'0')}`;
+                    };
                     return `${f(s)} - ${f(e)}`;
                   })()}
                 </span>
@@ -719,7 +755,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             return (
               <React.Fragment key={d.id}>
                 {layout.map(({ event: e, col, maxCol }) => {
-                  const { top, height } = eventPosition(e.startTime, e.endTime, 0)
+                  const { top, height } = eventPosition(e.startTime, e.endTime, slotStartHour, slotEndHour)
                   const isTimeWarning = e.timeConfirmed === false
                   const doc = doctors.find(docItem => docItem.id === e.doctorId) || d
                   const docColor = doc?.color || '#3b82f6'
@@ -764,7 +800,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 {docLeaves.map(l => {
                   const lStart = `${l.date}T${l.isFullDay ? '00:00' : l.startTime}:00+03:00`;
                   const lEnd = `${l.date}T${l.isFullDay ? '23:59' : l.endTime}:00+03:00`;
-                  const { top, height } = eventPosition(lStart, lEnd, 0);
+                  const { top, height } = l.isFullDay
+                    ? { top: 0, height: (slotEndHour - slotStartHour) * 96 }
+                    : eventPosition(lStart, lEnd, slotStartHour, slotEndHour);
                   const colWidth = `((100% - 56px) / ${cols})`;
                   const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`;
                   const width = `calc(${colWidth} - 4px)`;
@@ -822,7 +860,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
           {hasUnassigned && calculateEventLayout(unassigned).map(({ event: e, col, maxCol }) => {
             const left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
             const width = `calc((100% - 56px - 4px) / ${maxCol})`;
-            const { top, height } = eventPosition(e.startTime, e.endTime, 0);
+            const { top, height } = eventPosition(e.startTime, e.endTime, slotStartHour, slotEndHour);
             
             return (
               <div id={`cal-event-${e.id}`} key={e.id} className="rc-event rc-event-unassigned" style={{ top, height, left, width, maxWidth: `calc(100% - 56px - 4px - ((100% - 56px - 4px) / ${maxCol}) * ${col})`, minWidth: 0, background: 'rgba(245, 158, 11, 0.16)', border: '1.5px dashed #f59e0b', borderLeft: '4px solid #f59e0b', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }}
@@ -910,22 +948,23 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             const cellX = gridRect.left + window.scrollX + 56 + (colIdx * colWidthPx);
             const cellY = gridRect.top + window.scrollY + top;
 
-            const startMins = 0 * 60 + Math.round(top / 48 * 30);
+            const startMins = slotStartHour * 60 + Math.round(top / 48 * 30);
             const endMins = startMins + 30;
             const dateStr = weekDays[colIdx]?.date || currentDate;
             const formatTime = (mins: number) => {
-              const h = Math.floor(mins / 60);
-              const m = mins % 60;
+              const norm = ((mins % 1440) + 1440) % 1440;
+              const h = Math.floor(norm / 60);
+              const m = norm % 60;
               return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
             };
             if (onEmptySlotSelect) {
               onEmptySlotSelect(formatTime(startMins), formatTime(endMins), null, cellX, cellY);
             }
           }}>
-            {slots.map(slot => (
-              <div key={slot} style={{ display: 'contents' }}>
+            {slots.map((slot, slotIdx) => (
+              <div key={`${slot}-${slotIdx}`} style={{ display: 'contents' }}>
                 <div className="rc-time">{slot}</div>
-                {Array.from({ length: 7 }).map((_, i) => <div key={`${slot}-${i}`} className="rc-cell" />)}
+                {Array.from({ length: 7 }).map((_, i) => <div key={`${slot}-${slotIdx}-${i}`} className="rc-cell" />)}
               </div>
             ))}
             
@@ -948,9 +987,12 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 <span className="rc-ev-title" style={{ color: '#3b82f6', opacity: 0.8 }}>(Başlıksız)</span>
                 <span className="rc-ev-time" style={{ color: '#3b82f6', opacity: 0.8 }}>
                   {(() => {
-                    const s = 0 * 60 + Math.round(draftSelection.top / 48 * 30);
+                    const s = slotStartHour * 60 + Math.round(draftSelection.top / 48 * 30);
                     const e = s + Math.round(draftSelection.height / 48 * 30);
-                    const f = (m: number) => `${Math.floor(m/60).toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}`;
+                    const f = (m: number) => {
+                      const norm = ((m % 1440) + 1440) % 1440;
+                      return `${Math.floor(norm/60).toString().padStart(2,'0')}:${(norm%60).toString().padStart(2,'0')}`;
+                    };
                     return `${f(s)} - ${f(e)}`;
                   })()}
                 </span>
@@ -963,7 +1005,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             const leaveBlocks = (doctorLeaves || []).filter(l => l.date === day.date).map(l => {
               const start = `${l.date}T${l.isFullDay ? '00:00' : l.startTime}:00+03:00`
               const end = `${l.date}T${l.isFullDay ? '23:59' : l.endTime}:00+03:00`
-              const { top, height } = eventPosition(start, end, 0)
+              const { top, height } = l.isFullDay
+                ? { top: 0, height: (slotEndHour - slotStartHour) * 96 }
+                : eventPosition(start, end, slotStartHour, slotEndHour)
               const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`
               const width = `calc((100% - 56px) / ${cols} - 4px)`
               return <div key={`week-leave-${l.id}`} className="rc-doctor-leave" style={{ position: 'absolute', top, height, left, width, zIndex: 3, padding: '5px 7px', overflow: 'hidden', cursor: 'not-allowed' }} title={`Dr. ${l.doctorName || 'Hekim'} izinli: ${l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}`}>
@@ -972,7 +1016,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               </div>
             })
             const eventBlocks = layout.map(({ event: e, col, maxCol }) => {
-              const { top, height } = eventPosition(e.startTime, e.endTime, 0)
+              const { top, height } = eventPosition(e.startTime, e.endTime, slotStartHour, slotEndHour)
               const doc = doctors.find(d => d.id === e.doctorId)
               const docColor = doc?.color || '#3b82f6'
               const isTimeWarning = e.timeConfirmed === false

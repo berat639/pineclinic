@@ -44,7 +44,7 @@ function assertInput(input: ShiftPlanInput) {
   if (!Array.isArray(input.userIds) || !input.userIds.length || input.userIds.length > 100) throw new Error('En az bir, en fazla 100 personel seçin.')
   if (!isDate(input.startDate) || !isDate(input.endDate) || input.startDate > input.endDate) throw new Error('Geçerli bir tarih aralığı seçin.')
   if (!Array.isArray(input.weekdays) || !input.weekdays.length || input.weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error('En az bir gün seçin.')
-  if (!/^\d{2}:\d{2}$/.test(input.startTime) || !/^\d{2}:\d{2}$/.test(input.endTime) || input.startTime >= input.endTime) throw new Error('Başlangıç saati bitiş saatinden önce olmalıdır.')
+  if (!/^\d{2}:\d{2}$/.test(input.startTime) || !/^\d{2}:\d{2}$/.test(input.endTime) || input.startTime === input.endTime) throw new Error('Başlangıç ve bitiş saatleri geçerli ve birbirinden farklı olmalıdır.')
 }
 function dates(input: ShiftPlanInput) {
   const selected = new Set(input.weekdays)

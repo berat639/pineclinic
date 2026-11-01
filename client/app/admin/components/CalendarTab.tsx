@@ -151,6 +151,20 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
 
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [shifts, setShifts] = useState<any[]>([])
+  const [workingHours, setWorkingHours] = useState<{
+    startTime: string
+    endTime: string
+    isOvernight?: boolean
+    slotStartHour: number
+    slotEndHour: number
+  }>({
+    startTime: '08:00',
+    endTime: '20:00',
+    isOvernight: false,
+    slotStartHour: 8,
+    slotEndHour: 20,
+  })
+  const [workingHoursSaving, setWorkingHoursSaving] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [patientPanelOpen, setPatientPanelOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -496,13 +510,14 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       }
     }
 
-    const [docs, evts, shiftsData, invs, pats, leavesData] = await Promise.all([
+    const [docs, evts, shiftsData, invs, pats, leavesData, workingHoursData] = await Promise.all([
       fetchSafe('/api/dental/doctors'),
       fetchSafe('/api/dental/appointments'),
       fetchSafe('/api/shifts'),
       fetchSafe('/api/yonetici/inventory'),
       fetchSafe('/api/dental/patients'),
-      fetchSafe('/api/dental/doctors/leaves')
+      fetchSafe('/api/dental/doctors/leaves'),
+      fetchSafe('/api/dental/working-hours'),
     ])
 
     if (docs) {
@@ -517,9 +532,45 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     if (invs) setInventoryItems(invs)
     if (pats) setPatients(pats.filter((patient: { isArchived?: boolean }) => !patient.isArchived))
     if (leavesData) setDoctorLeaves(leavesData)
+    if (workingHoursData && typeof workingHoursData.slotStartHour === 'number') {
+      setWorkingHours(workingHoursData)
+    }
   }, [currentDate])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    const onHoursUpdated = (evt: Event) => {
+      const customEvt = evt as CustomEvent
+      if (customEvt.detail && typeof customEvt.detail.slotStartHour === 'number') {
+        setWorkingHours(customEvt.detail)
+      } else {
+        fetchData()
+      }
+    }
+    window.addEventListener('clinicWorkingHoursUpdated', onHoursUpdated)
+    return () => window.removeEventListener('clinicWorkingHoursUpdated', onHoursUpdated)
+  }, [fetchData])
+
+  const handleSaveClinicWorkingHours = async (nextStartTime: string, nextEndTime: string) => {
+    setWorkingHoursSaving(true)
+    try {
+      const res = await fetch('/api/admin/settings/working-hours', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startTime: nextStartTime, endTime: nextEndTime }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) throw new Error(data?.error || 'Klinik mesai saatleri kaydedilemedi')
+      setWorkingHours(data)
+      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: data }))
+      toast.success(`🕒 Klinik genel mesai saatleri güncellendi: ${data.startTime} – ${data.endTime}${data.isOvernight ? ' (Ertesi Gün)' : ''}`)
+    } catch (err: any) {
+      toast.error(err.message || 'Klinik mesai saatleri kaydedilemedi')
+    } finally {
+      setWorkingHoursSaving(false)
+    }
+  }
 
   // Real-time SSE listener for patient responses (Geleceğim / Ertele / Gelmiyorum) & AI appointments
   useEffect(() => {
@@ -1366,6 +1417,97 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           )}
         </div>
 
+        {/* Klinik Genel Mesai Saatleri (Takvim Saat Aralığı) */}
+        <div
+          style={{
+            marginTop: 6,
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: 'var(--card-inner, #f1f5f9)',
+            border: '1px solid var(--input-border, #cbd5e1)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Clock size={14} color="var(--accent, #0284c7)" /> Klinik Genel Mesai
+            </span>
+            {workingHours.isOvernight && (
+              <span
+                style={{
+                  fontSize: '0.64rem',
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  background: 'var(--badge-clinic-bg, #e0f2fe)',
+                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                  color: 'var(--badge-clinic-text, #0369a1)',
+                }}
+              >
+                Gece Vardiyası
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 6 }}>
+            <select
+              value={workingHours.startTime}
+              disabled={workingHoursSaving}
+              onChange={(e) => handleSaveClinicWorkingHours(e.target.value, workingHours.endTime)}
+              aria-label="Klinik açılış saati"
+              style={{
+                padding: '6px 8px',
+                borderRadius: 7,
+                border: '1px solid var(--input-border)',
+                background: 'var(--input-bg)',
+                color: 'var(--foreground)',
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {Array.from({ length: 24 }, (_, h) => {
+                const label = `${String(h).padStart(2, '0')}:00`
+                return <option key={`start-${label}`} value={label}>{label}</option>
+              })}
+            </select>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground-3)' }}>–</span>
+            <select
+              value={workingHours.endTime}
+              disabled={workingHoursSaving}
+              onChange={(e) => handleSaveClinicWorkingHours(workingHours.startTime, e.target.value)}
+              aria-label="Klinik kapanış saati"
+              style={{
+                padding: '6px 8px',
+                borderRadius: 7,
+                border: '1px solid var(--input-border)',
+                background: 'var(--input-bg)',
+                color: 'var(--foreground)',
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {Array.from({ length: 24 }, (_, i) => {
+                const h = i + 1 // 01:00 .. 24:00
+                const val = h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`
+                const startH = parseInt(workingHours.startTime.split(':')[0] || '8', 10)
+                const isNight = h < 24 && h <= startH
+                return (
+                  <option key={`end-${val}`} value={val}>
+                    {val}{isNight ? ' (Gece)' : ''}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--foreground-3)', lineHeight: 1.35 }}>
+            Takvim saat dilimleri: <strong>{workingHours.startTime} – {workingHours.endTime}</strong>
+            {workingHours.isOvernight ? ' (Ertesi gün gece)' : ''}
+          </div>
+        </div>
+
         {/* Takvimlerim (Doctor Filter) */}
         <div style={{ marginTop: 8, position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1619,6 +1761,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           events={filteredEvents.filter(ev => !ev.doctorId || selectedDoctorIds.includes(ev.doctorId))}
           shifts={shifts}
           doctorLeaves={doctorLeaves}
+          workingHours={workingHours}
           currentDate={currentDate}
           onHeaderContextMenu={(e, doctorId) => {
             e.preventDefault()
@@ -1784,7 +1927,12 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                       const isCovered = docShifts.some((s: any) => {
                         const [sH, sM] = (s.startTime || '00:00').split(':').map(Number);
                         const [eH, eM] = (s.endTime || '23:59').split(':').map(Number);
-                        return startMin >= (sH * 60 + (sM || 0)) && startMin <= (eH * 60 + (eM || 0));
+                        const sStart = sH * 60 + (sM || 0);
+                        let sEnd = eH * 60 + (eM || 0);
+                        if (sEnd <= sStart) sEnd += 1440;
+                        let checkMin = startMin;
+                        if (sEnd > 1440 && checkMin < sStart) checkMin += 1440;
+                        return checkMin >= sStart && checkMin <= sEnd;
                       });
                       if (!isCovered) {
                         const shiftRanges = docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ');

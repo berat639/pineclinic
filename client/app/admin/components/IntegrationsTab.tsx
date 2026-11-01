@@ -22,7 +22,7 @@ const roleTabs = [
   { id: 'klinik', label: 'Klinik Personeli' },
 ]
 
-type NotificationChannelKey = 'whatsapp' | 'sms' | 'email' | 'call'
+type NotificationChannelKey = 'whatsapp' | 'sms' | 'email' | 'assistant_call'
 
 interface NotificationPolicyState {
   channelPriority: NotificationChannelKey[]
@@ -37,12 +37,12 @@ interface NotificationPolicyState {
 }
 
 const DEFAULT_NOTIFICATION_POLICY_STATE: NotificationPolicyState = {
-  channelPriority: ['whatsapp', 'sms', 'email', 'call'],
+  channelPriority: ['whatsapp', 'sms', 'email', 'assistant_call'],
   enabledChannels: {
     whatsapp: true,
     sms: true,
     email: true,
-    call: true,
+    assistant_call: true,
   },
   confirmationWaitHours: 4,
   recallWaitHours: 48,
@@ -66,7 +66,7 @@ const CHANNEL_META: Record<NotificationChannelKey, { title: string; desc: string
     title: '✉️ E-Posta (SMTP Bilgilendirme & Onay Linki)',
     desc: 'Detaylı randevu özeti ve tek tıkla yanıt bağlantısı gönderir.',
   },
-  call: {
+  assistant_call: {
     title: '📞 Asistan ile Sesli Arama (AI Sesli Teyit)',
     desc: 'Son kademe. Yazılı kanallardan yanıt alınamazsa sesli asistan arayarak teyit alır.',
   },
@@ -156,6 +156,11 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicyState>(DEFAULT_NOTIFICATION_POLICY_STATE)
   const [savingPolicy, setSavingPolicy] = useState(false)
 
+  // Clinic General Working Hours State
+  const [clinicStartTime, setClinicStartTime] = useState('08:00')
+  const [clinicEndTime, setClinicEndTime] = useState('20:00')
+  const [savingWorkingHours, setSavingWorkingHours] = useState(false)
+
   const [loading, setLoading] = useState(true)
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationOverview>(emptyIntegrationOverview)
   const [saving, setSaving] = useState(false)
@@ -209,7 +214,38 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         }
       })
       .catch(() => {})
+
+    fetch('/api/dental/working-hours')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.startTime) setClinicStartTime(data.startTime)
+        if (data?.endTime) setClinicEndTime(data.endTime)
+      })
+      .catch(() => {})
   }, [apiPrefix])
+
+  const saveClinicWorkingHours = async (overrideStart?: string, overrideEnd?: string) => {
+    const nextStart = overrideStart ?? clinicStartTime
+    const nextEnd = overrideEnd ?? clinicEndTime
+    setSavingWorkingHours(true)
+    try {
+      const res = await fetch('/api/admin/settings/working-hours', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startTime: nextStart, endTime: nextEnd }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) throw new Error(data?.error || 'Klinik mesai saatleri kaydedilemedi')
+      setClinicStartTime(data.startTime)
+      setClinicEndTime(data.endTime)
+      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: data }))
+      showToast('success', `Klinik genel mesai saatleri güncellendi: ${data.startTime} – ${data.endTime}${data.isOvernight ? ' (Gece / Ertesi Gün)' : ''}`)
+    } catch (err: any) {
+      showToast('error', err.message || 'Klinik mesai saatleri kaydedilemedi')
+    } finally {
+      setSavingWorkingHours(false)
+    }
+  }
 
   const moveChannelPriority = (index: number, direction: -1 | 1) => {
     setNotificationPolicy(prev => {
@@ -354,6 +390,82 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
               PNG, JPG veya WEBP formatlarında, maksimum 2 MB boyutunda görsel yükleyebilirsiniz.
             </p>
           </div>
+        </div>
+      </SettingsCard>
+
+      {/* Klinik Genel Mesai Saatleri */}
+      <SettingsCard
+        title="🕒 Klinik Genel Mesai Saatleri (Takvim Saat Aralığı)"
+        description="Hekim bazlı vardiyalara ek olarak kliniğin genel açılış ve kapanış saatlerini belirleyin (ör. Sabah 08:00 – Gece 02:00). İnteraktif takvimdeki saat cetveli bu aralığa göre otomatik şekillenir."
+      >
+        <div className={styles.policyGrid}>
+          <Field label="Klinik Açılış Saati">
+            <select
+              className={styles.select}
+              value={clinicStartTime}
+              onChange={(e) => setClinicStartTime(e.target.value)}
+            >
+              {Array.from({ length: 48 }, (_, idx) => {
+                const total = idx * 30
+                const t = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+                return <option key={`int-start-${t}`} value={t}>{t}</option>
+              })}
+            </select>
+          </Field>
+          <Field label="Klinik Kapanış Saati (Gece Vardiyası Destekli)">
+            <select
+              className={styles.select}
+              value={clinicEndTime}
+              onChange={(e) => setClinicEndTime(e.target.value)}
+            >
+              {Array.from({ length: 48 }, (_, idx) => {
+                const total = (idx + 1) * 30
+                const t = total === 1440 ? '24:00' : `${String(Math.floor((total % 1440) / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+                const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
+                const eH = parseInt(t.split(':')[0] || '20', 10)
+                const isNight = t !== '24:00' && eH <= sH
+                return <option key={`int-end-${t}`} value={t}>{t}{isNight ? ' (Gece / Ertesi Gün)' : ''}</option>
+              })}
+            </select>
+          </Field>
+        </div>
+        <div className={styles.policyToggleRow}>
+          <button
+            type="button"
+            className={styles.orderBtn}
+            onClick={() => saveClinicWorkingHours('08:00', '20:00')}
+          >
+            Standart (08:00 – 20:00)
+          </button>
+          <button
+            type="button"
+            className={styles.orderBtn}
+            onClick={() => saveClinicWorkingHours('08:00', '02:00')}
+          >
+            Sabah 08:00 – Gece 02:00
+          </button>
+          <button
+            type="button"
+            className={styles.orderBtn}
+            onClick={() => saveClinicWorkingHours('09:00', '19:00')}
+          >
+            Gündüz (09:00 – 19:00)
+          </button>
+          <button
+            type="button"
+            className={styles.orderBtn}
+            onClick={() => saveClinicWorkingHours('00:00', '24:00')}
+          >
+            24 Saat Açık (00:00 – 24:00)
+          </button>
+          <button
+            type="button"
+            className={styles.saveButton}
+            onClick={() => saveClinicWorkingHours()}
+            disabled={savingWorkingHours}
+          >
+            {savingWorkingHours ? 'Kaydediliyor...' : 'Genel Mesai Saatlerini Kaydet'}
+          </button>
         </div>
       </SettingsCard>
 

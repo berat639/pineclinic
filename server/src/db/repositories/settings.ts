@@ -310,7 +310,8 @@ function normalizeNotificationPolicy(raw: Partial<NotificationPolicy> | null | u
   const seen = new Set<NotificationChannelKey>()
   const priority: NotificationChannelKey[] = []
   if (Array.isArray(raw?.channelPriority)) {
-    for (const ch of raw.channelPriority) {
+    for (const rawCh of raw.channelPriority) {
+      const ch = (rawCh as string) === 'call' ? 'assistant_call' : rawCh
       if ((ALL_NOTIFICATION_CHANNELS as readonly string[]).includes(ch) && !seen.has(ch as NotificationChannelKey)) {
         seen.add(ch as NotificationChannelKey)
         priority.push(ch as NotificationChannelKey)
@@ -321,11 +322,12 @@ function normalizeNotificationPolicy(raw: Partial<NotificationPolicy> | null | u
     if (!seen.has(ch)) priority.push(ch)
   }
 
+  const rawEnabled = (raw?.enabledChannels || {}) as Record<string, boolean | undefined>
   const enabled: Record<NotificationChannelKey, boolean> = {
-    whatsapp: raw?.enabledChannels?.whatsapp ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.whatsapp,
-    sms: raw?.enabledChannels?.sms ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.sms,
-    email: raw?.enabledChannels?.email ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.email,
-    assistant_call: raw?.enabledChannels?.assistant_call ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.assistant_call,
+    whatsapp: rawEnabled.whatsapp ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.whatsapp,
+    sms: rawEnabled.sms ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.sms,
+    email: rawEnabled.email ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.email,
+    assistant_call: rawEnabled.assistant_call ?? rawEnabled.call ?? DEFAULT_NOTIFICATION_POLICY.enabledChannels.assistant_call,
   }
 
   const clampInt = (val: unknown, fallback: number, min: number, max: number) => {
@@ -370,5 +372,83 @@ export async function setNotificationPolicy(patch: Partial<NotificationPolicy>, 
     },
   })
   await setSetting(NOTIFICATION_POLICY_KEY, JSON.stringify(merged), explicitClinicId)
+  return merged
+}
+
+// ── Clinic General Working Hours (Genel Mesai Saatleri) ─────────────────────
+export interface ClinicWorkingHours {
+  startTime: string // e.g. "08:00"
+  endTime: string   // e.g. "20:00" or "02:00" (gece 02:00) or "24:00"
+  isOvernight: boolean
+  slotStartHour: number // e.g. 8
+  slotEndHour: number   // e.g. 20, or 26 when endTime is "02:00" overnight
+}
+
+export const DEFAULT_CLINIC_WORKING_HOURS: ClinicWorkingHours = {
+  startTime: '08:00',
+  endTime: '20:00',
+  isOvernight: false,
+  slotStartHour: 8,
+  slotEndHour: 20,
+}
+
+const CLINIC_WORKING_HOURS_KEY = 'clinic.working_hours'
+
+function normalizeClinicWorkingHours(raw: Partial<ClinicWorkingHours> | null | undefined): ClinicWorkingHours {
+  const timePattern = /^([01]\d|2[0-4]):[0-5]\d$/
+  const startTime = typeof raw?.startTime === 'string' && timePattern.test(raw.startTime) && raw.startTime !== '24:00'
+    ? raw.startTime
+    : DEFAULT_CLINIC_WORKING_HOURS.startTime
+  const endTime = typeof raw?.endTime === 'string' && timePattern.test(raw.endTime)
+    ? raw.endTime
+    : DEFAULT_CLINIC_WORKING_HOURS.endTime
+
+  const startH = parseInt(startTime.slice(0, 2), 10) || 0
+  const endH = parseInt(endTime.slice(0, 2), 10) || 0
+  const endM = parseInt(endTime.slice(3, 5), 10) || 0
+  const endCeilH = endM > 0 ? endH + 1 : endH
+
+  const slotStartHour = Math.max(0, Math.min(23, startH))
+  let slotEndHour = 20
+  let isOvernight = false
+
+  if (endTime === '24:00' || endTime === '00:00') {
+    slotEndHour = 24
+    isOvernight = false
+  } else if (endH <= startH) {
+    // Overnight working hours (e.g. Sabah 08:00 -> Gece 02:00)
+    isOvernight = true
+    slotEndHour = Math.min(32, 24 + Math.max(1, endCeilH))
+  } else {
+    isOvernight = false
+    slotEndHour = Math.max(slotStartHour + 1, Math.min(24, endCeilH))
+  }
+
+  return {
+    startTime,
+    endTime,
+    isOvernight,
+    slotStartHour,
+    slotEndHour,
+  }
+}
+
+export async function getClinicWorkingHours(explicitClinicId?: string): Promise<ClinicWorkingHours> {
+  try {
+    const raw = await getSetting(CLINIC_WORKING_HOURS_KEY, explicitClinicId)
+    if (!raw) return { ...DEFAULT_CLINIC_WORKING_HOURS }
+    return normalizeClinicWorkingHours(JSON.parse(raw))
+  } catch {
+    return { ...DEFAULT_CLINIC_WORKING_HOURS }
+  }
+}
+
+export async function setClinicWorkingHours(patch: Partial<ClinicWorkingHours>, explicitClinicId?: string): Promise<ClinicWorkingHours> {
+  const current = await getClinicWorkingHours(explicitClinicId)
+  const merged = normalizeClinicWorkingHours({
+    ...current,
+    ...patch,
+  })
+  await setSetting(CLINIC_WORKING_HOURS_KEY, JSON.stringify(merged), explicitClinicId)
   return merged
 }
