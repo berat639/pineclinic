@@ -115,7 +115,6 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
         <div className="reference-modal-body">
           <section className="reference-modal-section">
             <div className="reference-section-title">
-              <span>1</span>
               <h4>Hasta Bilgileri</h4>
             </div>
             <div className="reference-modal-fields">

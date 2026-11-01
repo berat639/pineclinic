@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { toast } from 'react-hot-toast'
+import { CalendarOff } from 'lucide-react'
 
 interface ShiftContextMenuProps {
   x: number
@@ -124,7 +125,7 @@ export default function ShiftContextMenu({ x, y, doctorId, date, users, onClose,
               cursor: 'pointer'
             }}
           >
-            <span>🏖️</span> İzinli Yap / Saat Kapat
+            <CalendarOff size={13} /> İzinli Yap / Saat Kapat
           </button>
         </div>
       )}

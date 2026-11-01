@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
-import { Plus, X, Search, Filter, Calendar, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight, Pencil, Trash2, FolderKanban, ChevronDown, ChevronUp, ArrowUpRight } from 'lucide-react'
+import { Plus, X, Search, Filter, Calendar, CalendarOff, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight, Pencil, Trash2, FolderKanban, ChevronDown, ChevronUp, ArrowUpRight } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DoctorLeaveModal, { DoctorLeaveItem } from './DoctorLeaveModal'
 import DentalCalendar from './DentalCalendar'
@@ -1510,23 +1510,50 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
 
         {/* Takvimlerim (Doctor Filter) */}
         <div style={{ marginTop: 8, position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--foreground)' }}>Hekimlerim</h4>
-            {hasDoctors && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Hekimlerim</h4>
+            <span title={hasDoctors ? undefined : noDoctorsTooltip} style={{ display: 'inline-flex' }}>
               <button
+                type="button"
+                onClick={() => hasDoctors && setLeaveModalState({ isOpen: true, date: currentDate })}
+                disabled={!hasDoctors}
+                title={hasDoctors ? 'Hekimlerin izinli veya kapalı olduğu saatleri yönetin' : undefined}
+                className="btn-clinic-blue"
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: 7,
+                  fontSize: '0.73rem',
+                  fontWeight: 700,
+                  cursor: hasDoctors ? 'pointer' : 'not-allowed',
+                  opacity: hasDoctors ? 1 : 0.6,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <CalendarOff size={13} />
+                <span>İzin / Kapalı Saat</span>
+              </button>
+            </span>
+          </div>
+          {hasDoctors && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button
+                type="button"
                 onClick={() => {
                   if (selectedDoctorIds.length === doctors.length) {
-                    setSelectedDoctorIds([]) // clear all
+                    setSelectedDoctorIds([])
                   } else {
-                    setSelectedDoctorIds(doctors.map(d => d.id)) // select all
+                    setSelectedDoctorIds(doctors.map(d => d.id))
                   }
                 }}
-                style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', color: 'var(--brand)', cursor: 'pointer', fontWeight: 500 }}
+                style={{ background: 'transparent', border: 'none', fontSize: '0.73rem', color: 'var(--brand)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
               >
                 {selectedDoctorIds.length === doctors.length ? 'Temizle' : 'Tümünü Seç'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {!hasDoctors && onNavigateToClinicStaff && (
               <div style={{ padding: 12, border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--card-inner)', display: 'grid', gap: 8 }}>
@@ -1674,29 +1701,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
               >
                 <Plus size={16} /> Yeni Hasta Ekle
               </button>
-              <span title={hasDoctors ? undefined : noDoctorsTooltip} style={{ display: 'inline-flex' }}>
-                <button
-                  onClick={() => hasDoctors && setLeaveModalState({ isOpen: true, date: currentDate })}
-                  className="btn-clinic-blue"
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 8,
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    cursor: hasDoctors ? 'pointer' : 'not-allowed',
-                    opacity: hasDoctors ? 1 : 0.65,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0
-                  }}
-                  disabled={!hasDoctors}
-                  title={hasDoctors ? 'Hekimlerin izinli veya kapalı olduğu saatleri yönetin' : undefined}
-                >
-                  🏖️ İzin / Kapalı Saat Ekle
-                </button>
-              </span>
             </div>
           </div>
         </div>

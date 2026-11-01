@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { toast } from 'react-hot-toast'
 import { CalendarOff, X, Trash2 } from 'lucide-react'
+import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 export interface DoctorLeaveItem {
   id: string
@@ -36,7 +37,7 @@ const PRESET_REASONS = [
   'Seminer / Eğitim',
   'Mola / Dinlenme',
   'Hastalık / Rapor',
-  'Kişisel İzin'
+  'Kişisel İzin',
 ]
 
 export default function DoctorLeaveModal({
@@ -48,8 +49,9 @@ export default function DoctorLeaveModal({
   initialStartTime,
   initialEndTime,
   onSaved,
-  onSuccess
+  onSuccess,
 }: DoctorLeaveModalProps) {
+  const backdropDismiss = useBackdropDismiss(onClose)
   const [selectedDoctorId, setSelectedDoctorId] = useState(initialDoctorId || '')
   const [date, setDate] = useState(initialDate || new Date().toISOString().slice(0, 10))
   const [isFullDay, setIsFullDay] = useState(false)
@@ -60,12 +62,11 @@ export default function DoctorLeaveModal({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Existing leaves for doctor on this date
   const [existingLeaves, setExistingLeaves] = useState<DoctorLeaveItem[]>([])
   const [loadingLeaves, setLoadingLeaves] = useState(false)
 
   useEffect(() => {
-    if (initialDoctorId) setSelectedDoctorId(initialDoctorId)
+    if (initialDoctorId !== undefined) setSelectedDoctorId(initialDoctorId || '')
     if (initialDate) setDate(initialDate)
     if (initialStartTime) setStartTime(initialStartTime)
     if (initialEndTime) setEndTime(initialEndTime)
@@ -98,8 +99,8 @@ export default function DoctorLeaveModal({
 
   if (!isOpen) return null
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
     if (!selectedDoctorId) {
       toast.error('Lütfen bir hekim seçin')
       return
@@ -131,8 +132,8 @@ export default function DoctorLeaveModal({
           endTime: finalEndTime,
           isFullDay,
           reason: finalReason || null,
-          notes: notes.trim() || null
-        })
+          notes: notes.trim() || null,
+        }),
       })
 
       if (res.ok) {
@@ -140,12 +141,12 @@ export default function DoctorLeaveModal({
         if (onSaved) onSaved()
         if (onSuccess) onSuccess()
         fetchLeaves()
-        // Reset time/reason
         setReason('Yıllık İzin')
         setCustomReason('')
         setNotes('')
+        onClose()
       } else {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         toast.error('Hata: ' + (err.error || 'İzin kaydedilemedi'))
       }
     } catch (e) {
@@ -159,372 +160,488 @@ export default function DoctorLeaveModal({
   const handleDeleteLeave = async (leaveId: string) => {
     try {
       const res = await fetch(`/api/dental/doctors/leaves/${leaveId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
       })
       if (res.ok) {
         toast.success('İzin silindi, saatler yeniden açıldı')
-        setExistingLeaves(prev => prev.filter(l => l.id !== leaveId))
+        setExistingLeaves((prev) => prev.filter((l) => l.id !== leaveId))
         if (onSaved) onSaved()
         if (onSuccess) onSuccess()
       } else {
         toast.error('İzin silinemedi')
       }
-    } catch (e) {
+    } catch {
       toast.error('İzin silinirken hata oluştu')
     }
   }
 
+  const cardBg = 'var(--card-bg)'
+  const subCardBg = 'var(--card-inner, var(--background-2))'
+  const borderCol = 'var(--input-border)'
+  const textCol = 'var(--foreground)'
+  const labelCol = 'var(--foreground-2)'
+  const mutedCol = 'var(--foreground-3)'
+  const inputBg = 'var(--input-bg)'
+  const brandBlue = '#2563eb'
+
+  const inputStyle: React.CSSProperties = {
+    padding: '9px 12px',
+    borderRadius: '8px',
+    border: `1px solid ${borderCol}`,
+    background: inputBg,
+    color: textCol,
+    fontSize: '0.85rem',
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box',
+  }
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.75rem',
+    color: labelCol,
+    marginBottom: 4,
+    display: 'block',
+    fontWeight: 600,
+  }
+
+  const selectOptionStyle: React.CSSProperties = {
+    background: cardBg,
+    color: textCol,
+  }
+
   return (
-    <div
-      className="reference-modal-overlay"
-      onClick={onClose}
-    >
+    <>
       <div
-        className="reference-modal reference-modal--leave"
-        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 100020,
+          background: 'rgba(15, 23, 42, 0.6)',
+        }}
+        {...backdropDismiss}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Hekim İzni ve Kapalı Saat"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'fixed',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 'calc(100vw - 24px)',
+          maxWidth: '430px',
+          background: cardBg,
+          border: `1px solid ${borderCol}`,
+          borderRadius: '14px',
+          boxShadow:
+            '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4)',
+          zIndex: 100021,
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '90vh',
+          overflow: 'hidden',
+        }}
       >
-        {/* Header */}
-        <div className="reference-modal-header">
-          <div className="reference-modal-heading">
-            <span className="reference-modal-icon"><CalendarOff size={26} /></span>
+        {/* Header (Yeni Randevu Boyutunda & Stilinde) */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '15px 20px',
+            borderBottom: `1px solid ${borderCol}`,
+            background: subCardBg,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: brandBlue,
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <CalendarOff size={17} color="#ffffff" />
+            </div>
             <div>
-              <h3>Hekim İzni & Saat Kapatma</h3>
-              <p>İzinli saatler randevuya kapatılır</p>
+              <div
+                style={{
+                  fontSize: '1.02rem',
+                  fontWeight: 700,
+                  color: textCol,
+                  lineHeight: 1.2,
+                }}
+              >
+                İzin / Kapalı Saat Ekle
+              </div>
+              <div
+                style={{
+                  fontSize: '0.75rem',
+                  color: mutedCol,
+                  marginTop: '2px',
+                }}
+              >
+                Tarih: {date}
+              </div>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="reference-modal-close"
-            aria-label="Modalı kapat"
+            aria-label="Kapat"
+            style={{
+              background: inputBg,
+              border: `1px solid ${borderCol}`,
+              borderRadius: '6px',
+              width: '28px',
+              height: '28px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: textCol,
+            }}
           >
-            <X size={24} />
+            <X size={16} />
           </button>
         </div>
 
-        <div className="reference-modal-body">
-          <section className="reference-modal-section">
-            <div className="reference-section-title">
-              <span>1</span>
-              <h4>İzin Bilgileri</h4>
-            </div>
-            {/* Form */}
-            <form onSubmit={handleSave} className="reference-modal-fields">
-          {/* Doctor selection */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
-              Hekim (Zorunlu)
-            </label>
-            <select
-              value={selectedDoctorId}
-              onChange={e => setSelectedDoctorId(e.target.value)}
-              required
+        {/* Mode Switcher: Saat Aralığı Kapat | Tüm Gün İzinli */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            padding: '12px 20px',
+            borderBottom: `1px solid ${borderCol}`,
+            background: subCardBg,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setIsFullDay(false)}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '0.83rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: !isFullDay
+                ? `1px solid ${brandBlue}`
+                : `1px solid ${borderCol}`,
+              background: !isFullDay ? brandBlue : cardBg,
+              color: !isFullDay ? '#ffffff' : textCol,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Saat Aralığı Kapat
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsFullDay(true)}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '0.83rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: isFullDay
+                ? `1px solid ${brandBlue}`
+                : `1px solid ${borderCol}`,
+              background: isFullDay ? brandBlue : cardBg,
+              color: isFullDay ? '#ffffff' : textCol,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Tüm Gün İzinli
+          </button>
+        </div>
+
+        {/* Body */}
+        <div
+          style={{
+            padding: '18px 20px',
+            flex: 1,
+            overflowY: 'auto',
+            background: cardBg,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+          }}
+        >
+          <div
+            style={{
+              background: subCardBg,
+              padding: '14px',
+              borderRadius: '10px',
+              border: `1px solid ${borderCol}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div
               style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--input-border, #334155)',
-                background: 'var(--input-bg, #0f172a)',
-                color: 'var(--foreground, #ffffff)',
-                fontSize: '0.85rem',
-                outline: 'none',
-                boxSizing: 'border-box'
+                fontSize: '0.86rem',
+                fontWeight: 700,
+                color: textCol,
               }}
             >
-              <option value="">Hekim Seçiniz...</option>
-              {doctors.map(d => (
-                <option key={d.id} value={d.id}>
-                  {d.name} {d.specialty ? `(${d.specialty})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+              İzin Bilgileri
+            </div>
 
-          {/* Date and Full Day toggle */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
+            {/* Hekim */}
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
-                Tarih
+              <label style={labelStyle}>
+                Hekim <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <input
-                type="date"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--input-border, #334155)',
-                  background: 'var(--input-bg, #0f172a)',
-                  color: 'var(--foreground, #ffffff)',
-                  fontSize: '0.85rem',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-
-            <div style={{ paddingBottom: 6 }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: '0.82rem',
-                  color: 'var(--foreground, #e2e8f0)',
-                  cursor: 'pointer',
-                  fontWeight: 500
-                }}
+              <select
+                value={selectedDoctorId}
+                onChange={(e) => setSelectedDoctorId(e.target.value)}
+                style={inputStyle}
               >
-                <input
-                  type="checkbox"
-                  checked={isFullDay}
-                  onChange={e => setIsFullDay(e.target.checked)}
-                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--btn-clinic-primary-bg)' }}
-                />
-                Tüm Gün İzinli
-              </label>
+                <option value="" style={selectOptionStyle}>
+                  Hekim Seçiniz...
+                </option>
+                {doctors.map((d) => (
+                  <option key={d.id} value={d.id} style={selectOptionStyle}>
+                    {d.name} {d.specialty ? `(${d.specialty})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {/* Time range (if not full day) */}
-          {!isFullDay && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* Tarih & İzin Nedeni */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '10px',
+              }}
+            >
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
-                  Başlangıç Saati
-                </label>
+                <label style={labelStyle}>Tarih</label>
                 <input
-                  type="time"
-                  value={startTime}
-                  onChange={e => setStartTime(e.target.value)}
-                  required={!isFullDay}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: 8,
-                    border: '1px solid var(--input-border, #334155)',
-                    background: 'var(--input-bg, #0f172a)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.85rem',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  style={inputStyle}
                 />
               </div>
-
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
-                  Bitiş Saati
-                </label>
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={e => setEndTime(e.target.value)}
-                  required={!isFullDay}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: 8,
-                    border: '1px solid var(--input-border, #334155)',
-                    background: 'var(--input-bg, #0f172a)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.85rem',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Reason */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 6 }}>
-              İzin Nedeni
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-              {PRESET_REASONS.map(r => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setReason(r)}
-                  className={reason === r ? 'btn-clinic-primary' : 'btn-clinic-blue'}
-                  style={{
-                    padding: '5px 12px',
-                    borderRadius: 6,
-                    fontSize: '0.76rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
+                <label style={labelStyle}>İzin Nedeni</label>
+                <select
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  style={inputStyle}
                 >
-                  {r}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setReason('Diğer')}
-                className={reason === 'Diğer' ? 'btn-clinic-primary' : 'btn-clinic-blue'}
+                  {PRESET_REASONS.map((r) => (
+                    <option key={r} value={r} style={selectOptionStyle}>
+                      {r}
+                    </option>
+                  ))}
+                  <option value="Diğer" style={selectOptionStyle}>
+                    Diğer (Özel)
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            {/* Saat Aralığı (Tüm gün değilse) */}
+            {!isFullDay && (
+              <div
                 style={{
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  fontSize: '0.76rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '10px',
                 }}
               >
-                Diğer (Özel)
-              </button>
-            </div>
+                <div>
+                  <label style={labelStyle}>Başlangıç Saati</label>
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Bitiş Saati</label>
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            )}
 
             {reason === 'Diğer' && (
+              <div>
+                <label style={labelStyle}>Özel İzin Nedeni</label>
+                <input
+                  type="text"
+                  placeholder="Özel izin nedeni giriniz..."
+                  value={customReason}
+                  onChange={(e) => setCustomReason(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            )}
+
+            {/* Kısa Not */}
+            <div>
+              <label style={labelStyle}>Not (İsteğe Bağlı)</label>
               <input
                 type="text"
-                placeholder="Özel izin nedeni giriniz..."
-                value={customReason}
-                onChange={e => setCustomReason(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--input-border, #334155)',
-                  background: 'var(--input-bg, #0f172a)',
-                  color: 'var(--foreground, #ffffff)',
-                  fontSize: '0.85rem',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
+                placeholder="Örn: Yerine Dr. Ayşe bakacak..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                style={inputStyle}
               />
-            )}
+            </div>
           </div>
 
-          {/* Notes */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2, #cbd5e1)', marginBottom: 4 }}>
-              Ek Not (İsteğe Bağlı)
-            </label>
-            <input
-              type="text"
-              placeholder="Örn: Yerine Dr. Ayşe bakacak..."
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
+          {/* Seçili Hekimin Mevcut İzinleri */}
+          {selectedDoctorId && existingLeaves.length > 0 && (
+            <div
               style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--input-border, #334155)',
-                background: 'var(--input-bg, #0f172a)',
-                color: 'var(--foreground, #ffffff)',
-                fontSize: '0.85rem',
-                outline: 'none',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          {/* Action buttons */}
-          <div className="reference-modal-footer reference-modal-footer--inside">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-clinic-blue"
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                cursor: 'pointer'
+                background: subCardBg,
+                padding: '12px 14px',
+                borderRadius: '10px',
+                border: `1px solid ${borderCol}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
               }}
             >
-              Vazgeç
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="btn-clinic-primary"
-              style={{
-                padding: '8px 20px',
-                borderRadius: 8,
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {saving ? 'Kaydediliyor...' : 'İzni Kaydet & Saatleri Kapat'}
-            </button>
-          </div>
-            </form>
-          </section>
-
-        {/* Existing leaves section */}
-        {selectedDoctorId && (
-          <section className="reference-modal-section reference-leave-history">
-            <h4 style={{ margin: '0 0 10px 0', fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground, #e2e8f0)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>📋</span> Bu Hekimin Kayıtlı İzinleri ({existingLeaves.length})
-            </h4>
-
-            {loadingLeaves ? (
-              <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3, #94a3b8)' }}>Yükleniyor...</div>
-            ) : existingLeaves.length === 0 ? (
-              <div style={{ fontSize: '0.78rem', color: 'var(--foreground-3, #64748b)' }}>Kayıtlı aktif izin bulunmuyor.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
-                {existingLeaves.map(l => (
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  color: textCol,
+                }}
+              >
+                Kayıtlı İzinler ({existingLeaves.length})
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  maxHeight: '130px',
+                  overflowY: 'auto',
+                }}
+              >
+                {existingLeaves.map((l) => (
                   <div
                     key={l.id}
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      padding: '8px 12px',
-                      background: 'var(--card-inner, #0f172a)',
-                      borderRadius: 8,
-                      border: '1px solid var(--input-border, #334155)',
-                      fontSize: '0.8rem'
+                      padding: '8px 10px',
+                      background: inputBg,
+                      borderRadius: '8px',
+                      border: `1px solid ${borderCol}`,
+                      fontSize: '0.76rem',
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 600, color: 'var(--danger, #f87171)' }}>
-                        📅 {l.date} &nbsp;|&nbsp; ⏰ {l.isFullDay ? 'Tüm Gün' : `${l.startTime} - ${l.endTime}`}
+                      <div style={{ fontWeight: 700, color: textCol }}>
+                        {l.date} · {l.isFullDay ? 'Tüm Gün' : `${l.startTime}–${l.endTime}`}
                       </div>
                       {l.reason && (
-                        <div style={{ fontSize: '0.72rem', color: 'var(--foreground-2, #94a3b8)', marginTop: 2 }}>
-                          {l.reason} {l.notes ? `(${l.notes})` : ''}
+                        <div style={{ fontSize: '0.7rem', color: mutedCol }}>
+                          {l.reason}
+                          {l.notes ? ` (${l.notes})` : ''}
                         </div>
                       )}
                     </div>
                     <button
                       type="button"
                       onClick={() => handleDeleteLeave(l.id)}
-                      title="İzni Sil / Saati Aç"
                       style={{
                         padding: '4px 8px',
-                        background: 'var(--card-inner, #334155)',
+                        background: cardBg,
                         border: '1px solid var(--danger, #ef4444)',
-                        borderRadius: 6,
-                        color: 'var(--danger, #f87171)',
+                        borderRadius: '6px',
+                        color: 'var(--danger, #ef4444)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 4,
-                        fontSize: '0.72rem',
-                        fontWeight: 600
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
                       }}
                     >
-                      <Trash2 size={12} /> Saati Aç
+                      <Trash2 size={12} /> Aç
                     </button>
                   </div>
                 ))}
               </div>
-            )}
-          </section>
-        )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: '14px 20px',
+            borderTop: `1px solid ${borderCol}`,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px',
+            background: subCardBg,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: `1px solid ${borderCol}`,
+              background: cardBg,
+              color: textCol,
+              cursor: 'pointer',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+            }}
+          >
+            İptal
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSave()}
+            disabled={saving || !selectedDoctorId}
+            style={{
+              padding: '9px 24px',
+              borderRadius: '8px',
+              background: brandBlue,
+              color: '#ffffff',
+              border: 'none',
+              cursor: saving || !selectedDoctorId ? 'not-allowed' : 'pointer',
+              fontWeight: 700,
+              fontSize: '0.86rem',
+              opacity: saving || !selectedDoctorId ? 0.5 : 1,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {saving ? 'Kaydediliyor...' : 'Kaydet'}
+          </button>
         </div>
       </div>
-    </div>
+    </>
   )
 }

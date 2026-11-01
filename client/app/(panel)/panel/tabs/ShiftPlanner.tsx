@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactN
 import { DayPicker } from 'react-day-picker'
 import 'react-day-picker/dist/style.css'
 import { tr } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Clock, Plus, RotateCcw, Search, Umbrella, Users } from 'lucide-react'
+import { CalendarOff, ChevronLeft, ChevronRight, Clock, Plus, RotateCcw, Search, Users } from 'lucide-react'
 
 type Staff = { id: string; name: string; role: string; active: boolean; color?: string }
 type Shift = { id: string; userId: string; userName: string; userColor?: string; date: string; startTime: string; endTime: string; shiftType: string }
@@ -247,7 +247,7 @@ export default function ShiftPlanner({ users, shifts, onChanged, onOpenLeave }: 
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {lastOperation && <button onClick={undo} style={{ ...secondaryButton, color: 'var(--accent)' }}><RotateCcw size={16} /> Son eklemeyi geri al ({lastOperation.count})</button>}
-        <button onClick={() => onOpenLeave('', selectedDate)} style={secondaryButton}><Umbrella size={17} /> İzin Ekle</button>
+        <button onClick={() => onOpenLeave('', selectedDate)} style={{ ...secondaryButton, display: 'inline-flex', alignItems: 'center', gap: 6 }}><CalendarOff size={16} /> İzin / Kapalı Saat Ekle</button>
         <button onClick={() => setEditor({ userIds: [], date: selectedDate })} style={{ minHeight: 40, padding: '0 14px', borderRadius: 8, border: '1px solid var(--accent)', background: 'var(--accent)', color: 'var(--btn-clinic-primary-fg)', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center' }}><Plus size={17} /> Mesai Ekle</button>
       </div>
     </div>
