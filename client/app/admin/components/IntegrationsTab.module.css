@@ -260,7 +260,11 @@
 .logoActions { flex: 1; }
 
 .uploadButton,
-.saveButton {
+.saveButton,
+.page .uploadButton,
+.page .saveButton,
+:global([data-theme='light']) .page .uploadButton,
+:global([data-theme='light']) .page .saveButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -274,6 +278,15 @@
   font-family: inherit;
   font-size: 13px;
   font-weight: 650;
+}
+
+.uploadButton *,
+.saveButton *,
+.page .uploadButton *,
+.page .saveButton *,
+:global([data-theme='light']) .page .uploadButton *,
+:global([data-theme='light']) .page .saveButton * {
+  color: #ffffff !important;
 }
 
 .uploadButton:hover,

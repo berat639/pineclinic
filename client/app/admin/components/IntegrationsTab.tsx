@@ -382,8 +382,13 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
             )}
           </div>
           <div className={styles.logoActions}>
-            <label className={styles.uploadButton}>
-              {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
+            <label
+              className={styles.uploadButton}
+              style={{ background: '#2563eb', color: '#ffffff' }}
+            >
+              <span style={{ color: '#ffffff' }}>
+                {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
+              </span>
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoUpload} disabled={uploadingLogo} />
             </label>
             <p className={styles.helperText}>

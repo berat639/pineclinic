@@ -770,7 +770,13 @@ button[class*="primary"] *,
 [data-theme="light"] .admin-content [style*="background: var(--accent"],
 [data-theme="light"] .admin-content [style*="background: var(--accent"] *,
 [data-theme="light"] .admin-content [style*="background: var(--brand"],
-[data-theme="light"] .admin-content [style*="background: var(--brand"] * {
+[data-theme="light"] .admin-content [style*="background: var(--brand"] *,
+[data-theme="light"] .admin-content [class*="uploadButton"],
+[data-theme="light"] .admin-content [class*="uploadButton"] *,
+[data-theme="light"] .admin-content [class*="saveButton"]:not(:disabled),
+[data-theme="light"] .admin-content [class*="saveButton"]:not(:disabled) *,
+[data-theme="light"] .admin-content [class*="quickFixButton"],
+[data-theme="light"] .admin-content [class*="quickFixButton"] * {
   color: #ffffff !important;
 }
 
