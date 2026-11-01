@@ -443,6 +443,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
 
   // Fast Schedule Treatment State
   const [fastScheduleTreatment, setFastScheduleTreatment] = useState<any>(null)
+  const [calendarPickState, setCalendarPickState] = useState<{ treatment: any; event: any; patient: any } | null>(null)
   const [fsDate, setFsDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10);
   })
@@ -1669,6 +1670,89 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           </div>
         )}
 
+        {calendarPickState && (
+          <div
+            style={{
+              margin: '0 0 10px 0',
+              padding: '10px 14px',
+              borderRadius: 10,
+              background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+              border: '1.5px solid var(--accent, #2563eb)',
+              boxShadow: 'var(--pc-clay-pale)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 700, color: 'var(--foreground)' }}>
+              <span
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                  color: '#ffffff',
+                  fontSize: '0.7rem',
+                  fontWeight: 800,
+                }}
+              >
+                📌 Takvimden Seçim Modu
+              </span>
+              <span>
+                <strong>
+                  {calendarPickState.treatment?.toothNumber ? `#${calendarPickState.treatment.toothNumber} · ` : ''}
+                  {calendarPickState.treatment?.procedureName}
+                </strong>{' '}
+                için takvimde istediğiniz hekimin boş saat hücresine çift tıklayın veya sürükleyin.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEvent(calendarPickState.event)
+                  if (calendarPickState.patient) setPatientInfo(calendarPickState.patient)
+                  setFastScheduleTreatment(calendarPickState.treatment)
+                  setCalendarPickState(null)
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 7,
+                  border: '1px solid #1d4ed8',
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                  color: '#ffffff',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>Planlama Penceresine Dön</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEvent(calendarPickState.event)
+                  setCalendarPickState(null)
+                  window.dispatchEvent(new Event('clear-calendar-draft'))
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 7,
+                  border: '1px solid var(--input-border, #cbd5e1)',
+                  background: 'var(--card-bg, #ffffff)',
+                  color: 'var(--foreground-2)',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        )}
+
         <DentalCalendar
           doctors={doctors.filter(d => selectedDoctorIds.includes(d.id))}
           events={filteredEvents.filter(ev => !ev.doctorId || selectedDoctorIds.includes(ev.doctorId))}
@@ -1694,6 +1778,21 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           }}
           onEmptySlotSelect={(start, end, doctorId, x, y) => {
             if (!hasDoctors) return
+            if (calendarPickState) {
+              const pickedDate = start.slice(0, 10)
+              const pickedTime = start.slice(11, 16)
+              setSelectedEvent(calendarPickState.event)
+              if (calendarPickState.patient) setPatientInfo(calendarPickState.patient)
+              setFastScheduleTreatment({
+                ...calendarPickState.treatment,
+                prefillDate: pickedDate,
+                prefillTime: pickedTime,
+                prefillDoctorIds: doctorId ? [doctorId] : undefined,
+              })
+              setCalendarPickState(null)
+              window.dispatchEvent(new Event('clear-calendar-draft'))
+              return
+            }
             setQuickCreateMenu({ start, end, doctorId, x, y })
           }}
           onEventUpdate={async (updatedEvent, options) => {
@@ -3134,7 +3233,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             </div>
           </>
         )}
-        {/* Hızlı Randevu / Tarih Atama Modalı (Modern DayPicker & Interaktif Saat Seçici) */}
+        {/* Hızlı Randevu / Tarih Atama Modalı (Modern DayPicker & Seçilen Hekim Günlük Takvim Görünümü) */}
         {fastScheduleTreatment && selectedEvent && (
           <FastScheduleModal
             treatment={fastScheduleTreatment}
@@ -3143,6 +3242,25 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             doctors={doctors}
             shifts={shifts}
             existingEvents={events}
+            doctorLeaves={doctorLeaves}
+            workingHours={workingHours}
+            onPickOnMainCalendar={(targetDateStr, docIds) => {
+              const activePatient = patientInfo || patientProfileData?.patient || { name: selectedEvent.title?.split(' - ')[0] }
+              const activeEvent = selectedEvent.patientId ? selectedEvent : { ...selectedEvent, patientId: patientInfo?.id || selectedEvent.patientId || null }
+              setCalendarPickState({
+                treatment: fastScheduleTreatment,
+                event: activeEvent,
+                patient: activePatient,
+              })
+              if (targetDateStr) setCurrentDate(targetDateStr)
+              if (Array.isArray(docIds) && docIds.length > 0) {
+                setSelectedDoctorIds(prev => Array.from(new Set([...prev, ...docIds])))
+              }
+              setFastScheduleTreatment(null)
+              setSelectedEvent(null)
+              setPatientPanelOpen(false)
+              toast('📌 Takvimden uygun hekim sütunu ve boş saate çift tıklayın veya sürükleyin.', { icon: '📅' })
+            }}
             onClose={() => setFastScheduleTreatment(null)}
             onSuccess={(targetAppt, targetDate) => {
               setFastScheduleTreatment(null);
