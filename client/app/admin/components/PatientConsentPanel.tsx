@@ -263,10 +263,10 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
         type="button"
         className={`${styles.button} ${periodic ? styles.pale : ''} ${styles.consentReminderBtn}`}
         onClick={onOpenReminder}
-        title="Periyodik kontrol hatırlatması ayarla"
+        title="Tedavi hatırlatma bildirimlerini ayarla"
       >
         <Bell size={14} />
-        <span>{periodic ? `Hatırlatma · ${periodDays} gün` : 'Hatırlatma'}</span>
+        <span>{periodic ? `Tedavi hatırlatma bildirimleri · ${periodDays} gün` : 'Tedavi hatırlatma bildirimleri'}</span>
       </button>
     )}
     <div className={styles.consentTitle}><ShieldCheck size={15} /><strong>{allowed.length ? 'Bildirim yöntemi' : 'Bildirim onamı'}</strong>

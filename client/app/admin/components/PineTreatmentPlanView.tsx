@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react'
-import { CalendarDays, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, Trash2, X } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Bell, CalendarDays, ChevronDown, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import PlanDialog from './PlanDialog'
 import InlineCatalogForm, { type CreatedCatalogEntry, type EditingCatalogItem } from './InlineCatalogForm'
@@ -22,6 +22,36 @@ function IndicationIcon() {
 export default function PineTreatmentPlanView(p: any) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [reminderOpen, setReminderOpen] = useState(false)
+  const [consentDropdownOpen, setConsentDropdownOpen] = useState(false)
+  const patientDropdownRef = useRef<HTMLDivElement>(null)
+  const reminderDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!reminderOpen && !consentDropdownOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target) return
+      if (target.closest(`.${styles.dialogOverlay}`)) return
+      if (consentDropdownOpen && patientDropdownRef.current && !patientDropdownRef.current.contains(target)) {
+        setConsentDropdownOpen(false)
+      }
+      if (reminderOpen && reminderDropdownRef.current && !reminderDropdownRef.current.contains(target)) {
+        setReminderOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setConsentDropdownOpen(false)
+        setReminderOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [reminderOpen, consentDropdownOpen])
   const [procedureId, setProcedureId] = useState('')
   const [indications, setIndications] = useState<string[]>([])
   const [procedureSearch, setProcedureSearch] = useState('')
@@ -147,8 +177,81 @@ export default function PineTreatmentPlanView(p: any) {
   return <div className={styles.overlay}><div role="dialog" aria-modal="true" aria-label="Tedavi planı" className={`treatment-plan-modal ${styles.modal}`}>
     <header className={styles.header}>
       <h1>{p.identity ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}</h1>
-      <div className={styles.patient}><div className={styles.avatar}>{initials}</div><div><strong>{patientName}</strong><span>{p.patient?.patientNumber ? `#${p.patient.patientNumber}` : 'Hasta kaydı'}</span></div></div>
-      <PatientConsentPanel patientId={p.event.patientId} compact selectedChannels={p.notificationChannels} onChannelsChange={p.setNotificationChannels} onContactChange={p.onContactChange} periodic={p.periodic} periodDays={p.periodDays} onOpenReminder={() => setReminderOpen(true)} />
+      <div className={styles.patient} ref={patientDropdownRef}>
+        <div className={styles.avatar}>{initials}</div>
+        <div className={styles.patientMeta}>
+          <strong>{patientName}</strong>
+          <button
+            type="button"
+            className={`${styles.patientBadgeBtn} ${consentDropdownOpen ? styles.patientBadgeBtnActive : ''}`}
+            aria-expanded={consentDropdownOpen}
+            onClick={() => {
+              setConsentDropdownOpen(prev => !prev)
+              setReminderOpen(false)
+            }}
+          >
+            <ShieldCheck size={11} />
+            <span>Bildirim ayarları</span>
+            <ChevronDown size={11} />
+          </button>
+        </div>
+        <div
+          className={`${styles.headerDropdown} ${styles.consentDropdown} ${consentDropdownOpen ? styles.headerDropdownOpen : ''}`}
+          role="region"
+          aria-label="Bildirim ayarları"
+        >
+          <PatientConsentPanel
+            patientId={p.event.patientId}
+            selectedChannels={p.notificationChannels}
+            onChannelsChange={p.setNotificationChannels}
+            onContactChange={p.onContactChange}
+          />
+        </div>
+      </div>
+      <div className={styles.reminderDropdownWrap} ref={reminderDropdownRef}>
+        <button
+          type="button"
+          className={`${styles.button} ${p.periodic || reminderOpen ? styles.pale : ''} ${styles.reminderTriggerBtn}`}
+          aria-expanded={reminderOpen}
+          onClick={() => {
+            setReminderOpen(prev => !prev)
+            setConsentDropdownOpen(false)
+          }}
+          title="Tedavi hatırlatma bildirimlerini ayarla"
+        >
+          <Bell size={14} />
+          <span>{p.periodic ? `Tedavi hatırlatma bildirimleri · ${p.periodDays} gün` : 'Tedavi hatırlatma bildirimleri'}</span>
+          <ChevronDown size={13} />
+        </button>
+        {reminderOpen && (
+          <div
+            className={`${styles.headerDropdown} ${styles.reminderDropdown} ${styles.headerDropdownOpen}`}
+            role="region"
+            aria-label="Tedavi hatırlatma bildirimleri"
+          >
+            <strong className={styles.dropdownTitle}>Tedavi hatırlatma bildirimleri</strong>
+            <p className={styles.dialogDescription}>Hatırlatmalar, hastanın izin verdiği ve bu planda seçtiğiniz kanallardan gönderilir.</p>
+            <label className={styles.inlineCheck}>
+              <input type="checkbox" checked={p.periodic} onChange={event => p.setPeriodic(event.target.checked)} />
+              <span>Periyodik kontrolü hatırlat</span>
+            </label>
+            <label htmlFor="reminder-days" className={styles.dropdownLabel}>Kontrol aralığı (gün)</label>
+            <input
+              id="reminder-days"
+              className={styles.input}
+              type="number"
+              min="1"
+              max="3650"
+              disabled={!p.periodic}
+              value={p.periodDays}
+              onChange={event => p.setPeriodDays(Number(event.target.value))}
+            />
+            <div className={styles.dropdownActions}>
+              <button type="button" className={`${styles.button} ${styles.small}`} onClick={() => setReminderOpen(false)}>Bitti</button>
+            </div>
+          </div>
+        )}
+      </div>
       <span className={styles.date}><CalendarDays size={15} />{new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
       <div className={styles.headerRight}>
         <button type="button" className={`${styles.button} ${styles.primary}`} onClick={p.toggleVoice} disabled={p.voiceStarting} aria-pressed={p.listening}>{p.listening ? <MicOff size={15} /> : <Mic size={15} />}{p.listening ? 'Dinlemeyi Durdur' : 'Sesli Komut ile Planla'}</button>
@@ -240,7 +343,6 @@ export default function PineTreatmentPlanView(p: any) {
     </main>
     <PlanToothTools {...p} openMaterials={setMaterialRow} />
     {historyOpen && <PlanHistoryDialog patientId={p.event.patientId} entries={p.consultations} onChange={p.setConsultations} onClose={() => setHistoryOpen(false)} />}
-    {reminderOpen && <PlanDialog title="Periyodik hatırlatma" onClose={() => setReminderOpen(false)}><p className={styles.dialogDescription}>Hatırlatmalar, hastanın izin verdiği ve bu planda seçtiğiniz kanallardan gönderilir.</p><label className={styles.inlineCheck}><input type="checkbox" checked={p.periodic} onChange={event => p.setPeriodic(event.target.checked)} />Periyodik kontrolü hatırlat</label><label htmlFor="reminder-days">Kontrol aralığı (gün)</label><input id="reminder-days" className={styles.input} type="number" min="1" max="3650" disabled={!p.periodic} value={p.periodDays} onChange={event => p.setPeriodDays(Number(event.target.value))} /><div className={styles.actions}><button type="button" className={styles.button} onClick={() => setReminderOpen(false)}>Bitti</button></div></PlanDialog>}
     {p.showClose && <div role="dialog" aria-modal="true" aria-labelledby="pine-unsaved" className={styles.dialogOverlay}><div className={styles.dialog}><h3 id="pine-unsaved">Kaydedilmemiş değişiklikler</h3><p>Planı kapatmadan önce değişikliklerinizi kaydedebilirsiniz.</p><div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} onClick={() => { p.setShowClose(false); p.save({ closeAfter: true, allowEmpty: true }) }}>Kaydet</button><button type="button" className={styles.button} onClick={p.discard}>Değişiklikleri bırak</button><button type="button" autoFocus className={styles.button} onClick={() => p.setShowClose(false)}>Devam et</button></div></div></div>}
     {materialRow && materialItem && <div role="dialog" aria-modal="true" aria-label="Satır malzemeleri" className={styles.dialogOverlay}><div className={styles.dialog}><h3>Satır malzemeleri · {materialItem.name}</h3>{materialItem.materials.map((item: any, index: number) => <div className={styles.materialLine} key={`${item.inventoryItemId}-${index}`}><span>{item.name}</span><input className={styles.input} style={{ width: 65 }} aria-label={`${item.name} miktarı`} disabled={materialItem.locked} type="number" min="1" value={item.quantity} onChange={event => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, quantity: Number(event.target.value) } : value) }))} /><input className={styles.input} style={{ width: 80 }} aria-label={`${item.name} satış fiyatı`} disabled={materialItem.locked} type="number" min="0" step="0.01" value={(item.unitSalePriceMinor || 0) / 100} onChange={event => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value) }))} /><button type="button" className={styles.button} disabled={materialItem.locked} onClick={() => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.filter((_: any, i: number) => i !== index) }))}>Kaldır</button></div>)}<label htmlFor="pine-row-material">Malzeme ekle</label><select id="pine-row-material" className={styles.select} disabled={materialItem.locked} value="" onChange={event => { const item = p.inventory.find((value: any) => value.id === event.target.value); if (item && !materialItem.materials.some((value: any) => value.inventoryItemId === item.id)) updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: [...row.materials, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit, unitSalePriceMinor: 0 }] })) }}><option value="">Malzeme seçin</option>{p.inventory.map((item: any) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><div className={styles.actions}><button type="button" className={styles.button} onClick={() => setMaterialRow(null)}>Kapat</button></div></div></div>}
   </div></div>
