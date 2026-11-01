@@ -3473,9 +3473,17 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
+                        firstName: data.firstName,
+                        lastName: data.lastName,
                         name: data.name,
                         phone: data.phone,
+                        tcIdentity: data.tcIdentity || data.tc || '',
                         email: data.email,
+                        gender: data.gender || '',
+                        birthDate: data.birthDate || '',
+                        smsOptOut: Boolean(data.smsOptOut),
+                        emailOptOut: Boolean(data.emailOptOut),
+                        whatsappOptOut: Boolean(data.whatsappOptOut),
                       })
                     });
                     if (!ptRes.ok) {
