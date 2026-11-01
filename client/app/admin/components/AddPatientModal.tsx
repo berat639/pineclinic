@@ -4,6 +4,7 @@ import { UserRoundPlus, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 import { PhoneMaskedInput } from '@/lib/phone-mask'
+import PatientConsentPanel from './PatientConsentPanel'
 
 interface AddPatientModalProps {
   isOpen: boolean
@@ -27,12 +28,14 @@ const initialPatientState = {
 
 export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatientModalProps) {
   const [newPatient, setNewPatient] = useState(initialPatientState)
+  const [createdPatientId, setCreatedPatientId] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const backdropDismiss = useBackdropDismiss(onClose)
 
   useEffect(() => {
     if (isOpen) {
       setNewPatient(initialPatientState)
+      setCreatedPatientId('')
       setLoading(false)
     }
   }, [isOpen])
@@ -49,6 +52,42 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
 
   if (!isOpen) return null
 
+  const ensurePatientSaved = async (): Promise<string | null> => {
+    const fullName = `${newPatient.firstName.trim()} ${newPatient.lastName.trim()}`.trim()
+    if (!fullName) {
+      toast.error('Onam formu göndermek için önce hasta adını ve soyadını girin.')
+      return null
+    }
+    if (createdPatientId) {
+      await fetch(`/api/dental/patients/${createdPatientId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newPatient,
+          name: fullName,
+        }),
+      }).catch(() => {})
+      return createdPatientId
+    }
+    const res = await fetch('/api/dental/patients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...newPatient,
+        name: fullName,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      toast.error('Hata: ' + (err.error || 'Hasta kaydedilemedi'))
+      return null
+    }
+    const data = await res.json()
+    setCreatedPatientId(data.id)
+    onSuccess?.(data)
+    return data.id
+  }
+
   const handleAddPatient = async () => {
     const fullName = `${newPatient.firstName.trim()} ${newPatient.lastName.trim()}`.trim()
     if (!fullName) {
@@ -58,8 +97,8 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
 
     setLoading(true)
     try {
-      const res = await fetch('/api/dental/patients', {
-        method: 'POST',
+      const res = await fetch(createdPatientId ? `/api/dental/patients/${createdPatientId}` : '/api/dental/patients', {
+        method: createdPatientId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newPatient,
@@ -71,6 +110,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
         const data = await res.json()
         toast.success('Hasta başarıyla eklendi!')
         setNewPatient(initialPatientState)
+        setCreatedPatientId('')
         onSuccess?.(data)
         onClose()
       } else {
@@ -274,46 +314,31 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             />
           </div>
 
-          <div
-            className="reference-consent-card"
-            style={{
-              padding: '12px',
-              borderRadius: 8,
-              border: '1px solid var(--divider, #334155)',
-              background: 'var(--background-2, #0f172a)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              marginTop: 4
-            }}
-          >
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>
-              İletişim İzinleri (KVKK)
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={!newPatient.smsOptOut}
-                onChange={(e) => setNewPatient({ ...newPatient, smsOptOut: !e.target.checked })}
-              />
-              SMS ile bilgilendirilmek istiyorum
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={!newPatient.emailOptOut}
-                onChange={(e) => setNewPatient({ ...newPatient, emailOptOut: !e.target.checked })}
-              />
-              E-posta ile bilgilendirilmek istiyorum
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={!newPatient.whatsappOptOut}
-                onChange={(e) => setNewPatient({ ...newPatient, whatsappOptOut: !e.target.checked })}
-              />
-              WhatsApp ile bilgilendirilmek istiyorum
-            </label>
+          <div style={{ marginTop: 4 }}>
+            <PatientConsentPanel
+              patientId={createdPatientId || undefined}
+              onEnsurePatient={ensurePatientSaved}
+              unsavedContact={{
+                phone: newPatient.phone,
+                email: newPatient.email,
+                smsOptOut: newPatient.smsOptOut,
+                emailOptOut: newPatient.emailOptOut,
+                whatsappOptOut: newPatient.whatsappOptOut,
+              }}
+              onContactChange={(contact) => {
+                setNewPatient(prev => ({
+                  ...prev,
+                  phone: contact.phone ?? prev.phone,
+                  email: contact.email ?? prev.email,
+                }))
+              }}
+              onConsentChange={(nextOptOuts) => {
+                setNewPatient(prev => ({
+                  ...prev,
+                  ...nextOptOuts,
+                }))
+              }}
+            />
           </div>
             </div>
           </section>

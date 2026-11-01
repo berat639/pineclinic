@@ -19,12 +19,13 @@ type UnsavedContact = {
 type ConsentState = { patient: Contact & { smsOptOut: boolean; whatsappOptOut: boolean; emailOptOut: boolean }; preferences: { channel: string; status: string; textVersion: string }[]; requests: { id: string; status: string; deliveryChannel: string }[] }
 type Settings = { text: string; version: string | null; canEdit: boolean; canManageConsent?: boolean }
 type Props = {
-  patientId: string
+  patientId?: string
   compact?: boolean
   selectedChannels?: NotificationChannel[]
   onChannelsChange?: (channels: NotificationChannel[]) => void
   onContactChange?: (contact: Contact) => void
   onConsentChange?: (optOuts: OptOutState) => void
+  onEnsurePatient?: () => Promise<string | null>
   unsavedContact?: UnsavedContact
   periodic?: boolean
   periodDays?: number
@@ -63,7 +64,9 @@ function ChannelIcon({ channel }: { channel: NotificationChannel }) {
   )
 }
 
-export default function PatientConsentPanel({ patientId, compact, selectedChannels = [], onChannelsChange, onContactChange, onConsentChange, unsavedContact, periodic, periodDays, onOpenReminder }: Props) {
+export default function PatientConsentPanel({ patientId, compact, selectedChannels = [], onChannelsChange, onContactChange, onConsentChange, onEnsurePatient, unsavedContact, periodic, periodDays, onOpenReminder }: Props) {
+  const [createdPatientId, setCreatedPatientId] = useState<string>('')
+  const activePatientId = patientId || createdPatientId
   const [consent, setConsent] = useState<ConsentState | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [delivery, setDelivery] = useState<Delivery>('sms')
@@ -71,7 +74,6 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   const [busy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<'text' | 'contact' | null>(null)
   const [formText, setFormText] = useState('')
-  const [dialogChannels, setDialogChannels] = useState<NotificationChannel[]>([...NOTIFICATION_CHANNELS])
   const [contact, setContact] = useState<Contact>({ phone: '', email: '' })
   const [pendingChannel, setPendingChannel] = useState<NotificationChannel | null>(null)
   const [error, setError] = useState('')
@@ -79,10 +81,26 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   const requestKey = useRef<string | null>(null)
   const pending = useRef(false)
   const autoSelectedRef = useRef(false)
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+
+  useEffect(() => {
+    if (patientId) setCreatedPatientId('')
+  }, [patientId])
+
+  const refresh = useCallback(async (signal?: AbortSignal, overridePatientId?: string) => {
+    const targetId = overridePatientId ?? activePatientId
     try {
+      if (!targetId) {
+        const resSettings = await fetch('/api/dental/consent-settings', { cache: 'no-store', signal })
+        if (!resSettings.ok) throw new Error('Bildirim izinleri yüklenemedi.')
+        const nextSettings = await resSettings.json()
+        if (signal?.aborted) return
+        setConsent(null)
+        setSettings(nextSettings)
+        setError('')
+        return
+      }
       const responses = await Promise.all([
-        fetch(`/api/dental/patients/${patientId}/consent`, { cache: 'no-store', signal }),
+        fetch(`/api/dental/patients/${targetId}/consent`, { cache: 'no-store', signal }),
         fetch('/api/dental/consent-settings', { cache: 'no-store', signal }),
       ])
       if (responses.some(response => !response.ok)) throw new Error('Bildirim izinleri yüklenemedi.')
@@ -91,15 +109,17 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       setConsent(nextConsent); setSettings(nextSettings); setError('')
     } catch (reason) { if (!signal?.aborted) setError(reason instanceof Error ? reason.message : 'Bildirim izinleri yüklenemedi.') }
     finally { if (!signal?.aborted) setLoading(false) }
-  }, [patientId])
+  }, [activePatientId])
+
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true); setConsent(null); requestKey.current = null
+    setLoading(true); setConsent(null); requestKey.current = null; autoSelectedRef.current = false
     void refresh(controller.signal)
     const onFocus = () => { void refresh(controller.signal) }
     window.addEventListener('focus', onFocus)
     return () => { controller.abort(); window.removeEventListener('focus', onFocus) }
   }, [refresh])
+
   const effectivePatient = consent ? {
     ...consent.patient,
     phone: unsavedContact?.phone !== undefined ? unsavedContact.phone : consent.patient.phone,
@@ -107,25 +127,29 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
     smsOptOut: unsavedContact?.smsOptOut !== undefined ? unsavedContact.smsOptOut : consent.patient.smsOptOut,
     emailOptOut: unsavedContact?.emailOptOut !== undefined ? unsavedContact.emailOptOut : consent.patient.emailOptOut,
     whatsappOptOut: unsavedContact?.whatsappOptOut !== undefined ? unsavedContact.whatsappOptOut : consent.patient.whatsappOptOut,
-  } : null
+  } : (unsavedContact ? {
+    phone: unsavedContact.phone || null,
+    email: unsavedContact.email || null,
+    smsOptOut: Boolean(unsavedContact.smsOptOut),
+    emailOptOut: Boolean(unsavedContact.emailOptOut),
+    whatsappOptOut: Boolean(unsavedContact.whatsappOptOut),
+  } : null)
+
   const allowed = NOTIFICATION_CHANNELS.filter(channel => consent && effectivePatient && consentAllows(channel, consent.preferences, settings?.version, effectivePatient))
   const canManageConsent = settings ? settings.canManageConsent !== false : true
+
+  // Hastanın onam formunda seçtiği tüm kanallar otomatik olarak seçili gelir
   useEffect(() => {
     if (!loading && onChannelsChange && !autoSelectedRef.current && allowed.length > 0 && selectedChannels.length === 0) {
       autoSelectedRef.current = true
-      const preferred: NotificationChannel = allowed.includes('sms') && effectivePatient?.phone?.trim()
-        ? 'sms'
-        : allowed.includes('whatsapp') && effectivePatient?.phone?.trim()
-        ? 'whatsapp'
-        : allowed.includes('email') && effectivePatient?.email?.trim()
-        ? 'email'
-        : allowed[0]
-      onChannelsChange([preferred])
+      onChannelsChange([...allowed])
     }
-  }, [loading, allowed, selectedChannels.length, onChannelsChange, effectivePatient?.phone, effectivePatient?.email])
+  }, [loading, allowed, selectedChannels.length, onChannelsChange])
+
   const blocked = (channel: Delivery) => !!effectivePatient && (
     (channel === 'sms' && effectivePatient.smsOptOut) || (channel === 'whatsapp' && effectivePatient.whatsappOptOut) || (channel === 'email' && effectivePatient.emailOptOut) ||
     (!unsavedContact && !!consent && consent.preferences.some(item => item.channel === channel && ['refused', 'revoked'].includes(item.status))))
+
   const missingContact = (channel: NotificationChannel, state = consent) => {
     if (channel === 'assistant_call') {
       const phoneVal = unsavedContact?.phone !== undefined ? unsavedContact.phone : state?.patient.phone
@@ -135,6 +159,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
     const emailVal = unsavedContact?.email !== undefined ? unsavedContact.email : state?.patient.email
     return channel === 'email' ? !emailVal?.trim() : !phoneVal?.trim()
   }
+
   const openContact = (channel: NotificationChannel) => {
     setPendingChannel(channel)
     setContact({
@@ -144,8 +169,9 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
     setDialogError('')
     setDialog('contact')
   }
-  async function syncUnsavedIfNeeded() {
-    if (!unsavedContact || !consent) return
+
+  async function syncUnsavedIfNeeded(targetId = activePatientId) {
+    if (!unsavedContact || !consent || !targetId) return
     const nextPhone = unsavedContact.phone?.trim() || null
     const nextEmail = unsavedContact.email?.trim() || null
     const needsSync =
@@ -155,7 +181,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       (unsavedContact.emailOptOut !== undefined && unsavedContact.emailOptOut !== consent.patient.emailOptOut) ||
       (unsavedContact.whatsappOptOut !== undefined && unsavedContact.whatsappOptOut !== consent.patient.whatsappOptOut)
     if (!needsSync) return
-    const res = await fetch(`/api/dental/patients/${patientId}`, {
+    const res = await fetch(`/api/dental/patients/${targetId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -171,28 +197,44 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       throw new Error(err.error || 'Hasta iletişim bilgileri güncellenemedi.')
     }
   }
+
   async function send() {
     if (pending.current || blocked(delivery)) return
     if (missingContact(delivery)) { openContact(delivery); return }
     pending.current = true; setBusy(true); requestKey.current ||= crypto.randomUUID()
     try {
-      await syncUnsavedIfNeeded()
-      const response = await fetch(`/api/dental/patients/${patientId}/consent-requests`, {
+      let targetId = activePatientId
+      if (!targetId && onEnsurePatient) {
+        const ensured = await onEnsurePatient()
+        if (!ensured) {
+          requestKey.current = null
+          return
+        }
+        targetId = ensured
+        setCreatedPatientId(ensured)
+      }
+      if (!targetId) {
+        requestKey.current = null
+        throw new Error('Önce hasta bilgilerini girin.')
+      }
+      await syncUnsavedIfNeeded(targetId)
+      const response = await fetch(`/api/dental/patients/${targetId}/consent-requests`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deliveryChannel: delivery, requestKey: requestKey.current }),
       })
       const result = await response.json().catch(() => ({}))
       if (!response.ok) { requestKey.current = null; throw new Error(result.error || 'Form gönderilemedi.') }
       if (!['sent', 'responded'].includes(result.status)) throw new Error('Gönderim doğrulanamadı. Yeniden kontrol edin.')
-      requestKey.current = null; toast.success('Form gönderildi; hasta yanıtı bekleniyor.'); await refresh()
+      requestKey.current = null; toast.success('Form gönderildi; hasta yanıtı bekleniyor.'); await refresh(undefined, targetId)
     } catch (reason) { toast.error(reason instanceof Error ? reason.message : 'Form gönderilemedi.') }
     finally { pending.current = false; setBusy(false) }
   }
+
   async function saveClinicConsent(nextChannels: NotificationChannel[], closeOnSuccess = false) {
-    if (pending.current) return
+    if (pending.current || !activePatientId) return
     pending.current = true; setBusy(true); setDialogError('')
     try {
-      await syncUnsavedIfNeeded()
-      const response = await fetch(`/api/dental/patients/${patientId}/consent-in-clinic`, {
+      await syncUnsavedIfNeeded(activePatientId)
+      const response = await fetch(`/api/dental/patients/${activePatientId}/consent-in-clinic`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channels: nextChannels }),
       })
       const result = await response.json().catch(() => ({}))
@@ -204,19 +246,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
         whatsappOptOut: !nextChannels.includes('whatsapp'),
       })
       if (onChannelsChange) {
-        const filteredSelected = selectedChannels.filter(ch => nextChannels.includes(ch))
-        if (filteredSelected.length > 0) {
-          onChannelsChange(filteredSelected)
-        } else if (nextChannels.length > 0) {
-          const preferred: NotificationChannel = nextChannels.includes('sms') && effectivePatient?.phone?.trim()
-            ? 'sms'
-            : nextChannels.includes('email') && effectivePatient?.email?.trim()
-            ? 'email'
-            : nextChannels[0]
-          onChannelsChange([preferred])
-        } else {
-          onChannelsChange([])
-        }
+        onChannelsChange(nextChannels)
       }
       if (closeOnSuccess) setDialog(null)
       toast.success(nextChannels.length > 0 ? 'Hasta bildirim izinleri güncellendi.' : 'Hasta bildirim onamı kaldırıldı.')
@@ -228,13 +258,21 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       pending.current = false; setBusy(false)
     }
   }
+
   async function saveDialog(event: React.FormEvent) {
     event.preventDefault()
     if (pending.current) return
     pending.current = true; setBusy(true); setDialogError('')
     try {
       const editingText = dialog === 'text'
-      const response = await fetch(editingText ? '/api/dental/consent-settings' : `/api/dental/patients/${patientId}`, {
+      if (!editingText && !activePatientId) {
+        onContactChange?.({ phone: contact.phone?.trim() || null, email: contact.email?.trim() || null })
+        setDialog(null)
+        setPendingChannel(null)
+        toast.success('İletişim bilgileri forma aktarıldı.')
+        return
+      }
+      const response = await fetch(editingText ? '/api/dental/consent-settings' : `/api/dental/patients/${activePatientId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingText ? { text: formText } : { phone: contact.phone?.trim() || null, email: contact.email?.trim() || null }),
       })
@@ -246,14 +284,11 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       }
       await refresh(); setDialog(null); setPendingChannel(null)
       toast.success(editingText ? 'Onam metni kaydedildi.' : 'İletişim bilgileri kaydedildi.')
-      if (!editingText && targetChannel) {
+      if (!editingText && targetChannel && allowed.length > 0) {
         if (!allowed.includes(targetChannel) && canManageConsent) {
           pending.current = false
           const nextAllowed = Array.from(new Set([...allowed, targetChannel]))
           await saveClinicConsent(nextAllowed)
-          if (onChannelsChange && !selectedChannels.includes(targetChannel)) {
-            onChannelsChange([...selectedChannels, targetChannel])
-          }
           return
         }
         if (allowed.includes(targetChannel) && !selectedChannels.includes(targetChannel)) {
@@ -263,13 +298,15 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
     } catch (reason) { setDialogError(reason instanceof Error ? reason.message : 'Kaydedilemedi.') }
     finally { pending.current = false; setBusy(false) }
   }
+
   const openTextDialog = () => {
     setFormText(settings?.text || '')
-    setDialogChannels(allowed.length > 0 ? [...allowed] : [...NOTIFICATION_CHANNELS])
     setDialogError('')
     setDialog('text')
   }
+
   const closeDialog = () => { if (!busy) { setDialog(null); setPendingChannel(null) } }
+
   return <section className={`${styles.consent} ${!compact ? styles.consentStacked : ''}`} aria-label="Hasta bildirimleri">
     <div className={styles.consentRow}>
     {onOpenReminder && (
@@ -290,7 +327,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       <div className={styles.consentActions} role="group" aria-label="Bildirim yöntemleri (birden fazla seçilebilir)">
         {NOTIFICATION_CHANNELS.map(channel => {
           const isAllowed = allowed.includes(channel)
-          const isChecked = onChannelsChange ? (isAllowed && selectedChannels.includes(channel)) : isAllowed
+          const isChecked = onChannelsChange ? selectedChannels.includes(channel) : isAllowed
           const isDisabled = busy || (!isAllowed && !canManageConsent) || (!onChannelsChange && !canManageConsent)
           return (
             <label key={channel} className={styles.consentPill} title={isAllowed ? labels[channel] : (canManageConsent ? `${labels[channel]} iznini aktif et` : 'Bu kanal için hasta izni bulunmuyor')}>
@@ -334,60 +371,10 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       </div>}
       <button type="button" className={styles.consentTextButton} disabled={loading || !!error} onClick={openTextDialog}><FileText size={13} />Onam metni</button>
     </div>
-    {dialog && <PlanDialog title={dialog === 'text' ? 'Bildirim onam metni ve izinler' : 'Hasta kaydını güncelle'} onClose={closeDialog}>
+    {dialog && <PlanDialog title={dialog === 'text' ? 'Bildirim onam metni' : 'Hasta kaydını güncelle'} onClose={closeDialog}>
       <form onSubmit={saveDialog}>
         {dialog === 'text' ? <>
-          <p className={styles.dialogDescription}>Hasta bu metni okuyarak kanallar için ayrı ayrı izin verir. Yetkili personel klinik içinde alınan onam tercihlerini aşağıdan güncelleyebilir.</p>
-          {canManageConsent && (
-            <div style={{ padding: '12px', borderRadius: 10, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: '0.82rem', color: 'var(--foreground, #ffffff)' }}>Klinik İçi Kanal Onam İzinleri (Yetkili Düzenleme)</strong>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button
-                    type="button"
-                    className={styles.button}
-                    style={{ minHeight: 26, padding: '3px 8px', fontSize: '0.72rem' }}
-                    disabled={busy}
-                    onClick={() => setDialogChannels([...NOTIFICATION_CHANNELS])}
-                  >
-                    Tümünü Seç
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.button}
-                    style={{ minHeight: 26, padding: '3px 8px', fontSize: '0.72rem' }}
-                    disabled={busy}
-                    onClick={() => setDialogChannels([])}
-                  >
-                    Tümünü Kaldır
-                  </button>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {NOTIFICATION_CHANNELS.map(channel => {
-                  const checked = dialogChannels.includes(channel)
-                  return (
-                    <label key={channel} className={styles.consentPill}>
-                      <input
-                        type="checkbox"
-                        disabled={busy}
-                        checked={checked}
-                        onChange={event => {
-                          setDialogChannels(prev =>
-                            event.target.checked
-                              ? Array.from(new Set([...prev, channel]))
-                              : prev.filter(item => item !== channel)
-                          )
-                        }}
-                      />
-                      <ChannelIcon channel={channel} />
-                      {labels[channel]}
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+          <p className={styles.dialogDescription}>Hasta kendisine gönderilen formda bu metni okuyarak kanallar için ayrı ayrı izin verir.</p>
           <label htmlFor="notification-consent-text">Onam metni</label>
           <textarea id="notification-consent-text" className={styles.textarea} rows={7} required minLength={20} maxLength={10000} readOnly={!settings?.canEdit} value={formText} onChange={event => setFormText(event.target.value)} />
           <p className={styles.dialogDescription}>{settings?.canEdit ? 'Metin değişirse mevcut izinler yeni metin için yenilenmelidir.' : 'Metni klinik yöneticisi düzenleyebilir.'}</p>
@@ -399,12 +386,6 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
         {dialogError && <p role="alert">{dialogError}</p>}
         <div className={styles.actions}>
           <button type="button" className={styles.button} disabled={busy} onClick={closeDialog}>Kapat</button>
-          {dialog === 'text' && canManageConsent && (
-            <button type="button" className={`${styles.button} ${styles.pale}`} disabled={busy} onClick={() => void saveClinicConsent(dialogChannels, true)}>
-              <ShieldCheck size={14} />
-              <span>{busy ? 'Kaydediliyor…' : allowed.length > 0 ? 'Onam İzinlerini Güncelle' : 'Klinikte Onaylandı Olarak İşaretle'}</span>
-            </button>
-          )}
           {(dialog !== 'text' || settings?.canEdit) && <button type="submit" className={`${styles.button} ${styles.primary}`} disabled={busy}>{busy ? 'Kaydediliyor…' : (dialog === 'text' ? 'Metni Kaydet' : 'Kaydet')}</button>}
         </div>
       </form>

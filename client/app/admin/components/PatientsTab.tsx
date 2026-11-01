@@ -1198,8 +1198,7 @@ export default function PatientsTab() {
                 <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
               </div>
               
-              <div style={{ padding: '12px', borderRadius: 8, border: '1px solid var(--divider, #334155)', background: 'var(--background-2, #0f172a)', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>Bildirim Onamı & İletişim İzinleri (KVKK)</label>
+              <div style={{ marginTop: 4 }}>
                 <PatientConsentPanel
                   patientId={editingPatient.id}
                   unsavedContact={{
@@ -1225,20 +1224,6 @@ export default function PatientsTab() {
                     loadPatients()
                   }}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4, borderTop: '1px solid var(--divider, #334155)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={!editFormData.smsOptOut} onChange={e => setEditFormData({...editFormData, smsOptOut: !e.target.checked})} />
-                    SMS ile bilgilendirilmek istiyorum
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={!editFormData.emailOptOut} onChange={e => setEditFormData({...editFormData, emailOptOut: !e.target.checked})} />
-                    E-posta ile bilgilendirilmek istiyorum
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--foreground-2, #cbd5e1)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={!editFormData.whatsappOptOut} onChange={e => setEditFormData({...editFormData, whatsappOptOut: !e.target.checked})} />
-                    WhatsApp ile bilgilendirilmek istiyorum
-                  </label>
-                </div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>

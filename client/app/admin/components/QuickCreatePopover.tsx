@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Search, Plus, ChevronRight } from 'lucide-react';
 import FancyHourPicker from './FancyHourPicker';
+import PatientConsentPanel from './PatientConsentPanel';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 import { PhoneMaskedInput, matchesPhoneSearch } from '@/lib/phone-mask';
 
@@ -39,6 +40,7 @@ export default function QuickCreatePopover({
   // Top tab mode: 'select' (Hasta Randevu) | 'create' (Yeni Hasta Ekle)
   const [patientMode, setPatientMode] = useState<'select' | 'create'>('select');
   const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+  const [createdPatientId, setCreatedPatientId] = useState<string>('');
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
 
   // New patient full form state
@@ -183,6 +185,55 @@ export default function QuickCreatePopover({
     return uniquePatients.find((p) => p.id === selectedPatientId);
   }, [uniquePatients, selectedPatientId]);
 
+  const ensureCreatedPatient = async (): Promise<string | null> => {
+    if (!firstName.trim()) {
+      toast.error('Onam formu göndermek için önce hastanın adını girin.');
+      return null;
+    }
+    if (createdPatientId) {
+      await fetch(`/api/dental/patients/${createdPatientId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          name: fullName,
+          phone,
+          tcIdentity: tc,
+          email,
+          gender,
+          birthDate,
+        }),
+      }).catch(() => {});
+      return createdPatientId;
+    }
+    const res = await fetch('/api/dental/patients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        name: fullName,
+        phone,
+        tcIdentity: tc,
+        email,
+        gender,
+        birthDate,
+        smsOptOut: !sms,
+        emailOptOut: !emailOpt,
+        whatsappOptOut: !waOpt,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast.error(err.error || 'Hasta oluşturulamadı');
+      return null;
+    }
+    const pt = await res.json();
+    setCreatedPatientId(pt.id);
+    return pt.id;
+  };
+
   const handleSave = () => {
     if (patientMode === 'select' && !selectedPatientId) {
       toast.error('Lütfen listeden bir hasta seçin veya Yeni Hasta Ekle sekmesine geçin.');
@@ -204,7 +255,7 @@ export default function QuickCreatePopover({
     onSave({
       type: 'patient_appointment',
       title: finalTitle,
-      patientId: patientMode === 'select' ? selectedPatientId : undefined,
+      patientId: patientMode === 'select' ? selectedPatientId : (createdPatientId || undefined),
       doctorId: selectedDoctorId || null,
       startTime: formatNumberTime(timeRange[0]),
       endTime: formatNumberTime(timeRange[1]),
@@ -667,6 +718,11 @@ export default function QuickCreatePopover({
                       </button>
                     </div>
                   )}
+                  {selectedPatientId && (
+                    <div style={{ marginTop: 4 }}>
+                      <PatientConsentPanel patientId={selectedPatientId} />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div
@@ -809,79 +865,28 @@ export default function QuickCreatePopover({
                     </div>
                   </div>
 
-                  {/* İletişim İzinleri (KVKK) */}
-                  <div
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      border: `1px solid ${borderCol}`,
-                      background: inputBg,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
-                      marginTop: '2px',
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        color: textCol,
+                  {/* Bildirim Onamı (KVKK) */}
+                  <div style={{ marginTop: '2px' }}>
+                    <PatientConsentPanel
+                      patientId={createdPatientId || undefined}
+                      onEnsurePatient={ensureCreatedPatient}
+                      unsavedContact={{
+                        phone,
+                        email,
+                        smsOptOut: !sms,
+                        emailOptOut: !emailOpt,
+                        whatsappOptOut: !waOpt,
                       }}
-                    >
-                      İletişim İzinleri (KVKK)
-                    </span>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontSize: '0.78rem',
-                        color: labelCol,
-                        cursor: 'pointer',
+                      onContactChange={(contact) => {
+                        if (contact.phone !== undefined && contact.phone !== null) setPhone(contact.phone);
+                        if (contact.email !== undefined && contact.email !== null) setEmail(contact.email);
                       }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={sms}
-                        onChange={(e) => setSms(e.target.checked)}
-                      />
-                      SMS ile bilgilendirilmek istiyorum
-                    </label>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontSize: '0.78rem',
-                        color: labelCol,
-                        cursor: 'pointer',
+                      onConsentChange={(nextOptOuts) => {
+                        setSms(!nextOptOuts.smsOptOut);
+                        setEmailOpt(!nextOptOuts.emailOptOut);
+                        setWaOpt(!nextOptOuts.whatsappOptOut);
                       }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={emailOpt}
-                        onChange={(e) => setEmailOpt(e.target.checked)}
-                      />
-                      E-posta ile bilgilendirilmek istiyorum
-                    </label>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontSize: '0.78rem',
-                        color: labelCol,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={waOpt}
-                        onChange={(e) => setWaOpt(e.target.checked)}
-                      />
-                      WhatsApp ile bilgilendirilmek istiyorum
-                    </label>
+                    />
                   </div>
                 </div>
               )}

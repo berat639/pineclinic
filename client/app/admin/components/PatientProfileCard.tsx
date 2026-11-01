@@ -84,28 +84,18 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
       </div>
 
       {/* İletişim İzinleri (KVKK) */}
-      <div style={cardStyle}>
-        <div style={headerStyle}>🛡️ Bildirim Onamı & İletişim İzinleri (KVKK)</div>
-        {patient?.id && (
-          <div style={{ marginBottom: 10 }}>
-            <PatientConsentPanel
-              patientId={patient.id}
-              onConsentChange={(nextOptOuts) => {
-                if (onConsentChange) {
-                  if (nextOptOuts.smsOptOut !== Boolean(patient.smsOptOut)) onConsentChange('smsOptOut', nextOptOuts.smsOptOut)
-                  if (nextOptOuts.emailOptOut !== Boolean(patient.emailOptOut)) onConsentChange('emailOptOut', nextOptOuts.emailOptOut)
-                  if (nextOptOuts.whatsappOptOut !== Boolean(patient.whatsappOptOut)) onConsentChange('whatsappOptOut', nextOptOuts.whatsappOptOut)
-                }
-              }}
-            />
-          </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-          <ConsentRow label="💬 SMS" field="smsOptOut" optedOut={patient.smsOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
-          <ConsentRow label="📧 E-posta" field="emailOptOut" optedOut={patient.emailOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
-          <ConsentRow label="🟢 WhatsApp" field="whatsappOptOut" optedOut={patient.whatsappOptOut} editable={Boolean(onConsentChange)} onChange={onConsentChange} />
-        </div>
-      </div>
+      {patient?.id && (
+        <PatientConsentPanel
+          patientId={patient.id}
+          onConsentChange={(nextOptOuts) => {
+            if (onConsentChange) {
+              if (nextOptOuts.smsOptOut !== Boolean(patient.smsOptOut)) onConsentChange('smsOptOut', nextOptOuts.smsOptOut)
+              if (nextOptOuts.emailOptOut !== Boolean(patient.emailOptOut)) onConsentChange('emailOptOut', nextOptOuts.emailOptOut)
+              if (nextOptOuts.whatsappOptOut !== Boolean(patient.whatsappOptOut)) onConsentChange('whatsappOptOut', nextOptOuts.whatsappOptOut)
+            }
+          }}
+        />
+      )}
 
       {/* Hastalıklar & Alerjiler */}
       {diseases && diseases.length > 0 && (
@@ -251,15 +241,4 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
       
     </div>
   )
-}
-
-function ConsentRow({ label, field, optedOut, editable, onChange }: { label: string; field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut'; optedOut: boolean; editable: boolean; onChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void }) {
-  const allowed = !optedOut
-  return <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-    <span>{label}:</span>
-    {editable ? <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: allowed ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
-      <input type="checkbox" checked={allowed} onChange={event => onChange?.(field, !event.target.checked)} />
-      {allowed ? 'İzinli' : 'Reddedildi'}
-    </label> : <span style={{ color: allowed ? '#10b981' : '#ef4444', fontWeight: 600 }}>{allowed ? '✔️ İzinli' : '❌ Reddedildi'}</span>}
-  </div>
 }
