@@ -1,7 +1,26 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { CalendarOff, Check, ChevronLeft, ChevronRight, Clock, Plus, Repeat, RotateCcw, Search, Trash2, Users, X } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { DayPicker } from 'react-day-picker'
+import 'react-day-picker/dist/style.css'
+import { tr } from 'date-fns/locale'
+import {
+  Calendar as CalendarIcon,
+  CalendarOff,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Plus,
+  Repeat,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react'
 import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
 
 export type Staff = { id: string; name: string; role: string; active: boolean; color?: string }
@@ -23,6 +42,8 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const total = index * 30
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 })
+const END_TIME_OPTIONS = [...TIME_OPTIONS.slice(1), '24:00']
+
 const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const localDate = (key: string) => new Date(`${key}T12:00:00`)
 const addDays = (key: string, days: number) => {
@@ -42,6 +63,20 @@ const monthEnd = (key: string) => {
 }
 const label = (key: string, options: Intl.DateTimeFormatOptions) => localDate(key).toLocaleDateString('tr-TR', options)
 
+const timeToSteps = (timeStr: string): number => {
+  if (timeStr === '24:00') return 48
+  const [h, m] = timeStr.split(':').map(Number)
+  return Math.max(0, Math.min(48, (h || 0) * 2 + ((m || 0) >= 30 ? 1 : 0)))
+}
+
+const stepsToTime = (steps: number): string => {
+  const clamped = Math.max(0, Math.min(48, Math.round(steps)))
+  if (clamped === 48) return '24:00'
+  const h = Math.floor(clamped / 2)
+  const m = clamped % 2 === 1 ? '30' : '00'
+  return `${String(h).padStart(2, '0')}:${m}`
+}
+
 function useCompactLayout() {
   const [compact, setCompact] = useState(false)
   useEffect(() => {
@@ -56,7 +91,7 @@ function useCompactLayout() {
 
 const neoCard: CSSProperties = {
   background: 'var(--card-bg)',
-  border: '1.5px solid var(--input-border)',
+  border: '1px solid var(--input-border)',
   borderRadius: 14,
   boxShadow: 'var(--pc-neo-card)',
 }
@@ -70,9 +105,9 @@ const neoSubCard: CSSProperties = {
 
 const neoInput: CSSProperties = {
   minHeight: 38,
-  padding: '0 10px',
+  padding: '0 11px',
   borderRadius: 10,
-  border: '1.5px solid var(--input-border)',
+  border: '1px solid var(--input-border)',
   background: 'var(--input-bg)',
   color: 'var(--foreground)',
   boxShadow: 'var(--pc-neo-inset)',
@@ -83,7 +118,24 @@ const neoInput: CSSProperties = {
   outline: 'none',
 }
 
-const clayOutlineButton: CSSProperties = {
+const claySecondaryButton: CSSProperties = {
+  minHeight: 38,
+  padding: '0 12px',
+  borderRadius: 10,
+  border: '1px solid var(--btn-clinic-blue-border, #93c5fd)',
+  background: 'var(--btn-clinic-blue-bg, #ffffff)',
+  color: 'var(--btn-clinic-blue-fg, #1d4ed8)',
+  boxShadow: 'var(--pc-clay-btn)',
+  cursor: 'pointer',
+  fontWeight: 700,
+  fontSize: 12.5,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+}
+
+const clayNeutralButton: CSSProperties = {
   minHeight: 38,
   padding: '0 12px',
   borderRadius: 10,
@@ -102,10 +154,10 @@ const clayOutlineButton: CSSProperties = {
 
 const clayPrimaryButton: CSSProperties = {
   minHeight: 38,
-  padding: '0 14px',
+  padding: '0 15px',
   borderRadius: 10,
-  border: '1px solid #0284c7',
-  background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+  border: '1px solid #1d4ed8',
+  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
   color: '#ffffff',
   boxShadow: 'var(--pc-clay-primary)',
   cursor: 'pointer',
@@ -115,6 +167,645 @@ const clayPrimaryButton: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   gap: 6,
+}
+
+const CALENDAR_POPOVER_CSS = `
+  .clinic-rdp .rdp {
+    --rdp-cell-size: 34px;
+    --rdp-accent-color: #1d4ed8;
+    --rdp-background-color: var(--card-inner);
+    margin: 0;
+    color: var(--foreground);
+    font-size: 12.5px;
+  }
+  .clinic-rdp .rdp-months {
+    justify-content: center;
+  }
+  .clinic-rdp .rdp-caption_label {
+    font-size: 13.5px;
+    font-weight: 800;
+    color: var(--foreground);
+    text-transform: capitalize;
+  }
+  .clinic-rdp .rdp-nav_button {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--input-border) !important;
+    background: var(--input-bg) !important;
+    color: var(--foreground) !important;
+  }
+  .clinic-rdp .rdp-head_cell {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--foreground-2);
+    text-transform: uppercase;
+  }
+  .clinic-rdp .rdp-day {
+    color: var(--foreground);
+    border-radius: 9px;
+    font-weight: 650;
+    transition: all 0.12s ease;
+  }
+  .clinic-rdp .rdp-day_today:not(.rdp-day_selected) {
+    border: 1.5px solid #2563eb !important;
+    color: #2563eb !important;
+    font-weight: 800;
+  }
+  .clinic-rdp .rdp-day_selected:not([disabled]),
+  .clinic-rdp .rdp-day_selected:hover:not([disabled]) {
+    background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+    color: #ffffff !important;
+    font-weight: 800;
+    box-shadow: var(--pc-clay-primary);
+  }
+  .clinic-rdp .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+    background: var(--card-inner) !important;
+  }
+`
+
+/**
+ * Modern Dribbble-Style DatePicker Popover Button (Replaces ugly browser <input type="date" />)
+ */
+function ClinicDatePickerButton({
+  value,
+  onChange,
+  ariaLabel = 'Seçili tarih',
+}: {
+  value: string
+  onChange: (nextDate: string) => void
+  ariaLabel?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <style>{CALENDAR_POPOVER_CSS}</style>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          ...clayNeutralButton,
+          padding: '0 12px',
+          minWidth: 148,
+          justifyContent: 'space-between',
+          border: open ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <CalendarIcon size={15} color="#2563eb" />
+          <span style={{ fontWeight: 750, fontSize: 12.5, color: 'var(--foreground)' }}>
+            {label(value, { day: '2-digit', month: 'short', year: 'numeric' })}
+          </span>
+        </span>
+        <ChevronDown size={14} color="var(--foreground-2)" />
+      </button>
+
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            zIndex: 100040,
+            background: 'var(--card-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 14,
+            padding: 12,
+            boxShadow: 'var(--pc-modal-shadow)',
+            minWidth: 276,
+          }}
+        >
+          <div className="clinic-rdp">
+            <DayPicker
+              mode="single"
+              locale={tr}
+              selected={localDate(value)}
+              onSelect={(d) => {
+                if (d) {
+                  onChange(dateKey(d))
+                  setOpen(false)
+                }
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingTop: 8,
+              marginTop: 8,
+              borderTop: '1px solid var(--input-border)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                onChange(dateKey(new Date()))
+                setOpen(false)
+              }}
+              style={{
+                ...claySecondaryButton,
+                minHeight: 30,
+                padding: '0 10px',
+                fontSize: 11.5,
+              }}
+            >
+              Bugün
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{
+                ...clayNeutralButton,
+                minHeight: 30,
+                padding: '0 10px',
+                fontSize: 11.5,
+              }}
+            >
+              Kapat
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Modern Interactive Dual-Thumb Hour Range Slider + Popover Hour Picker
+ * Used in both the Klinik Genel Mesai top bar and the ShiftEditor sidebar.
+ */
+function InteractiveTimeRangePicker({
+  startTime,
+  endTime,
+  onChange,
+  disabled,
+  compact = false,
+}: {
+  startTime: string
+  endTime: string
+  onChange: (nextStart: string, nextEnd: string) => void
+  disabled?: boolean
+  compact?: boolean
+}) {
+  const [openPopover, setOpenPopover] = useState<'start' | 'end' | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
+
+  const startStep = timeToSteps(startTime)
+  const endStep = timeToSteps(endTime)
+  const isOvernight = endTime !== '24:00' && endStep <= startStep
+
+  const durationHours = useMemo(() => {
+    let diff = endStep - startStep
+    if (diff <= 0) diff += 48
+    return Math.round((diff / 2) * 10) / 10
+  }, [startStep, endStep])
+
+  useEffect(() => {
+    if (!openPopover) return
+    const handleOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpenPopover(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [openPopover])
+
+  useEffect(() => {
+    if (!dragging || disabled) return
+    const handleMove = (clientX: number) => {
+      if (!trackRef.current) return
+      const rect = trackRef.current.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      const step = Math.round(ratio * 48)
+      if (dragging === 'start') {
+        const clampedStep = Math.min(47, Math.max(0, step))
+        onChange(stepsToTime(clampedStep), endTime)
+      } else {
+        const clampedStep = Math.min(48, Math.max(1, step))
+        onChange(startTime, stepsToTime(clampedStep))
+      }
+    }
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX)
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches[0]) handleMove(e.touches[0].clientX)
+    }
+    const onUp = () => setDragging(null)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('touchmove', onTouchMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchend', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchend', onUp)
+    }
+  }, [dragging, disabled, startTime, endTime, onChange])
+
+  const startPct = (startStep / 48) * 100
+  const endPct = (endStep / 48) * 100
+
+  const HOUR_PILLS_START = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`)
+  const HOUR_PILLS_END = [...Array.from({ length: 23 }, (_, i) => `${String(i + 1).padStart(2, '0')}:00`), '24:00']
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: compact ? 6 : 10, width: compact ? 'auto' : '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Start Time Pill */}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label="Klinik açılış saati"
+          onClick={() => setOpenPopover((p) => (p === 'start' ? null : 'start'))}
+          style={{
+            minHeight: 36,
+            padding: '0 11px',
+            borderRadius: 10,
+            border: openPopover === 'start' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
+            background: 'var(--input-bg)',
+            color: 'var(--foreground)',
+            boxShadow: 'var(--pc-clay-btn)',
+            cursor: disabled ? 'default' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12.5,
+            fontWeight: 750,
+          }}
+        >
+          <span style={{ fontSize: 11, fontWeight: 650, color: 'var(--foreground-2)' }}>Açılış</span>
+          <strong style={{ color: '#2563eb', fontSize: 13 }}>{startTime}</strong>
+          <ChevronDown size={13} color="var(--foreground-2)" />
+        </button>
+
+        {/* Interactive Visual Slider Track */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            minWidth: compact ? 180 : 210,
+            flex: compact ? '0 1 200px' : 1,
+            padding: '0 6px',
+          }}
+        >
+          <div
+            ref={trackRef}
+            onMouseDown={(e) => {
+              if (disabled || !trackRef.current) return
+              const rect = trackRef.current.getBoundingClientRect()
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+              const clickedStep = Math.round(ratio * 48)
+              const distStart = Math.abs(clickedStep - startStep)
+              const distEnd = Math.abs(clickedStep - endStep)
+              if (distStart <= distEnd) {
+                onChange(stepsToTime(Math.min(47, Math.max(0, clickedStep))), endTime)
+                setDragging('start')
+              } else {
+                onChange(startTime, stepsToTime(Math.min(48, Math.max(1, clickedStep))))
+                setDragging('end')
+              }
+            }}
+            style={{
+              position: 'relative',
+              height: 10,
+              borderRadius: 999,
+              background: 'var(--input-bg)',
+              border: '1px solid var(--input-border)',
+              boxShadow: 'var(--pc-neo-inset)',
+              cursor: disabled ? 'default' : 'pointer',
+              userSelect: 'none',
+            }}
+          >
+            {!isOvernight ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${startPct}%`,
+                  width: `${Math.max(2, endPct - startPct)}%`,
+                  borderRadius: 999,
+                  background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                }}
+              />
+            ) : (
+              <>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    left: `${startPct}%`,
+                    right: 0,
+                    borderRadius: '999px 0 0 999px',
+                    background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    width: `${endPct}%`,
+                    borderRadius: '0 999px 999px 0',
+                    background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
+                  }}
+                />
+              </>
+            )}
+
+            {/* Start Thumb */}
+            <div
+              role="slider"
+              aria-label="Başlangıç saati kaydırıcı"
+              aria-valuemin={0}
+              aria-valuemax={24}
+              aria-valuenow={startStep / 2}
+              tabIndex={disabled ? -1 : 0}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                if (!disabled) setDragging('start')
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation()
+                if (!disabled) setDragging('start')
+              }}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${startPct}%`,
+                transform: 'translate(-50%, -50%)',
+                width: 18,
+                height: 18,
+                borderRadius: 999,
+                background: '#ffffff',
+                border: '3px solid #1d4ed8',
+                boxShadow: '0 2px 5px rgba(15, 23, 42, 0.28)',
+                cursor: disabled ? 'default' : 'grab',
+                zIndex: 2,
+              }}
+              title={`Başlangıç: ${startTime}`}
+            />
+
+            {/* End Thumb */}
+            <div
+              role="slider"
+              aria-label="Bitiş saati kaydırıcı"
+              aria-valuemin={0}
+              aria-valuemax={24}
+              aria-valuenow={endStep / 2}
+              tabIndex={disabled ? -1 : 0}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                if (!disabled) setDragging('end')
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation()
+                if (!disabled) setDragging('end')
+              }}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${endPct}%`,
+                transform: 'translate(-50%, -50%)',
+                width: 18,
+                height: 18,
+                borderRadius: 999,
+                background: '#1d4ed8',
+                border: '2.5px solid #ffffff',
+                boxShadow: '0 2px 5px rgba(15, 23, 42, 0.28)',
+                cursor: disabled ? 'default' : 'grab',
+                zIndex: 2,
+              }}
+              title={`Bitiş: ${endTime}`}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, fontWeight: 700, color: 'var(--foreground-3)', padding: '0 2px' }}>
+            <span>00:00</span>
+            <span>06:00</span>
+            <span>12:00</span>
+            <span>18:00</span>
+            <span>24:00</span>
+          </div>
+        </div>
+
+        {/* End Time Pill */}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label="Klinik kapanış saati"
+          onClick={() => setOpenPopover((p) => (p === 'end' ? null : 'end'))}
+          style={{
+            minHeight: 36,
+            padding: '0 11px',
+            borderRadius: 10,
+            border: openPopover === 'end' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
+            background: 'var(--input-bg)',
+            color: 'var(--foreground)',
+            boxShadow: 'var(--pc-clay-btn)',
+            cursor: disabled ? 'default' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12.5,
+            fontWeight: 750,
+          }}
+        >
+          <span style={{ fontSize: 11, fontWeight: 650, color: 'var(--foreground-2)' }}>Kapanış</span>
+          <strong style={{ color: '#2563eb', fontSize: 13 }}>
+            {endTime}
+            {isOvernight ? ' (Gece)' : ''}
+          </strong>
+          <ChevronDown size={13} color="var(--foreground-2)" />
+        </button>
+
+        {/* Duration Badge */}
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 750,
+            padding: '4px 9px',
+            borderRadius: 999,
+            background: 'var(--badge-clinic-bg, #e0f2fe)',
+            border: '1px solid var(--badge-clinic-border, #bae6fd)',
+            color: 'var(--badge-clinic-fg, #0369a1)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {isOvernight ? `🌙 ${durationHours} sa` : `⏱️ ${durationHours} sa`}
+        </span>
+      </div>
+
+      {/* Tactile Hour Grid Popover */}
+      {openPopover && !disabled && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            zIndex: 100045,
+            width: 310,
+            maxWidth: 'calc(100vw - 32px)',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 14,
+            padding: 14,
+            boxShadow: 'var(--pc-modal-shadow)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <strong style={{ fontSize: 12.5, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <SlidersHorizontal size={14} color="#2563eb" />
+              {openPopover === 'start' ? 'Başlangıç / Açılış Saati Seçin' : 'Bitiş / Kapanış Saati Seçin'}
+            </strong>
+            <button
+              type="button"
+              onClick={() => setOpenPopover(null)}
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 7,
+                border: '1px solid var(--input-border)',
+                background: 'var(--card-inner)',
+                color: 'var(--foreground-2)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <X size={13} />
+            </button>
+          </div>
+
+          {/* Quick Presets */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 5, marginBottom: 10 }}>
+            {(
+              [
+                ['08:00', '20:00', '08:00 – 20:00 (Standart)'],
+                ['09:00', '19:00', '09:00 – 19:00 (Gündüz)'],
+                ['08:00', '02:00', '08:00 – 02:00 (Gece)'],
+                ['00:00', '24:00', '00:00 – 24:00 (24 Saat)'],
+              ] as [string, string, string][]
+            ).map(([pS, pE, pLbl]) => {
+              const activePreset = startTime === pS && endTime === pE
+              return (
+                <button
+                  key={pLbl}
+                  type="button"
+                  onClick={() => {
+                    onChange(pS, pE)
+                    setOpenPopover(null)
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: 8,
+                    border: activePreset ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                    background: activePreset ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-inner)',
+                    color: activePreset ? '#ffffff' : 'var(--foreground)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  <span style={{ color: activePreset ? '#ffffff' : 'inherit' }}>{pLbl}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* 24-Hour Tactile Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
+            {(openPopover === 'start' ? HOUR_PILLS_START : HOUR_PILLS_END).map((t) => {
+              const currentVal = openPopover === 'start' ? startTime : endTime
+              const isSelected = currentVal === t
+              const halfHour = t !== '24:00' ? `${t.slice(0, 2)}:30` : null
+              const isHalfSelected = halfHour && currentVal === halfHour
+              return (
+                <Fragment key={`grid-${openPopover}-${t}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (openPopover === 'start') {
+                        onChange(t, endTime)
+                        setOpenPopover('end')
+                      } else {
+                        onChange(startTime, t)
+                        setOpenPopover(null)
+                      }
+                    }}
+                    style={{
+                      padding: '6px 4px',
+                      borderRadius: 8,
+                      border: isSelected ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                      background: isSelected ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
+                      color: isSelected ? '#ffffff' : 'var(--foreground)',
+                      fontSize: 11.5,
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ color: isSelected ? '#ffffff' : 'inherit' }}>{t}</span>
+                  </button>
+                  {halfHour && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (openPopover === 'start') {
+                          onChange(halfHour, endTime)
+                          setOpenPopover('end')
+                        } else {
+                          onChange(startTime, halfHour)
+                          setOpenPopover(null)
+                        }
+                      }}
+                      style={{
+                        padding: '6px 4px',
+                        borderRadius: 8,
+                        border: isHalfSelected ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                        background: isHalfSelected ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-inner)',
+                        color: isHalfSelected ? '#ffffff' : 'var(--foreground-2)',
+                        fontSize: 11,
+                        fontWeight: 650,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span style={{ color: isHalfSelected ? '#ffffff' : 'inherit' }}>{halfHour}</span>
+                    </button>
+                  )}
+                </Fragment>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ShiftPlanner({
@@ -332,15 +1023,9 @@ export default function ShiftPlanner({
     }
   }
 
-  const isOvernightClinic = useMemo(() => {
-    const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
-    const eH = parseInt(clinicEndTime.split(':')[0] || '20', 10)
-    return clinicEndTime !== '24:00' && eH <= sH
-  }, [clinicStartTime, clinicEndTime])
-
   return (
     <section style={{ ...neoCard, padding: 18 }}>
-      {/* Sadeleştirilmiş Tek Satır Klinik Genel Mesai Barı */}
+      {/* Klinik Genel Mesai Barı (İnteraktif Slider + Saat Seçici + Kaydet) */}
       <div
         style={{
           ...neoSubCard,
@@ -350,16 +1035,16 @@ export default function ShiftPlanner({
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: 12,
+          gap: 14,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
             style={{
-              width: 34,
-              height: 34,
+              width: 36,
+              height: 36,
               borderRadius: 10,
-              background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+              background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
               boxShadow: 'var(--pc-clay-primary)',
               display: 'flex',
               alignItems: 'center',
@@ -367,75 +1052,29 @@ export default function ShiftPlanner({
               flexShrink: 0,
             }}
           >
-            <Clock size={17} color="#ffffff" />
+            <Clock size={18} color="#ffffff" />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: 13.5, color: 'var(--foreground)' }}>Klinik Genel Mesai (Takvim Saat Aralığı)</strong>
-              {isOvernightClinic && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    background: 'var(--badge-clinic-bg, #e0f2fe)',
-                    border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                    color: 'var(--badge-clinic-text, #0369a1)',
-                  }}
-                >
-                  🌙 Gece Vardiyası ({clinicStartTime} – {clinicEndTime})
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--foreground-2)' }}>
+            <strong style={{ fontSize: 13.5, color: 'var(--foreground)', display: 'block' }}>
+              Klinik Genel Mesai (Takvim Saat Aralığı)
+            </strong>
+            <span style={{ fontSize: 11.5, color: 'var(--foreground-2)' }}>
               İnteraktif takvim saat cetveli bu açılış-kapanış aralığına göre otomatik ayarlanır.
-            </div>
+            </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground-2)' }}>Açılış:</span>
-            <select
-              aria-label="Klinik açılış saati"
-              value={clinicStartTime}
-              disabled={!canEditClinicHours || clinicHoursSaving}
-              onChange={(e) => setClinicStartTime(e.target.value)}
-              style={{ ...neoInput, width: 100, minHeight: 36 }}
-            >
-              {TIME_OPTIONS.map((t) => (
-                <option key={`clinic-start-${t}`} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <span style={{ fontWeight: 700, color: 'var(--foreground-3)' }}>–</span>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground-2)' }}>Kapanış:</span>
-            <select
-              aria-label="Klinik kapanış saati"
-              value={clinicEndTime}
-              disabled={!canEditClinicHours || clinicHoursSaving}
-              onChange={(e) => setClinicEndTime(e.target.value)}
-              style={{ ...neoInput, width: 145, minHeight: 36 }}
-            >
-              {Array.from(new Set([...TIME_OPTIONS.slice(1), '24:00'])).map((t) => {
-                const sH = parseInt(clinicStartTime.split(':')[0] || '8', 10)
-                const eH = parseInt(t.split(':')[0] || '20', 10)
-                const isOvernightOption = t !== '24:00' && eH <= sH
-                return (
-                  <option key={`clinic-end-${t}`} value={t}>
-                    {t}
-                    {isOvernightOption ? ' (Gece)' : ''}
-                  </option>
-                )
-              })}
-            </select>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <InteractiveTimeRangePicker
+            compact
+            startTime={clinicStartTime}
+            endTime={clinicEndTime}
+            disabled={!canEditClinicHours || clinicHoursSaving}
+            onChange={(nextS, nextE) => {
+              setClinicStartTime(nextS)
+              setClinicEndTime(nextE)
+            }}
+          />
 
           {canEditClinicHours && (
             <button
@@ -481,10 +1120,10 @@ export default function ShiftPlanner({
                   aria-pressed={active}
                   style={{
                     minHeight: 34,
-                    padding: '0 12px',
+                    padding: '0 13px',
                     borderRadius: 8,
-                    border: active ? '1px solid #0284c7' : '1px solid transparent',
-                    background: active ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'transparent',
+                    border: active ? '1px solid #1d4ed8' : '1px solid transparent',
+                    background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent',
                     color: active ? '#ffffff' : 'var(--foreground-2)',
                     boxShadow: active ? 'var(--pc-clay-primary)' : 'none',
                     fontWeight: 750,
@@ -502,42 +1141,43 @@ export default function ShiftPlanner({
             type="button"
             onClick={() => navigate(-1)}
             aria-label={`Önceki ${view === 'day' ? 'gün' : view === 'week' ? 'hafta' : 'ay'}`}
-            style={clayOutlineButton}
+            style={clayNeutralButton}
           >
             <ChevronLeft size={17} />
           </button>
+
           <strong style={{ minWidth: 165, textAlign: 'center', color: 'var(--foreground)', fontSize: 13.5 }}>{displayDate}</strong>
-          <input
-            aria-label="Seçili tarih"
-            type="date"
+
+          {/* Özel Tasarım DatePicker Popover */}
+          <ClinicDatePickerButton
             value={selectedDate}
-            onChange={(event) => {
-              setSelectedDate(event.target.value)
-              setMonthFocus(event.target.value)
+            onChange={(nextDate) => {
+              setSelectedDate(nextDate)
+              setMonthFocus(nextDate)
             }}
-            style={{ ...neoInput, width: 142, minHeight: 38 }}
           />
+
           <button
             type="button"
             onClick={() => navigate(1)}
             aria-label={`Sonraki ${view === 'day' ? 'gün' : view === 'week' ? 'hafta' : 'ay'}`}
-            style={clayOutlineButton}
+            style={clayNeutralButton}
           >
             <ChevronRight size={17} />
           </button>
-          <button type="button" onClick={() => setSelectedDate(dateKey(new Date()))} style={clayOutlineButton}>
+          <button type="button" onClick={() => setSelectedDate(dateKey(new Date()))} style={claySecondaryButton}>
             Bugün
           </button>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {lastOperation && canEditShifts && (
-            <button type="button" onClick={undo} style={{ ...clayOutlineButton, color: 'var(--accent)' }}>
+            <button type="button" onClick={undo} style={claySecondaryButton}>
               <RotateCcw size={15} /> Son İşlemi Geri Al ({lastOperation.count})
             </button>
           )}
           {canManageLeaves && (
-            <button type="button" onClick={() => onOpenLeave('', selectedDate)} style={clayOutlineButton}>
+            <button type="button" onClick={() => onOpenLeave('', selectedDate)} style={clayNeutralButton}>
               <CalendarOff size={15} /> İzin / Kapalı Saat
             </button>
           )}
@@ -583,7 +1223,7 @@ export default function ShiftPlanner({
             flex: '1 1 220px',
             minHeight: 38,
             padding: '0 10px',
-            border: '1.5px solid var(--input-border)',
+            border: '1px solid var(--input-border)',
             borderRadius: 10,
             background: 'var(--input-bg)',
             boxShadow: 'var(--pc-neo-inset)',
@@ -597,14 +1237,14 @@ export default function ShiftPlanner({
             style={{ border: 'none', outline: 'none', background: 'transparent', color: 'var(--foreground)', width: '100%', fontSize: 13 }}
           />
         </label>
-        <select value={role} onChange={(event) => setRole(event.target.value)} style={{ ...neoInput, width: 'auto', minWidth: 155 }}>
+        <select value={role} onChange={(event) => setRole(event.target.value)} style={{ ...neoInput, width: 'auto', minWidth: 160 }}>
           <option value="all">Tüm Roller</option>
           <option value="hekim">Hekimler</option>
           <option value="host">Kayıt / Resepsiyon</option>
           <option value="yonetici">Yöneticiler</option>
         </select>
         <span style={{ fontSize: 11.5, color: 'var(--foreground-3)', fontWeight: 600 }}>
-          💡 Hücreye tıklayarak düzenleyebilir, sağ tıklayarak hızlıca <strong>Günlük / Haftalık / Aylık</strong> atayabilirsiniz.
+          💡 Hücreye tıklayarak sağ yan panelden düzenleyebilir, sağ tıklayarak hızlıca <strong>Günlük / Haftalık / Aylık</strong> atayabilirsiniz.
         </span>
       </div>
 
@@ -626,7 +1266,7 @@ export default function ShiftPlanner({
         >
           <span>{undoError || successNotice}</span>
           {lastOperation && !undoError && canEditShifts && (
-            <button type="button" onClick={undo} style={clayOutlineButton}>
+            <button type="button" onClick={undo} style={claySecondaryButton}>
               <RotateCcw size={14} /> Geri Al
             </button>
           )}
@@ -771,9 +1411,9 @@ export default function ShiftPlanner({
         />
       )}
 
-      {/* Yeni Randevu (QuickCreatePopover) Standart 460px Modal Mimarisiyle Mesai Planla */}
+      {/* Mesai Planla Sağ Sidebar (Drawer) Akışı */}
       {editor && (
-        <ShiftEditorModal
+        <ShiftEditorSidebar
           users={staff}
           initial={editor}
           onClose={() => setEditor(null)}
@@ -840,7 +1480,7 @@ function DayView({
             }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700 }}>
-              <span style={{ width: 10, height: 10, background: person.color || 'var(--accent)', borderRadius: 999 }} />
+              <span style={{ width: 10, height: 10, background: person.color || '#2563eb', borderRadius: 999 }} />
               {person.name}
             </span>
             <span
@@ -849,7 +1489,7 @@ function DayView({
                 borderRadius: 8,
                 background: shift ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-bg)',
                 border: shift ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
-                color: shift ? 'var(--badge-clinic-text, #0369a1)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
+                color: shift ? 'var(--badge-clinic-fg, #0369a1)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
                 boxShadow: shift ? 'var(--pc-clay-pale)' : 'none',
                 fontWeight: shift || leave ? 750 : 600,
                 fontSize: 12.5,
@@ -922,10 +1562,11 @@ function WeekView({
               aria-selected={dayIndex === index}
               onClick={() => setDayIndex(index)}
               style={{
-                ...clayOutlineButton,
+                ...clayNeutralButton,
                 minHeight: 48,
                 padding: 4,
-                background: dayIndex === index ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'var(--input-bg)',
+                border: dayIndex === index ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                background: dayIndex === index ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
                 color: dayIndex === index ? '#ffffff' : 'var(--foreground)',
               }}
             >
@@ -963,7 +1604,7 @@ function WeekView({
                 }}
               >
                 <span style={{ fontWeight: 700 }}>{person.name}</span>
-                <span style={{ color: shift ? 'var(--accent)' : 'var(--foreground-3)', fontWeight: 700 }}>
+                <span style={{ color: shift ? '#2563eb' : 'var(--foreground-3)', fontWeight: 700 }}>
                   {shift ? `${shift.startTime}–${shift.endTime}` : '+ Mesai'}
                 </span>
               </button>
@@ -980,17 +1621,17 @@ function WeekView({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(195px, 1.35fr) repeat(7, minmax(112px, 1fr))',
+          gridTemplateColumns: 'minmax(205px, 1.4fr) repeat(7, minmax(112px, 1fr))',
           minWidth: 980,
           gap: 1,
           background: 'var(--input-border)',
-          border: '1.5px solid var(--input-border)',
+          border: '1px solid var(--input-border)',
           borderRadius: 12,
           overflow: 'hidden',
           boxShadow: 'var(--pc-neo-subcard)',
         }}
       >
-        <div style={{ padding: '10px 12px', background: 'var(--card-inner)', fontWeight: 800, fontSize: 12.5, color: 'var(--foreground)' }}>
+        <div style={{ padding: '10px 14px', background: 'var(--card-inner)', fontWeight: 800, fontSize: 12.5, color: 'var(--foreground)' }}>
           Personel & Tekrarlı Plan
         </div>
         {dates.map((day, index) => (
@@ -1000,124 +1641,145 @@ function WeekView({
             <small style={{ color: 'var(--foreground-2)', fontWeight: 600 }}>{label(day, { day: 'numeric', month: 'short' })}</small>
           </div>
         ))}
-        {staff.map((person) => (
-          <Fragment key={person.id}>
-            <div
-              style={{
-                padding: '10px 12px',
-                background: 'var(--card-bg)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                justifyContent: 'center',
-                gap: 6,
-                color: 'var(--foreground)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 6 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontWeight: 750, fontSize: 13 }}>
-                  <span style={{ width: 9, height: 9, background: person.color || 'var(--accent)', borderRadius: 999, flexShrink: 0 }} />
-                  {person.name}
-                </span>
-                <small style={{ color: 'var(--foreground-2)', fontWeight: 700, fontSize: 11 }}>{totalHours(person.id)} sa</small>
-              </div>
-              {canEdit && (
-                <div style={{ display: 'flex', gap: 5, width: '100%' }}>
-                  <button
-                    type="button"
-                    onClick={() => onAssignRepeat(person.id, date, 'week')}
-                    className="btn-clinic-outline"
+        {staff.map((person) => {
+          const plannedHours = totalHours(person.id)
+          return (
+            <Fragment key={person.id}>
+              <div
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--card-bg)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  justifyContent: 'center',
+                  gap: 7,
+                  color: 'var(--foreground)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 6 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 750, fontSize: 13 }}>
+                    <span style={{ width: 9, height: 9, background: person.color || '#2563eb', borderRadius: 999, flexShrink: 0 }} />
+                    {person.name}
+                  </span>
+                  <span
                     style={{
-                      flex: 1,
-                      padding: '3px 6px',
-                      borderRadius: 6,
                       fontSize: 10.5,
-                      fontWeight: 700,
-                      boxShadow: 'var(--pc-clay-btn)',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 3,
+                      fontWeight: 750,
+                      padding: '2px 7px',
+                      borderRadius: 999,
+                      background: plannedHours > 0 ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-inner)',
+                      border: plannedHours > 0 ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
+                      color: plannedHours > 0 ? 'var(--badge-clinic-fg, #0369a1)' : 'var(--foreground-3)',
                     }}
-                    title="Bu personele haftalık tekrarlı mesai planla"
                   >
-                    <Repeat size={10} /> Haftalık
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onAssignRepeat(person.id, date, 'month')}
-                    className="btn-clinic-outline"
-                    style={{
-                      flex: 1,
-                      padding: '3px 6px',
-                      borderRadius: 6,
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      boxShadow: 'var(--pc-clay-btn)',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 3,
-                    }}
-                    title="Bu personele aylık tekrarlı mesai planla"
-                  >
-                    <Repeat size={10} /> Aylık
-                  </button>
+                    {plannedHours} sa
+                  </span>
                 </div>
-              )}
-            </div>
-            {dates.map((day) => {
-              const shift = shifts.find((item) => item.userId === person.id && item.date === day)
-              const leave = leaves.find((item) => item.doctorId === person.id && item.date === day)
-              return (
-                <button
-                  key={`${person.id}-${day}`}
-                  type="button"
-                  onClick={() => !leave && canEdit && onOpen(person.id, day, shift)}
-                  onContextMenu={(e) => onContextMenu(e, person, day, shift)}
-                  style={{
-                    minHeight: 68,
-                    padding: 6,
-                    background: shift ? 'var(--card-inner)' : 'var(--input-bg)',
-                    border: 'none',
-                    color: shift ? 'var(--foreground)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
-                    cursor: leave || !canEdit ? 'default' : 'pointer',
-                    textAlign: 'center',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 3,
-                  }}
-                >
-                  {shift ? (
-                    <div
+
+                {canEdit && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, width: '100%' }}>
+                    <button
+                      type="button"
+                      onClick={() => onAssignRepeat(person.id, date, 'week')}
                       style={{
-                        padding: '5px 8px',
-                        borderRadius: 8,
-                        background: 'var(--badge-clinic-bg, #e0f2fe)',
-                        border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                        color: 'var(--badge-clinic-text, #0369a1)',
-                        boxShadow: 'var(--pc-clay-pale)',
+                        padding: '4px 8px',
+                        borderRadius: 7,
+                        border: '1px solid var(--btn-clinic-blue-border, #93c5fd)',
+                        background: 'var(--btn-clinic-blue-bg, #eff6ff)',
+                        color: 'var(--btn-clinic-blue-fg, #1d4ed8)',
+                        boxShadow: 'var(--pc-clay-btn)',
+                        fontSize: 11,
                         fontWeight: 750,
-                        fontSize: 11.5,
-                        lineHeight: 1.25,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 4,
                       }}
+                      title="Bu personele haftalık tekrarlı mesai planla"
                     >
-                      {shift.startTime}–{shift.endTime}
-                    </div>
-                  ) : leave ? (
-                    <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--danger)' }}>İzinli</span>
-                  ) : (
-                    <span style={{ fontSize: 11.5, fontWeight: 600 }}>+ Mesai</span>
-                  )}
-                </button>
-              )
-            })}
-          </Fragment>
-        ))}
+                      <Repeat size={11} color="#1d4ed8" />
+                      <span>Haftalık</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onAssignRepeat(person.id, date, 'month')}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 7,
+                        border: '1px solid var(--btn-clinic-blue-border, #93c5fd)',
+                        background: 'var(--btn-clinic-blue-bg, #eff6ff)',
+                        color: 'var(--btn-clinic-blue-fg, #1d4ed8)',
+                        boxShadow: 'var(--pc-clay-btn)',
+                        fontSize: 11,
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 4,
+                      }}
+                      title="Bu personele aylık tekrarlı mesai planla"
+                    >
+                      <Repeat size={11} color="#1d4ed8" />
+                      <span>Aylık</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {dates.map((day) => {
+                const shift = shifts.find((item) => item.userId === person.id && item.date === day)
+                const leave = leaves.find((item) => item.doctorId === person.id && item.date === day)
+                return (
+                  <button
+                    key={`${person.id}-${day}`}
+                    type="button"
+                    onClick={() => !leave && canEdit && onOpen(person.id, day, shift)}
+                    onContextMenu={(e) => onContextMenu(e, person, day, shift)}
+                    style={{
+                      minHeight: 68,
+                      padding: 6,
+                      background: shift ? 'var(--card-inner)' : 'var(--input-bg)',
+                      border: 'none',
+                      color: shift ? 'var(--foreground)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
+                      cursor: leave || !canEdit ? 'default' : 'pointer',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 3,
+                    }}
+                  >
+                    {shift ? (
+                      <div
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: 8,
+                          background: 'var(--badge-clinic-bg, #e0f2fe)',
+                          border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                          color: 'var(--badge-clinic-fg, #0369a1)',
+                          boxShadow: 'var(--pc-clay-pale)',
+                          fontWeight: 750,
+                          fontSize: 11.5,
+                          lineHeight: 1.25,
+                        }}
+                      >
+                        {shift.startTime}–{shift.endTime}
+                      </div>
+                    ) : leave ? (
+                      <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--danger)' }}>İzinli</span>
+                    ) : (
+                      <span style={{ fontSize: 11.5, fontWeight: 600 }}>+ Mesai</span>
+                    )}
+                  </button>
+                )
+              })}
+            </Fragment>
+          )
+        })}
       </div>
       {staff.length === 0 && <Empty />}
     </div>
@@ -1173,14 +1835,14 @@ function MonthView({
                 minHeight: 88,
                 padding: 8,
                 background: selectedDate === day ? 'var(--card-inner)' : inMonth ? 'var(--card-bg)' : 'var(--input-bg)',
-                border: selectedDate === day ? '1.5px solid #0284c7' : '1px solid var(--input-border)',
+                border: selectedDate === day ? '1.5px solid #1d4ed8' : '1px solid var(--input-border)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 color: 'var(--foreground)',
               }}
             >
               <strong style={{ fontSize: 12.5 }}>{localDate(day).getDate()}</strong>
-              <div style={{ marginTop: 6, color: rows.length ? 'var(--accent)' : 'var(--foreground-3)', fontSize: 11.5, fontWeight: 700 }}>
+              <div style={{ marginTop: 6, color: rows.length ? '#2563eb' : 'var(--foreground-3)', fontSize: 11.5, fontWeight: 700 }}>
                 {rows.length ? `${rows.length} personel` : 'Mesai yok'}
               </div>
               {rows.slice(0, 2).map((item) => (
@@ -1228,7 +1890,7 @@ function MonthView({
                 }}
               >
                 <span style={{ fontWeight: 700, fontSize: 13 }}>{person.name}</span>
-                <span style={{ color: shift ? 'var(--accent)' : 'var(--foreground-3)', fontWeight: 700, fontSize: 12.5 }}>
+                <span style={{ color: shift ? '#2563eb' : 'var(--foreground-3)', fontWeight: 700, fontSize: 12.5 }}>
                   {shift ? `${shift.startTime}–${shift.endTime}` : '+ Mesai Ekle'}
                 </span>
               </button>
@@ -1242,13 +1904,13 @@ function MonthView({
 }
 
 /**
- * Yeni Randevu (`QuickCreatePopover`) standart modal mimarisi:
- * - maxWidth: 460px, borderRadius: 14px, solid var(--card-bg)
- * - Backdrop: rgba(15, 23, 42, 0.6)
- * - Tedavi Planlama Neomorphism & Claymorphism oranı
- * - Günlük / Haftalık / Aylık tek tıkla kayıt (2 aşamalı Önizle -> Ekle kaldırıldı)
+ * Sağdan Açılan Mesai Planla Sidebar (Drawer) Akışı:
+ * - Side bar akışı korundu (`aside`, `justifyContent: 'flex-end'`, `width: 480px`, `height: '100vh'`)
+ * - Tüm aktif butonlar ve seçili günler tutarlı Koyu Mavi (`#2563eb` -> `#1d4ed8`)
+ * - İnteraktif Dual-Handle Saat Slider + Saat Pill Seçici
+ * - Özel Tasarım Gömülü Takvim (`DayPicker`) DatePicker
  */
-function ShiftEditorModal({
+function ShiftEditorSidebar({
   users,
   initial,
   onClose,
@@ -1282,17 +1944,6 @@ function ShiftEditorModal({
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [requestId] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`))
-
-  const shiftDurationInfo = useMemo(() => {
-    const [sH, sM] = startTime.split(':').map(Number)
-    const [eH, eM] = endTime.split(':').map(Number)
-    const sMin = sH * 60 + sM
-    let eMin = eH * 60 + eM
-    const isOvernight = endTime !== '24:00' && eMin <= sMin
-    if (eMin <= sMin) eMin += 1440
-    const diffHours = Math.round(((eMin - sMin) / 60) * 10) / 10
-    return { hours: diffHours, isOvernight }
-  }, [startTime, endTime])
 
   const computedPlan = useMemo(() => {
     const rangeStart = repeat === 'once' ? startDate : repeat === 'week' ? monday(startDate) : monthStart(startDate)
@@ -1341,6 +1992,13 @@ function ShiftEditorModal({
     }
   }
 
+  const SHIFT_PRESETS: Array<{ label: string; start: string; end: string }> = [
+    { label: '09:00 – 18:00', start: '09:00', end: '18:00' },
+    { label: '08:00 – 20:00', start: '08:00', end: '20:00' },
+    { label: '09:00 – 19:00', start: '09:00', end: '19:00' },
+    { label: '08:00 – 02:00 (Gece)', start: '08:00', end: '02:00' },
+  ]
+
   return (
     <div
       onClick={onClose}
@@ -1350,54 +2008,63 @@ function ShiftEditorModal({
         zIndex: 100020,
         background: 'rgba(15, 23, 42, 0.6)',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
+        justifyContent: 'flex-end',
       }}
     >
-      <div
+      <style>{CALENDAR_POPOVER_CSS}</style>
+      <aside
         role="dialog"
         aria-modal="true"
         aria-label="Mesai Planla"
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: '100%',
-          maxWidth: 460,
-          maxHeight: '90vh',
-          overflowY: 'auto',
+          width: 480,
+          maxWidth: '100vw',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
           background: 'var(--card-bg)',
-          borderRadius: 14,
-          border: '1.5px solid var(--input-border)',
-          padding: 20,
-          boxShadow: 'var(--pc-neo-card)',
+          borderLeft: '1px solid var(--input-border)',
+          boxShadow: 'var(--pc-modal-shadow)',
           color: 'var(--foreground)',
           boxSizing: 'border-box',
         }}
       >
-        {/* Modal Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Sticky Drawer Header */}
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--input-border)',
+            background: 'var(--card-inner)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div
               style={{
-                width: 34,
-                height: 34,
+                width: 36,
+                height: 36,
                 borderRadius: 10,
-                background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+                background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
                 boxShadow: 'var(--pc-clay-primary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                flexShrink: 0,
               }}
             >
-              <Clock size={17} color="#ffffff" />
+              <Clock size={18} color="#ffffff" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--foreground)' }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--foreground)', lineHeight: 1.2 }}>
                 {initial.shift ? 'Mesai Düzenle' : 'Mesai Planla'}
-              </h3>
-              <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)' }}>
+              </h2>
+              <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--foreground-2)', fontWeight: 550 }}>
                 Günlük, haftalık veya aylık tekrarlı vardiya atayın
-              </div>
+              </p>
             </div>
           </div>
           <button
@@ -1405,47 +2072,58 @@ function ShiftEditorModal({
             onClick={onClose}
             aria-label="Kapat"
             style={{
-              width: 30,
-              height: 30,
+              width: 32,
+              height: 32,
               borderRadius: 8,
               border: '1px solid var(--input-border)',
-              background: 'var(--card-inner)',
+              background: 'var(--input-bg)',
               color: 'var(--foreground-2)',
+              boxShadow: 'var(--pc-clay-btn)',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
             }}
           >
-            <X size={15} />
+            <X size={16} />
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Scrollable Drawer Body */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
           {/* 1. Personel Seçimi */}
-          <div style={{ ...neoSubCard, padding: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Users size={14} color="var(--accent)" /> Personel ({userIds.length} seçili)
+          <div style={{ ...neoSubCard, padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Users size={15} color="#2563eb" /> Personel ({userIds.length} seçili)
               </span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button
                   type="button"
                   onClick={() => setUserIds(users.filter((u) => u.role === 'hekim').map((u) => u.id))}
-                  style={{ ...clayOutlineButton, minHeight: 26, padding: '0 8px', fontSize: 11 }}
+                  style={{ ...claySecondaryButton, minHeight: 28, padding: '0 9px', fontSize: 11 }}
                 >
                   Hekimler
                 </button>
                 <button
                   type="button"
                   onClick={() => setUserIds(userIds.length === users.length ? [] : users.map((u) => u.id))}
-                  style={{ ...clayOutlineButton, minHeight: 26, padding: '0 8px', fontSize: 11, color: 'var(--accent)' }}
+                  style={{ ...claySecondaryButton, minHeight: 28, padding: '0 9px', fontSize: 11 }}
                 >
                   {userIds.length === users.length ? 'Temizle' : 'Tümü'}
                 </button>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, maxHeight: 132, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7, maxHeight: 148, overflowY: 'auto' }}>
               {users.map((person) => {
                 const selected = userIds.includes(person.id)
                 return (
@@ -1460,9 +2138,9 @@ function ShiftEditorModal({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       gap: 6,
-                      padding: '7px 9px',
-                      borderRadius: 9,
-                      border: selected ? '1.5px solid #0284c7' : '1px solid var(--input-border)',
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: selected ? '1.5px solid #1d4ed8' : '1px solid var(--input-border)',
                       background: selected ? 'var(--card-bg)' : 'var(--input-bg)',
                       boxShadow: selected ? 'var(--pc-clay-pale)' : 'none',
                       color: 'var(--foreground)',
@@ -1470,24 +2148,24 @@ function ShiftEditorModal({
                       textAlign: 'left',
                     }}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, fontSize: 12, fontWeight: 700 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 999, background: person.color || '#0284c7', flexShrink: 0 }} />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 12.5, fontWeight: 700 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 999, background: person.color || '#2563eb', flexShrink: 0 }} />
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name}</span>
                     </span>
                     <span
                       style={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: 5,
-                        background: selected ? '#0284c7' : 'var(--card-inner)',
-                        border: selected ? '1px solid #0284c7' : '1px solid var(--input-border)',
+                        width: 18,
+                        height: 18,
+                        borderRadius: 6,
+                        background: selected ? '#1d4ed8' : 'var(--card-inner)',
+                        border: selected ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
                       }}
                     >
-                      {selected && <Check size={11} color="#ffffff" strokeWidth={3} />}
+                      {selected && <Check size={12} color="#ffffff" strokeWidth={3} />}
                     </span>
                   </button>
                 )
@@ -1495,67 +2173,64 @@ function ShiftEditorModal({
             </div>
           </div>
 
-          {/* 2. Saat Aralığı */}
-          <div style={{ ...neoSubCard, padding: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 750, color: 'var(--foreground)' }}>Çalışma Saat Aralığı</span>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: 'var(--badge-clinic-bg, #e0f2fe)',
-                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                  color: 'var(--badge-clinic-text, #0369a1)',
-                }}
-              >
-                {shiftDurationInfo.isOvernight ? `🌙 Gece · ${shiftDurationInfo.hours} sa` : `⏱️ ${shiftDurationInfo.hours} saat`}
+          {/* 2. Çalışma Saat Aralığı (Slider HourPicker + Hızlı Saat Blokları) */}
+          <div style={{ ...neoSubCard, padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock size={15} color="#2563eb" /> Çalışma Saat Aralığı
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--foreground-2)', fontWeight: 650 }}>
+                Kaydırarak veya saate tıklayarak seçin
               </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <label style={{ display: 'grid', gap: 4, fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)' }}>
-                Başlangıç
-                <select value={startTime} onChange={(e) => setStartTime(e.target.value)} style={neoInput}>
-                  {TIME_OPTIONS.map((t) => (
-                    <option key={`mod-s-${t}`} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)' }}>
-                Bitiş
-                <select value={endTime} onChange={(e) => setEndTime(e.target.value)} style={neoInput}>
-                  {Array.from(new Set([...TIME_OPTIONS.slice(1), '24:00', ...TIME_OPTIONS.slice(1, 17)])).map((t) => {
-                    const sH = parseInt(startTime.split(':')[0] || '8', 10)
-                    const eH = parseInt(t.split(':')[0] || '20', 10)
-                    const overnight = t !== '24:00' && eH <= sH
-                    return (
-                      <option key={`mod-e-${t}`} value={t}>
-                        {t}
-                        {overnight ? ' (Gece)' : ''}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
+
+            <InteractiveTimeRangePicker
+              startTime={startTime}
+              endTime={endTime}
+              onChange={(nextS, nextE) => {
+                setStartTime(nextS)
+                setEndTime(nextE)
+              }}
+            />
+
+            {/* Quick Shift Hour Presets */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6, marginTop: 12 }}>
+              {SHIFT_PRESETS.map((preset) => {
+                const isActive = startTime === preset.start && endTime === preset.end
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setStartTime(preset.start)
+                      setEndTime(preset.end)
+                    }}
+                    style={{
+                      padding: '6px 6px',
+                      borderRadius: 8,
+                      border: isActive ? '1px solid #1d4ed8' : '1px solid var(--btn-clinic-blue-border, #93c5fd)',
+                      background: isActive ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--btn-clinic-blue-bg, #ffffff)',
+                      color: isActive ? '#ffffff' : 'var(--btn-clinic-blue-fg, #1d4ed8)',
+                      boxShadow: isActive ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                      fontSize: 10.5,
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <span style={{ color: isActive ? '#ffffff' : 'inherit' }}>{preset.label}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {/* 3. Tekrarlı Planlama (Günlük / Haftalık / Aylık) */}
-          <div style={{ ...neoSubCard, padding: 12 }}>
-            <div style={{ fontSize: 12, fontWeight: 750, color: 'var(--foreground)', marginBottom: 8 }}>
+          {/* 3. Planlama Dönemi & Özel DatePicker */}
+          <div style={{ ...neoSubCard, padding: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--foreground)', marginBottom: 10 }}>
               Planlama Dönemi (Tekrarlı Vardiya)
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 6,
-                marginBottom: 10,
-              }}
-            >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 12 }}>
               {(
                 [
                   ['once', 'Günlük (Tek Gün)'],
@@ -1578,8 +2253,8 @@ function ShiftEditorModal({
                       minHeight: 36,
                       padding: '0 8px',
                       borderRadius: 9,
-                      border: active ? '1px solid #0284c7' : '1px solid var(--input-border)',
-                      background: active ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'var(--input-bg)',
+                      border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                      background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
                       color: active ? '#ffffff' : 'var(--foreground)',
                       boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
                       fontSize: 11.5,
@@ -1593,31 +2268,60 @@ function ShiftEditorModal({
               })}
             </div>
 
-            <label style={{ display: 'grid', gap: 4, fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)', marginBottom: repeat !== 'once' ? 10 : 0 }}>
-              {repeat === 'once' ? 'Mesai Tarihi' : repeat === 'week' ? 'Hafta Seçimi (Herhangi Bir Gün)' : 'Ay Seçimi (Herhangi Bir Gün)'}
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={neoInput} />
-            </label>
+            {/* Embedded Modern Clinical DatePicker Card */}
+            <div
+              style={{
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
+                borderRadius: 12,
+                padding: '10px 12px',
+                marginBottom: repeat !== 'once' ? 12 : 0,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)' }}>
+                  {repeat === 'once'
+                    ? `Seçili Gün: ${label(startDate, { day: 'numeric', month: 'long', year: 'numeric' })}`
+                    : repeat === 'week'
+                      ? `Hafta: ${label(monday(startDate), { day: 'numeric', month: 'short' })} – ${label(addDays(monday(startDate), 6), { day: 'numeric', month: 'short', year: 'numeric' })}`
+                      : `Ay: ${label(startDate, { month: 'long', year: 'numeric' })}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStartDate(dateKey(new Date()))}
+                  style={{ ...claySecondaryButton, minHeight: 25, padding: '0 8px', fontSize: 10.5 }}
+                >
+                  Bugün
+                </button>
+              </div>
+              <div className="clinic-rdp" style={{ display: 'flex', justifyContent: 'center' }}>
+                <DayPicker
+                  mode="single"
+                  locale={tr}
+                  selected={localDate(startDate)}
+                  onSelect={(val) => val && setStartDate(dateKey(val))}
+                />
+              </div>
+            </div>
 
             {repeat !== 'once' && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)' }}>
-                    {repeat === 'week'
-                      ? `${label(monday(startDate), { day: 'numeric', month: 'short' })} – ${label(addDays(monday(startDate), 6), { day: 'numeric', month: 'short' })} Günleri`
-                      : `${label(startDate, { month: 'long', year: 'numeric' })} Boyunca Çalışma Günleri`}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 750, color: 'var(--foreground-2)' }}>
+                    Çalışma Günleri
                   </span>
-                  <div style={{ display: 'flex', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 5 }}>
                     <button
                       type="button"
                       onClick={() => setWeekdays([0, 1, 2, 3, 4])}
-                      style={{ ...clayOutlineButton, minHeight: 24, padding: '0 7px', fontSize: 10.5 }}
+                      style={{ ...claySecondaryButton, minHeight: 26, padding: '0 8px', fontSize: 11 }}
                     >
                       Hafta İçi
                     </button>
                     <button
                       type="button"
                       onClick={() => setWeekdays([0, 1, 2, 3, 4, 5, 6])}
-                      style={{ ...clayOutlineButton, minHeight: 24, padding: '0 7px', fontSize: 10.5 }}
+                      style={{ ...claySecondaryButton, minHeight: 26, padding: '0 8px', fontSize: 11 }}
                     >
                       Her Gün
                     </button>
@@ -1634,10 +2338,10 @@ function ShiftEditorModal({
                           setWeekdays((curr) => (curr.includes(idx) ? curr.filter((x) => x !== idx) : [...curr, idx]))
                         }
                         style={{
-                          minHeight: 34,
+                          minHeight: 36,
                           borderRadius: 8,
-                          border: active ? '1px solid #0284c7' : '1px solid var(--input-border)',
-                          background: active ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'var(--input-bg)',
+                          border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                          background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
                           color: active ? '#ffffff' : 'var(--foreground)',
                           boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
                           fontSize: 11.5,
@@ -1658,7 +2362,7 @@ function ShiftEditorModal({
             <div
               role="alert"
               style={{
-                padding: '9px 12px',
+                padding: '10px 12px',
                 borderRadius: 10,
                 background: 'var(--card-inner)',
                 border: '1px solid var(--danger)',
@@ -1670,44 +2374,54 @@ function ShiftEditorModal({
               ⚠️ {error}
             </div>
           )}
+        </div>
 
-          {/* Footer Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            {initial.shift && onDeleteShift ? (
-              <button
-                type="button"
-                onClick={() => onDeleteShift(initial.shift!.id)}
-                style={{
-                  ...clayOutlineButton,
-                  border: '1px solid var(--danger)',
-                  color: 'var(--danger)',
-                }}
-              >
-                <Trash2 size={14} /> Mesaiyi Sil
-              </button>
-            ) : (
-              <div />
-            )}
+        {/* Sticky Drawer Footer */}
+        <div
+          style={{
+            padding: '14px 20px',
+            borderTop: '1px solid var(--input-border)',
+            background: 'var(--card-inner)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          {initial.shift && onDeleteShift ? (
+            <button
+              type="button"
+              onClick={() => onDeleteShift(initial.shift!.id)}
+              style={{
+                ...clayNeutralButton,
+                border: '1px solid var(--danger)',
+                color: 'var(--danger)',
+              }}
+            >
+              <Trash2 size={14} /> Mesaiyi Sil
+            </button>
+          ) : (
+            <div />
+          )}
 
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={onClose} disabled={saving} style={clayOutlineButton}>
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="btn-clinic-primary"
-                style={clayPrimaryButton}
-              >
-                <span style={{ color: '#ffffff' }}>
-                  {saving ? 'Kaydediliyor…' : repeat === 'once' ? 'Mesaiyi Kaydet' : repeat === 'week' ? 'Haftalık Planı Kaydet' : 'Aylık Planı Kaydet'}
-                </span>
-              </button>
-            </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={onClose} disabled={saving} style={clayNeutralButton}>
+              Vazgeç
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="btn-clinic-primary"
+              style={clayPrimaryButton}
+            >
+              <span style={{ color: '#ffffff' }}>
+                {saving ? 'Kaydediliyor…' : repeat === 'once' ? 'Mesaiyi Kaydet' : repeat === 'week' ? 'Haftalık Planı Kaydet' : 'Aylık Planı Kaydet'}
+              </span>
+            </button>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
   )
 }

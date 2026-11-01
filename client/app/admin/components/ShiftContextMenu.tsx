@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { toast } from 'react-hot-toast'
 import { CalendarOff, Clock, Repeat, Trash2, Edit3, X } from 'lucide-react'
 
@@ -26,12 +26,18 @@ export interface ShiftContextMenuProps {
   onOpenLeaveModal?: (doctorId: string, date: string) => void
 }
 
-const TIME_OPTIONS = Array.from({ length: 48 }, (_, idx) => {
-  const total = idx * 30
-  const hh = String(Math.floor(total / 60)).padStart(2, '0')
-  const mm = String(total % 60).padStart(2, '0')
+function toMins(t: string): number {
+  const [h, m] = (t || '09:00').split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
+
+function fromMins(m: number): string {
+  const clamped = Math.max(0, Math.min(24 * 60, m))
+  if (clamped >= 24 * 60) return '24:00'
+  const hh = String(Math.floor(clamped / 60)).padStart(2, '0')
+  const mm = String(clamped % 60).padStart(2, '0')
   return `${hh}:${mm}`
-})
+}
 
 export default function ShiftContextMenu({
   x,
@@ -52,9 +58,40 @@ export default function ShiftContextMenu({
   const [selectedDoctorId, setSelectedDoctorId] = useState(doctorId || '')
   const [startTime, setStartTime] = useState(initialStartTime || '09:00')
   const [endTime, setEndTime] = useState(initialEndTime || '19:00')
+  const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
 
-  const safeLeft = typeof window !== 'undefined' ? Math.min(x, Math.max(12, window.innerWidth - 280)) : x
-  const safeTop = typeof window !== 'undefined' ? Math.min(y, Math.max(12, window.innerHeight - 360)) : y
+  const safeLeft = typeof window !== 'undefined' ? Math.min(x, Math.max(12, window.innerWidth - 296)) : x
+  const safeTop = typeof window !== 'undefined' ? Math.min(y, Math.max(12, window.innerHeight - 390)) : y
+
+  const startPct = (toMins(startTime) / (24 * 60)) * 100
+  const endPct = (toMins(endTime) / (24 * 60)) * 100
+
+  const handleTrackMove = (clientX: number, thumb: 'start' | 'end') => {
+    if (!trackRef.current) return
+    const rect = trackRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    const snapped = Math.round((ratio * 24 * 60) / 30) * 30
+    if (thumb === 'start') {
+      setStartTime(fromMins(Math.min(23 * 60 + 30, snapped)))
+    } else {
+      setEndTime(fromMins(Math.max(30, snapped)))
+    }
+  }
+
+  const startDrag = (thumb: 'start' | 'end') => (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(thumb)
+    const onMove = (ev: PointerEvent) => handleTrackMove(ev.clientX, thumb)
+    const onUp = () => {
+      setDragging(null)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   const handleApply = (repeatMode: 'daily' | 'weekly' | 'monthly') => {
     if (!selectedDoctorId) {
@@ -87,8 +124,8 @@ export default function ShiftContextMenu({
         border: '1.5px solid var(--input-border, #cbd5e1)',
         borderRadius: 14,
         padding: 14,
-        boxShadow: 'var(--pc-neo-card)',
-        width: 264,
+        boxShadow: 'var(--pc-modal-shadow)',
+        width: 280,
         color: 'var(--foreground)',
       }}
     >
@@ -154,7 +191,7 @@ export default function ShiftContextMenu({
         <>
           <div
             style={{
-              padding: '9px 10px',
+              padding: '10px 11px',
               borderRadius: 10,
               background: 'var(--card-inner)',
               border: '1px solid var(--input-border)',
@@ -162,51 +199,154 @@ export default function ShiftContextMenu({
               marginBottom: 10,
             }}
           >
-            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--foreground-2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Clock size={12} color="var(--accent, #0284c7)" /> Mesai Saat Aralığı
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Clock size={12} color="#2563eb" /> Mesai Saati (Sürükle / Seç)
+              </div>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  color: 'var(--badge-clinic-text, #1d4ed8)',
+                  background: 'var(--badge-clinic-bg, #e0f2fe)',
+                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {startTime} – {endTime}
+              </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 5 }}>
-              <select
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+
+            {/* Interactive Mini Range Slider */}
+            <div style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center', marginBottom: 8, userSelect: 'none' }}>
+              <div
+                ref={trackRef}
+                onClick={(e) => {
+                  if (!trackRef.current) return
+                  const rect = trackRef.current.getBoundingClientRect()
+                  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                  const clickedMin = Math.round((ratio * 24 * 60) / 30) * 30
+                  const distStart = Math.abs(clickedMin - toMins(startTime))
+                  const distEnd = Math.abs(clickedMin - toMins(endTime))
+                  handleTrackMove(e.clientX, distStart <= distEnd ? 'start' : 'end')
+                }}
                 style={{
-                  padding: '5px 6px',
-                  borderRadius: 8,
-                  border: '1px solid var(--input-border)',
+                  position: 'relative',
+                  width: '100%',
+                  height: 8,
+                  borderRadius: 999,
                   background: 'var(--input-bg)',
-                  color: 'var(--foreground)',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
+                  border: '1px solid var(--input-border)',
                   boxShadow: 'var(--pc-neo-inset)',
+                  cursor: 'pointer',
+                  overflow: 'hidden',
                 }}
               >
-                {TIME_OPTIONS.map((t) => (
-                  <option key={`ctx-s-${t}`} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-3)' }}>–</span>
-              <select
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                {endPct >= startPct ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      bottom: 0,
+                      left: `${startPct}%`,
+                      width: `${Math.max(2, endPct - startPct)}%`,
+                      background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                      borderRadius: 999,
+                    }}
+                  />
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: `${startPct}%`,
+                        right: 0,
+                        background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        width: `${endPct}%`,
+                        background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                      }}
+                    />
+                  </>
+                )}
+              </div>
+
+              <div
+                onPointerDown={startDrag('start')}
                 style={{
-                  padding: '5px 6px',
-                  borderRadius: 8,
-                  border: '1px solid var(--input-border)',
-                  background: 'var(--input-bg)',
-                  color: 'var(--foreground)',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  boxShadow: 'var(--pc-neo-inset)',
+                  position: 'absolute',
+                  left: `calc(${startPct}% - 9px)`,
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                  border: '2px solid #ffffff',
+                  boxShadow: '0 2px 5px rgba(29, 78, 216, 0.35)',
+                  cursor: dragging === 'start' ? 'grabbing' : 'grab',
+                  zIndex: 2,
                 }}
-              >
-                {[...TIME_OPTIONS.slice(1), '24:00'].map((t) => (
-                  <option key={`ctx-e-${t}`} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              />
+              <div
+                onPointerDown={startDrag('end')}
+                style={{
+                  position: 'absolute',
+                  left: `calc(${endPct}% - 9px)`,
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                  border: '2px solid #ffffff',
+                  boxShadow: '0 2px 5px rgba(29, 78, 216, 0.35)',
+                  cursor: dragging === 'end' ? 'grabbing' : 'grab',
+                  zIndex: 2,
+                }}
+              />
+            </div>
+
+            {/* Quick Presets */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
+              {[
+                { label: '08-20', s: '08:00', e: '20:00' },
+                { label: '09-18', s: '09:00', e: '18:00' },
+                { label: '09-13', s: '09:00', e: '13:00' },
+                { label: '13-19', s: '13:00', e: '19:00' },
+              ].map((p) => {
+                const active = startTime === p.s && endTime === p.e
+                return (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => {
+                      setStartTime(p.s)
+                      setEndTime(p.e)
+                    }}
+                    className={active ? 'btn-clinic-primary' : 'btn-clinic-outline'}
+                    style={{
+                      padding: '4px 4px',
+                      borderRadius: 6,
+                      fontSize: '0.66rem',
+                      fontWeight: 750,
+                      border: active ? '1px solid #1d4ed8' : '1px solid var(--btn-clinic-outline-border, #93c5fd)',
+                      background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--btn-clinic-outline-bg, #eff6ff)',
+                      color: active ? '#ffffff' : 'var(--btn-clinic-outline-text, #1d4ed8)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ color: active ? '#ffffff' : 'inherit' }}>{p.label}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -222,8 +362,8 @@ export default function ShiftContextMenu({
                 alignItems: 'center',
                 padding: '8px 11px',
                 borderRadius: 9,
-                border: '1px solid #0284c7',
-                background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+                border: '1px solid #1d4ed8',
+                background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
                 color: '#ffffff',
                 fontSize: '0.75rem',
                 fontWeight: 700,

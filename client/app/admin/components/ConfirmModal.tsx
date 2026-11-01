@@ -84,7 +84,7 @@ export default function ConfirmModal({
           background: 'var(--card-bg, #1e293b)',
           borderRadius: '14px',
           border: '1.5px solid var(--input-border, #334155)',
-          boxShadow: 'var(--pc-neo-card)',
+          boxShadow: 'var(--pc-modal-shadow)',
           padding: '24px',
           position: 'relative',
           display: 'flex',

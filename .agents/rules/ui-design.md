@@ -43,10 +43,12 @@ trigger: always_on
   - **Neomorphism (`--pc-neo-card`, `--pc-neo-subcard`, `--pc-neo-inset`)**: Outer extruded tactile shadows on solid cards/subcards and clean inset shadows (`--pc-neo-inset`) on all `input`, `select`, search boxes, and segmented tab tracks.
   - **Claymorphism (`--pc-clay-btn`, `--pc-clay-pale`, `--pc-clay-primary`, `--pc-clay-total`)**: 3D inner-rim highlights and soft outer elevation on buttons, badges, pills, and interactive cells. Primary blue buttons (`#075cff` / `#2563eb`) use `--pc-clay-primary` with pure `#ffffff` text/icons.
 
-## 6. Standard Modal Architecture ("Yeni Randevu" / `QuickCreatePopover` Standard)
-- Every form/action modal (except full-screen workspaces like Odontogram/Treatment Planning) MUST match the exact dimensions, colors, and backdrop of **Yeni Randevu (`QuickCreatePopover.tsx`)**:
+## 6. Standard Modal & Drawer Architecture ("Yeni Randevu" / `QuickCreatePopover` Standard)
+- Every form/action modal (except full-screen workspaces like Odontogram/Treatment Planning and right-side drawers like `Mesai Planla` / `ShiftEditorSidebar`) MUST match the exact dimensions, colors, and backdrop of **Yeni Randevu (`QuickCreatePopover.tsx`)**:
   - **Backdrop**: Fixed `inset: 0`, `background: var(--modal-overlay)` (`rgba(15, 23, 42, 0.6)`), never transparent or missing.
-  - **Modal Container**: `width: min(460px, calc(100vw - 24px))`, `maxWidth: 460px`, `maxHeight: 90vh`, `borderRadius: 14px`, solid `background: var(--card-bg)`, `border: 1px solid var(--pc-border, var(--input-border))`, with Neomorphism & Claymorphism tokens applied throughout.
-  - **Header & Footer**: Header with `padding: 15px 20px`, `background: var(--card-inner)`, `32x32px` rounded-8px `#2563eb` (`#ffffff` icon, `--pc-clay-primary`) badge, title + subtitle, and `28x28px` close button (`--pc-clay-btn`).
+  - **Shadow (No Bright White Halo)**: Never use white outer shadows (`-3px -3px 8px #ffffff`) on modals, drawers, or popovers over dark overlays. Always use `boxShadow: var(--pc-modal-shadow)`.
+  - **Modal Container**: `width: min(460px, calc(100vw - 24px))`, `maxWidth: 460px`, `maxHeight: 90vh`, `borderRadius: 14px`, solid `background: var(--card-bg)`, `border: 1.5px solid var(--input-border)`, `boxShadow: var(--pc-modal-shadow)`.
+  - **Cohesive Deep Clinical Blue**: All primary buttons, active tabs, and selected pills must use the same deep clinical blue (`linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)`, border `#1d4ed8`, text `#ffffff`).
+  - **Custom DatePicker & Interactive Slider HourPicker**: Avoid raw browser-native `<input type="date">` and long `<select>` hour dropdowns; use custom `DayPicker` popovers and dual-thumb 24-hour range sliders + hour grid popovers (`InteractiveTimeRangePicker`).
 
 

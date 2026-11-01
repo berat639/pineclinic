@@ -90,13 +90,14 @@
   --pc-blue: #2563eb;
   --pc-blue-fg: #ffffff;
   --pc-tint-fg: #93c5fd;
-  --pc-neo-card: 5px 8px 18px -4px rgba(2,6,23,.72), -2px -2px 7px rgba(51,65,85,.22), inset 0 1px 0 rgba(148,163,184,.14), inset 0 -2px 0 rgba(2,6,23,.5);
-  --pc-neo-subcard: 3px 5px 12px -3px rgba(2,6,23,.62), -1px -1px 5px rgba(51,65,85,.18), inset 0 1px 0 rgba(148,163,184,.12), inset 0 -1.5px 0 rgba(2,6,23,.45);
-  --pc-neo-inset: inset 2px 2px 5px rgba(2,6,23,.65), inset -1px -1px 4px rgba(51,65,85,.2);
-  --pc-clay-btn: 0 3px 8px -2px rgba(2,6,23,.65), inset 0 1px 0 rgba(148,163,184,.16), inset 0 -2px 0 rgba(2,6,23,.55);
-  --pc-clay-pale: 0 4px 10px -2px rgba(2,6,23,.68), inset 0 1.5px 0 rgba(147,197,253,.22), inset 0 -2px 0 rgba(7,22,48,.65);
-  --pc-clay-primary: 0 6px 14px -2px rgba(37,99,235,.45), inset 0 2px 1px rgba(255,255,255,.28), inset 0 -2.5px 2px rgba(15,23,42,.48);
-  --pc-clay-total: 0 8px 20px -4px rgba(2,6,23,.72), inset 0 1.5px 0 rgba(147,197,253,.22), inset 0 -2px 0 rgba(8,20,44,.7);
+  --pc-neo-card: 0 8px 22px -4px rgba(2,6,23,.65), inset 0 1px 0 rgba(148,163,184,.12), inset 0 -1.5px 0 rgba(2,6,23,.45);
+  --pc-neo-subcard: 0 4px 12px -2px rgba(2,6,23,.52), inset 0 1px 0 rgba(148,163,184,.10), inset 0 -1px 0 rgba(2,6,23,.38);
+  --pc-neo-inset: inset 1.5px 1.5px 4px rgba(2,6,23,.55), inset -1px -1px 3px rgba(51,65,85,.16);
+  --pc-clay-btn: 0 2px 6px -1px rgba(2,6,23,.55), inset 0 1px 0 rgba(148,163,184,.14), inset 0 -1.5px 0 rgba(2,6,23,.45);
+  --pc-clay-pale: 0 3px 8px -2px rgba(2,6,23,.55), inset 0 1px 0 rgba(147,197,253,.18), inset 0 -1.5px 0 rgba(7,22,48,.55);
+  --pc-clay-primary: 0 4px 12px -2px rgba(29,78,216,.42), inset 0 1.5px 0 rgba(255,255,255,.24), inset 0 -2px 0 rgba(15,23,42,.42);
+  --pc-clay-total: 0 6px 16px -3px rgba(2,6,23,.62), inset 0 1px 0 rgba(147,197,253,.18), inset 0 -1.5px 0 rgba(8,20,44,.6);
+  --pc-modal-shadow: 0 20px 44px -8px rgba(2, 6, 23, 0.78), 0 6px 16px -4px rgba(2, 6, 23, 0.55);
 }
 
 /* ── Light ─────────────────────────────────────────────────────────────────── */
@@ -185,16 +186,17 @@
   --pc-border: #d8e5f6;
   --pc-muted: #526e98;
   --pc-tint: #edf5ff;
-  --pc-blue: #075cff;
+  --pc-blue: #1d4ed8;
   --pc-blue-fg: #ffffff;
-  --pc-tint-fg: #0759da;
-  --pc-neo-card: 4px 6px 14px -3px rgba(15,52,110,.08), -3px -3px 8px #ffffff, inset 0 1px 0 #ffffff, inset 0 -1.5px 0 #e5effc;
-  --pc-neo-subcard: 3px 4px 10px -2px rgba(15,52,110,.07), -2px -2px 6px #ffffff, inset 0 1px 0 #ffffff, inset 0 -1px 0 #e8f1fc;
-  --pc-neo-inset: inset 2px 2px 5px rgba(15,52,110,.07), inset -2px -2px 5px #ffffff;
-  --pc-clay-btn: 0 3px 7px -2px rgba(15,52,110,.10), -1px -1px 4px #ffffff, inset 0 1.5px 0 #ffffff, inset 0 -2px 0 #e2ecf9;
-  --pc-clay-pale: 0 4px 9px -2px rgba(7,92,255,.14), inset 0 1.5px 0 #ffffff, inset 0 -2px 0 #d5e6ff;
-  --pc-clay-primary: 0 5px 12px -2px rgba(7,92,255,.34), inset 0 2px 1px rgba(255,255,255,.36), inset 0 -2.5px 2px rgba(3,45,138,.38);
-  --pc-clay-total: 0 8px 18px -4px rgba(7,92,255,.16), -2px -2px 8px #ffffff, inset 0 2px 0 #ffffff, inset 0 -2px 0 #cfe3ff;
+  --pc-tint-fg: #1d4ed8;
+  --pc-neo-card: 0 6px 18px -4px rgba(15, 23, 42, 0.07), 0 2px 6px -1px rgba(15, 23, 42, 0.04), inset 0 1px 0 #ffffff, inset 0 -1px 0 #e5effc;
+  --pc-neo-subcard: 0 3px 10px -2px rgba(15, 23, 42, 0.05), inset 0 1px 0 #ffffff, inset 0 -1px 0 #e8f1fc;
+  --pc-neo-inset: inset 1.5px 1.5px 4px rgba(15, 52, 110, 0.06), inset -1px -1px 3px #ffffff;
+  --pc-clay-btn: 0 2px 6px -1px rgba(15, 52, 110, 0.08), inset 0 1px 0 #ffffff, inset 0 -1.5px 0 #e2ecf9;
+  --pc-clay-pale: 0 3px 8px -2px rgba(29, 78, 216, 0.12), inset 0 1px 0 #ffffff, inset 0 -1.5px 0 #d5e6ff;
+  --pc-clay-primary: 0 4px 12px -2px rgba(29, 78, 216, 0.32), inset 0 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 -2px 0 rgba(30, 58, 138, 0.38);
+  --pc-clay-total: 0 6px 16px -4px rgba(29, 78, 216, 0.14), inset 0 1px 0 #ffffff, inset 0 -1.5px 0 #cfe3ff;
+  --pc-modal-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.24), 0 6px 16px -4px rgba(15, 23, 42, 0.10);
 }
 
 /* ── Appointment-reference modal layout ─────────────────────────────────── */
@@ -630,13 +632,16 @@ body {
   transform: translateY(-1px);
 }
 
-.btn-clinic-blue {
+.btn-clinic-blue,
+.btn-clinic-outline {
   background: var(--btn-clinic-blue-bg) !important;
   border: 1px solid var(--btn-clinic-blue-border) !important;
   color: var(--btn-clinic-blue-fg) !important;
+  box-shadow: var(--pc-clay-btn);
   transition: all 0.15s ease;
 }
-.btn-clinic-blue:hover {
+.btn-clinic-blue:hover,
+.btn-clinic-outline:hover {
   background: var(--btn-clinic-blue-hover) !important;
 }
 

@@ -104,8 +104,8 @@ const inputStyle: React.CSSProperties = {
 const clayPrimaryBtnStyle: React.CSSProperties = {
   padding: '9px 16px',
   borderRadius: 10,
-  border: '1px solid #0284c7',
-  background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+  border: '1px solid #1d4ed8',
+  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
   color: '#ffffff',
   boxShadow: 'var(--pc-clay-primary)',
   fontSize: '0.8rem',
@@ -120,9 +120,9 @@ const clayPrimaryBtnStyle: React.CSSProperties = {
 const clayOutlineBtnStyle: React.CSSProperties = {
   padding: '9px 14px',
   borderRadius: 10,
-  border: '1px solid var(--input-border)',
-  background: 'var(--input-bg)',
-  color: 'var(--foreground)',
+  border: '1px solid var(--btn-clinic-outline-border, #93c5fd)',
+  background: 'var(--btn-clinic-outline-bg, #eff6ff)',
+  color: 'var(--btn-clinic-outline-text, #1d4ed8)',
   boxShadow: 'var(--pc-clay-btn)',
   fontSize: '0.8rem',
   fontWeight: 700,
@@ -134,8 +134,8 @@ const clayOutlineBtnStyle: React.CSSProperties = {
 }
 
 const ROLE_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  yonetici: { label: 'Yönetici', color: '#0369a1', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
-  hekim: { label: 'Hekim', color: '#0284c7', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
+  yonetici: { label: 'Yönetici', color: '#1d4ed8', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
+  hekim: { label: 'Hekim', color: '#1d4ed8', bg: 'var(--badge-clinic-bg, #e0f2fe)', border: 'var(--badge-clinic-border, #bae6fd)' },
   host: { label: 'Kayıt / Resepsiyon', color: '#15803d', bg: 'var(--btn-mint-bg, #f0fdf4)', border: 'var(--btn-mint-border, #86efac)' },
 }
 
@@ -446,15 +446,16 @@ export default function KlinikPersonelTab() {
             type="button"
             onClick={() => setWorkspace('planner')}
             aria-pressed={workspace === 'planner'}
+            className={workspace === 'planner' ? 'btn-clinic-primary' : ''}
             style={{
               minHeight: 38,
               padding: '0 16px',
-              border: workspace === 'planner' ? '1px solid #0284c7' : '1px solid transparent',
+              border: workspace === 'planner' ? '1px solid #1d4ed8' : '1px solid transparent',
               borderRadius: 9,
               cursor: 'pointer',
               fontWeight: 750,
               fontSize: 13,
-              background: workspace === 'planner' ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'transparent',
+              background: workspace === 'planner' ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent',
               color: workspace === 'planner' ? '#ffffff' : 'var(--foreground-2)',
               boxShadow: workspace === 'planner' ? 'var(--pc-clay-primary)' : 'none',
             }}
@@ -466,15 +467,16 @@ export default function KlinikPersonelTab() {
           type="button"
           onClick={() => setWorkspace('people')}
           aria-pressed={workspace === 'people'}
+          className={workspace === 'people' ? 'btn-clinic-primary' : ''}
           style={{
             minHeight: 38,
             padding: '0 16px',
-            border: workspace === 'people' ? '1px solid #0284c7' : '1px solid transparent',
+            border: workspace === 'people' ? '1px solid #1d4ed8' : '1px solid transparent',
             borderRadius: 9,
             cursor: 'pointer',
             fontWeight: 750,
             fontSize: 13,
-            background: workspace === 'people' ? 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)' : 'transparent',
+            background: workspace === 'people' ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent',
             color: workspace === 'people' ? '#ffffff' : 'var(--foreground-2)',
             boxShadow: workspace === 'people' ? 'var(--pc-clay-primary)' : 'none',
           }}
@@ -800,7 +802,7 @@ export default function KlinikPersonelTab() {
               background: 'var(--card-bg)',
               borderRadius: 14,
               border: '1.5px solid var(--input-border)',
-              boxShadow: 'var(--pc-neo-card)',
+              boxShadow: 'var(--pc-modal-shadow)',
               padding: 20,
               boxSizing: 'border-box',
               color: 'var(--foreground)',
@@ -813,7 +815,7 @@ export default function KlinikPersonelTab() {
                     width: 34,
                     height: 34,
                     borderRadius: 10,
-                    background: 'linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%)',
+                    background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
                     boxShadow: 'var(--pc-clay-primary)',
                     display: 'flex',
                     alignItems: 'center',
@@ -1024,7 +1026,7 @@ export default function KlinikPersonelTab() {
               background: 'var(--card-bg)',
               borderRadius: 14,
               border: '1.5px solid var(--input-border)',
-              boxShadow: 'var(--pc-neo-card)',
+              boxShadow: 'var(--pc-modal-shadow)',
               padding: 20,
               boxSizing: 'border-box',
               color: 'var(--foreground)',
@@ -1037,7 +1039,7 @@ export default function KlinikPersonelTab() {
                     width: 34,
                     height: 34,
                     borderRadius: 10,
-                    background: editForm.color || '#0284c7',
+                    background: editForm.color || '#2563eb',
                     boxShadow: 'var(--pc-clay-btn)',
                     display: 'flex',
                     alignItems: 'center',

@@ -352,10 +352,9 @@ export default function QuickCreatePopover({
           width: effectiveWidth,
           maxWidth: '460px',
           background: cardBg,
-          border: `1px solid ${borderCol}`,
+          border: `1.5px solid ${borderCol}`,
           borderRadius: '14px',
-          boxShadow:
-            '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4)',
+          boxShadow: 'var(--pc-modal-shadow)',
           zIndex: 100005,
           display: 'flex',
           flexDirection: 'column',

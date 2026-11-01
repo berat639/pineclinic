@@ -1,8 +1,11 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { toast } from 'react-hot-toast'
-import { CalendarOff, X, Trash2 } from 'lucide-react'
+import { CalendarOff, X, Trash2, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react'
+import { DayPicker } from 'react-day-picker'
+import { tr } from 'date-fns/locale'
+import 'react-day-picker/dist/style.css'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
 
 export interface DoctorLeaveItem {
@@ -40,6 +43,31 @@ const PRESET_REASONS = [
   'Kişisel İzin',
 ]
 
+function parseYmd(value: string): Date {
+  const [y, m, d] = (value || '').split('-').map(Number)
+  if (!y || !m || !d) return new Date()
+  return new Date(y, m - 1, d, 12, 0, 0)
+}
+
+function toYmd(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function toMins(t: string): number {
+  const [h, m] = (t || '09:00').split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
+
+function fromMins(m: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 30, m))
+  const hh = String(Math.floor(clamped / 60)).padStart(2, '0')
+  const mm = String(clamped % 60).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
 export default function DoctorLeaveModal({
   isOpen,
   onClose,
@@ -62,12 +90,19 @@ export default function DoctorLeaveModal({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [showDatePopover, setShowDatePopover] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => parseYmd(initialDate || new Date().toISOString().slice(0, 10)))
+  const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
+
   const [existingLeaves, setExistingLeaves] = useState<DoctorLeaveItem[]>([])
-  const [loadingLeaves, setLoadingLeaves] = useState(false)
 
   useEffect(() => {
     if (initialDoctorId !== undefined) setSelectedDoctorId(initialDoctorId || '')
-    if (initialDate) setDate(initialDate)
+    if (initialDate) {
+      setDate(initialDate)
+      setCalendarMonth(parseYmd(initialDate))
+    }
     if (initialStartTime) setStartTime(initialStartTime)
     if (initialEndTime) setEndTime(initialEndTime)
   }, [initialDoctorId, initialDate, initialStartTime, initialEndTime, isOpen])
@@ -77,7 +112,6 @@ export default function DoctorLeaveModal({
       setExistingLeaves([])
       return
     }
-    setLoadingLeaves(true)
     try {
       const res = await fetch(`/api/dental/doctors/leaves?doctorId=${selectedDoctorId}`)
       if (res.ok) {
@@ -86,8 +120,6 @@ export default function DoctorLeaveModal({
       }
     } catch (e) {
       console.error('Error fetching doctor leaves:', e)
-    } finally {
-      setLoadingLeaves(false)
     }
   }
 
@@ -98,6 +130,37 @@ export default function DoctorLeaveModal({
   }, [isOpen, selectedDoctorId])
 
   if (!isOpen) return null
+
+  const startPct = (toMins(startTime) / (24 * 60)) * 100
+  const endPct = (toMins(endTime) / (24 * 60)) * 100
+
+  const handleTrackMove = (clientX: number, thumb: 'start' | 'end') => {
+    if (!trackRef.current) return
+    const rect = trackRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    const snapped = Math.round((ratio * 24 * 60) / 30) * 30
+    if (thumb === 'start') {
+      const nextStart = Math.min(toMins(endTime) - 30, Math.max(0, snapped))
+      setStartTime(fromMins(nextStart))
+    } else {
+      const nextEnd = Math.max(toMins(startTime) + 30, Math.min(23 * 60 + 30, snapped))
+      setEndTime(fromMins(nextEnd))
+    }
+  }
+
+  const startDrag = (thumb: 'start' | 'end') => (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(thumb)
+    const onMove = (ev: PointerEvent) => handleTrackMove(ev.clientX, thumb)
+    const onUp = () => {
+      setDragging(null)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -183,15 +246,18 @@ export default function DoctorLeaveModal({
   const mutedCol = 'var(--foreground-3)'
   const inputBg = 'var(--input-bg)'
   const brandBlue = '#2563eb'
+  const brandBlueBorder = '#1d4ed8'
+  const brandBlueGradient = 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
 
   const inputStyle: React.CSSProperties = {
     padding: '9px 12px',
-    borderRadius: '8px',
+    borderRadius: '10px',
     border: `1.5px solid ${borderCol}`,
     background: inputBg,
     color: textCol,
     boxShadow: 'var(--pc-neo-inset)',
-    fontSize: '0.85rem',
+    fontSize: '0.84rem',
+    fontWeight: 600,
     outline: 'none',
     width: '100%',
     boxSizing: 'border-box',
@@ -202,13 +268,19 @@ export default function DoctorLeaveModal({
     color: labelCol,
     marginBottom: 4,
     display: 'block',
-    fontWeight: 600,
+    fontWeight: 700,
   }
 
   const selectOptionStyle: React.CSSProperties = {
     background: cardBg,
     color: textCol,
   }
+
+  const formattedDate = parseYmd(date).toLocaleDateString('tr-TR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 
   return (
     <>
@@ -236,7 +308,7 @@ export default function DoctorLeaveModal({
           background: cardBg,
           border: `1.5px solid ${borderCol}`,
           borderRadius: '14px',
-          boxShadow: 'var(--pc-neo-card)',
+          boxShadow: 'var(--pc-modal-shadow)',
           zIndex: 100021,
           display: 'flex',
           flexDirection: 'column',
@@ -261,7 +333,8 @@ export default function DoctorLeaveModal({
                 width: '32px',
                 height: '32px',
                 borderRadius: '8px',
-                background: brandBlue,
+                background: brandBlueGradient,
+                boxShadow: 'var(--pc-clay-primary)',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
@@ -289,7 +362,7 @@ export default function DoctorLeaveModal({
                   marginTop: '2px',
                 }}
               >
-                Tarih: {date}
+                Tarih: {formattedDate}
               </div>
             </div>
           </div>
@@ -300,7 +373,7 @@ export default function DoctorLeaveModal({
             style={{
               background: inputBg,
               border: `1px solid ${borderCol}`,
-              borderRadius: '6px',
+              borderRadius: '8px',
               width: '28px',
               height: '28px',
               cursor: 'pointer',
@@ -308,6 +381,7 @@ export default function DoctorLeaveModal({
               alignItems: 'center',
               justifyContent: 'center',
               color: textCol,
+              boxShadow: 'var(--pc-clay-btn)',
             }}
           >
             <X size={16} />
@@ -327,42 +401,40 @@ export default function DoctorLeaveModal({
           <button
             type="button"
             onClick={() => setIsFullDay(false)}
+            className={!isFullDay ? 'btn-clinic-primary' : ''}
             style={{
               flex: 1,
               padding: '8px 12px',
-              borderRadius: '8px',
+              borderRadius: '9px',
               fontSize: '0.83rem',
-              fontWeight: 700,
+              fontWeight: 750,
               cursor: 'pointer',
-              border: !isFullDay
-                ? `1px solid ${brandBlue}`
-                : `1px solid ${borderCol}`,
-              background: !isFullDay ? brandBlue : cardBg,
+              border: !isFullDay ? `1px solid ${brandBlueBorder}` : `1px solid ${borderCol}`,
+              background: !isFullDay ? brandBlueGradient : cardBg,
               color: !isFullDay ? '#ffffff' : textCol,
-              transition: 'all 0.15s ease',
+              boxShadow: !isFullDay ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
             }}
           >
-            Saat Aralığı Kapat
+            <span style={{ color: !isFullDay ? '#ffffff' : 'inherit' }}>Saat Aralığı Kapat</span>
           </button>
           <button
             type="button"
             onClick={() => setIsFullDay(true)}
+            className={isFullDay ? 'btn-clinic-primary' : ''}
             style={{
               flex: 1,
               padding: '8px 12px',
-              borderRadius: '8px',
+              borderRadius: '9px',
               fontSize: '0.83rem',
-              fontWeight: 700,
+              fontWeight: 750,
               cursor: 'pointer',
-              border: isFullDay
-                ? `1px solid ${brandBlue}`
-                : `1px solid ${borderCol}`,
-              background: isFullDay ? brandBlue : cardBg,
+              border: isFullDay ? `1px solid ${brandBlueBorder}` : `1px solid ${borderCol}`,
+              background: isFullDay ? brandBlueGradient : cardBg,
               color: isFullDay ? '#ffffff' : textCol,
-              transition: 'all 0.15s ease',
+              boxShadow: isFullDay ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
             }}
           >
-            Tüm Gün İzinli
+            <span style={{ color: isFullDay ? '#ffffff' : 'inherit' }}>Tüm Gün İzinli</span>
           </button>
         </div>
 
@@ -382,20 +454,15 @@ export default function DoctorLeaveModal({
             style={{
               background: subCardBg,
               padding: '14px',
-              borderRadius: '10px',
+              borderRadius: '12px',
               border: `1px solid ${borderCol}`,
+              boxShadow: 'var(--pc-neo-subcard)',
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
             }}
           >
-            <div
-              style={{
-                fontSize: '0.86rem',
-                fontWeight: 700,
-                color: textCol,
-              }}
-            >
+            <div style={{ fontSize: '0.86rem', fontWeight: 750, color: textCol }}>
               İzin Bilgileri
             </div>
 
@@ -420,7 +487,7 @@ export default function DoctorLeaveModal({
               </select>
             </div>
 
-            {/* Tarih & İzin Nedeni */}
+            {/* Tarih (Özel DatePicker Popover) & İzin Nedeni */}
             <div
               style={{
                 display: 'grid',
@@ -428,14 +495,57 @@ export default function DoctorLeaveModal({
                 gap: '10px',
               }}
             >
-              <div>
+              <div style={{ position: 'relative' }}>
                 <label style={labelStyle}>Tarih</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  style={inputStyle}
-                />
+                <button
+                  type="button"
+                  onClick={() => setShowDatePopover((prev) => !prev)}
+                  style={{
+                    ...inputStyle,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span>{formattedDate}</span>
+                  <CalendarIcon size={14} color={brandBlue} />
+                </button>
+                {showDatePopover && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      zIndex: 100050,
+                      width: 280,
+                      padding: 12,
+                      borderRadius: 14,
+                      background: cardBg,
+                      border: `1.5px solid ${borderCol}`,
+                      boxShadow: 'var(--pc-modal-shadow)',
+                    }}
+                  >
+                    <div className="clinic-rdp">
+                      <DayPicker
+                        mode="single"
+                        locale={tr}
+                        weekStartsOn={1}
+                        month={calendarMonth}
+                        onMonthChange={setCalendarMonth}
+                        selected={parseYmd(date)}
+                        onSelect={(d) => {
+                          if (d) {
+                            setDate(toYmd(d))
+                            setShowDatePopover(false)
+                          }
+                        }}
+                        showOutsideDays
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label style={labelStyle}>İzin Nedeni</label>
@@ -456,32 +566,138 @@ export default function DoctorLeaveModal({
               </div>
             </div>
 
-            {/* Saat Aralığı (Tüm gün değilse) */}
+            {/* Saat Aralığı Slider (Tüm gün değilse) */}
             {!isFullDay && (
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '10px',
+                  padding: '12px',
+                  borderRadius: 10,
+                  background: cardBg,
+                  border: `1px solid ${borderCol}`,
+                  boxShadow: 'var(--pc-neo-inset)',
                 }}
               >
-                <div>
-                  <label style={labelStyle}>Başlangıç Saati</label>
-                  <input
-                    type="time"
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    style={inputStyle}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 750, color: labelCol, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Clock size={13} color={brandBlue} /> Kapalı Saat Aralığı
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.76rem',
+                      fontWeight: 800,
+                      color: 'var(--badge-clinic-text, #1d4ed8)',
+                      background: 'var(--badge-clinic-bg, #e0f2fe)',
+                      border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                      padding: '2px 9px',
+                      borderRadius: 999,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {startTime} – {endTime}
+                  </span>
+                </div>
+
+                {/* Dual-Thumb Slider */}
+                <div style={{ position: 'relative', height: 24, display: 'flex', alignItems: 'center', marginBottom: 8, userSelect: 'none' }}>
+                  <div
+                    ref={trackRef}
+                    onClick={(e) => {
+                      if (!trackRef.current) return
+                      const rect = trackRef.current.getBoundingClientRect()
+                      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                      const clickedMin = Math.round((ratio * 24 * 60) / 30) * 30
+                      const distStart = Math.abs(clickedMin - toMins(startTime))
+                      const distEnd = Math.abs(clickedMin - toMins(endTime))
+                      handleTrackMove(e.clientX, distStart <= distEnd ? 'start' : 'end')
+                    }}
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      height: 8,
+                      borderRadius: 999,
+                      background: subCardBg,
+                      border: `1px solid ${borderCol}`,
+                      cursor: 'pointer',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: `${startPct}%`,
+                        width: `${Math.max(2, endPct - startPct)}%`,
+                        background: brandBlueGradient,
+                        borderRadius: 999,
+                      }}
+                    />
+                  </div>
+                  <div
+                    onPointerDown={startDrag('start')}
+                    style={{
+                      position: 'absolute',
+                      left: `calc(${startPct}% - 9px)`,
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: brandBlueGradient,
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 2px 5px rgba(29, 78, 216, 0.35)',
+                      cursor: dragging === 'start' ? 'grabbing' : 'grab',
+                      zIndex: 2,
+                    }}
+                  />
+                  <div
+                    onPointerDown={startDrag('end')}
+                    style={{
+                      position: 'absolute',
+                      left: `calc(${endPct}% - 9px)`,
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: brandBlueGradient,
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 2px 5px rgba(29, 78, 216, 0.35)',
+                      cursor: dragging === 'end' ? 'grabbing' : 'grab',
+                      zIndex: 2,
+                    }}
                   />
                 </div>
-                <div>
-                  <label style={labelStyle}>Bitiş Saati</label>
-                  <input
-                    type="time"
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    style={inputStyle}
-                  />
+
+                {/* Quick Leave Presets */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
+                  {[
+                    { label: 'Öğle (12-13)', s: '12:00', e: '13:00' },
+                    { label: 'Sabah (09-13)', s: '09:00', e: '13:00' },
+                    { label: 'Öğleden S. (13-18)', s: '13:00', e: '18:00' },
+                    { label: 'Mesai (09-18)', s: '09:00', e: '18:00' },
+                  ].map((p) => {
+                    const active = startTime === p.s && endTime === p.e
+                    return (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() => {
+                          setStartTime(p.s)
+                          setEndTime(p.e)
+                        }}
+                        className={active ? 'btn-clinic-primary' : 'btn-clinic-outline'}
+                        style={{
+                          padding: '4px 4px',
+                          borderRadius: 6,
+                          fontSize: '0.66rem',
+                          fontWeight: 750,
+                          border: active ? `1px solid ${brandBlueBorder}` : '1px solid var(--btn-clinic-outline-border, #93c5fd)',
+                          background: active ? brandBlueGradient : 'var(--btn-clinic-outline-bg, #eff6ff)',
+                          color: active ? '#ffffff' : 'var(--btn-clinic-outline-text, #1d4ed8)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ color: active ? '#ffffff' : 'inherit' }}>{p.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -525,13 +741,7 @@ export default function DoctorLeaveModal({
                 gap: '8px',
               }}
             >
-              <div
-                style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  color: textCol,
-                }}
-              >
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: textCol }}>
                 Kayıtlı İzinler ({existingLeaves.length})
               </div>
               <div
@@ -608,15 +818,17 @@ export default function DoctorLeaveModal({
           <button
             type="button"
             onClick={onClose}
+            className="btn-clinic-outline"
             style={{
               padding: '9px 18px',
-              borderRadius: '8px',
-              border: `1px solid ${borderCol}`,
-              background: cardBg,
-              color: textCol,
+              borderRadius: '9px',
+              border: '1px solid var(--btn-clinic-outline-border, #93c5fd)',
+              background: 'var(--btn-clinic-outline-bg, #eff6ff)',
+              color: 'var(--btn-clinic-outline-text, #1d4ed8)',
+              boxShadow: 'var(--pc-clay-btn)',
               cursor: 'pointer',
-              fontSize: '0.86rem',
-              fontWeight: 600,
+              fontSize: '0.84rem',
+              fontWeight: 700,
             }}
           >
             İptal
@@ -625,20 +837,21 @@ export default function DoctorLeaveModal({
             type="button"
             onClick={() => handleSave()}
             disabled={saving || !selectedDoctorId}
+            className="btn-clinic-primary"
             style={{
               padding: '9px 24px',
-              borderRadius: '8px',
-              background: brandBlue,
+              borderRadius: '9px',
+              background: brandBlueGradient,
               color: '#ffffff',
-              border: 'none',
+              border: `1px solid ${brandBlueBorder}`,
+              boxShadow: 'var(--pc-clay-primary)',
               cursor: saving || !selectedDoctorId ? 'not-allowed' : 'pointer',
-              fontWeight: 700,
-              fontSize: '0.86rem',
+              fontWeight: 750,
+              fontSize: '0.84rem',
               opacity: saving || !selectedDoctorId ? 0.5 : 1,
-              transition: 'all 0.15s ease',
             }}
           >
-            {saving ? 'Kaydediliyor...' : 'Kaydet'}
+            <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor...' : 'Kaydet'}</span>
           </button>
         </div>
       </div>
