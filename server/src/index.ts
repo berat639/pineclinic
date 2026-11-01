@@ -2258,7 +2258,7 @@ const app = new Elysia()
     }
     const { setClinicWorkingHours } = await import('./db/repositories/settings')
     const workingHours = await setClinicWorkingHours((body || {}) as Record<string, unknown>)
-    return { success: true, workingHours }
+    return { success: true, ...workingHours, workingHours }
   })
   .get('/api/dental/staff-permissions', async ({ cookie, request }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'

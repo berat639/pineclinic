@@ -382,6 +382,7 @@ export interface ClinicWorkingHours {
   isOvernight: boolean
   slotStartHour: number // e.g. 8
   slotEndHour: number   // e.g. 20, or 26 when endTime is "02:00" overnight
+  workingDays: number[] // 0=Pzt .. 6=Paz
 }
 
 export const DEFAULT_CLINIC_WORKING_HOURS: ClinicWorkingHours = {
@@ -390,6 +391,7 @@ export const DEFAULT_CLINIC_WORKING_HOURS: ClinicWorkingHours = {
   isOvernight: false,
   slotStartHour: 8,
   slotEndHour: 20,
+  workingDays: [0, 1, 2, 3, 4, 5],
 }
 
 const CLINIC_WORKING_HOURS_KEY = 'clinic.working_hours'
@@ -402,6 +404,13 @@ function normalizeClinicWorkingHours(raw: Partial<ClinicWorkingHours> | null | u
   const endTime = typeof raw?.endTime === 'string' && timePattern.test(raw.endTime)
     ? raw.endTime
     : DEFAULT_CLINIC_WORKING_HOURS.endTime
+
+  const rawDays = Array.isArray(raw?.workingDays)
+    ? raw.workingDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    : null
+  const workingDays = rawDays && rawDays.length > 0
+    ? Array.from(new Set(rawDays)).sort((a, b) => a - b)
+    : [...DEFAULT_CLINIC_WORKING_HOURS.workingDays]
 
   const startH = parseInt(startTime.slice(0, 2), 10) || 0
   const endH = parseInt(endTime.slice(0, 2), 10) || 0
@@ -430,6 +439,7 @@ function normalizeClinicWorkingHours(raw: Partial<ClinicWorkingHours> | null | u
     isOvernight,
     slotStartHour,
     slotEndHour,
+    workingDays,
   }
 }
 

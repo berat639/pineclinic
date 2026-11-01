@@ -64,17 +64,19 @@ const monthEnd = (key: string) => {
 const label = (key: string, options: Intl.DateTimeFormatOptions) => localDate(key).toLocaleDateString('tr-TR', options)
 
 const timeToSteps = (timeStr: string): number => {
-  if (timeStr === '24:00') return 48
-  const [h, m] = timeStr.split(':').map(Number)
-  return Math.max(0, Math.min(48, (h || 0) * 2 + ((m || 0) >= 30 ? 1 : 0)))
+  if (timeStr === '24:00') return 96
+  const [h, m] = (timeStr || '08:00').split(':').map(Number)
+  const totalMins = (h || 0) * 60 + (m || 0)
+  return Math.max(0, Math.min(96, Math.round(totalMins / 15)))
 }
 
 const stepsToTime = (steps: number): string => {
-  const clamped = Math.max(0, Math.min(48, Math.round(steps)))
-  if (clamped === 48) return '24:00'
-  const h = Math.floor(clamped / 2)
-  const m = clamped % 2 === 1 ? '30' : '00'
-  return `${String(h).padStart(2, '0')}:${m}`
+  const clamped = Math.max(0, Math.min(96, Math.round(steps)))
+  if (clamped === 96) return '24:00'
+  const totalMins = clamped * 15
+  const h = Math.floor(totalMins / 60)
+  const m = totalMins % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 function useCompactLayout() {
@@ -348,15 +350,14 @@ function ClinicDatePickerButton({
 }
 
 /**
- * Modern Interactive Dual-Thumb Hour Range Slider + Popover Hour Picker
- * Used in both the Klinik Genel Mesai top bar and the ShiftEditor sidebar.
+ * Wide, High-Precision (15-min step) Interactive Dual-Thumb 24h Range Slider
+ * No dropdown buttons or popup grids — direct smooth dragging & arrow key precision.
  */
 function InteractiveTimeRangePicker({
   startTime,
   endTime,
   onChange,
   disabled,
-  compact = false,
 }: {
   startTime: string
   endTime: string
@@ -364,8 +365,6 @@ function InteractiveTimeRangePicker({
   disabled?: boolean
   compact?: boolean
 }) {
-  const [openPopover, setOpenPopover] = useState<'start' | 'end' | null>(null)
-  const wrapperRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
 
@@ -375,20 +374,9 @@ function InteractiveTimeRangePicker({
 
   const durationHours = useMemo(() => {
     let diff = endStep - startStep
-    if (diff <= 0) diff += 48
-    return Math.round((diff / 2) * 10) / 10
+    if (diff <= 0) diff += 96
+    return Math.round((diff / 4) * 100) / 100
   }, [startStep, endStep])
-
-  useEffect(() => {
-    if (!openPopover) return
-    const handleOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpenPopover(null)
-      }
-    }
-    document.addEventListener('mousedown', handleOutside)
-    return () => document.removeEventListener('mousedown', handleOutside)
-  }, [openPopover])
 
   useEffect(() => {
     if (!dragging || disabled) return
@@ -396,12 +384,12 @@ function InteractiveTimeRangePicker({
       if (!trackRef.current) return
       const rect = trackRef.current.getBoundingClientRect()
       const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-      const step = Math.round(ratio * 48)
+      const step = Math.round(ratio * 96)
       if (dragging === 'start') {
-        const clampedStep = Math.min(47, Math.max(0, step))
+        const clampedStep = Math.min(95, Math.max(0, step))
         onChange(stepsToTime(clampedStep), endTime)
       } else {
-        const clampedStep = Math.min(48, Math.max(1, step))
+        const clampedStep = Math.min(96, Math.max(1, step))
         onChange(startTime, stepsToTime(clampedStep))
       }
     }
@@ -422,388 +410,249 @@ function InteractiveTimeRangePicker({
     }
   }, [dragging, disabled, startTime, endTime, onChange])
 
-  const startPct = (startStep / 48) * 100
-  const endPct = (endStep / 48) * 100
-
-  const HOUR_PILLS_START = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`)
-  const HOUR_PILLS_END = [...Array.from({ length: 23 }, (_, i) => `${String(i + 1).padStart(2, '0')}:00`), '24:00']
+  const startPct = (startStep / 96) * 100
+  const endPct = (endStep / 96) * 100
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: compact ? 6 : 10, width: compact ? 'auto' : '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {/* Start Time Pill */}
-        <button
-          type="button"
-          disabled={disabled}
-          aria-label="Klinik açılış saati"
-          onClick={() => setOpenPopover((p) => (p === 'start' ? null : 'start'))}
-          style={{
-            minHeight: 36,
-            padding: '0 11px',
-            borderRadius: 10,
-            border: openPopover === 'start' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
-            background: 'var(--input-bg)',
-            color: 'var(--foreground)',
-            boxShadow: 'var(--pc-clay-btn)',
-            cursor: disabled ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12.5,
-            fontWeight: 750,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 650, color: 'var(--foreground-2)' }}>Açılış</span>
-          <strong style={{ color: '#2563eb', fontSize: 13 }}>{startTime}</strong>
-          <ChevronDown size={13} color="var(--foreground-2)" />
-        </button>
-
-        {/* Interactive Visual Slider Track */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-            minWidth: compact ? 180 : 210,
-            flex: compact ? '0 1 200px' : 1,
-            padding: '0 6px',
-          }}
-        >
-          <div
-            ref={trackRef}
-            onMouseDown={(e) => {
-              if (disabled || !trackRef.current) return
-              const rect = trackRef.current.getBoundingClientRect()
-              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-              const clickedStep = Math.round(ratio * 48)
-              const distStart = Math.abs(clickedStep - startStep)
-              const distEnd = Math.abs(clickedStep - endStep)
-              if (distStart <= distEnd) {
-                onChange(stepsToTime(Math.min(47, Math.max(0, clickedStep))), endTime)
-                setDragging('start')
-              } else {
-                onChange(startTime, stepsToTime(Math.min(48, Math.max(1, clickedStep))))
-                setDragging('end')
-              }
-            }}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', minWidth: 280 }}>
+      {/* Live Time Summary Row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span
             style={{
-              position: 'relative',
-              height: 10,
-              borderRadius: 999,
+              padding: '3px 10px',
+              borderRadius: 8,
               background: 'var(--input-bg)',
               border: '1px solid var(--input-border)',
               boxShadow: 'var(--pc-neo-inset)',
-              cursor: disabled ? 'default' : 'pointer',
-              userSelect: 'none',
+              fontSize: 12.5,
+              fontWeight: 800,
+              color: '#1d4ed8',
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {!isOvernight ? (
+            {startTime} – {endTime}
+            {isOvernight ? ' (Gece)' : ''}
+          </span>
+        </div>
+
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 800,
+            padding: '3px 10px',
+            borderRadius: 999,
+            background: 'var(--badge-clinic-bg, #e0f2fe)',
+            border: '1px solid var(--badge-clinic-border, #bae6fd)',
+            color: 'var(--badge-clinic-fg, #1d4ed8)',
+            whiteSpace: 'nowrap',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {isOvernight ? `🌙 ${durationHours} saat` : `⏱️ ${durationHours} saat`}
+        </span>
+      </div>
+
+      {/* Wide High-Precision Slider Track */}
+      <div style={{ padding: '6px 10px 2px' }}>
+        <div
+          ref={trackRef}
+          onMouseDown={(e) => {
+            if (disabled || !trackRef.current) return
+            const rect = trackRef.current.getBoundingClientRect()
+            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+            const clickedStep = Math.round(ratio * 96)
+            const distStart = Math.abs(clickedStep - startStep)
+            const distEnd = Math.abs(clickedStep - endStep)
+            if (distStart <= distEnd) {
+              onChange(stepsToTime(Math.min(95, Math.max(0, clickedStep))), endTime)
+              setDragging('start')
+            } else {
+              onChange(startTime, stepsToTime(Math.min(96, Math.max(1, clickedStep))))
+              setDragging('end')
+            }
+          }}
+          style={{
+            position: 'relative',
+            height: 14,
+            borderRadius: 999,
+            background: 'var(--input-bg)',
+            border: '1.5px solid var(--input-border)',
+            boxShadow: 'var(--pc-neo-inset)',
+            cursor: disabled ? 'default' : 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          {/* Subtle Hour Tick Marks inside Track */}
+          {Array.from({ length: 23 }, (_, idx) => {
+            const pct = ((idx + 1) / 24) * 100
+            const isMajor = (idx + 1) % 3 === 0
+            return (
+              <div
+                key={`tick-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: `${pct}%`,
+                  top: isMajor ? 2 : 4,
+                  bottom: isMajor ? 2 : 4,
+                  width: 1,
+                  background: 'var(--input-border)',
+                  opacity: isMajor ? 0.65 : 0.35,
+                  pointerEvents: 'none',
+                }}
+              />
+            )
+          })}
+
+          {!isOvernight ? (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `${startPct}%`,
+                width: `${Math.max(1.5, endPct - startPct)}%`,
+                borderRadius: 999,
+                background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+              }}
+            />
+          ) : (
+            <>
               <div
                 style={{
                   position: 'absolute',
                   top: 0,
                   bottom: 0,
                   left: `${startPct}%`,
-                  width: `${Math.max(2, endPct - startPct)}%`,
-                  borderRadius: 999,
+                  right: 0,
+                  borderRadius: '999px 0 0 999px',
                   background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
                 }}
               />
-            ) : (
-              <>
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    bottom: 0,
-                    left: `${startPct}%`,
-                    right: 0,
-                    borderRadius: '999px 0 0 999px',
-                    background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    bottom: 0,
-                    left: 0,
-                    width: `${endPct}%`,
-                    borderRadius: '0 999px 999px 0',
-                    background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
-                  }}
-                />
-              </>
-            )}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: `${endPct}%`,
+                  borderRadius: '0 999px 999px 0',
+                  background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
+                }}
+              />
+            </>
+          )}
 
-            {/* Start Thumb */}
-            <div
-              role="slider"
-              aria-label="Başlangıç saati kaydırıcı"
-              aria-valuemin={0}
-              aria-valuemax={24}
-              aria-valuenow={startStep / 2}
-              tabIndex={disabled ? -1 : 0}
-              onMouseDown={(e) => {
-                e.stopPropagation()
-                if (!disabled) setDragging('start')
-              }}
-              onTouchStart={(e) => {
-                e.stopPropagation()
-                if (!disabled) setDragging('start')
-              }}
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: `${startPct}%`,
-                transform: 'translate(-50%, -50%)',
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                background: '#ffffff',
-                border: '3px solid #1d4ed8',
-                boxShadow: '0 2px 5px rgba(15, 23, 42, 0.28)',
-                cursor: disabled ? 'default' : 'grab',
-                zIndex: 2,
-              }}
-              title={`Başlangıç: ${startTime}`}
-            />
+          {/* Start Thumb */}
+          <div
+            role="slider"
+            aria-label="Başlangıç saati kaydırıcı"
+            aria-valuemin={0}
+            aria-valuemax={24}
+            aria-valuenow={startStep / 4}
+            tabIndex={disabled ? -1 : 0}
+            onKeyDown={(e) => {
+              if (disabled) return
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault()
+                onChange(stepsToTime(Math.max(0, startStep - 1)), endTime)
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault()
+                onChange(stepsToTime(Math.min(95, startStep + 1)), endTime)
+              }
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              if (!disabled) setDragging('start')
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation()
+              if (!disabled) setDragging('start')
+            }}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `${startPct}%`,
+              transform: 'translate(-50%, -50%)',
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              background: '#ffffff',
+              border: '3.5px solid #1d4ed8',
+              boxShadow: '0 2px 6px rgba(15, 23, 42, 0.32)',
+              cursor: disabled ? 'default' : dragging === 'start' ? 'grabbing' : 'grab',
+              zIndex: dragging === 'start' ? 4 : 3,
+            }}
+            title={`Açılış: ${startTime}`}
+          />
 
-            {/* End Thumb */}
-            <div
-              role="slider"
-              aria-label="Bitiş saati kaydırıcı"
-              aria-valuemin={0}
-              aria-valuemax={24}
-              aria-valuenow={endStep / 2}
-              tabIndex={disabled ? -1 : 0}
-              onMouseDown={(e) => {
-                e.stopPropagation()
-                if (!disabled) setDragging('end')
-              }}
-              onTouchStart={(e) => {
-                e.stopPropagation()
-                if (!disabled) setDragging('end')
-              }}
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: `${endPct}%`,
-                transform: 'translate(-50%, -50%)',
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                background: '#1d4ed8',
-                border: '2.5px solid #ffffff',
-                boxShadow: '0 2px 5px rgba(15, 23, 42, 0.28)',
-                cursor: disabled ? 'default' : 'grab',
-                zIndex: 2,
-              }}
-              title={`Bitiş: ${endTime}`}
-            />
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, fontWeight: 700, color: 'var(--foreground-3)', padding: '0 2px' }}>
-            <span>00:00</span>
-            <span>06:00</span>
-            <span>12:00</span>
-            <span>18:00</span>
-            <span>24:00</span>
-          </div>
+          {/* End Thumb */}
+          <div
+            role="slider"
+            aria-label="Bitiş saati kaydırıcı"
+            aria-valuemin={0}
+            aria-valuemax={24}
+            aria-valuenow={endStep / 4}
+            tabIndex={disabled ? -1 : 0}
+            onKeyDown={(e) => {
+              if (disabled) return
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault()
+                onChange(startTime, stepsToTime(Math.max(1, endStep - 1)))
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault()
+                onChange(startTime, stepsToTime(Math.min(96, endStep + 1)))
+              }
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              if (!disabled) setDragging('end')
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation()
+              if (!disabled) setDragging('end')
+            }}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: `${endPct}%`,
+              transform: 'translate(-50%, -50%)',
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              background: '#1d4ed8',
+              border: '3px solid #ffffff',
+              boxShadow: '0 2px 6px rgba(15, 23, 42, 0.32)',
+              cursor: disabled ? 'default' : dragging === 'end' ? 'grabbing' : 'grab',
+              zIndex: dragging === 'end' ? 4 : 3,
+            }}
+            title={`Kapanış: ${endTime}`}
+          />
         </div>
 
-        {/* End Time Pill */}
-        <button
-          type="button"
-          disabled={disabled}
-          aria-label="Klinik kapanış saati"
-          onClick={() => setOpenPopover((p) => (p === 'end' ? null : 'end'))}
-          style={{
-            minHeight: 36,
-            padding: '0 11px',
-            borderRadius: 10,
-            border: openPopover === 'end' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
-            background: 'var(--input-bg)',
-            color: 'var(--foreground)',
-            boxShadow: 'var(--pc-clay-btn)',
-            cursor: disabled ? 'default' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12.5,
-            fontWeight: 750,
-          }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 650, color: 'var(--foreground-2)' }}>Kapanış</span>
-          <strong style={{ color: '#2563eb', fontSize: 13 }}>
-            {endTime}
-            {isOvernight ? ' (Gece)' : ''}
-          </strong>
-          <ChevronDown size={13} color="var(--foreground-2)" />
-        </button>
-
-        {/* Duration Badge */}
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 750,
-            padding: '4px 9px',
-            borderRadius: 999,
-            background: 'var(--badge-clinic-bg, #e0f2fe)',
-            border: '1px solid var(--badge-clinic-border, #bae6fd)',
-            color: 'var(--badge-clinic-fg, #0369a1)',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {isOvernight ? `🌙 ${durationHours} sa` : `⏱️ ${durationHours} sa`}
-        </span>
-      </div>
-
-      {/* Tactile Hour Grid Popover */}
-      {openPopover && !disabled && (
+        {/* 24-Hour Scale Labels */}
         <div
-          onClick={(e) => e.stopPropagation()}
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            right: 0,
-            zIndex: 100045,
-            width: 310,
-            maxWidth: 'calc(100vw - 32px)',
-            background: 'var(--card-bg)',
-            border: '1px solid var(--input-border)',
-            borderRadius: 14,
-            padding: 14,
-            boxShadow: 'var(--pc-modal-shadow)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: 10,
+            fontWeight: 750,
+            color: 'var(--foreground-3)',
+            marginTop: 6,
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <strong style={{ fontSize: 12.5, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <SlidersHorizontal size={14} color="#2563eb" />
-              {openPopover === 'start' ? 'Başlangıç / Açılış Saati Seçin' : 'Bitiş / Kapanış Saati Seçin'}
-            </strong>
-            <button
-              type="button"
-              onClick={() => setOpenPopover(null)}
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 7,
-                border: '1px solid var(--input-border)',
-                background: 'var(--card-inner)',
-                color: 'var(--foreground-2)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <X size={13} />
-            </button>
-          </div>
-
-          {/* Quick Presets */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 5, marginBottom: 10 }}>
-            {(
-              [
-                ['08:00', '20:00', '08:00 – 20:00 (Standart)'],
-                ['09:00', '19:00', '09:00 – 19:00 (Gündüz)'],
-                ['08:00', '02:00', '08:00 – 02:00 (Gece)'],
-                ['00:00', '24:00', '00:00 – 24:00 (24 Saat)'],
-              ] as [string, string, string][]
-            ).map(([pS, pE, pLbl]) => {
-              const activePreset = startTime === pS && endTime === pE
-              return (
-                <button
-                  key={pLbl}
-                  type="button"
-                  onClick={() => {
-                    onChange(pS, pE)
-                    setOpenPopover(null)
-                  }}
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: 8,
-                    border: activePreset ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                    background: activePreset ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-inner)',
-                    color: activePreset ? '#ffffff' : 'var(--foreground)',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    textAlign: 'center',
-                  }}
-                >
-                  <span style={{ color: activePreset ? '#ffffff' : 'inherit' }}>{pLbl}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* 24-Hour Tactile Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
-            {(openPopover === 'start' ? HOUR_PILLS_START : HOUR_PILLS_END).map((t) => {
-              const currentVal = openPopover === 'start' ? startTime : endTime
-              const isSelected = currentVal === t
-              const halfHour = t !== '24:00' ? `${t.slice(0, 2)}:30` : null
-              const isHalfSelected = halfHour && currentVal === halfHour
-              return (
-                <Fragment key={`grid-${openPopover}-${t}`}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (openPopover === 'start') {
-                        onChange(t, endTime)
-                        setOpenPopover('end')
-                      } else {
-                        onChange(startTime, t)
-                        setOpenPopover(null)
-                      }
-                    }}
-                    style={{
-                      padding: '6px 4px',
-                      borderRadius: 8,
-                      border: isSelected ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                      background: isSelected ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
-                      color: isSelected ? '#ffffff' : 'var(--foreground)',
-                      fontSize: 11.5,
-                      fontWeight: 750,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{ color: isSelected ? '#ffffff' : 'inherit' }}>{t}</span>
-                  </button>
-                  {halfHour && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (openPopover === 'start') {
-                          onChange(halfHour, endTime)
-                          setOpenPopover('end')
-                        } else {
-                          onChange(startTime, halfHour)
-                          setOpenPopover(null)
-                        }
-                      }}
-                      style={{
-                        padding: '6px 4px',
-                        borderRadius: 8,
-                        border: isHalfSelected ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                        background: isHalfSelected ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-inner)',
-                        color: isHalfSelected ? '#ffffff' : 'var(--foreground-2)',
-                        fontSize: 11,
-                        fontWeight: 650,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span style={{ color: isHalfSelected ? '#ffffff' : 'inherit' }}>{halfHour}</span>
-                    </button>
-                  )}
-                </Fragment>
-              )
-            })}
-          </div>
+          <span>00:00</span>
+          <span>03:00</span>
+          <span>06:00</span>
+          <span>09:00</span>
+          <span>12:00</span>
+          <span>15:00</span>
+          <span>18:00</span>
+          <span>21:00</span>
+          <span>24:00</span>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -852,6 +701,7 @@ export default function ShiftPlanner({
   const [leaves, setLeaves] = useState<Leave[]>([])
   const [clinicStartTime, setClinicStartTime] = useState('08:00')
   const [clinicEndTime, setClinicEndTime] = useState('20:00')
+  const [clinicWorkingDays, setClinicWorkingDays] = useState<number[]>([0, 1, 2, 3, 4, 5])
   const [clinicHoursSaving, setClinicHoursSaving] = useState(false)
 
   useEffect(() => {
@@ -860,6 +710,9 @@ export default function ShiftPlanner({
       .then((data) => {
         if (data?.startTime) setClinicStartTime(data.startTime)
         if (data?.endTime) setClinicEndTime(data.endTime)
+        if (Array.isArray(data?.workingDays) && data.workingDays.length > 0) {
+          setClinicWorkingDays(data.workingDays)
+        }
       })
       .catch(() => {})
   }, [])
@@ -875,18 +728,24 @@ export default function ShiftPlanner({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ startTime: nextStart, endTime: nextEnd }),
+        body: JSON.stringify({
+          startTime: nextStart,
+          endTime: nextEnd,
+          workingDays: clinicWorkingDays,
+        }),
       })
       const data = await response.json().catch(() => null)
-      if (!response.ok || !data) {
+      const resolved = data?.workingHours || data
+      if (!response.ok || !resolved) {
         setUndoError(data?.error || 'Klinik genel mesai saatleri kaydedilemedi.')
         return
       }
-      setClinicStartTime(data.startTime)
-      setClinicEndTime(data.endTime)
-      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: data }))
+      if (resolved.startTime) setClinicStartTime(resolved.startTime)
+      if (resolved.endTime) setClinicEndTime(resolved.endTime)
+      if (Array.isArray(resolved.workingDays)) setClinicWorkingDays(resolved.workingDays)
+      window.dispatchEvent(new CustomEvent('clinicWorkingHoursUpdated', { detail: resolved }))
       setSuccessNotice(
-        `Klinik genel mesai saatleri ${data.startTime} – ${data.endTime}${data.isOvernight ? ' (Gece / Ertesi Gün)' : ''} olarak güncellendi. Takvim saat aralığı otomatik eşitlendi.`
+        `Klinik genel mesai saatleri ${resolved.startTime} – ${resolved.endTime}${resolved.isOvernight ? ' (Gece / Ertesi Gün)' : ''} olarak güncellendi. Takvim saat aralığı otomatik eşitlendi.`
       )
     } catch {
       setUndoError('Klinik genel mesai saatleri kaydedilirken bağlantı hatası oluştu.')
@@ -1025,48 +884,104 @@ export default function ShiftPlanner({
 
   return (
     <section style={{ ...neoCard, padding: 18 }}>
-      {/* Klinik Genel Mesai Barı (İnteraktif Slider + Saat Seçici + Kaydet) */}
+      {/* Klinik Genel Mesai Barı (Geniş Hassas Slider + Haftanın Günleri + Kaydet) */}
       <div
         style={{
           ...neoSubCard,
-          padding: '12px 16px',
+          padding: '14px 16px',
           marginBottom: 16,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 14,
+          flexDirection: 'column',
+          gap: 12,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
-              boxShadow: 'var(--pc-clay-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Clock size={18} color="#ffffff" />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                boxShadow: 'var(--pc-clay-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Clock size={18} color="#ffffff" />
+            </div>
+            <div>
+              <strong style={{ fontSize: 13.5, color: 'var(--foreground)', display: 'block' }}>
+                Klinik Genel Mesai (Takvim Saat Aralığı & Açık Günler)
+              </strong>
+              <span style={{ fontSize: 11.5, color: 'var(--foreground-2)' }}>
+                İnteraktif takvim saat cetveli ve çalışma günleri bu aralığa göre otomatik ayarlanır.
+              </span>
+            </div>
           </div>
-          <div>
-            <strong style={{ fontSize: 13.5, color: 'var(--foreground)', display: 'block' }}>
-              Klinik Genel Mesai (Takvim Saat Aralığı)
-            </strong>
-            <span style={{ fontSize: 11.5, color: 'var(--foreground-2)' }}>
-              İnteraktif takvim saat cetveli bu açılış-kapanış aralığına göre otomatik ayarlanır.
-            </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              {DAYS.map((day, idx) => {
+                const active = clinicWorkingDays.includes(idx)
+                return (
+                  <button
+                    key={`clinic-day-${day}`}
+                    type="button"
+                    disabled={!canEditClinicHours || clinicHoursSaving}
+                    onClick={() => {
+                      setClinicWorkingDays((curr) => {
+                        if (curr.includes(idx)) {
+                          return curr.length > 1 ? curr.filter((x) => x !== idx) : curr
+                        }
+                        return [...curr, idx].sort((a, b) => a - b)
+                      })
+                    }}
+                    style={{
+                      minHeight: 32,
+                      padding: '0 9px',
+                      borderRadius: 8,
+                      border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                      background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
+                      color: active ? '#ffffff' : 'var(--foreground)',
+                      boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                      fontSize: 11.5,
+                      fontWeight: 750,
+                      cursor: !canEditClinicHours || clinicHoursSaving ? 'default' : 'pointer',
+                    }}
+                  >
+                    <span style={{ color: active ? '#ffffff' : 'inherit' }}>{day}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {canEditClinicHours && (
+              <button
+                type="button"
+                disabled={clinicHoursSaving}
+                onClick={() => saveClinicWorkingHours()}
+                className="btn-clinic-primary"
+                style={{ ...clayPrimaryButton, minHeight: 34 }}
+              >
+                <span style={{ color: '#ffffff' }}>{clinicHoursSaving ? 'Kaydediliyor…' : 'Kaydet'}</span>
+              </button>
+            )}
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ width: '100%' }}>
           <InteractiveTimeRangePicker
-            compact
             startTime={clinicStartTime}
             endTime={clinicEndTime}
             disabled={!canEditClinicHours || clinicHoursSaving}
@@ -1075,18 +990,6 @@ export default function ShiftPlanner({
               setClinicEndTime(nextE)
             }}
           />
-
-          {canEditClinicHours && (
-            <button
-              type="button"
-              disabled={clinicHoursSaving}
-              onClick={() => saveClinicWorkingHours()}
-              className="btn-clinic-primary"
-              style={{ ...clayPrimaryButton, minHeight: 36 }}
-            >
-              <span style={{ color: '#ffffff' }}>{clinicHoursSaving ? 'Kaydediliyor…' : 'Kaydet'}</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -1946,9 +1849,11 @@ function ShiftEditorSidebar({
   const [requestId] = useState(() => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`))
 
   const computedPlan = useMemo(() => {
-    const rangeStart = repeat === 'once' ? startDate : repeat === 'week' ? monday(startDate) : monthStart(startDate)
-    const rangeEnd = repeat === 'once' ? startDate : repeat === 'week' ? addDays(monday(startDate), 6) : monthEnd(startDate)
-    const activeWeekdays = repeat === 'once' ? [(localDate(startDate).getDay() + 6) % 7] : weekdays
+    const selectedWeekday = weekdays[0] ?? Math.max(0, (localDate(startDate).getDay() + 6) % 7)
+    const singleDayDate = addDays(monday(startDate), selectedWeekday)
+    const rangeStart = repeat === 'once' ? singleDayDate : repeat === 'week' ? monday(startDate) : monthStart(startDate)
+    const rangeEnd = repeat === 'once' ? singleDayDate : repeat === 'week' ? addDays(monday(startDate), 6) : monthEnd(startDate)
+    const activeWeekdays = repeat === 'once' ? [selectedWeekday] : weekdays
     return {
       userIds,
       startDate: rangeStart,
@@ -2173,14 +2078,14 @@ function ShiftEditorSidebar({
             </div>
           </div>
 
-          {/* 2. Çalışma Saat Aralığı (Slider HourPicker + Hızlı Saat Blokları) */}
+          {/* 2. Çalışma Saat Aralığı (Geniş Hassas Slider) */}
           <div style={{ ...neoSubCard, padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <span style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Clock size={15} color="#2563eb" /> Çalışma Saat Aralığı
               </span>
               <span style={{ fontSize: 11, color: 'var(--foreground-2)', fontWeight: 650 }}>
-                Kaydırarak veya saate tıklayarak seçin
+                15 dk hassasiyetle kaydırarak ayarlayın
               </span>
             </div>
 
@@ -2192,45 +2097,14 @@ function ShiftEditorSidebar({
                 setEndTime(nextE)
               }}
             />
-
-            {/* Quick Shift Hour Presets */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6, marginTop: 12 }}>
-              {SHIFT_PRESETS.map((preset) => {
-                const isActive = startTime === preset.start && endTime === preset.end
-                return (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      setStartTime(preset.start)
-                      setEndTime(preset.end)
-                    }}
-                    style={{
-                      padding: '6px 6px',
-                      borderRadius: 8,
-                      border: isActive ? '1px solid #1d4ed8' : '1px solid var(--btn-clinic-blue-border, #93c5fd)',
-                      background: isActive ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--btn-clinic-blue-bg, #ffffff)',
-                      color: isActive ? '#ffffff' : 'var(--btn-clinic-blue-fg, #1d4ed8)',
-                      boxShadow: isActive ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                      fontSize: 10.5,
-                      fontWeight: 750,
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <span style={{ color: isActive ? '#ffffff' : 'inherit' }}>{preset.label}</span>
-                  </button>
-                )
-              })}
-            </div>
           </div>
 
-          {/* 3. Planlama Dönemi & Özel DatePicker */}
+          {/* 3. Planlama Dönemi & Haftanın Günleri */}
           <div style={{ ...neoSubCard, padding: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 750, color: 'var(--foreground)', marginBottom: 10 }}>
               Planlama Dönemi (Tekrarlı Vardiya)
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
               {(
                 [
                   ['once', 'Günlük (Tek Gün)'],
@@ -2245,7 +2119,9 @@ function ShiftEditorSidebar({
                     type="button"
                     onClick={() => {
                       setRepeat(val)
-                      if (val !== 'once' && weekdays.length <= 1) {
+                      if (val === 'once') {
+                        setWeekdays((curr) => [curr[0] ?? Math.max(0, (localDate(startDate).getDay() + 6) % 7)])
+                      } else if (weekdays.length <= 1) {
                         setWeekdays([0, 1, 2, 3, 4, 5])
                       }
                     }}
@@ -2268,48 +2144,12 @@ function ShiftEditorSidebar({
               })}
             </div>
 
-            {/* Embedded Modern Clinical DatePicker Card */}
-            <div
-              style={{
-                background: 'var(--input-bg)',
-                border: '1px solid var(--input-border)',
-                borderRadius: 12,
-                padding: '10px 12px',
-                marginBottom: repeat !== 'once' ? 12 : 0,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--foreground-2)' }}>
-                  {repeat === 'once'
-                    ? `Seçili Gün: ${label(startDate, { day: 'numeric', month: 'long', year: 'numeric' })}`
-                    : repeat === 'week'
-                      ? `Hafta: ${label(monday(startDate), { day: 'numeric', month: 'short' })} – ${label(addDays(monday(startDate), 6), { day: 'numeric', month: 'short', year: 'numeric' })}`
-                      : `Ay: ${label(startDate, { month: 'long', year: 'numeric' })}`}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 750, color: 'var(--foreground-2)' }}>
+                  Haftanın Günleri ({label(monday(startDate), { day: 'numeric', month: 'short' })} – {label(addDays(monday(startDate), 6), { day: 'numeric', month: 'short' })})
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setStartDate(dateKey(new Date()))}
-                  style={{ ...claySecondaryButton, minHeight: 25, padding: '0 8px', fontSize: 10.5 }}
-                >
-                  Bugün
-                </button>
-              </div>
-              <div className="clinic-rdp" style={{ display: 'flex', justifyContent: 'center' }}>
-                <DayPicker
-                  mode="single"
-                  locale={tr}
-                  selected={localDate(startDate)}
-                  onSelect={(val) => val && setStartDate(dateKey(val))}
-                />
-              </div>
-            </div>
-
-            {repeat !== 'once' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 750, color: 'var(--foreground-2)' }}>
-                    Çalışma Günleri
-                  </span>
+                {repeat !== 'once' && (
                   <div style={{ display: 'flex', gap: 5 }}>
                     <button
                       type="button"
@@ -2326,36 +2166,40 @@ function ShiftEditorSidebar({
                       Her Gün
                     </button>
                   </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5 }}>
-                  {DAYS.map((day, idx) => {
-                    const active = weekdays.includes(idx)
-                    return (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() =>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5 }}>
+                {DAYS.map((day, idx) => {
+                  const active = weekdays.includes(idx)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => {
+                        if (repeat === 'once') {
+                          setWeekdays([idx])
+                        } else {
                           setWeekdays((curr) => (curr.includes(idx) ? curr.filter((x) => x !== idx) : [...curr, idx]))
                         }
-                        style={{
-                          minHeight: 36,
-                          borderRadius: 8,
-                          border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                          background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
-                          color: active ? '#ffffff' : 'var(--foreground)',
-                          boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                          fontSize: 11.5,
-                          fontWeight: 750,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span style={{ color: active ? '#ffffff' : 'inherit' }}>{day}</span>
-                      </button>
-                    )
-                  })}
-                </div>
+                      }}
+                      style={{
+                        minHeight: 36,
+                        borderRadius: 8,
+                        border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
+                        background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--input-bg)',
+                        color: active ? '#ffffff' : 'var(--foreground)',
+                        boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                        fontSize: 11.5,
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span style={{ color: active ? '#ffffff' : 'inherit' }}>{day}</span>
+                    </button>
+                  )
+                })}
               </div>
-            )}
+            </div>
           </div>
 
           {error && (
