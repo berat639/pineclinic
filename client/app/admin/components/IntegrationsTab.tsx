@@ -246,18 +246,27 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       .catch(() => {})
   }, [apiPrefix])
 
-  const saveStaffPermissions = async () => {
+  const saveRoleAndStaffPermissions = async () => {
     setSavingStaffPerms(true)
     try {
-      const res = await fetch('/api/admin/settings/staff-permissions', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(staffPermissions),
-      })
-      const data = await res.json().catch(() => null)
-      if (!res.ok || !data) throw new Error(data?.error || 'Klinik personeli yetkileri kaydedilemedi')
-      if (data.permissions) setStaffPermissions(data.permissions)
-      showToast('success', 'Klinik Personeli sekmesi rol ve işlem yetkileri güncellendi')
+      const [rolesRes, staffRes] = await Promise.all([
+        fetch('/api/admin/settings/roles', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rolePermissions),
+        }),
+        fetch('/api/admin/settings/staff-permissions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(staffPermissions),
+        }),
+      ])
+      const staffData = await staffRes.json().catch(() => null)
+      if (!rolesRes.ok || !staffRes.ok || !staffData) {
+        throw new Error(staffData?.error || 'Rol ve yetki izinleri kaydedilemedi')
+      }
+      if (staffData.permissions) setStaffPermissions(staffData.permissions)
+      showToast('success', 'Rol bazlı sekme ve Klinik Personeli işlem yetkileri güncellendi')
     } catch (err: any) {
       showToast('error', err.message || 'Yetkiler kaydedilemedi')
     } finally {
@@ -562,7 +571,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
 
       <BillingIntegrationsCard />
 
-      {/* Role-based Tab Permissions */}
+      {/* Rol Bazlı Sekme İzinleri & Klinik Personeli Alt Yetkileri (Tek Başlık Altında) */}
       <section className={styles.card}>
         <div className={styles.roleHeading}>
           <div className={styles.roleIcon}>
@@ -570,53 +579,17 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           </div>
           <div>
             <h3 className={styles.cardTitle}>Rol Bazlı Sekme İzinleri</h3>
-            <p className={styles.cardDescription}>Alt kullanıcıların görebileceği sekmeleri belirleyin.</p>
+            <p className={styles.cardDescription}>
+              Alt kullanıcıların görebileceği sekmeleri ve Klinik Personeli sekmesi içindeki işlem yetkilerini belirleyin. Yönetici (yonetici) rolü her zaman tüm yetkilere sahiptir.
+            </p>
           </div>
         </div>
-        
-        <div className={styles.roleList}>
-          {['hekim', 'sekreter', 'asistan'].map(role => (
-            <div key={role} className={styles.roleGroup}>
-              <div className={styles.roleName}>{role} Rolü</div>
-              <div className={styles.permissionList}>
-                {roleTabs.map(tab => {
-                  const isChecked = rolePermissions[role]?.includes(tab.id) || false
-                  return (
-                    <label key={tab.id} className={styles.permission}>
-                      <input 
-                        type="checkbox" 
-                        checked={isChecked}
-                        onChange={(e) => {
-                          setRolePermissions(prev => {
-                            const current = prev[role] || []
-                            return {
-                              ...prev,
-                              [role]: e.target.checked ? [...current, tab.id] : current.filter(id => id !== tab.id)
-                            }
-                          })
-                        }}
-                      />
-                      {tab.label}
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
 
-      {/* Klinik Personeli Sekmesi Rol ve Yetki Ayarları */}
-      <SettingsCard
-        title="🛡️ Klinik Personeli Sekmesi Rol ve Yetki Ayarları"
-        description="Yönetici (yonetici) rolü her zaman tüm yetkilere sahiptir. Hekim ve Kayıt/Resepsiyon Personeli (host) rollerinin Klinik Personeli sekmesi içindeki alanlarda hangi işlemleri yapabileceğini belirleyin."
-      >
         <div className={styles.roleList}>
-          {([
-            { key: 'hekim' as const, title: 'Hekim Rolü (hekim)' },
-            { key: 'host' as const, title: 'Kayıt / Resepsiyon Personeli Rolü (host)' },
-          ]).map((roleMeta) => {
-            const perms = staffPermissions[roleMeta.key]
+          {['hekim', 'sekreter', 'asistan'].map(role => {
+            const staffRoleKey: 'hekim' | 'host' | null =
+              role === 'hekim' ? 'hekim' : role === 'sekreter' ? 'host' : null
+            const perms = staffRoleKey ? staffPermissions[staffRoleKey] : null
             const permDefs: Array<{ k: keyof StaffPermItem; label: string }> = [
               { k: 'viewShiftPlanner', label: 'Mesai Planla Sekmesini Görüntüleyebilir' },
               { k: 'editShifts', label: 'Mesai Ekleyebilir / Düzenleyebilir / Silebilir' },
@@ -624,48 +597,103 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
               { k: 'editClinicWorkingHours', label: 'Klinik Genel Mesai Saatini Değiştirebilir' },
               { k: 'manageStaff', label: 'Personel Davet Edebilir / Hesap Dondurabilir' },
             ]
+
             return (
-              <div key={roleMeta.key} className={styles.roleGroup}>
-                <div className={styles.roleName}>{roleMeta.title}</div>
-                <div className={styles.permissionList}>
-                  {permDefs.map((def) => (
-                    <label key={def.k} className={styles.permission}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(perms?.[def.k])}
-                        onChange={(e) => {
-                          const checked = e.target.checked
-                          setStaffPermissions((prev) => ({
-                            ...prev,
-                            [roleMeta.key]: {
-                              ...prev[roleMeta.key],
-                              [def.k]: checked,
-                            },
-                          }))
-                        }}
-                      />
-                      {def.label}
-                    </label>
-                  ))}
+              <div key={role} className={styles.roleGroup}>
+                <div className={styles.roleName}>
+                  {role === 'hekim'
+                    ? 'Hekim Rolü'
+                    : role === 'sekreter'
+                    ? 'Sekreter / Kayıt Personeli (host) Rolü'
+                    : 'Asistan Rolü'}
                 </div>
+
+                {/* Görünür Panel Sekmeleri */}
+                <div className={styles.permissionList}>
+                  {roleTabs.map(tab => {
+                    const isChecked = rolePermissions[role]?.includes(tab.id) || false
+                    return (
+                      <label key={tab.id} className={styles.permission}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            setRolePermissions(prev => {
+                              const current = prev[role] || []
+                              return {
+                                ...prev,
+                                [role]: e.target.checked ? [...current, tab.id] : current.filter(id => id !== tab.id)
+                              }
+                            })
+                          }}
+                        />
+                        {tab.label}
+                      </label>
+                    )
+                  })}
+                </div>
+
+                {/* Klinik Personeli Sekmesi İçi Alt Yetkiler (Aynı Kart ve Rol Kutusu İçinde) */}
+                {staffRoleKey && perms && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      paddingTop: 10,
+                      borderTop: '1px solid var(--integration-border)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: 'var(--integration-text-muted)',
+                        marginBottom: 8,
+                      }}
+                    >
+                      🛡️ Klinik Personeli Sekmesi İşlem Yetkileri
+                    </div>
+                    <div className={styles.permissionList}>
+                      {permDefs.map((def) => (
+                        <label key={def.k} className={styles.permission}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(perms[def.k])}
+                            onChange={(e) => {
+                              const checked = e.target.checked
+                              setStaffPermissions((prev) => ({
+                                ...prev,
+                                [staffRoleKey]: {
+                                  ...prev[staffRoleKey],
+                                  [def.k]: checked,
+                                },
+                              }))
+                            }}
+                          />
+                          {def.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+
         <div className={styles.policyActionRow} style={{ marginTop: 12 }}>
           <p className={styles.policyHint}>
-            🔒 Klinik yöneticisi dışındaki kullanıcılar yalnızca burada izin verdiğiniz işlem butonlarını görür ve kullanabilir.
+            🔒 Klinik yöneticisi dışındaki kullanıcılar yalnızca burada izin verdiğiniz sekmeleri ve işlem butonlarını görür.
           </p>
           <button
             type="button"
             className={styles.saveButton}
             disabled={savingStaffPerms}
-            onClick={saveStaffPermissions}
+            onClick={saveRoleAndStaffPermissions}
           >
-            {savingStaffPerms ? 'Kaydediliyor...' : 'Klinik Personeli Yetkilerini Kaydet'}
+            {savingStaffPerms ? 'Kaydediliyor...' : 'Rol ve Yetki İzinlerini Kaydet'}
           </button>
         </div>
-      </SettingsCard>
+      </section>
 
       <div className={styles.footer}>
         <button
