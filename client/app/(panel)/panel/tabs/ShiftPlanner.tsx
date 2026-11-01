@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactN
 import { DayPicker } from 'react-day-picker'
 import 'react-day-picker/dist/style.css'
 import { tr } from 'date-fns/locale'
-import { CalendarOff, ChevronLeft, ChevronRight, Clock, Plus, RotateCcw, Search, Users } from 'lucide-react'
+import { Calendar, CalendarOff, Check, ChevronLeft, ChevronRight, Clock, Plus, RotateCcw, Search, Users, X } from 'lucide-react'
 
 type Staff = { id: string; name: string; role: string; active: boolean; color?: string }
 type Shift = { id: string; userId: string; userName: string; userColor?: string; date: string; startTime: string; endTime: string; shiftType: string }
@@ -311,20 +311,817 @@ function ShiftEditor({ users, initial, onClose, onSaved }: { users: Staff[]; ini
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [requestId] = useState(() => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`)
-  const plan = useMemo(() => ({ userIds, startDate, endDate: repeat === 'once' ? startDate : repeat === 'week' ? addDays(monday(startDate), 6) : repeat === 'month' ? monthEnd(startDate) : endDate, weekdays: repeat === 'once' ? [((localDate(startDate).getDay() + 6) % 7)] : weekdays, startTime, endTime, shiftType, overwriteShiftIds: overwriteIds }), [userIds, startDate, endDate, repeat, weekdays, startTime, endTime, shiftType, overwriteIds])
+
+  const plan = useMemo(() => ({
+    userIds,
+    startDate,
+    endDate: repeat === 'once' ? startDate : repeat === 'week' ? addDays(monday(startDate), 6) : repeat === 'month' ? monthEnd(startDate) : endDate,
+    weekdays: repeat === 'once' ? [((localDate(startDate).getDay() + 6) % 7)] : weekdays,
+    startTime,
+    endTime,
+    shiftType,
+    overwriteShiftIds: overwriteIds,
+  }), [userIds, startDate, endDate, repeat, weekdays, startTime, endTime, shiftType, overwriteIds])
+
   const months = useMemo(() => Array.from({ length: 25 }, (_, index) => {
     const month = localDate(startDate); month.setDate(1); month.setMonth(month.getMonth() + index - 12)
     return { value: `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`, text: month.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }) }
   }), [startDate])
+
   useEffect(() => { setPreview(null); setError('') }, [userIds, startDate, endDate, repeat, weekdays, startTime, endTime, shiftType])
-  const requestPreview = async () => { setSaving(true); setError(''); try { const response = await fetch('/api/shifts/plan/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(plan) }); const data = await response.json().catch(() => ({})); if (!response.ok) return setError(data.error || 'Önizleme alınamadı.'); setPreview(data) } catch { setError('Önizleme için bağlantı kurulamadı.') } finally { setSaving(false) } }
-  const save = async () => { if (!preview) return requestPreview(); setSaving(true); setError(''); try { const response = await fetch('/api/shifts/plan/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ requestId, plan }) }); const data = await response.json().catch(() => ({})); if (!response.ok) return setError(data.error || 'Mesailer kaydedilemedi.'); onSaved({ id: data.operationId, count: data.count ?? data.created + data.updated }) } catch { setError('Bağlantı kesildi. Aynı panelden tekrar deneyebilirsiniz.') } finally { setSaving(false) } }
+
+  const requestPreview = async () => {
+    setSaving(true); setError('')
+    try {
+      const response = await fetch('/api/shifts/plan/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(plan),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) return setError(data.error || 'Önizleme alınamadı.')
+      setPreview(data)
+    } catch {
+      setError('Önizleme için bağlantı kurulamadı.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const save = async () => {
+    if (!preview) return requestPreview()
+    setSaving(true); setError('')
+    try {
+      const response = await fetch('/api/shifts/plan/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ requestId, plan }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) return setError(data.error || 'Mesailer kaydedilemedi.')
+      onSaved({ id: data.operationId, count: data.count ?? data.created + data.updated })
+    } catch {
+      setError('Bağlantı kesildi. Aynı panelden tekrar deneyebilirsiniz.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const selectedExisting = preview?.rows.filter(row => row.state === 'existing') || []
   const count = (preview?.summary.create || 0) + selectedExisting.filter(row => overwriteIds.includes(row.existingId!)).length
-  const setMonth = (value: string) => { const [year, month] = value.split('-').map(Number); const day = Math.min(localDate(startDate).getDate(), new Date(year, month, 0).getDate()); setStartDate(`${value}-${String(day).padStart(2, '0')}`) }
-  return <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 100020, pointerEvents: 'none' }}><aside role="dialog" aria-label="Mesai planla" style={{ width: 610, maxWidth: '100vw', height: '100%', overflowY: 'auto', pointerEvents: 'auto', background: 'var(--card-bg)', borderLeft: '1px solid var(--input-border)', padding: 22, boxSizing: 'border-box', color: 'var(--foreground)' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}><div><h2 style={{ margin: 0, fontSize: 20 }}>Mesai planla</h2><p style={{ margin: '4px 0 0', color: 'var(--foreground-2)', fontSize: 13 }}>Tarihi, saatleri ve uygulanacak günleri tek ekranda seçin.</p></div><button onClick={onClose} style={secondaryButton}>Kapat</button></div><EditorField label="Personel"><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 7, maxHeight: 154, overflowY: 'auto' }}>{users.map(person => <label key={person.id} style={{ ...surface, display: 'flex', gap: 8, alignItems: 'center', minHeight: 44, padding: '0 9px', background: userIds.includes(person.id) ? 'var(--card-inner)' : 'var(--input-bg)', cursor: 'pointer' }}><input type="checkbox" checked={userIds.includes(person.id)} onChange={() => setUserIds(current => current.includes(person.id) ? current.filter(id => id !== person.id) : [...current, person.id])} />{person.name}</label>)}</div></EditorField><EditorField label="Tarih seçici"><div style={{ ...surface, background: 'var(--card-inner)', padding: 10 }}><style>{`.shift-date-picker .rdp { --rdp-accent-color: var(--accent); --rdp-background-color: var(--card-inner); margin: 0; color: var(--foreground); } .shift-date-picker .rdp-caption_label, .shift-date-picker .rdp-head_cell, .shift-date-picker .rdp-day { color: var(--foreground); } .shift-date-picker .rdp-day_selected:not([disabled]) { background: var(--accent) !important; color: var(--btn-clinic-primary-fg) !important; } .shift-date-picker .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { background: var(--input-bg); }`}</style><div className="shift-date-picker"><DayPicker mode="single" locale={tr} selected={localDate(startDate)} onSelect={value => value && setStartDate(dateKey(value))} /></div></div></EditorField><EditorField label="Saat seçici"><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}><TimeSelect label="Başlangıç" value={startTime} onChange={setStartTime} /><TimeSelect label="Bitiş" value={endTime} onChange={setEndTime} /></div></EditorField><EditorField label="Tekrarlama"><div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>{([['once', 'Yalnızca bu gün'], ['week', 'Bu hafta'], ['month', 'Seçilen ay'], ['range', 'Tarih aralığı']] as [Repeat,string][]).map(([value, text]) => <button key={value} onClick={() => setRepeat(value)} aria-pressed={repeat === value} style={{ ...secondaryButton, minHeight: 44, background: repeat === value ? 'var(--accent)' : 'var(--input-bg)', color: repeat === value ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground)' }}>{text}</button>)}</div>{repeat === 'week' && <div style={{ ...surface, marginTop: 9, padding: '9px 10px', background: 'var(--card-inner)', fontSize: 13 }}>Seçili hafta: <strong>{label(monday(startDate), { day: 'numeric', month: 'long' })} – {label(addDays(monday(startDate), 6), { day: 'numeric', month: 'long' })}</strong></div>}{repeat === 'month' && <select aria-label="Mesai uygulanacak ay" value={startDate.slice(0, 7)} onChange={event => setMonth(event.target.value)} style={{ ...input, marginTop: 9 }}>{months.map(month => <option key={month.value} value={month.value}>{month.text}</option>)}</select>}{repeat === 'range' && <input aria-label="Bitiş tarihi" type="date" value={endDate} min={startDate} onChange={event => setEndDate(event.target.value)} style={{ ...input, marginTop: 9 }} />}{repeat !== 'once' && <><div style={{ display: 'flex', gap: 6, marginTop: 10 }}><button onClick={() => setWeekdays([0,1,2,3,4])} style={secondaryButton}>Hafta içi</button><button onClick={() => setWeekdays([0,1,2,3,4,5,6])} style={secondaryButton}>Her gün</button></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginTop: 8 }}>{DAYS.map((day,index) => <button key={day} onClick={() => setWeekdays(current => current.includes(index) ? current.filter(item => item !== index) : [...current,index])} style={{ ...secondaryButton, minHeight: 40, padding: 2, background: weekdays.includes(index) ? 'var(--accent)' : 'var(--input-bg)', color: weekdays.includes(index) ? 'var(--btn-clinic-primary-fg)' : 'var(--foreground)' }}>{day}</button>)}</div></>}</EditorField><EditorField label="Mesai türü"><input value={shiftType} onChange={event => setShiftType(event.target.value)} style={input} /></EditorField>{preview && <div style={{ ...surface, padding: 12, background: 'var(--card-inner)', fontSize: 13 }}><strong>{preview.summary.create} yeni · {preview.summary.same} aynı · {preview.summary.existing} mevcut · {preview.summary.leave} izin çakışması</strong>{selectedExisting.length > 0 && <div style={{ marginTop: 10 }}><div style={{ marginBottom: 6 }}>Değiştirmek istediğiniz mevcut mesailer:</div>{selectedExisting.map(row => <label key={row.existingId} style={{ display: 'block', marginTop: 5 }}><input type="checkbox" checked={overwriteIds.includes(row.existingId!)} onChange={() => setOverwriteIds(current => current.includes(row.existingId!) ? current.filter(id => id !== row.existingId) : [...current, row.existingId!])} /> {row.date}</label>)}</div>}</div>}{error && <p role="alert" style={{ color: 'var(--danger)', fontWeight: 650 }}>{error}</p>}<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}><button onClick={onClose} disabled={saving} style={secondaryButton}>Vazgeç</button><button onClick={save} disabled={saving} style={{ ...secondaryButton, background: 'var(--accent)', color: 'var(--btn-clinic-primary-fg)', borderColor: 'var(--accent)' }}>{saving ? 'Kaydediliyor…' : preview ? `${count} mesai ekle` : 'Önizle'}</button></div></aside></div>
+  const setMonth = (value: string) => {
+    const [year, month] = value.split('-').map(Number)
+    const day = Math.min(localDate(startDate).getDate(), new Date(year, month, 0).getDate())
+    setStartDate(`${value}-${String(day).padStart(2, '0')}`)
+  }
+
+  // Calculate shift duration & overnight status
+  const shiftDurationInfo = useMemo(() => {
+    const [sH, sM] = startTime.split(':').map(Number)
+    const [eH, eM] = endTime.split(':').map(Number)
+    const sMin = sH * 60 + sM
+    let eMin = eH * 60 + eM
+    const isOvernight = endTime !== '24:00' && eMin <= sMin
+    if (eMin <= sMin) eMin += 1440
+    const diffHours = Math.round(((eMin - sMin) / 60) * 10) / 10
+    return { hours: diffHours, isOvernight }
+  }, [startTime, endTime])
+
+  const roleLabel = (r: string) => r === 'hekim' ? 'Hekim' : r === 'host' ? 'Resepsiyon' : r === 'yonetici' ? 'Yönetici' : 'Personel'
+
+  const SHIFT_PRESETS: { label: string; sub: string; start: string; end: string; type: string }[] = [
+    { label: 'Gündüz', sub: '09:00 – 18:00', start: '09:00', end: '18:00', type: 'Mesai' },
+    { label: 'Sabahçı', sub: '08:00 – 16:00', start: '08:00', end: '16:00', type: 'Sabahçı' },
+    { label: 'Tam Gün', sub: '08:00 – 20:00', start: '08:00', end: '20:00', type: 'Tam Gün' },
+    { label: 'Gece Nöbeti', sub: '08:00 – 02:00', start: '08:00', end: '02:00', type: 'Gece Nöbeti' },
+  ]
+
+  const SHIFT_TYPES = ['Mesai', 'Sabahçı', 'Öğlenci', 'Tam Gün', 'Gece Nöbeti']
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100020,
+        background: 'rgba(15, 23, 42, 0.55)',
+        display: 'flex',
+        justifyContent: 'flex-end',
+      }}
+    >
+      <aside
+        role="dialog"
+        aria-label="Mesai planla"
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 480,
+          maxWidth: '100vw',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--card-bg)',
+          borderLeft: '1px solid var(--input-border)',
+          boxShadow: '-12px 0 36px rgba(15, 23, 42, 0.28)',
+          boxSizing: 'border-box',
+          color: 'var(--foreground)',
+        }}
+      >
+        {/* Sticky Header */}
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--input-border)',
+            background: 'var(--card-bg)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: '#2563eb',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Clock size={19} color="#ffffff" />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                Mesai planla
+              </h2>
+              <p style={{ margin: '3px 0 0', color: 'var(--foreground-2)', fontSize: 12, fontWeight: 500 }}>
+                Tarihi, vardiya saatlerini ve uygulanacak personeli seçin
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Kapat"
+            title="Kapat"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: '1px solid var(--input-border)',
+              background: 'var(--input-bg)',
+              color: 'var(--foreground-2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Scrollable Content */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          {/* 1. Personel Seçimi */}
+          <div style={{ ...surface, background: 'var(--card-inner)', padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Users size={15} color="#2563eb" />
+                <strong style={{ fontSize: 13, color: 'var(--foreground)' }}>Personel</strong>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    background: 'var(--badge-clinic-bg, #e0f2fe)',
+                    border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                    color: 'var(--badge-clinic-text, #0369a1)',
+                  }}
+                >
+                  {userIds.length} / {users.length} seçili
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const docIds = users.filter(u => u.role === 'hekim').map(u => u.id)
+                    setUserIds(docIds)
+                  }}
+                  style={{
+                    minHeight: 26,
+                    padding: '0 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--input-border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--foreground-2)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Sadece Hekimler
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserIds(userIds.length === users.length ? [] : users.map(u => u.id))}
+                  style={{
+                    minHeight: 26,
+                    padding: '0 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--input-border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--accent)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {userIds.length === users.length ? 'Temizle' : 'Tümünü Seç'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, maxHeight: 176, overflowY: 'auto' }}>
+              {users.map(person => {
+                const selected = userIds.includes(person.id)
+                return (
+                  <label
+                    key={person.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: selected ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
+                      background: selected ? 'var(--card-bg)' : 'var(--input-bg)',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => setUserIds(current => current.includes(person.id) ? current.filter(id => id !== person.id) : [...current, person.id])}
+                      style={{ position: 'absolute', opacity: 0, width: 1, height: 1, pointerEvents: 'none' }}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 999,
+                          background: person.color || '#2563eb',
+                          color: '#ffffff',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {person.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {person.name}
+                        </div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--foreground-2)' }}>
+                          {roleLabel(person.role)}
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 6,
+                        border: selected ? '1px solid #2563eb' : '1px solid var(--input-border)',
+                        background: selected ? '#2563eb' : 'var(--card-inner)',
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {selected && <Check size={12} color="#ffffff" strokeWidth={3} />}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 2. Saat Seçici & Hazır Vardiya Şablonları */}
+          <div style={{ ...surface, background: 'var(--card-inner)', padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Clock size={15} color="#2563eb" />
+                <strong style={{ fontSize: 13, color: 'var(--foreground)' }}>Saat seçici & Vardiya Şablonu</strong>
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background: 'var(--badge-clinic-bg, #e0f2fe)',
+                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                  color: 'var(--badge-clinic-text, #0369a1)',
+                }}
+              >
+                {shiftDurationInfo.isOvernight ? `🌙 Gece Mesaisi · ${shiftDurationInfo.hours} saat` : `⏱️ ${shiftDurationInfo.hours} saat vardiya`}
+              </span>
+            </div>
+
+            {/* Quick Shift Presets */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6, marginBottom: 12 }}>
+              {SHIFT_PRESETS.map(preset => {
+                const isActive = startTime === preset.start && endTime === preset.end
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setStartTime(preset.start)
+                      setEndTime(preset.end)
+                      setShiftType(preset.type)
+                    }}
+                    style={{
+                      padding: '7px 6px',
+                      borderRadius: 8,
+                      border: isActive ? '1px solid #2563eb' : '1px solid var(--input-border)',
+                      background: isActive ? '#2563eb' : 'var(--input-bg)',
+                      color: isActive ? '#ffffff' : 'var(--foreground)',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                  >
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: isActive ? '#ffffff' : 'var(--foreground)' }}>{preset.label}</span>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: isActive ? '#ffffff' : 'var(--foreground-2)' }}>{preset.sub}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <TimeSelect label="Başlangıç" value={startTime} onChange={setStartTime} />
+              <TimeSelect label="Bitiş" value={endTime} onChange={setEndTime} isEnd startTime={startTime} />
+            </div>
+
+            {/* Mesai Türü */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)' }}>Mesai türü</span>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {SHIFT_TYPES.map(t => {
+                    const active = shiftType === t
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setShiftType(t)}
+                        style={{
+                          padding: '2px 7px',
+                          borderRadius: 6,
+                          border: active ? '1px solid #2563eb' : '1px solid var(--input-border)',
+                          background: active ? '#2563eb' : 'var(--input-bg)',
+                          color: active ? '#ffffff' : 'var(--foreground-2)',
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {t}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <input
+                aria-label="Mesai türü"
+                value={shiftType}
+                onChange={event => setShiftType(event.target.value)}
+                placeholder="Örn: Mesai, Sabahçı, Gece Nöbeti"
+                style={input}
+              />
+            </div>
+          </div>
+
+          {/* 3. Tekrarlama & Tarih Seçici */}
+          <div style={{ ...surface, background: 'var(--card-inner)', padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Calendar size={15} color="#2563eb" />
+                <strong style={{ fontSize: 13, color: 'var(--foreground)' }}>Tarih seçici & Tekrarlama</strong>
+              </div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                {([
+                  ['Bugün', dateKey(new Date())],
+                  ['Yarın', addDays(dateKey(new Date()), 1)],
+                ] as [string, string][]).map(([lbl, dVal]) => {
+                  const active = startDate === dVal
+                  return (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() => setStartDate(dVal)}
+                      style={{
+                        minHeight: 25,
+                        padding: '0 8px',
+                        borderRadius: 6,
+                        border: active ? '1px solid #2563eb' : '1px solid var(--input-border)',
+                        background: active ? '#2563eb' : 'var(--input-bg)',
+                        color: active ? '#ffffff' : 'var(--foreground-2)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {lbl}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Segmented Repeat Bar */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                gap: 4,
+                padding: 4,
+                borderRadius: 10,
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
+                marginBottom: 10,
+              }}
+            >
+              {([
+                ['once', 'Yalnızca bu gün'],
+                ['week', 'Bu hafta'],
+                ['month', 'Seçilen ay'],
+                ['range', 'Tarih aralığı'],
+              ] as [Repeat, string][]).map(([value, text]) => {
+                const active = repeat === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setRepeat(value)}
+                    aria-pressed={active}
+                    style={{
+                      minHeight: 34,
+                      padding: '0 6px',
+                      borderRadius: 7,
+                      border: 'none',
+                      background: active ? '#2563eb' : 'transparent',
+                      color: active ? '#ffffff' : 'var(--foreground-2)',
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {text}
+                  </button>
+                )
+              })}
+            </div>
+
+            {repeat === 'week' && (
+              <div style={{ ...surface, marginBottom: 10, padding: '8px 10px', background: 'var(--input-bg)', fontSize: 12.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--foreground-2)' }}>Seçili hafta:</span>
+                <strong style={{ color: 'var(--foreground)' }}>
+                  {label(monday(startDate), { day: 'numeric', month: 'long' })} – {label(addDays(monday(startDate), 6), { day: 'numeric', month: 'long' })}
+                </strong>
+              </div>
+            )}
+
+            {repeat === 'month' && (
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)', marginBottom: 10 }}>
+                Mesai uygulanacak ay
+                <select aria-label="Mesai uygulanacak ay" value={startDate.slice(0, 7)} onChange={event => setMonth(event.target.value)} style={input}>
+                  {months.map(month => <option key={month.value} value={month.value}>{month.text}</option>)}
+                </select>
+              </label>
+            )}
+
+            {repeat === 'range' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)' }}>
+                  Başlangıç tarihi
+                  <input aria-label="Başlangıç tarihi" type="date" value={startDate} onChange={event => setStartDate(event.target.value)} style={input} />
+                </label>
+                <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 650, color: 'var(--foreground-2)' }}>
+                  Bitiş tarihi
+                  <input aria-label="Bitiş tarihi" type="date" value={endDate} min={startDate} onChange={event => setEndDate(event.target.value)} style={input} />
+                </label>
+              </div>
+            )}
+
+            {/* Compact Styled Calendar UI Kit */}
+            <div style={{ ...surface, background: 'var(--input-bg)', padding: '8px 10px', display: 'flex', justifyContent: 'center' }}>
+              <style>{`
+                .shift-date-picker .rdp {
+                  --rdp-cell-size: 34px;
+                  --rdp-accent-color: #2563eb;
+                  --rdp-background-color: var(--card-inner);
+                  margin: 0;
+                  color: var(--foreground);
+                  font-size: 12.5px;
+                }
+                .shift-date-picker .rdp-months {
+                  justify-content: center;
+                }
+                .shift-date-picker .rdp-caption_label {
+                  font-size: 13px;
+                  font-weight: 800;
+                  color: var(--foreground);
+                  text-transform: capitalize;
+                }
+                .shift-date-picker .rdp-head_cell {
+                  font-size: 11px;
+                  font-weight: 700;
+                  color: var(--foreground-2);
+                }
+                .shift-date-picker .rdp-day {
+                  color: var(--foreground);
+                  border-radius: 8px;
+                  font-weight: 600;
+                }
+                .shift-date-picker .rdp-day_selected:not([disabled]),
+                .shift-date-picker .rdp-day_selected:hover:not([disabled]) {
+                  background: #2563eb !important;
+                  color: #ffffff !important;
+                  font-weight: 800;
+                }
+                .shift-date-picker .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+                  background: var(--card-inner);
+                }
+              `}</style>
+              <div className="shift-date-picker">
+                <DayPicker
+                  mode="single"
+                  locale={tr}
+                  selected={localDate(startDate)}
+                  onSelect={value => value && setStartDate(dateKey(value))}
+                />
+              </div>
+            </div>
+
+            {repeat !== 'once' && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground-2)' }}>Uygulanacak Günler</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setWeekdays([0, 1, 2, 3, 4])}
+                      style={{
+                        minHeight: 25,
+                        padding: '0 8px',
+                        borderRadius: 6,
+                        border: '1px solid var(--input-border)',
+                        background: 'var(--input-bg)',
+                        color: 'var(--foreground)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Hafta içi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWeekdays([0, 1, 2, 3, 4, 5, 6])}
+                      style={{
+                        minHeight: 25,
+                        padding: '0 8px',
+                        borderRadius: 6,
+                        border: '1px solid var(--input-border)',
+                        background: 'var(--input-bg)',
+                        color: 'var(--foreground)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Her gün
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5 }}>
+                  {DAYS.map((day, index) => {
+                    const active = weekdays.includes(index)
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => setWeekdays(current => current.includes(index) ? current.filter(item => item !== index) : [...current, index])}
+                        style={{
+                          minHeight: 36,
+                          padding: 2,
+                          borderRadius: 8,
+                          border: active ? '1px solid #2563eb' : '1px solid var(--input-border)',
+                          background: active ? '#2563eb' : 'var(--input-bg)',
+                          color: active ? '#ffffff' : 'var(--foreground)',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {day}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Önizleme & Çakışma Özeti */}
+          {preview && (
+            <div style={{ ...surface, padding: 14, background: 'var(--card-inner)', fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <strong style={{ fontSize: 13, color: 'var(--foreground)' }}>Planlama Önizlemesi</strong>
+                <span style={{ fontSize: 11.5, color: 'var(--foreground-2)', fontWeight: 600 }}>
+                  {preview.summary.create} yeni · {preview.summary.same} aynı · {preview.summary.existing} mevcut · {preview.summary.leave} izin çakışması
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                {([
+                  ['Yeni', preview.summary.create || 0, '#2563eb'],
+                  ['Mevcut', preview.summary.existing || 0, 'var(--foreground)'],
+                  ['Aynı', preview.summary.same || 0, 'var(--foreground-2)'],
+                  ['İzinli', preview.summary.leave || 0, 'var(--danger)'],
+                ] as [string, number, string][]).map(([lbl, val, clr]) => (
+                  <div
+                    key={lbl}
+                    style={{
+                      padding: '8px 6px',
+                      borderRadius: 8,
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: 15, fontWeight: 800, color: clr }}>{val}</div>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--foreground-2)' }}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+              {selectedExisting.length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--input-border)' }}>
+                  <div style={{ marginBottom: 6, fontSize: 12, fontWeight: 700, color: 'var(--foreground-2)' }}>
+                    Değiştirmek istediğiniz mevcut mesailer:
+                  </div>
+                  <div style={{ display: 'grid', gap: 5, maxHeight: 120, overflowY: 'auto' }}>
+                    {selectedExisting.map(row => {
+                      const personName = users.find(u => u.id === row.userId)?.name || ''
+                      return (
+                        <label
+                          key={row.existingId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 8px',
+                            borderRadius: 7,
+                            background: 'var(--input-bg)',
+                            border: '1px solid var(--input-border)',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={overwriteIds.includes(row.existingId!)}
+                            onChange={() => setOverwriteIds(current => current.includes(row.existingId!) ? current.filter(id => id !== row.existingId) : [...current, row.existingId!])}
+                          />
+                          <span style={{ fontWeight: 650 }}>{row.date}</span>
+                          {personName && <span style={{ color: 'var(--foreground-2)' }}>· {personName}</span>}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <p
+              role="alert"
+              style={{
+                margin: 0,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--card-inner)',
+                border: '1px solid var(--danger)',
+                color: 'var(--danger)',
+                fontSize: 12.5,
+                fontWeight: 700,
+              }}
+            >
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Sticky Footer */}
+        <div
+          style={{
+            padding: '14px 20px',
+            borderTop: '1px solid var(--input-border)',
+            background: 'var(--card-bg)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <button type="button" onClick={onClose} disabled={saving} style={secondaryButton}>
+            Vazgeç
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {preview && (
+              <button type="button" onClick={requestPreview} disabled={saving} style={secondaryButton}>
+                Yeniden Önizle
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving}
+              style={{
+                minHeight: 40,
+                padding: '0 18px',
+                borderRadius: 8,
+                border: '1px solid #2563eb',
+                background: '#2563eb',
+                color: '#ffffff',
+                fontWeight: 700,
+                cursor: saving ? 'wait' : 'pointer',
+              }}
+            >
+              {saving ? 'Kaydediliyor…' : preview ? `${count} mesai ekle` : 'Önizle'}
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  )
 }
-const input: CSSProperties = { minHeight: 40, padding: '0 9px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', boxSizing: 'border-box', width: '100%' }
-const TimeSelect = ({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) => <label style={{ display: 'grid', gap: 5, color: 'var(--foreground-2)', fontSize: 12, fontWeight: 650 }}>{label}<select value={value} onChange={event => onChange(event.target.value)} style={input}>{TIME_OPTIONS.map(time => <option key={time} value={time}>{time}</option>)}</select></label>
-const EditorField = ({ label, children }: { label: string; children: ReactNode }) => <div style={{ marginTop: 18 }}><strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>{label}</strong>{children}</div>
+
+const input: CSSProperties = { minHeight: 40, padding: '0 10px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', boxSizing: 'border-box', width: '100%', fontSize: 13, fontWeight: 600 }
+
+const TimeSelect = ({ label, value, onChange, isEnd, startTime }: { label: string; value: string; onChange: (value: string) => void; isEnd?: boolean; startTime?: string }) => {
+  const options = isEnd ? Array.from(new Set([...TIME_OPTIONS.slice(1), '24:00', ...TIME_OPTIONS.slice(1, 17)])) : TIME_OPTIONS
+  return (
+    <label style={{ display: 'grid', gap: 5, color: 'var(--foreground-2)', fontSize: 12, fontWeight: 650 }}>
+      {label}
+      <select value={value} onChange={event => onChange(event.target.value)} style={input}>
+        {options.map(time => {
+          const sH = startTime ? parseInt(startTime.split(':')[0] || '8', 10) : 8
+          const eH = parseInt(time.split(':')[0] || '20', 10)
+          const overnight = isEnd && time !== '24:00' && eH <= sH
+          return (
+            <option key={time} value={time}>
+              {time}{overnight ? ' (Gece / Ertesi Gün)' : ''}
+            </option>
+          )
+        })}
+      </select>
+    </label>
+  )
+}
+
 const Empty = () => <div style={{ padding: 24, color: 'var(--foreground-3)', textAlign: 'center' }}><Users size={22} style={{ marginBottom: 6 }} /><br />Gösterilecek aktif personel yok.</div>
