@@ -830,7 +830,21 @@ export async function createTreatmentPlan(data: {
 export async function updateTreatmentPlan(id: string, data: { status?: string; groupId?: string | null; doctorId?: string | null }) {
   const clinicId = requireClinicId()
   const values: Record<string, unknown> = {}
-  if (data.status !== undefined) values.status = data.status
+  if (data.status !== undefined) {
+    values.status = data.status
+    if (data.status === 'completed') {
+      const [existing] = await db
+        .select({ isPeriodic: treatmentPlans.isPeriodic, periodDays: treatmentPlans.periodDays, notifyPatient: treatmentPlans.notifyPatient })
+        .from(treatmentPlans)
+        .where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId)))
+        .limit(1)
+      if (existing?.isPeriodic && existing.notifyPatient && existing.periodDays && existing.periodDays > 0) {
+        const nextDate = new Date()
+        nextDate.setDate(nextDate.getDate() + existing.periodDays)
+        values.nextNotificationDate = nextDate.toISOString().slice(0, 10)
+      }
+    }
+  }
   if (data.groupId !== undefined) values.groupId = data.groupId
   if (data.doctorId !== undefined) values.doctorId = data.doctorId
   if (Object.keys(values).length === 0) return null

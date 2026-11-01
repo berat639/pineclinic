@@ -19,7 +19,21 @@
 .headerDropdownOpen { display:flex; flex-direction:column; gap:8px; }
 .consentDropdown { width:max-content; min-width:340px; max-width:min(500px, calc(100vw - 36px)); }
 .consentDropdown .consent { margin-top:0; padding:0; border:0; background:var(--card-bg); box-shadow:none; }
-.reminderDropdown { width:320px; max-width:calc(100vw - 36px); }
+.reminderDropdown { width:370px; max-width:calc(100vw - 36px); }
+.reminderDropdownHead { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.tdbSuggestionBox { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border:1px solid var(--pc-border); border-radius:9px; background:var(--pc-tint); color:var(--pc-tint-fg); font-size:11.5px; line-height:1.35; }
+.tdbSuggestionBox strong { display:block; font-size:12px; font-weight:700; margin-bottom:2px; }
+.tdbSuggestionBox p { margin:0; color:var(--foreground-2); font-size:11px; }
+.presetGrid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin-top:2px; }
+.presetChip { display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:6px 9px; border:1px solid var(--pc-border); border-radius:8px; background:var(--pc-surface); color:var(--foreground); font:inherit; text-align:left; cursor:pointer; box-shadow:var(--pc-clay-btn); transition:border-color .15s ease,background .15s ease; }
+.presetChip strong { font-size:12px; font-weight:700; color:var(--foreground); }
+.presetChip span { font-size:10.5px; color:var(--pc-muted); }
+.presetChipActive { background:var(--pc-tint); border-color:var(--pc-blue); color:var(--pc-tint-fg); box-shadow:var(--pc-clay-pale); }
+.presetChipActive strong, .presetChipActive span { color:var(--pc-tint-fg); }
+.customDaysRow { display:flex; flex-direction:column; gap:5px; margin-top:4px; padding-top:8px; border-top:1px solid var(--pc-border); }
+.customDaysInputWrap { display:flex; align-items:center; gap:8px; }
+.customDaysInputWrap input { width:110px; padding:6px 10px; font-size:12.5px; font-weight:700; }
+.customDaysInputWrap span { font-size:12px; color:var(--pc-muted); font-weight:600; }
 .dropdownTitle { display:block; font-size:13.5px; font-weight:700; color:var(--foreground); margin:0; }
 .dropdownLabel { display:block; font-size:12px; font-weight:600; color:var(--foreground-2); margin:2px 0 0; }
 .dropdownActions { display:flex; justify-content:flex-end; margin-top:4px; }
@@ -237,6 +251,9 @@
 :global([data-theme="light"] .admin-content) .modal .consentTitle > span { color:var(--pc-muted) !important; }
 :global([data-theme="light"] .admin-content) .modal .patientBadgeBtn,
 :global([data-theme="light"] .admin-content) .modal .patientBadgeBtn *,
+:global([data-theme="light"] .admin-content) .modal .presetChipActive,
+:global([data-theme="light"] .admin-content) .modal .presetChipActive *,
+:global([data-theme="light"] .admin-content) .modal .tdbSuggestionBox strong,
 :global([data-theme="light"] .admin-content) .modal .consentTextButton,
 :global([data-theme="light"] .admin-content) .modal .mediaAttach,
 :global([data-theme="light"] .admin-content) .modal .mediaAttach span { color:var(--pc-tint-fg) !important; }

@@ -262,7 +262,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [discount, setDiscount] = useState<number>(0)
   const [discountFixed, setDiscountFixed] = useState<number>(0)
 
-  const [isPeriodic, setIsPeriodic] = useState(false)
+  const [isPeriodic, setIsPeriodic] = useState(!editingGroup)
   const [periodDays, setPeriodDays] = useState<number>(180)
   const [notifyPatient, setNotifyPatient] = useState(false)
   const [notificationType, setNotificationType] = useState('')

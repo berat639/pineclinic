@@ -9,6 +9,7 @@ import PatientConsentPanel from './PatientConsentPanel'
 import PlanMediaPanel from './PlanMediaPanel'
 import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
+import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
 import styles from './PineTreatmentPlan.module.css'
 
 const money = (minor: number) => `${(minor / 100).toLocaleString('tr-TR', { minimumFractionDigits: minor % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })} ₺`
@@ -71,6 +72,8 @@ export default function PineTreatmentPlanView(p: any) {
   const selectedIndicationName = indications.length === 1 ? indications[0] : null
   const selectedIndicationId = selectedIndicationName ? p.indicationIds[selectedIndicationName] : null
   const rows: { target: string; item: any }[] = Object.entries(p.drafts).flatMap(([target, items]) => (items as any[]).map(item => ({ target, item })))
+  const tdbSuggestion = getTdbReminderSuggestion(rows.map(row => row.item?.name || ''))
+  const isCustomDays = p.periodic && !REMINDER_PRESETS.some(preset => preset.days === p.periodDays)
   const patientName = p.patient?.name || p.event?.title?.split(' - ')[0] || 'Hasta'
   const initials = patientName.split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0]).join('').toLocaleUpperCase('tr-TR')
   const updateRow = (target: string, id: string, update: (item: any) => any) => p.setDrafts((previous: any) => ({ ...previous, [target]: (previous[target] || []).map((item: any) => item.id === id && !item.locked ? update(item) : item) }))
@@ -220,7 +223,7 @@ export default function PineTreatmentPlanView(p: any) {
           title="Tedavi hatırlatma bildirimlerini ayarla"
         >
           <Bell size={14} />
-          <span>{p.periodic ? `Tedavi hatırlatma bildirimleri · ${p.periodDays} gün` : 'Tedavi hatırlatma bildirimleri'}</span>
+          <span>{formatReminderLabel(p.periodic, p.periodDays)}</span>
           <ChevronDown size={13} />
         </button>
         {reminderOpen && (
@@ -229,23 +232,93 @@ export default function PineTreatmentPlanView(p: any) {
             role="region"
             aria-label="Tedavi hatırlatma bildirimleri"
           >
-            <strong className={styles.dropdownTitle}>Tedavi hatırlatma bildirimleri</strong>
-            <p className={styles.dialogDescription}>Hatırlatmalar, hastanın izin verdiği ve bu planda seçtiğiniz kanallardan gönderilir.</p>
-            <label className={styles.inlineCheck}>
-              <input type="checkbox" checked={p.periodic} onChange={event => p.setPeriodic(event.target.checked)} />
-              <span>Periyodik kontrolü hatırlat</span>
-            </label>
-            <label htmlFor="reminder-days" className={styles.dropdownLabel}>Kontrol aralığı (gün)</label>
-            <input
-              id="reminder-days"
-              className={styles.input}
-              type="number"
-              min="1"
-              max="3650"
-              disabled={!p.periodic}
-              value={p.periodDays}
-              onChange={event => p.setPeriodDays(Number(event.target.value))}
-            />
+            <div className={styles.reminderDropdownHead}>
+              <strong className={styles.dropdownTitle}>Tedavi hatırlatma bildirimleri</strong>
+              <label className={styles.inlineCheck}>
+                <input
+                  type="checkbox"
+                  checked={p.periodic}
+                  onChange={event => {
+                    const nextPeriodic = event.target.checked
+                    p.setPeriodic(nextPeriodic)
+                    if (nextPeriodic && (!p.periodDays || p.periodDays < 1)) {
+                      p.setPeriodDays(180)
+                    }
+                  }}
+                />
+                <span>{p.periodic ? 'Açık' : 'Kapalı'}</span>
+              </label>
+            </div>
+            <p className={styles.dialogDescription} style={{ margin: '2px 0 6px' }}>
+              Varsayılan olarak 6 ayda bir (180 gün) kontrol seçilidir. Hazır TDB sürelerinden seçebilir, özel gün girebilir veya kapatabilirsiniz.
+            </p>
+            {tdbSuggestion && (tdbSuggestion.periodic !== p.periodic || (tdbSuggestion.periodic && tdbSuggestion.days !== p.periodDays)) && (
+              <div className={styles.tdbSuggestionBox}>
+                <div>
+                  <strong>💡 TDB Önerisi: {tdbSuggestion.badge}</strong>
+                  <p>{tdbSuggestion.reason}</p>
+                </div>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.pale} ${styles.small}`}
+                  onClick={() => {
+                    p.setPeriodic(tdbSuggestion.periodic)
+                    if (tdbSuggestion.periodic) p.setPeriodDays(tdbSuggestion.days)
+                  }}
+                >
+                  Uygula
+                </button>
+              </div>
+            )}
+            <div className={styles.presetGrid} role="group" aria-label="Hızlı hatırlatma süreleri">
+              <button
+                type="button"
+                className={`${styles.presetChip} ${!p.periodic ? styles.presetChipActive : ''}`}
+                onClick={() => p.setPeriodic(false)}
+              >
+                <strong>Kapalı</strong>
+                <span>Hatırlatma yok</span>
+              </button>
+              {REMINDER_PRESETS.map(preset => {
+                const active = p.periodic && p.periodDays === preset.days
+                return (
+                  <button
+                    type="button"
+                    key={preset.days}
+                    className={`${styles.presetChip} ${active ? styles.presetChipActive : ''}`}
+                    onClick={() => {
+                      p.setPeriodic(true)
+                      p.setPeriodDays(preset.days)
+                    }}
+                  >
+                    <strong>{preset.label}</strong>
+                    <span>{preset.sublabel}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className={styles.customDaysRow}>
+              <label htmlFor="reminder-days" className={styles.dropdownLabel}>
+                Özel gün belirle {isCustomDays ? `(${p.periodDays} gün aktif)` : '(1 – 3650 gün)'}
+              </label>
+              <div className={styles.customDaysInputWrap}>
+                <input
+                  id="reminder-days"
+                  className={styles.input}
+                  type="number"
+                  min="1"
+                  max="3650"
+                  placeholder="Örn: 45"
+                  value={p.periodDays || ''}
+                  onChange={event => {
+                    const val = Math.max(1, Math.min(3650, Number(event.target.value) || 1))
+                    if (!p.periodic) p.setPeriodic(true)
+                    p.setPeriodDays(val)
+                  }}
+                />
+                <span>gün sonra</span>
+              </div>
+            </div>
             <div className={styles.dropdownActions}>
               <button type="button" className={`${styles.button} ${styles.small}`} onClick={() => setReminderOpen(false)}>Bitti</button>
             </div>

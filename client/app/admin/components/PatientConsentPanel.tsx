@@ -78,6 +78,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   const [dialogError, setDialogError] = useState('')
   const requestKey = useRef<string | null>(null)
   const pending = useRef(false)
+  const autoSelectedRef = useRef(false)
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const responses = await Promise.all([
@@ -109,6 +110,19 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   } : null
   const allowed = NOTIFICATION_CHANNELS.filter(channel => consent && effectivePatient && consentAllows(channel, consent.preferences, settings?.version, effectivePatient))
   const canManageConsent = settings ? settings.canManageConsent !== false : true
+  useEffect(() => {
+    if (!loading && onChannelsChange && !autoSelectedRef.current && allowed.length > 0 && selectedChannels.length === 0) {
+      autoSelectedRef.current = true
+      const preferred: NotificationChannel = allowed.includes('sms') && effectivePatient?.phone?.trim()
+        ? 'sms'
+        : allowed.includes('whatsapp') && effectivePatient?.phone?.trim()
+        ? 'whatsapp'
+        : allowed.includes('email') && effectivePatient?.email?.trim()
+        ? 'email'
+        : allowed[0]
+      onChannelsChange([preferred])
+    }
+  }, [loading, allowed, selectedChannels.length, onChannelsChange, effectivePatient?.phone, effectivePatient?.email])
   const blocked = (channel: Delivery) => !!effectivePatient && (
     (channel === 'sms' && effectivePatient.smsOptOut) || (channel === 'whatsapp' && effectivePatient.whatsappOptOut) || (channel === 'email' && effectivePatient.emailOptOut) ||
     (!unsavedContact && !!consent && consent.preferences.some(item => item.channel === channel && ['refused', 'revoked'].includes(item.status))))
