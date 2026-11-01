@@ -24,6 +24,7 @@ type ProviderState = {
 
 const emptySettings: BillingSettings = { invoicePrefix: 'KLC', eDocumentProvider: 'none' }
 const providerNames: Record<string, string> = { iyzico: 'Iyzico', paytr: 'PayTR', stripe: 'Stripe' }
+const COMING_SOON = true
 
 export default function BillingIntegrationsCard() {
   const [settings, setSettings] = useState<BillingSettings>(emptySettings)
@@ -33,6 +34,7 @@ export default function BillingIntegrationsCard() {
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null)
 
   const load = async () => {
+    if (COMING_SOON) return
     try {
       const [settingsResponse, providersResponse] = await Promise.all([
         fetch('/api/finance/settings', { credentials: 'include' }),
@@ -83,31 +85,45 @@ export default function BillingIntegrationsCard() {
   const providerState = providers[form.provider]
   return <>
     <section className={styles.card}>
-      <h3 className={styles.cardTitle}>e-Belge ve Fatura Entegrasyonu</h3>
-      <p className={styles.cardDescription}>Bu alan e-Belge entegratörü için hazırlık bilgilerini tutar. Sağlayıcı onayı olmadan oluşturulan kayıtlar hukuki fatura değildir.</p>
-      <div className={styles.grid}>
-        {([
-          ['legalName', 'Unvan'], ['taxNumber', 'VKN / TCKN'], ['taxOffice', 'Vergi dairesi'], ['mersisNumber', 'MERSİS'], ['email', 'E-posta'], ['invoicePrefix', 'Belge öneki'],
-        ] as const).map(([field, label]) => <label key={field} className={styles.field}><span className={styles.fieldLabel}>{label}</span><input value={settings[field] || ''} onChange={event => update(field, event.target.value)} /></label>)}
-        <label className={styles.field}><span className={styles.fieldLabel}>e-Belge sağlayıcısı</span><select value={settings.eDocumentProvider || 'none'} onChange={event => update('eDocumentProvider', event.target.value)}><option value="none">Henüz bağlı değil</option><option value="gib">GİB / özel entegratör</option><option value="logo">Logo</option><option value="mikro">Mikro</option><option value="other">Diğer</option></select></label>
-        <label className={styles.field} style={{ gridColumn: '1 / -1' }}><span className={styles.fieldLabel}>Fatura adresi</span><input value={settings.address || ''} onChange={event => update('address', event.target.value)} /></label>
+      <div className={styles.comingSoonHeader}>
+        <h3 className={styles.cardTitle}>e-Belge ve Fatura Entegrasyonu</h3>
+        {COMING_SOON && <span className={styles.comingSoonBadge}>⏳ Çok Yakında</span>}
       </div>
-      <button type="button" className={styles.saveButton} disabled={saving !== null} onClick={() => void saveBilling()}>{saving === 'billing' ? 'Kaydediliyor…' : 'Fatura bilgilerini kaydet'}</button>
+      <p className={`${styles.cardDescription} ${COMING_SOON ? styles.comingSoonNotice : ''}`}>
+        GİB, Logo, Mikro ve özel e-Belge entegratörleri ile doğrudan fatura kesimi çok yakında kullanıma sunulacaktır.
+      </p>
+      <div hidden={COMING_SOON} style={COMING_SOON ? { display: 'none' } : undefined}>
+        <div className={styles.grid}>
+          {([
+            ['legalName', 'Unvan'], ['taxNumber', 'VKN / TCKN'], ['taxOffice', 'Vergi dairesi'], ['mersisNumber', 'MERSİS'], ['email', 'E-posta'], ['invoicePrefix', 'Belge öneki'],
+          ] as const).map(([field, label]) => <label key={field} className={styles.field}><span className={styles.fieldLabel}>{label}</span><input value={settings[field] || ''} onChange={event => update(field, event.target.value)} /></label>)}
+          <label className={styles.field}><span className={styles.fieldLabel}>e-Belge sağlayıcısı</span><select value={settings.eDocumentProvider || 'none'} onChange={event => update('eDocumentProvider', event.target.value)}><option value="none">Henüz bağlı değil</option><option value="gib">GİB / özel entegratör</option><option value="logo">Logo</option><option value="mikro">Mikro</option><option value="other">Diğer</option></select></label>
+          <label className={styles.field} style={{ gridColumn: '1 / -1' }}><span className={styles.fieldLabel}>Fatura adresi</span><input value={settings.address || ''} onChange={event => update('address', event.target.value)} /></label>
+        </div>
+        <button type="button" className={styles.saveButton} disabled={saving !== null} onClick={() => void saveBilling()}>{saving === 'billing' ? 'Kaydediliyor…' : 'Fatura bilgilerini kaydet'}</button>
+      </div>
     </section>
 
     <section className={styles.card}>
-      <h3 className={styles.cardTitle}>Online Tahsilat Entegrasyonu</h3>
-      <p className={styles.cardDescription}>Iyzico, PayTR ve Stripe yapılandırması burada saklanır. Anahtarlar şifrelenir, daha sonra tekrar görüntülenmez; canlı tahsilat için sağlayıcı hesabı ve webhook doğrulaması gerekir.</p>
-      <div className={styles.grid}>
-        <label className={styles.field}><span className={styles.fieldLabel}>Sağlayıcı</span><select value={form.provider} onChange={event => chooseProvider(event.target.value)}>{Object.entries(providerNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-        <label className={styles.field}><span className={styles.fieldLabel}>Mağaza / Merchant ID</span><input value={form.merchantId} onChange={event => setForm(current => ({ ...current, merchantId: event.target.value }))} /></label>
-        <label className={styles.field}><span className={styles.fieldLabel}>API anahtarı</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasApiKey ? 'Kayıtlı — değiştirmek için girin' : 'Henüz girilmedi'} value={form.apiKey} onChange={event => setForm(current => ({ ...current, apiKey: event.target.value }))} /></label>
-        <label className={styles.field}><span className={styles.fieldLabel}>Gizli anahtar</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasSecret ? 'Kayıtlı — değiştirmek için girin' : 'Henüz girilmedi'} value={form.secret} onChange={event => setForm(current => ({ ...current, secret: event.target.value }))} /></label>
-        <label className={styles.field}><span className={styles.fieldLabel}>Webhook imza anahtarı</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasWebhookSecret ? 'Kayıtlı — değiştirmek için girin' : 'İsteğe bağlı'} value={form.webhookSecret} onChange={event => setForm(current => ({ ...current, webhookSecret: event.target.value }))} /></label>
-        <label className={styles.field}><span className={styles.fieldLabel}>Durum</span><span style={{ color: 'var(--integration-text-muted)', fontSize: 13 }}><input type="checkbox" checked={form.enabled} onChange={event => setForm(current => ({ ...current, enabled: event.target.checked }))} /> Etkin</span></label>
+      <div className={styles.comingSoonHeader}>
+        <h3 className={styles.cardTitle}>Online Tahsilat Entegrasyonu</h3>
+        {COMING_SOON && <span className={styles.comingSoonBadge}>⏳ Çok Yakında</span>}
       </div>
-      <button type="button" className={styles.saveButton} disabled={saving !== null} onClick={() => void saveProvider()}>{saving === 'provider' ? 'Kaydediliyor…' : 'Sağlayıcıyı kaydet'}</button>
+      <p className={`${styles.cardDescription} ${COMING_SOON ? styles.comingSoonNotice : ''}`}>
+        Iyzico, PayTR ve Stripe sanal POS entegrasyonları ile online ödeme alma özelliği çok yakında kullanıma sunulacaktır.
+      </p>
+      <div hidden={COMING_SOON} style={COMING_SOON ? { display: 'none' } : undefined}>
+        <div className={styles.grid}>
+          <label className={styles.field}><span className={styles.fieldLabel}>Sağlayıcı</span><select value={form.provider} onChange={event => chooseProvider(event.target.value)}>{Object.entries(providerNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+          <label className={styles.field}><span className={styles.fieldLabel}>Mağaza / Merchant ID</span><input value={form.merchantId} onChange={event => setForm(current => ({ ...current, merchantId: event.target.value }))} /></label>
+          <label className={styles.field}><span className={styles.fieldLabel}>API anahtarı</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasApiKey ? 'Kayıtlı — değiştirmek için girin' : 'Henüz girilmedi'} value={form.apiKey} onChange={event => setForm(current => ({ ...current, apiKey: event.target.value }))} /></label>
+          <label className={styles.field}><span className={styles.fieldLabel}>Gizli anahtar</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasSecret ? 'Kayıtlı — değiştirmek için girin' : 'Henüz girilmedi'} value={form.secret} onChange={event => setForm(current => ({ ...current, secret: event.target.value }))} /></label>
+          <label className={styles.field}><span className={styles.fieldLabel}>Webhook imza anahtarı</span><input type="password" autoComplete="new-password" placeholder={providerState?.hasWebhookSecret ? 'Kayıtlı — değiştirmek için girin' : 'İsteğe bağlı'} value={form.webhookSecret} onChange={event => setForm(current => ({ ...current, webhookSecret: event.target.value }))} /></label>
+          <label className={styles.field}><span className={styles.fieldLabel}>Durum</span><span style={{ color: 'var(--integration-text-muted)', fontSize: 13 }}><input type="checkbox" checked={form.enabled} onChange={event => setForm(current => ({ ...current, enabled: event.target.checked }))} /> Etkin</span></label>
+        </div>
+        <button type="button" className={styles.saveButton} disabled={saving !== null} onClick={() => void saveProvider()}>{saving === 'provider' ? 'Kaydediliyor…' : 'Sağlayıcıyı kaydet'}</button>
+      </div>
     </section>
-    {notice && <p style={{ margin: 0, color: notice.error ? 'var(--danger)' : 'var(--success)', fontSize: 13 }}>{notice.text}</p>}
+    {!COMING_SOON && notice && <p style={{ margin: 0, color: notice.error ? 'var(--danger)' : 'var(--success)', fontSize: 13 }}>{notice.text}</p>}
   </>
 }

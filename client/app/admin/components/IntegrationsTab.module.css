@@ -27,6 +27,9 @@
   --integration-selected-bg: #1e3a8a;
   --integration-selected-border: #93c5fd;
   --integration-link-text: #bfdbfe;
+  --integration-coming-soon-bg: #172554;
+  --integration-coming-soon-border: #1e40af;
+  --integration-coming-soon-text: #93c5fd;
 
   display: flex;
   width: 100%;
@@ -65,6 +68,9 @@
   --integration-selected-bg: #dbeafe;
   --integration-selected-border: #2563eb;
   --integration-link-text: #1d4ed8;
+  --integration-coming-soon-bg: #e0f2fe;
+  --integration-coming-soon-border: #bae6fd;
+  --integration-coming-soon-text: #0369a1;
 }
 
 .loading {
@@ -176,6 +182,39 @@
   background: var(--integration-danger-bg);
   border-color: var(--integration-danger-border);
   color: var(--integration-danger-text) !important;
+}
+
+.comingSoonHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.comingSoonHeader .cardTitle {
+  margin: 0;
+}
+
+.comingSoonBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 12px;
+  background: var(--integration-coming-soon-bg);
+  border: 1px solid var(--integration-coming-soon-border);
+  border-radius: 999px;
+  box-shadow: var(--pc-clay-pale);
+  color: var(--integration-coming-soon-text) !important;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.comingSoonNotice {
+  margin: 0 !important;
 }
 
 .grid {
