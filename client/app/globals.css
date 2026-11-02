@@ -31,23 +31,26 @@
   --logo-filter: brightness(0) invert(1);
   --body-gradient-1: rgba(29,78,216,0.15);
   --body-gradient-2: rgba(96,165,250,0.05);
-  --flow-bg: #0a0f1a;
+  --flow-bg: #0b1329;
   --flow-grid: #1e293b;
-  --flow-node-field: #1e3a5f;
+  --flow-node-field: #132238;
   --flow-node-field-border: #3b82f6;
-  --flow-node-cond: #4a3520;
+  --flow-node-field-text: #93c5fd;
+  --flow-node-cond: #3b2814;
   --flow-node-cond-border: #f59e0b;
-  --flow-node-action: #3b1f5e;
+  --flow-node-cond-text: #fde68a;
+  --flow-node-action: #2e1a4a;
   --flow-node-action-border: #8b5cf6;
+  --flow-node-action-text: #ddd6fe;
   --flow-text: #f0f4ff;
   --flow-text-muted: #94a3b8;
   --flow-panel-bg: #0f172a;
   --flow-panel-border: #334155;
-  --flow-input-bg: #020617;
-  --flow-info-bg: #172554;
-  --flow-info-border: #1e3a8a;
+  --flow-input-bg: #0f172a;
+  --flow-info-bg: #132238;
+  --flow-info-border: #1e40af;
   --flow-info-text: #bfdbfe;
-  --flow-toolbar-button-bg: #172554;
+  --flow-toolbar-button-bg: #132238;
   --flow-danger-bg: #450a0a;
   --flow-success-bg: #052e16;
   --calendar-checkbox-bg: #0a1220;
@@ -134,21 +137,24 @@
   --body-gradient-2: rgba(96,165,250,0.06);
   --flow-bg: #f1f5f9;
   --flow-grid: #cbd5e1;
-  --flow-node-field: #e0edff;
+  --flow-node-field: #eff6ff;
   --flow-node-field-border: #3b82f6;
+  --flow-node-field-text: #1d4ed8;
   --flow-node-cond: #fef3c7;
-  --flow-node-cond-border: #f59e0b;
-  --flow-node-action: #ede9fe;
-  --flow-node-action-border: #8b5cf6;
+  --flow-node-cond-border: #d97706;
+  --flow-node-cond-text: #92400e;
+  --flow-node-action: #f5f3ff;
+  --flow-node-action-border: #7c3aed;
+  --flow-node-action-text: #5b21b6;
   --flow-text: #0f172a;
   --flow-text-muted: #475569;
   --flow-panel-bg: #ffffff;
   --flow-panel-border: #cbd5e1;
   --flow-input-bg: #ffffff;
-  --flow-info-bg: #dbeafe;
+  --flow-info-bg: #eff6ff;
   --flow-info-border: #93c5fd;
   --flow-info-text: #1e3a8a;
-  --flow-toolbar-button-bg: #dbeafe;
+  --flow-toolbar-button-bg: #eff6ff;
   --flow-danger-bg: #fee2e2;
   --flow-success-bg: #dcfce7;
   --calendar-checkbox-bg: #e2e8f0;
@@ -435,10 +441,14 @@
   .reference-modal-footer { padding: 12px 16px; }
 }
 
-/* ── React Flow Controls ────────────────────────────────────────────────────── */
-.react-flow__controls-button { background: var(--card-bg) !important; fill: var(--foreground) !important; border-color: var(--glass-border) !important; }
-.react-flow__controls-button:hover { background: var(--glass-bg-hover) !important; }
+/* ── React Flow Controls & Handles ──────────────────────────────────────────── */
+.react-flow__controls-button { background: var(--card-bg) !important; fill: var(--foreground) !important; border-color: var(--input-border) !important; }
+.react-flow__controls-button:hover { background: var(--card-inner) !important; }
 .react-flow__attribution { display: none !important; }
+.react-flow__handle { transition: transform 0.15s ease, box-shadow 0.15s ease; cursor: crosshair !important; }
+.react-flow__handle:hover { transform: scale(1.35); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35); }
+.react-flow__edge-textbg { fill: var(--card-bg) !important; stroke: var(--input-border) !important; stroke-width: 1px; rx: 4px; ry: 4px; }
+.react-flow__edge-text { fill: var(--foreground) !important; font-weight: 700 !important; font-size: 10px !important; }
 
 /* ── Resource Calendar ─────────────────────────────────────────────────────── */
 .rc-scroll-container {

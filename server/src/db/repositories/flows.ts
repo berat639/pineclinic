@@ -19,7 +19,7 @@ export interface FlowNode {
     enumValues?: string[]
     // CONDITION node
     conditionField?: string
-    operator?: 'equals' | 'contains' | 'notEmpty'
+    operator?: 'equals' | 'contains' | 'notEmpty' | 'intent'
     conditionValue?: string
     // ACTION node
     action?: string
@@ -288,9 +288,16 @@ export function flowToPromptText(flow: ConversationFlow): string {
         break
       case 'CONDITION': {
         const field = node.data.conditionField
-        const op = node.data.operator === 'equals' ? '==' : node.data.operator === 'contains' ? 'içeriyorsa' : 'boş değilse'
         const val = node.data.conditionValue || ''
-        lines.push(`${prefix}${step}. KOŞUL: "${field}" ${op} "${val}" ise:`)
+        if (field === 'user_intent' || node.data.operator === 'intent') {
+          lines.push(`${prefix}${step}. KOŞUL (KULLANICI NİYETİ): Kullanıcının ifadesi "${val}" niyetini taşıyorsa:`)
+        } else if (field === 'kayitli') {
+          const isRegisteredExpected = val.toLowerCase() !== 'false' && val.toLowerCase() !== 'hayır'
+          lines.push(`${prefix}${step}. KOŞUL (HASTA KAYIT DURUMU): musteriSorgula sonucuna göre hasta sistemde ${isRegisteredExpected ? 'kayıtlı ise (kayitli=true)' : 'kayıtlı değilse (kayitli=false)'}:`)
+        } else {
+          const op = node.data.operator === 'equals' ? '==' : node.data.operator === 'contains' ? 'içeriyorsa' : 'boş değilse'
+          lines.push(`${prefix}${step}. KOŞUL: "${field}" ${op} "${val}" ise:`)
+        }
         step++
         const edges = edgeMap.get(nodeId) || []
         const trueEdge = edges.find(e => e.sourceHandle === 'true')
@@ -325,16 +332,21 @@ export function flowToPromptText(flow: ConversationFlow): string {
         } else if (act === 'end_call') {
           const msg = (node.data as Record<string, unknown>).message || ''
           lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${msg ? `"${msg}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
+        } else if (act === 'webhook') {
+          const url = String(actionData.webhookUrl || '')
+          lines.push(`${prefix}${step}. DIŞ SİSTEM (WEBHOOK) BİLDİRİMİ: Toplanan bilgileri kaydet (${url || 'webhook'}) ve bir sonraki adıma geç.`)
         } else {
           lines.push(`${prefix}${step}. Randevu bilgilerini toplayıp randevuOlustur aracını çağır.`)
         }
         step++
         break
       }
-      case 'END':
-        lines.push(`${prefix}${step}. Görüşmeyi nazikçe tamamla ve veda et.`)
+      case 'END': {
+        const endMsg = typeof node.data.message === 'string' ? node.data.message.trim() : ''
+        lines.push(`${prefix}${step}. ${endMsg ? `"${endMsg}" diyerek görüşmeyi` : 'Görüşmeyi'} nazikçe tamamla ve veda et.`)
         step++
         return
+      }
     }
 
     const edges = edgeMap.get(nodeId) || []

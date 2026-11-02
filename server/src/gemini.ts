@@ -105,6 +105,7 @@ export async function createLiveSession(
       clinicId: options.clinicId,
       direction: options.direction || 'inbound',
       channel: options.telephonyChannel ? 'phone' : 'web_socket',
+      initialFields: options.callerPhone ? { telefon: options.callerPhone } : undefined,
     })
     : null
 
@@ -162,6 +163,13 @@ export async function createLiveSession(
           source: 'voice',
           clinicId: options.clinicId,
         })
+        if (flowEngine) {
+          await flowEngine.accept({ fields: { telefon: phone, hastaNotu: noteContent, ...(patientName ? { musteri_adi: patientName } : {}) } })
+          const expected = flowEngine.expectedAction()
+          if (expected && ['save_patient_note', 'notBirak'].includes(expected.action)) {
+            await flowEngine.completeAction(expected.nodeId, true)
+          }
+        }
         return {
           success: true,
           message: 'Notunuz başarıyla kaydedildi ve klinik bankosuna iletildi. Yetkililerimiz en kısa sürede size dönüş sağlayacaktır.',
@@ -179,6 +187,12 @@ export async function createLiveSession(
         const { sendLocationToCaller } = await import('./services/voice-whatsapp')
         await sendLocationToCaller(options.callerPhone)
         locationSent = true
+        if (flowEngine) {
+          const expected = flowEngine.expectedAction()
+          if (expected && expected.action === 'send_wa_location') {
+            await flowEngine.completeAction(expected.nodeId, true)
+          }
+        }
         return { success: true, message: 'Konum arayan numaraya WhatsApp üzerinden gönderildi. Kullanıcıya kısa bir sesli onay ver.' }
       } catch {
         return { success: false, message: 'Konum WhatsApp üzerinden gönderilemedi. Kullanıcıya bağlantının şu an gönderilemediğini söyle.' }
@@ -410,9 +424,21 @@ export async function createLiveSession(
           getPatientDoctorHistory(rawPhone, options.clinicId),
         ])
 
+        const syncFlowLookup = async (registered: boolean, name?: string | null) => {
+          if (!flowEngine) return
+          await flowEngine.accept({
+            fields: {
+              telefon: rawPhone,
+              kayitli: registered ? 'true' : 'false',
+              ...(name ? { musteri_adi: name } : {}),
+            },
+          })
+        }
+
         if (!customer) {
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
           if (knowledgeCustomer) {
+            await syncFlowLookup(true, knowledgeCustomer.name)
             return {
               kayitli: true,
               musteri_adi: knowledgeCustomer.name,
@@ -421,6 +447,7 @@ export async function createLiveSession(
             }
           }
           if (dentalPatient) {
+            await syncFlowLookup(true, dentalPatient.name)
             return {
               kayitli: true,
               musteri_adi: dentalPatient.name,
@@ -429,6 +456,7 @@ export async function createLiveSession(
             }
           }
           if (doktorGecmisi.length > 0) {
+            await syncFlowLookup(true, null)
             return {
               kayitli: true,
               musteri_adi: null,
@@ -436,6 +464,7 @@ export async function createLiveSession(
               sonuc: `Kayıtlı hasta bulundu.\nDoktor geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}`,
             }
           }
+          await syncFlowLookup(false, null)
           return { kayitli: false, sonuc: 'Bu numara ile kayıtlı hasta bulunamadı. Hastadan ad ve soyadını sor.' }
         }
         
@@ -455,6 +484,7 @@ export async function createLiveSession(
         if (doktorGecmisi.length > 0) {
           info.push(`Doktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`)
         }
+        await syncFlowLookup(true, customer.name)
         return {
           kayitli: true,
           musteri_adi: customer.name,
@@ -572,6 +602,12 @@ export async function createLiveSession(
       return { success: true, sehir, sicaklik: '20°C', durum: 'açık', message: `${sehir}'da hava şu an gayet güzel ve ılıman görünüyor.` }
     }
     if (name === 'cagriySonlandir') {
+      if (flowEngine) {
+        const expected = flowEngine.expectedAction()
+        if (expected && expected.action === 'end_call') {
+          await flowEngine.completeAction(expected.nodeId, true)
+        }
+      }
       callbacks.onHangup?.()
       return { success: true }
     }

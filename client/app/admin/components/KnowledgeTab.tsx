@@ -262,7 +262,7 @@ export default function KnowledgeTab() {
   const [callerIdSaving, setCallerIdSaving] = useState(false)
 
   // Flow Builder Direction State
-  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound'>('inbound')
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
 
   // Outbound Call Modal state
   const [callModalOpen, setCallModalOpen] = useState(false)
@@ -985,46 +985,67 @@ export default function KnowledgeTab() {
           </div>
 
           {/* Flow Direction Selector Switcher */}
-          <div style={{ display: 'flex', background: 'var(--flow-panel-bg)', padding: 4, borderRadius: 10, border: '1px solid var(--flow-panel-border)' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', background: 'var(--input-bg)', padding: 5, borderRadius: 10, border: '1px solid var(--input-border)', boxShadow: 'var(--pc-neo-inset)' }}>
             <button
+              type="button"
               onClick={() => setFlowDirection('inbound')}
               style={{
-                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
-                background: flowDirection === 'inbound' ? '#2563eb' : 'var(--flow-panel-bg)',
-                color: flowDirection === 'inbound' ? '#fff' : 'var(--foreground-3)',
-                boxShadow: flowDirection === 'inbound' ? '0 2px 8px rgba(59,130,246,0.4)' : 'none',
+                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
+                background: flowDirection === 'inbound' ? '#2563eb' : 'var(--card-bg)',
+                borderColor: flowDirection === 'inbound' ? '#1d4ed8' : 'var(--input-border)',
+                color: flowDirection === 'inbound' ? '#ffffff' : 'var(--foreground)',
+                boxShadow: flowDirection === 'inbound' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
               }}
             >
-              📥 Gelen Arama Akışı (Randevu)
+              <span style={{ color: flowDirection === 'inbound' ? '#ffffff' : 'inherit' }}>📥 Gelen Arama Akışı (Randevu)</span>
             </button>
             <button
+              type="button"
               onClick={() => setFlowDirection('outbound')}
               style={{
-                padding: '8px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, transition: 'all 0.2s',
-                background: flowDirection === 'outbound' ? '#047857' : 'var(--flow-panel-bg)',
-                color: flowDirection === 'outbound' ? '#fff' : 'var(--foreground-3)',
-                boxShadow: flowDirection === 'outbound' ? '0 2px 8px rgba(16,185,129,0.4)' : 'none',
+                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
+                background: flowDirection === 'outbound' ? '#2563eb' : 'var(--card-bg)',
+                borderColor: flowDirection === 'outbound' ? '#1d4ed8' : 'var(--input-border)',
+                color: flowDirection === 'outbound' ? '#ffffff' : 'var(--foreground)',
+                boxShadow: flowDirection === 'outbound' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
               }}
             >
-              📤 Giden Arama Akışı (Anket & Takip)
+              <span style={{ color: flowDirection === 'outbound' ? '#ffffff' : 'inherit' }}>📤 Giden Arama Akışı (Anket & Takip)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFlowDirection('whatsapp')}
+              style={{
+                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
+                background: flowDirection === 'whatsapp' ? '#2563eb' : 'var(--card-bg)',
+                borderColor: flowDirection === 'whatsapp' ? '#1d4ed8' : 'var(--input-border)',
+                color: flowDirection === 'whatsapp' ? '#ffffff' : 'var(--foreground)',
+                boxShadow: flowDirection === 'whatsapp' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+              }}
+            >
+              <span style={{ color: flowDirection === 'whatsapp' ? '#ffffff' : 'inherit' }}>💬 WhatsApp Asistan Akışı</span>
             </button>
           </div>
         </div>
 
         {/* Current Flow Notice */}
         <div style={{
-          padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: '0.8rem',
+          padding: '10px 14px', borderRadius: 10, marginBottom: 16, fontSize: '0.8rem',
           background: 'var(--flow-info-bg)',
           border: '1px solid var(--flow-info-border)',
           color: 'var(--flow-info-text)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
         }}>
-          <span>
-            {flowDirection === 'inbound' 
-              ? '📥 Şu an **Gelen Arama Akışı** düzenleniyor. Kliniği arayan hastaların görüşme akışıdır.' 
-              : '📤 Şu an **Giden Arama Akışı** düzenleniyor. Robotun dışarıya yaptığı anket ve takip aramalarının akışıdır.'}
+          <span style={{ fontWeight: 600 }}>
+            {flowDirection === 'inbound'
+              ? '📥 Şu an Gelen Arama Akışı düzenleniyor — Kliniği arayan hastaların karşılama, sorgulama ve randevu akışıdır.'
+              : flowDirection === 'outbound'
+              ? '📤 Şu an Giden Arama Akışı düzenleniyor — Yapay zekanın dışarıya yaptığı memnuniyet anketi ve takip aramalarının akışıdır.'
+              : '💬 Şu an WhatsApp Asistan Akışı düzenleniyor — WhatsApp üzerinden gelen hasta mesajlarında uygulanacak konuşma akışıdır.'}
           </span>
-          <span style={{ fontSize: '0.72rem', opacity: 0.8 }}>Yön: {flowDirection}</span>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: 12, background: 'var(--card-bg)', border: '1px solid var(--flow-info-border)', color: 'var(--foreground)' }}>
+            Aktif Kanal: {flowDirection === 'inbound' ? 'Gelen Arama' : flowDirection === 'outbound' ? 'Giden Arama' : 'WhatsApp'}
+          </span>
         </div>
 
         {/* FlowBuilder with dynamic direction key to force re-render/reload */}

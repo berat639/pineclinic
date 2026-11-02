@@ -47,8 +47,20 @@ function conditionMatches(node: FlowNode, fields: Record<string, unknown>) {
   const actual = String(fields[field] ?? '').trim()
   const expected = String(node.data.conditionValue || '').trim()
   if (node.data.operator === 'notEmpty') return actual.length > 0
+  if (node.data.operator === 'intent' || field === 'user_intent') {
+    if (!actual) return false
+    const actualLow = actual.toLocaleLowerCase('tr-TR')
+    if (['true', 'evet', '1', 'var'].includes(actualLow)) return true
+    if (['false', 'hayır', 'hayir', '0', 'yok'].includes(actualLow)) return false
+    const expectedWords = expected.toLocaleLowerCase('tr-TR').split(/[\s,;:.!?]+/).filter(w => w.length >= 3)
+    return expectedWords.some(w => actualLow.includes(w)) || actualLow.includes(expected.toLocaleLowerCase('tr-TR'))
+  }
   if (node.data.operator === 'contains') return actual.toLocaleLowerCase('tr-TR').includes(expected.toLocaleLowerCase('tr-TR'))
-  return actual.toLocaleLowerCase('tr-TR') === expected.toLocaleLowerCase('tr-TR')
+  const actualNorm = actual.toLocaleLowerCase('tr-TR')
+  const expectedNorm = expected.toLocaleLowerCase('tr-TR')
+  if (expectedNorm === 'true' && (actualNorm === 'true' || actualNorm === 'evet' || actualNorm === '1')) return true
+  if (expectedNorm === 'false' && (actualNorm === 'false' || actualNorm === 'hayır' || actualNorm === 'hayir' || actualNorm === '0')) return true
+  return actualNorm === expectedNorm
 }
 
 function validField(node: FlowNode, fields: Record<string, unknown>) {
@@ -80,7 +92,7 @@ export class FlowEngine {
     this.id = args.id; this.state = args.state; this.mode = args.mode; this.channel = args.channel; this.direction = args.direction; this.clinicId = args.clinicId
   }
 
-  static async create(args: { clinicId: string; direction: string; channel: FlowChannel; mode?: FlowRuntimeMode }) {
+  static async create(args: { clinicId: string; direction: string; channel: FlowChannel; mode?: FlowRuntimeMode; initialFields?: Record<string, unknown> }) {
     const flow = await getActiveFlow(args.direction, args.clinicId)
     if (!flow) return null
     const validation = validateConversationFlow(flow.nodes, flow.edges)
@@ -90,7 +102,7 @@ export class FlowEngine {
     const start = flow.nodes.find(node => node.type === 'START')
     const engine = new FlowEngine({
       id: randomUUID(), mode, channel: args.channel, direction: args.direction, clinicId: args.clinicId,
-      state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: {}, handledEvents: {}, completedActions: [] },
+      state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: cleanFields(args.initialFields), handledEvents: {}, completedActions: [] },
     })
     await engine.persist()
     return engine

@@ -19,3 +19,39 @@ test('bağımsız aktarım tetikleyicisi kullanılmayan adım uyarısı oluştur
   const issues = validateConversationFlow([start, end, transfer], [{ id: 'a', source: 'start', target: 'end' }])
   expect(issues.some(issue => issue.nodeId === 'aktar' && issue.level === 'warning')).toBe(false)
 })
+
+test('user_intent koşulu ve webhook aksiyonu doğrulama ve prompt üretiminde desteklenir', () => {
+  const intentCond: FlowNode = {
+    id: 'intent_node',
+    type: 'CONDITION',
+    position: { x: 0, y: 1 },
+    data: { conditionField: 'user_intent', operator: 'intent', conditionValue: 'Yetkiliyle görüşmek istiyor' },
+  }
+  const webhookAction: FlowNode = {
+    id: 'webhook_node',
+    type: 'ACTION',
+    position: { x: 0, y: 2 },
+    data: { action: 'webhook', webhookUrl: 'https://example.com/hook' },
+  }
+  const edges: FlowEdge[] = [
+    { id: 'e1', source: 'start', target: 'intent_node' },
+    { id: 'e2', source: 'intent_node', target: 'webhook_node', sourceHandle: 'true' },
+    { id: 'e3', source: 'intent_node', target: 'end', sourceHandle: 'false' },
+    { id: 'e4', source: 'webhook_node', target: 'end' },
+  ]
+  const issues = validateConversationFlow([start, intentCond, webhookAction, end], edges)
+  expect(issues.filter(i => i.level === 'error')).toHaveLength(0)
+
+  const badWebhook: FlowNode = {
+    id: 'bad_webhook',
+    type: 'ACTION',
+    position: { x: 0, y: 2 },
+    data: { action: 'webhook', webhookUrl: 'gecersiz-url' },
+  }
+  const badIssues = validateConversationFlow([start, intentCond, badWebhook, end], [
+    { id: 'e1', source: 'start', target: 'intent_node' },
+    { id: 'e2', source: 'intent_node', target: 'bad_webhook', sourceHandle: 'true' },
+    { id: 'e3', source: 'intent_node', target: 'end', sourceHandle: 'false' },
+  ])
+  expect(badIssues).toContainEqual(expect.objectContaining({ nodeId: 'bad_webhook', level: 'error' }))
+})

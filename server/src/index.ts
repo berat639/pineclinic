@@ -2443,9 +2443,35 @@ const app = new Elysia()
     if (!engine) { set.status = 404; return { success: false, message: 'Görüşme bulunamadı veya süresi doldu.' } }
     const input = (body || {}) as { name?: string; args?: Record<string, unknown> }
     const args = input.args || {}
-    if (input.name !== 'randevuOlustur') { set.status = 400; return { success: false, message: 'Bu işlem bu görüşmede kullanılamaz.' } }
+    if (!['randevuOlustur', 'hastaNotKaydet', 'cagriySonlandir'].includes(String(input.name || ''))) {
+      set.status = 400
+      return { success: false, message: 'Bu işlem bu görüşmede kullanılamaz.' }
+    }
     const step = await engine.accept({ fields: args })
     const action = engine.expectedAction()
+    if (input.name === 'hastaNotKaydet') {
+      if (!step.success || !action || !['save_patient_note', 'notBirak'].includes(action.action)) {
+        return { success: false, message: step.message || step.next?.prompt || 'Not için gerekli bilgiler henüz tamamlanmadı.' }
+      }
+      try {
+        const { createPatientNote } = await import('./db/repositories/dental')
+        const phone = String(args.telefon || '')
+        const note = String(args.not || args.hastaNotu || '')
+        const name = String(args.hasta_adi || args.musteri_adi || '')
+        await createPatientNote({ phone, content: name ? `[${name}] ${note}` : note, source: 'web', clinicId: currentClinicId() || undefined })
+        await engine.completeAction(action.nodeId, true)
+        return { success: true, message: 'Notunuz başarıyla kaydedildi.' }
+      } catch {
+        await engine.completeAction(action.nodeId, false)
+        return { success: false, message: 'Not kaydedilirken bir hata oluştu.' }
+      }
+    }
+    if (input.name === 'cagriySonlandir') {
+      if (action && action.action === 'end_call') {
+        await engine.completeAction(action.nodeId, true)
+      }
+      return { success: true }
+    }
     if (!step.success || !action || !['save_appointment_pending', 'randevuOlustur'].includes(action.action)) {
       return { success: false, message: step.message || step.next?.prompt || 'Randevu için gerekli bilgiler henüz tamamlanmadı.' }
     }
