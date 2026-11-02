@@ -950,6 +950,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
   // Interactive Flow Simulator State
   const [simActive, setSimActive] = useState(false)
+  const [simLoading, setSimLoading] = useState(false)
+  const [simAiPowered, setSimAiPowered] = useState(false)
   const [simCurrentNodeId, setSimCurrentNodeId] = useState<string | null>(null)
   const [simVisitedNodeIds, setSimVisitedNodeIds] = useState<string[]>([])
   const [simVisitedEdgeIds, setSimVisitedEdgeIds] = useState<string[]>([])
@@ -1580,6 +1582,86 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     setSimLog(prev => [...prev, ...newLogs])
   }, [nodes, edges])
 
+  const callBackendAiSimulation = useCallback(async (params: {
+    targetNodeId: string | null
+    currentFields: Record<string, string>
+    visitedNodes: string[]
+    visitedEdges: string[]
+    userMessage?: string
+    manualBranch?: 'true' | 'false'
+    priorLogs?: Array<{ role: 'system' | 'ai' | 'user' | 'action'; text: string }>
+  }) => {
+    setSimLoading(true)
+    try {
+      const serverNodes = nodes.map(n => {
+        const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, ...cleanData } = (n.data || {}) as any
+        return {
+          id: n.id,
+          type: n.type === 'startNode' ? 'START' : n.type === 'fieldNode' ? 'FIELD' : n.type === 'conditionNode' ? 'CONDITION' : n.type === 'actionNode' ? 'ACTION' : 'END',
+          position: n.position,
+          data: cleanData,
+        }
+      })
+      const cleanEdges = edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+        ...(typeof e.label === 'string' ? { label: e.label } : {}),
+      }))
+      const historyForAi = (params.priorLogs || simLog)
+        .filter(item => item.role === 'ai' || item.role === 'user')
+        .map(item => ({
+          role: item.role === 'ai' ? ('model' as const) : ('user' as const),
+          text: item.text.replace(/^(🤖 AI[^:]*:|👤 Hasta[^:]*:|▶[^:]*:)\s*/i, ''),
+        }))
+
+      const res = await fetch('/api/admin/flow/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          direction,
+          nodes: serverNodes,
+          edges: cleanEdges,
+          currentNodeId: params.targetNodeId,
+          fields: params.currentFields,
+          visitedNodeIds: params.visitedNodes,
+          visitedEdgeIds: params.visitedEdges,
+          history: historyForAi,
+          userMessage: params.userMessage,
+          manualBranch: params.manualBranch,
+        }),
+      })
+      if (!res.ok) throw new Error('Simülasyon yanıtı alınamadı')
+      const data = await res.json()
+      setSimAiPowered(Boolean(data.aiPowered))
+      if (data.fields) setSimFields(data.fields)
+      setSimCurrentNodeId(data.currentNodeId ?? null)
+      if (Array.isArray(data.visitedNodeIds)) setSimVisitedNodeIds(data.visitedNodeIds)
+      if (Array.isArray(data.visitedEdgeIds)) setSimVisitedEdgeIds(data.visitedEdgeIds)
+
+      const extraLogs: Array<{ role: 'system' | 'ai' | 'user' | 'action'; text: string }> = []
+      if (data.extractedFields && Object.keys(data.extractedFields).length > 0) {
+        const pairs = Object.entries(data.extractedFields).map(([k, v]) => `${k}="${v}"`).join(', ')
+        extraLogs.push({ role: 'system', text: `🧠 AI Alan Çıkarımı: ${pairs}` })
+      }
+      if (Array.isArray(data.usedKnowledgeTitles) && data.usedKnowledgeTitles.length > 0) {
+        extraLogs.push({ role: 'system', text: `📚 Bilgi Bankası (RAG) Kullanıldı: ${data.usedKnowledgeTitles.join(', ')}` })
+      }
+      if (Array.isArray(data.logs)) {
+        extraLogs.push(...data.logs)
+      }
+      setSimLog(prev => [...prev, ...extraLogs])
+    } catch {
+      // Offline / local fallback
+      if (params.targetNodeId) {
+        stepSimulationFrom(params.targetNodeId, params.currentFields, params.visitedNodes, params.visitedEdges)
+      }
+    } finally {
+      setSimLoading(false)
+    }
+  }, [nodes, edges, direction, simLog, stepSimulationFrom])
+
   const startSimulation = useCallback((initialRegistered?: string) => {
     const start = nodes.find(n => n.type === 'startNode')
     if (!start) {
@@ -1588,91 +1670,74 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     }
     const regVal = initialRegistered ?? simFields.kayitli ?? 'false'
     const initFields: Record<string, string> = { kayitli: regVal }
+    const initLog = [{ role: 'system' as const, text: `🧪 AI Simülasyonu başlatıldı (Hasta Kayıtlı mı: ${regVal === 'true' ? 'Evet' : 'Hayır'})` }]
     setSimActive(true)
     setSimFields(initFields)
     setSimInput('')
     setSimVisitedNodeIds([start.id])
     setSimVisitedEdgeIds([])
-    setSimLog([{ role: 'system', text: `🧪 Simülasyon başlatıldı (Hasta Kayıtlı mı: ${regVal === 'true' ? 'Evet' : 'Hayır'})` }])
+    setSimLog(initLog)
     setRightTab('simulator')
-    stepSimulationFrom(start.id, initFields, [], [])
-  }, [nodes, simFields.kayitli, showToast, stepSimulationFrom])
+    void callBackendAiSimulation({
+      targetNodeId: start.id,
+      currentFields: initFields,
+      visitedNodes: [start.id],
+      visitedEdges: [],
+      priorLogs: initLog,
+    })
+  }, [nodes, simFields.kayitli, showToast, callBackendAiSimulation])
 
   const submitSimulationField = (valueToSubmit?: string) => {
     const val = (valueToSubmit ?? simInput).trim()
-    const currentNode = nodes.find(n => n.id === simCurrentNodeId)
-    if (!currentNode || currentNode.type !== 'fieldNode') return
-    const d = currentNode.data as FieldData
-    if (!val && d.required) {
-      showToast('Bu alan zorunludur, lütfen bir test yanıtı girin', 'error')
-      return
-    }
-    if (val) {
-      if ((d.fieldType === 'date' || d.fieldName === 'tarih') && !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
-        showToast('Tarih alanı YYYY-MM-DD formatında olmalıdır (Örn: 2026-11-05)', 'error')
-        return
-      }
-      if ((d.fieldType === 'time' || d.fieldName === 'saat') && !/^([01]\d|2[0-3]):[0-5]\d$/.test(val)) {
-        showToast('Saat alanı HH:MM formatında olmalıdır (Örn: 14:30)', 'error')
-        return
-      }
-      if (d.fieldName === 'telefon' && val.replace(/\D/g, '').length < 10) {
-        showToast('Telefon numarası en az 10 haneli olmalıdır', 'error')
-        return
-      }
-    }
-
-    const updatedFields = { ...simFields, [d.fieldName]: val || '(boş)' }
-    setSimFields(updatedFields)
+    if (!val || simLoading) return
     setSimInput('')
-    setSimLog(prev => [...prev, { role: 'user', text: `👤 Hasta: "${val || '(boş geçildi)'}"` }])
-
-    const outEdge = edges.find(e => e.source === currentNode.id)
-    if (!outEdge) {
-      setSimLog(prev => [...prev, { role: 'system', text: '⚠️ Bu adımdan sonra bağlı bir devam yolu yok.' }])
-      return
-    }
-    stepSimulationFrom(outEdge.target, updatedFields, simVisitedNodeIds, [...simVisitedEdgeIds, outEdge.id])
+    const userLogItem = { role: 'user' as const, text: `👤 Hasta: "${val}"` }
+    const nextLogs = [...simLog, userLogItem]
+    setSimLog(nextLogs)
+    void callBackendAiSimulation({
+      targetNodeId: simCurrentNodeId,
+      currentFields: simFields,
+      visitedNodes: simVisitedNodeIds,
+      visitedEdges: simVisitedEdgeIds,
+      userMessage: val,
+      priorLogs: nextLogs,
+    })
   }
 
   const chooseConditionBranchInSim = (branch: 'true' | 'false') => {
+    if (simLoading) return
     const currentNode = nodes.find(n => n.id === simCurrentNodeId)
     if (!currentNode || currentNode.type !== 'conditionNode') return
-    const outEdge = edges.find(e => e.source === currentNode.id && e.sourceHandle === branch)
-    setSimLog(prev => [
-      ...prev,
-      { role: 'user', text: `👤 Test Seçimi: ${branch === 'true' ? '✅ Evet (Niyet Eşleşti)' : '❌ Hayır (Eşleşmedi)'}` },
-    ])
-    if (!outEdge) {
-      setSimLog(prev => [...prev, { role: 'system', text: `⚠️ "${branch === 'true' ? 'Evet' : 'Hayır'}" çıkışı bağlı değil.` }])
-      return
-    }
-    stepSimulationFrom(outEdge.target, simFields, simVisitedNodeIds, [...simVisitedEdgeIds, outEdge.id])
+    const nextLogs = [
+      ...simLog,
+      { role: 'user' as const, text: `👤 Test Seçimi: ${branch === 'true' ? '✅ Evet (Niyet Eşleşti)' : '❌ Hayır (Eşleşmedi)'}` },
+    ]
+    setSimLog(nextLogs)
+    void callBackendAiSimulation({
+      targetNodeId: currentNode.id,
+      currentFields: simFields,
+      visitedNodes: simVisitedNodeIds,
+      visitedEdges: simVisitedEdgeIds,
+      manualBranch: branch,
+      priorLogs: nextLogs,
+    })
   }
 
   const triggerGlobalKeywordInSim = () => {
-    const phrase = simGlobalPhrase.trim().toLocaleLowerCase('tr-TR')
-    if (!phrase) return
-    const matchedNode = nodes.find(n => {
-      if (n.type !== 'actionNode') return false
-      const kwRaw = String((n.data as ActionData).triggerKeywords || '')
-      const kwList = kwRaw.split(/[,;|\n]+/).map(k => k.trim().toLocaleLowerCase('tr-TR')).filter(Boolean)
-      return kwList.some(k => phrase.includes(k))
-    })
-    if (!matchedNode) {
-      showToast('Bu ifadeyle eşleşen bir global tetikleyici düğümü bulunamadı', 'error')
-      return
-    }
-    const d = matchedNode.data as ActionData
-    setSimActive(true)
-    setSimCurrentNodeId(matchedNode.id)
-    setSimVisitedNodeIds(prev => [...prev, matchedNode.id])
-    setSimLog(prev => [
-      ...prev,
-      { role: 'user', text: `👤 Hasta (Ara Söz): "${simGlobalPhrase.trim()}"` },
-      { role: 'action', text: `⚡ GLOBAL TETİKLEYİCİ DEVREYE GİRDİ: ${ACTION_LABELS[d.action] || d.action}` },
-    ])
+    const phrase = simGlobalPhrase.trim()
+    if (!phrase || simLoading) return
     setSimGlobalPhrase('')
+    setSimActive(true)
+    const nextLogs = [...simLog, { role: 'user' as const, text: `👤 Hasta (Ara Söz): "${phrase}"` }]
+    setSimLog(nextLogs)
+    void callBackendAiSimulation({
+      targetNodeId: simCurrentNodeId || nodes.find(n => n.type === 'startNode')?.id || null,
+      currentFields: simFields,
+      visitedNodes: simVisitedNodeIds,
+      visitedEdges: simVisitedEdgeIds,
+      userMessage: phrase,
+      priorLogs: nextLogs,
+    })
   }
 
   if (!loaded) {
@@ -2842,10 +2907,25 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
                 {/* Simulator Header & Caller State Toggle */}
                 <div style={{ padding: 12, background: 'var(--card-inner)', border: '1px solid var(--input-border)', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--foreground)' }}>🧪 Canlı Akış Simülatörü</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--foreground)' }}>🧪 Canlı AI Simülatörü</span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 800,
+                          padding: '2px 7px',
+                          borderRadius: 10,
+                          background: simAiPowered ? '#16a34a' : '#2563eb',
+                          color: '#ffffff',
+                        }}
+                      >
+                        <span style={{ color: '#ffffff' }}>{simAiPowered ? '🤖 Gemini AI + RAG Aktif' : '🤖 AI Bağlantılı'}</span>
+                      </span>
+                    </div>
                     <button
                       type="button"
+                      disabled={simLoading}
                       onClick={() => startSimulation(simFields.kayitli)}
                       style={{
                         padding: '4px 10px',
@@ -2855,10 +2935,10 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                         color: '#ffffff',
                         fontSize: 10,
                         fontWeight: 700,
-                        cursor: 'pointer',
+                        cursor: simLoading ? 'wait' : 'pointer',
                       }}
                     >
-                      <span style={{ color: '#ffffff' }}>🔄 Baştan Başlat</span>
+                      <span style={{ color: '#ffffff' }}>{simLoading ? '⏳ İşleniyor...' : '🔄 Baştan Başlat'}</span>
                     </button>
                   </div>
 
@@ -2953,27 +3033,35 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   ))}
                 </div>
 
-                {/* Active Step Interactive Input */}
-                {selectedSimNode?.type === 'fieldNode' && (() => {
-                  const d = selectedSimNode.data as FieldData
+                {/* Active Step Interactive Input (Works for any step with natural AI + RAG) */}
+                {(() => {
+                  const d = (selectedSimNode?.data || {}) as FieldData
                   const preset = PRESET_FIELDS.find(p => p.value === d.fieldName)
-                  const samples = d.fieldType === 'enum' && d.enumValues?.length ? d.enumValues : (preset?.samples || ['Örnek Yanıt'])
+                  const samples =
+                    selectedSimNode?.type === 'fieldNode'
+                      ? d.fieldType === 'enum' && d.enumValues?.length
+                        ? d.enumValues
+                        : preset?.samples || ['Örnek Yanıt']
+                      : ['Yarın saat 14:30 için diş ağrısı randevusu almak istiyorum', 'Muayene ücretiniz ne kadar?', 'Konum gönderebilir misiniz?']
 
                   return (
                     <div style={{ padding: 12, background: 'var(--card-inner)', border: '1.5px solid #2563eb', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground)' }}>
-                        ✍️ Hasta Yanıtını Girin ({d.fieldName}):
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>✍️ AI Asistana Mesaj Yazın {d.fieldName ? `(${d.fieldName})` : ''}:</span>
+                        {simLoading && <span style={{ fontSize: 10, color: '#2563eb' }}>🤖 AI yanıt üretiyor...</span>}
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <input
                           value={simInput}
+                          disabled={simLoading}
                           onChange={e => setSimInput(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitSimulationField() } }}
-                          placeholder="Yanıt yazın veya aşağıdan seçin..."
+                          placeholder="Doğal cümle veya yanıt yazın (AI alanları otomatik çıkarır)..."
                           style={{ ...inputStyle, flex: 1 }}
                         />
                         <button
                           type="button"
+                          disabled={simLoading || !simInput.trim()}
                           onClick={() => submitSimulationField()}
                           style={{
                             padding: '8px 14px',
@@ -2983,10 +3071,11 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                             color: '#ffffff',
                             fontSize: 11,
                             fontWeight: 700,
-                            cursor: 'pointer',
+                            cursor: simLoading || !simInput.trim() ? 'not-allowed' : 'pointer',
+                            opacity: simLoading || !simInput.trim() ? 0.6 : 1,
                           }}
                         >
-                          <span style={{ color: '#ffffff' }}>Gönder →</span>
+                          <span style={{ color: '#ffffff' }}>{simLoading ? '...' : 'Gönder →'}</span>
                         </button>
                       </div>
                       <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -2994,6 +3083,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <button
                             key={sample}
                             type="button"
+                            disabled={simLoading}
                             onClick={() => submitSimulationField(sample)}
                             style={{
                               padding: '3px 8px',
@@ -3003,7 +3093,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                               color: 'var(--foreground-2)',
                               fontSize: 10,
                               fontWeight: 600,
-                              cursor: 'pointer',
+                              cursor: simLoading ? 'not-allowed' : 'pointer',
                             }}
                           >
                             ⚡ {sample}

@@ -2418,6 +2418,16 @@ const app = new Elysia()
     return { success: true, mode }
   })
 
+  .post('/api/admin/flow/simulate', async ({ body, set }) => {
+    try {
+      const { runFlowSimulationStep } = await import('./services/flow-simulator')
+      return await runFlowSimulationStep((body || {}) as any)
+    } catch (error) {
+      set.status = 500
+      return { error: error instanceof Error ? error.message : 'Simülasyon çalıştırılamadı' }
+    }
+  })
+
   // Direct web audio keeps media in the browser; only the small flow state crosses this API.
   .post('/api/flow-sessions', async ({ body, set }) => {
     const clinicId = currentClinicId()

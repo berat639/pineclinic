@@ -1,0 +1,457 @@
+import { GoogleGenAI, Type } from '@google/genai'
+import { type FlowEdge, type FlowNode, flowToPromptText } from '../db/repositories/flows'
+import { getGreeting } from '../db/repositories/settings'
+import { retrieveTopK, buildRagPrompt } from '../rag'
+
+export interface SimulationMessage {
+  role: 'ai' | 'user' | 'system' | 'action'
+  text: string
+}
+
+export interface FlowSimulationRequest {
+  direction?: 'inbound' | 'outbound' | 'whatsapp'
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  currentNodeId?: string | null
+  fields?: Record<string, string>
+  visitedNodeIds?: string[]
+  visitedEdgeIds?: string[]
+  history?: Array<{ role: 'user' | 'model'; text: string }>
+  userMessage?: string
+  manualBranch?: 'true' | 'false'
+}
+
+export interface FlowSimulationResponse {
+  currentNodeId: string | null
+  visitedNodeIds: string[]
+  visitedEdgeIds: string[]
+  fields: Record<string, string>
+  extractedFields: Record<string, string>
+  logs: SimulationMessage[]
+  completed: boolean
+  aiPowered: boolean
+  usedKnowledgeTitles: string[]
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  save_appointment_pending: '📝 Randevu Talebi Oluştur (Onay Bekler)',
+  randevuOlustur: '📝 Randevu Oluştur',
+  save_patient_note: '🗒️ Hastadan Not Al (Bankoya İlet)',
+  notBirak: '🗒️ Anket / Hasta Notu Kaydet',
+  webhook: '🔗 Dış Sisteme Gönder (Webhook)',
+  end_call: '👋 Bilgi Ver ve Görüşmeyi Bitir',
+  transfer_call: '📞 Aramayı Yetkiliye Aktar',
+  transfer: '📞 Canlı Desteğe Aktar',
+  send_wa_location: '📍 WhatsApp’tan Konum Gönder',
+  send_wa_message: '📱 WhatsApp Mesajı Gönder',
+  save_record: '💾 Veritabanına Kaydet',
+}
+
+function getTodayIso(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' })
+}
+
+function evaluateDeterministicCondition(
+  node: FlowNode,
+  fields: Record<string, string>,
+  intentMatchedByAi?: boolean
+): boolean {
+  const field = String(node.data.conditionField || '')
+  const actual = String(fields[field] ?? '').trim()
+  const expected = String(node.data.conditionValue || '').trim()
+
+  if (field === 'user_intent' || node.data.operator === 'intent') {
+    if (typeof intentMatchedByAi === 'boolean') return intentMatchedByAi
+    const aLow = actual.toLocaleLowerCase('tr-TR')
+    if (['true', 'evet', '1'].includes(aLow)) return true
+    if (['false', 'hayır', 'hayir', '0'].includes(aLow)) return false
+    const words = expected.toLocaleLowerCase('tr-TR').split(/[\s,;:.!?]+/).filter(w => w.length >= 3)
+    return words.some(w => aLow.includes(w))
+  }
+
+  if (node.data.operator === 'notEmpty') return actual.length > 0
+  if (node.data.operator === 'contains') {
+    return actual.toLocaleLowerCase('tr-TR').includes(expected.toLocaleLowerCase('tr-TR'))
+  }
+
+  const aLow = actual.toLocaleLowerCase('tr-TR')
+  const eLow = expected.toLocaleLowerCase('tr-TR')
+  if (eLow === 'true') return ['true', 'evet', '1'].includes(aLow)
+  if (eLow === 'false') return ['false', 'hayır', 'hayir', '0'].includes(aLow)
+  return aLow === eLow
+}
+
+function isFieldSatisfied(node: FlowNode, fields: Record<string, string>): boolean {
+  const name = String(node.data.fieldName || '').trim()
+  if (!name) return true
+  const val = String(fields[name] ?? '').trim()
+  if (!val) return false
+  if (val === '(boş)' && !node.data.required) return true
+  if (node.data.fieldType === 'date' || name === 'tarih') return /^\d{4}-\d{2}-\d{2}$/.test(val)
+  if (node.data.fieldType === 'time' || name === 'saat') return /^([01]\d|2[0-3]):[0-5]\d$/.test(val)
+  if (name === 'telefon') return val.replace(/\D/g, '').length >= 10
+  return true
+}
+
+export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise<FlowSimulationResponse> {
+  const direction = req.direction || 'inbound'
+  const nodes = Array.isArray(req.nodes) ? req.nodes : []
+  const edges = Array.isArray(req.edges) ? req.edges : []
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
+  const fields: Record<string, string> = { ...(req.fields || {}) }
+  const extractedFields: Record<string, string> = {}
+  const visitedNodeIds = [...(req.visitedNodeIds || [])]
+  const visitedEdgeIds = [...(req.visitedEdgeIds || [])]
+  const logs: SimulationMessage[] = []
+  const usedKnowledgeTitles: string[] = []
+
+  const apiKey = process.env.GEMINI_API_KEY
+  const ai = apiKey ? new GoogleGenAI({ apiKey }) : null
+  const modelName = process.env.GEMINI_SIMULATION_MODEL || 'gemini-2.5-flash'
+
+  const userMessage = (req.userMessage || '').trim()
+  let currId: string | null = req.currentNodeId ?? nodes.find(n => n.type === 'START')?.id ?? null
+
+  // 1. Check Global Keyword Triggers first if user sent a message
+  if (userMessage) {
+    const lowMsg = userMessage.toLocaleLowerCase('tr-TR')
+    const matchedGlobal = nodes.find(n => {
+      if (n.type !== 'ACTION') return false
+      const kwRaw = String(n.data.triggerKeywords || '')
+      const kwList = kwRaw.split(/[,;|\n]+/).map(k => k.trim().toLocaleLowerCase('tr-TR')).filter(Boolean)
+      return kwList.some(k => lowMsg.includes(k))
+    })
+
+    if (matchedGlobal) {
+      currId = matchedGlobal.id
+      if (!visitedNodeIds.includes(matchedGlobal.id)) visitedNodeIds.push(matchedGlobal.id)
+      const actLabel = ACTION_LABELS[String(matchedGlobal.data.action || '')] || matchedGlobal.data.label || 'İşlem'
+      logs.push({
+        role: 'action',
+        text: `⚡ GLOBAL TETİKLEYİCİ EŞLEŞTİ: ${actLabel}`,
+      })
+    }
+  }
+
+  // 2. If user sent a message, run AI extraction (fields + user_intent) & RAG lookup
+  let ragContext = ''
+  let aiIntentMatched: boolean | undefined = undefined
+
+  if (userMessage) {
+    try {
+      const docs = await retrieveTopK(userMessage, 3)
+      if (docs.length > 0) {
+        usedKnowledgeTitles.push(...docs.map(d => d.title))
+        ragContext = await buildRagPrompt(docs)
+      }
+    } catch {
+      // RAG optional in simulation if embeddings aren't configured
+    }
+
+    const fieldNodes = nodes.filter(n => n.type === 'FIELD' && n.data.fieldName)
+    const activeNode = currId ? nodeMap.get(currId) : undefined
+
+    if (ai) {
+      try {
+        const fieldSchemaProps: Record<string, any> = {}
+        for (const fn of fieldNodes) {
+          const fName = String(fn.data.fieldName!)
+          fieldSchemaProps[fName] = {
+            type: Type.STRING,
+            description: `${fn.data.description || fName}. ${
+              fn.data.fieldType === 'date' || fName === 'tarih'
+                ? `Bugün ${getTodayIso()}. YYYY-MM-DD formatına çevir.`
+                : fn.data.fieldType === 'time' || fName === 'saat'
+                ? 'HH:MM (24 saat) formatına çevir.'
+                : ''
+            }`,
+          }
+        }
+
+        const intentCondNodes = nodes.filter(
+          n => n.type === 'CONDITION' && (n.data.conditionField === 'user_intent' || n.data.operator === 'intent')
+        )
+
+        const extractionResult = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: `Bugünün tarihi: ${getTodayIso()}.
+Şu anki aktif adım: ${activeNode ? JSON.stringify({ id: activeNode.id, type: activeNode.type, data: activeNode.data }) : 'Yok'}.
+Mevcut toplanmış alanlar: ${JSON.stringify(fields)}.
+${intentCondNodes.length > 0 ? `Kontrol edilecek özel niyet koşulu: "${intentCondNodes.map(n => n.data.conditionValue).join(' | ')}"` : ''}
+Kullanıcının son mesajı: "${userMessage}"
+
+Görev:
+1. Kullanıcının mesajından çıkarılabilen alanları (fields) JSON içinde doldur. Eğer şu anki aktif adım bir FIELD ise ve kullanıcı kısa bir yanıt verdiyse (ör. sadece isim, sadece saat, sadece puan), o yanıtı aktif adımın fieldName alanına ata.
+2. Eğer özel niyet koşulu varsa, kullanıcının mesajının bu niyeti taşıyıp taşımadığını intentMatched (true/false) olarak belirt.`,
+                },
+              ],
+            },
+          ],
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                fields: {
+                  type: Type.OBJECT,
+                  properties: fieldSchemaProps,
+                },
+                intentMatched: {
+                  type: Type.BOOLEAN,
+                  description: 'Kullanıcı mesajı özel niyet koşulunu karşılıyor mu?',
+                },
+              },
+            },
+          },
+        })
+
+        const parsed = JSON.parse(extractionResult.text || '{}')
+        if (parsed.fields && typeof parsed.fields === 'object') {
+          for (const [k, v] of Object.entries(parsed.fields)) {
+            if (typeof v === 'string' && v.trim()) {
+              fields[k] = v.trim()
+              extractedFields[k] = v.trim()
+            }
+          }
+        }
+        if (typeof parsed.intentMatched === 'boolean') {
+          aiIntentMatched = parsed.intentMatched
+          fields.user_intent = String(parsed.intentMatched)
+        }
+      } catch (err) {
+        console.warn('[FlowSimulator] AI alan çıkarımı yedek moda geçti:', err)
+      }
+    }
+
+    // Fallback direct assignment if active node is FIELD and AI didn't extract it
+    if (activeNode?.type === 'FIELD' && activeNode.data.fieldName) {
+      const fName = String(activeNode.data.fieldName)
+      if (!extractedFields[fName] && !fields[fName]) {
+        fields[fName] = userMessage
+        extractedFields[fName] = userMessage
+      }
+    }
+  }
+
+  // 3. If manualBranch was clicked on a CONDITION node
+  if (req.manualBranch && currId) {
+    const condNode = nodeMap.get(currId)
+    if (condNode?.type === 'CONDITION') {
+      const outEdge = edges.find(e => e.source === condNode.id && e.sourceHandle === req.manualBranch)
+      logs.push({
+        role: 'system',
+        text: `🔀 Koşul Dalı Seçildi: ${req.manualBranch === 'true' ? '✅ EVET (Yeşil Yol)' : '❌ HAYIR (Kırmızı Yol)'}`,
+      })
+      if (outEdge) {
+        if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+        currId = outEdge.target
+      }
+    }
+  }
+
+  // 4. Advance through the flow graph
+  let completed = false
+  let stoppedNode: FlowNode | undefined = undefined
+  let greetingText = ''
+  try {
+    greetingText =
+      direction === 'outbound'
+        ? (await getGreeting('outbound')) || 'Merhaba, kliniğimizden memnuniyet anketi için arıyorum.'
+        : (await getGreeting('inbound')) || 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+  } catch {
+    greetingText = 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+  }
+
+  let startedFromStartNode = false
+
+  for (let guard = 0; guard < nodes.length + 4; guard++) {
+    if (!currId) break
+    const node = nodeMap.get(currId)
+    if (!node) break
+    if (!visitedNodeIds.includes(node.id)) visitedNodeIds.push(node.id)
+
+    if (node.type === 'START') {
+      startedFromStartNode = true
+      const outEdge = edges.find(e => e.source === node.id)
+      if (!outEdge) {
+        stoppedNode = node
+        logs.push({ role: 'system', text: '⚠️ Karşılama adımından sonra bağlı bir adım bulunmuyor.' })
+        break
+      }
+      if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+      currId = outEdge.target
+      continue
+    }
+
+    if (node.type === 'FIELD') {
+      if (!isFieldSatisfied(node, fields)) {
+        stoppedNode = node
+        break
+      }
+      const outEdge = edges.find(e => e.source === node.id)
+      if (!outEdge) {
+        stoppedNode = node
+        break
+      }
+      if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+      currId = outEdge.target
+      continue
+    }
+
+    if (node.type === 'CONDITION') {
+      const condField = String(node.data.conditionField || '')
+      // If user_intent and no userMessage yet, pause at the condition node
+      if ((condField === 'user_intent' || node.data.operator === 'intent') && !userMessage && !req.manualBranch) {
+        stoppedNode = node
+        logs.push({
+          role: 'system',
+          text: `🔀 Özel Niyet Koşulu: "${node.data.conditionValue || ''}" — Bir hasta mesajı yazarak yapay zekanın hangi dala yönlendirdiğini test edin.`,
+        })
+        break
+      }
+
+      const matched = evaluateDeterministicCondition(node, fields, aiIntentMatched)
+      const branch = matched ? 'true' : 'false'
+      logs.push({
+        role: 'system',
+        text: `🔀 Koşul Değerlendirildi (${condField || 'koşul'}): ${matched ? '✅ EVET (Yeşil Yol)' : '❌ HAYIR (Kırmızı Yol)'}`,
+      })
+      const outEdge = edges.find(e => e.source === node.id && e.sourceHandle === branch)
+      if (!outEdge) {
+        stoppedNode = node
+        logs.push({ role: 'system', text: `⚠️ Koşulun "${matched ? 'Evet' : 'Hayır'}" çıkışı hiçbir adıma bağlı değil!` })
+        break
+      }
+      if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+      currId = outEdge.target
+      continue
+    }
+
+    if (node.type === 'ACTION') {
+      const act = String(node.data.action || '')
+      const actTitle = ACTION_LABELS[act] || node.data.label || act
+      logs.push({
+        role: 'action',
+        text: `⚡ İŞLEM TETİKLENDİ: ${actTitle}\nToplanan Veriler: ${JSON.stringify(fields)}`,
+      })
+      const outEdge = edges.find(e => e.source === node.id)
+      if (!outEdge) {
+        stoppedNode = node
+        completed = true
+        break
+      }
+      if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+      currId = outEdge.target
+      continue
+    }
+
+    if (node.type === 'END') {
+      stoppedNode = node
+      completed = true
+      break
+    }
+  }
+
+  // 5. Generate Natural AI Response for the current state
+  const flowPrompt = flowToPromptText({
+    id: 'sim',
+    name: 'simulation',
+    nodes,
+    edges,
+    isActive: true,
+    createdAt: '',
+    updatedAt: '',
+  })
+
+  let stepInstruction = ''
+  if (stoppedNode?.type === 'FIELD') {
+    stepInstruction = `Şu anki akış adımında hastadan "${stoppedNode.data.fieldName}" bilgisini istemelisin. Sorulacak soru: "${stoppedNode.data.description || stoppedNode.data.fieldName}".`
+  } else if (stoppedNode?.type === 'CONDITION') {
+    stepInstruction = `Şu anki adımda hastanın niyetini ("${stoppedNode.data.conditionValue}") anlamak için nasıl yardımcı olabileceğini sor.`
+  } else if (stoppedNode?.type === 'END' || completed) {
+    const closeMsg = stoppedNode?.data?.message || 'Görüşmeyi nazikçe tamamla ve sağlıklı günler dile.'
+    stepInstruction = `Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
+  }
+
+  if (ai) {
+    try {
+      const historyContents = (req.history || []).slice(-10).map(h => ({
+        role: h.role,
+        parts: [{ text: h.text }],
+      }))
+
+      const sysInstruction = `Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.
+Bugünün tarihi: ${getTodayIso()}.
+${startedFromStartNode && !userMessage ? `Görüşme yeni başladı. İlk olarak şu karşılama mesajını söyle: "${greetingText}" ve ardından sıradaki adımın sorusunu doğalca ekle.` : ''}
+${ragContext ? `\nKLİNİK BİLGİ BANKASI (Eğer kullanıcı bir soru sorduysa bu bilgilerle yanıtla):\n${ragContext}\n` : ''}
+${flowPrompt}
+
+MEVCUT TOPLANAN BİLGİLER: ${JSON.stringify(fields)}
+SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
+
+      const promptTurn = userMessage
+        ? `Hasta şöyle dedi: "${userMessage}". Eğer hastanın mesajında bir soru varsa önce Bilgi Bankası ile kısaca yanıtla, ardından sıradaki görevi (${stepInstruction}) doğal bir cümleyle uygula.`
+        : `Görüşmeyi başlat ve sıradaki görevi (${stepInstruction}) uygula.`
+
+      const gen = await ai.models.generateContent({
+        model: modelName,
+        contents: [...historyContents, { role: 'user', parts: [{ text: promptTurn }] }],
+        config: {
+          systemInstruction: sysInstruction,
+          temperature: 0.35,
+        },
+      })
+
+      const aiText = (gen.text || '').trim()
+      if (aiText) {
+        logs.push({ role: 'ai', text: `🤖 AI Asistan: ${aiText}` })
+        return {
+          currentNodeId: stoppedNode?.id ?? currId,
+          visitedNodeIds,
+          visitedEdgeIds,
+          fields,
+          extractedFields,
+          logs,
+          completed,
+          aiPowered: true,
+          usedKnowledgeTitles,
+        }
+      }
+    } catch (err) {
+      console.warn('[FlowSimulator] AI yanıt üretimi yedek moda geçti:', err)
+    }
+  }
+
+  // Fallback deterministic message if GEMINI_API_KEY is not active
+  if (startedFromStartNode && !userMessage) {
+    logs.push({ role: 'ai', text: `▶ Karşılama: "${greetingText}"` })
+  }
+  if (stoppedNode?.type === 'FIELD') {
+    logs.push({
+      role: 'ai',
+      text: `🤖 AI Sorusu (${stoppedNode.data.fieldName}): "${stoppedNode.data.description || `${stoppedNode.data.fieldName} bilgisini paylaşır mısınız?`}"`,
+    })
+  } else if (stoppedNode?.type === 'END') {
+    logs.push({
+      role: 'ai',
+      text: `⏹️ [${stoppedNode.data.label || 'Görüşme Tamamlandı'}]: ${stoppedNode.data.message || 'Görüşme nazikçe sonlandırıldı.'}`,
+    })
+  }
+
+  return {
+    currentNodeId: stoppedNode?.id ?? currId,
+    visitedNodeIds,
+    visitedEdgeIds,
+    fields,
+    extractedFields,
+    logs,
+    completed,
+    aiPowered: false,
+    usedKnowledgeTitles,
+  }
+}
