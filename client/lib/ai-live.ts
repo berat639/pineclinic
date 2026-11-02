@@ -15,6 +15,8 @@ export type LiveChatCallbacks = {
   onError: (error: string) => void
   onInterrupted: () => void
   onInteractionStatus?: (status: 'IN_PROGRESS' | 'IDLE') => void
+  /** Kullanıcının konuşmasının yazıya dökümü (sesli modda). */
+  onUserText?: (text: string) => void
 }
 
 export type SessionConfig = {
@@ -37,6 +39,11 @@ export type SessionConfig = {
   callMaxDuration?: number
   flowSession?: { id: string; token: string; revision?: number }
   sessionKey?: string
+  /**
+   * Verilirse araç çağrıları sunucudaki canlı uç noktalara gitmez, bu işleyiciye
+   * yönlenir (ör. simülatör: hiçbir gerçek kayıt oluşturulmaz).
+   */
+  toolHandler?: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 // ── Tool call → server HTTP ────────────────────────────────────────────────
@@ -112,6 +119,7 @@ export class AiLiveSession {
   private _sendGuard = false
   private flowSession?: { id: string; token: string; revision?: number }
   private sessionKey?: string
+  private toolHandler?: SessionConfig['toolHandler']
   private _interactionInProgress = false
 
   constructor(callbacks: LiveChatCallbacks) {
@@ -122,6 +130,7 @@ export class AiLiveSession {
     const modelName = config.model || 'gemini-3.8-live'
     this.flowSession = config.flowSession
     this.sessionKey = config.flowSession?.token || config.sessionKey
+    this.toolHandler = config.toolHandler
     this._interactionInProgress = false
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
@@ -290,7 +299,7 @@ export class AiLiveSession {
 
         const results = await Promise.all(functionCalls.map(async (call) => ({
           name: call.name,
-          response: await handleToolCall(call.name ?? '', (call.args ?? {}) as Record<string, unknown>, this.flowSession, this.sessionKey),
+          response: await this.runTool(call.name ?? '', (call.args ?? {}) as Record<string, unknown>),
         })))
         this.textHistory.push({
           role: 'user',
@@ -318,6 +327,7 @@ export class AiLiveSession {
     this.textConfig = null
     this.textHistory = []
     this.textQueue = Promise.resolve()
+    this.toolHandler = undefined
     if (this.flowSession) {
       const { id, token } = this.flowSession
       this.flowSession = undefined
@@ -328,11 +338,16 @@ export class AiLiveSession {
   get connected() { return this._isConnected }
   get interactionInProgress() { return this._interactionInProgress }
 
+  private runTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (this.toolHandler) return this.toolHandler(name, args)
+    return handleToolCall(name, args, this.flowSession, this.sessionKey)
+  }
+
   private handleMessage(message: LiveServerMessage) {
     // Tool calls
     if (message.toolCall?.functionCalls?.length) {
       for (const fc of message.toolCall.functionCalls) {
-        handleToolCall(fc.name ?? '', fc.args as Record<string, unknown>, this.flowSession, this.sessionKey)
+        this.runTool(fc.name ?? '', (fc.args ?? {}) as Record<string, unknown>)
           .then((result) => {
             if (this.session && this._isConnected) {
               try {
@@ -374,6 +389,9 @@ export class AiLiveSession {
       // console.log('[AI]', transcript)
       this.callbacks.onText(transcript)
     }
+
+    const userTranscript = (message as any).serverContent?.inputTranscription?.text
+    if (userTranscript) this.callbacks.onUserText?.(userTranscript)
 
     if (message.serverContent?.turnComplete) this.callbacks.onTurnComplete()
     if (message.serverContent?.interrupted) this.callbacks.onInterrupted()

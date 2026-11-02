@@ -202,6 +202,64 @@ KESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asis
 - Hava durumu sorulduğunda havaDurumuSorgula aracını kullan.
 - İletilmesi gereken bir not veya mesaj varsa dikkatle dinle ve yetkililere ileteceğini belirt.`,
   },
+  {
+    key: 'prompt.phone_call_init',
+    label: 'Telefon Çağrı Başlangıç Bildirimi',
+    description: 'Gelen telefon araması bağlandığında modele gönderilen ilk sistem bildirimi ({{greeting}} destekler).',
+    sortOrder: 18,
+    defaultValue: `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "{{greeting}}"`,
+  },
+  {
+    key: 'prompt.outbound_call_init',
+    label: 'Giden Arama Başlangıç Bildirimi',
+    description: 'Dış arama (giden arama) açıldığında modele gönderilen ilk sistem bildirimi ({{greeting}} destekler).',
+    sortOrder: 19,
+    defaultValue: `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "{{greeting}}"`,
+  },
+  {
+    key: 'prompt.vip_call_init',
+    label: 'VIP Çağrı Başlangıç Bildirimi',
+    description: 'Özel VIP hattı arandığında modele gönderilen ilk sistem bildirimi ({{greeting}} destekler).',
+    sortOrder: 20,
+    defaultValue: `Sistem bildirimi: Özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "{{greeting}}"
+
+KESİN KURAL: Asla telefon numarası veya kayıt sorma. Tamamen samimi, neşeli ve doğal bir şekilde özel kişisel asistan olarak konuşmaya başla.`,
+  },
+  {
+    key: 'prompt.whatsapp_live_rules',
+    label: 'WhatsApp Canlı Yanıt ve Güvenlik Kuralları',
+    description: 'WhatsApp mesajlarını yanıtlarken uygulanan onay, tekil randevu, gizlilik ve personele aktarım kuralları.',
+    sortOrder: 21,
+    defaultValue: `Kısa Türkçe yanıtlar ver. Randevu işleminden önce kullanıcıdan tarih/saat ve isim için açık onay al. Araç başarı sonucunu almadan işlem yapıldı deme. Her kullanıcı mesajında en fazla bir randevu oluştur. Başka numaralara ait kişisel bilgi sorgulama. Personel istendiğinde insanaAktar kullan.`,
+  },
+  {
+    key: 'prompt.voice_identity_rules',
+    label: 'Ses Kimliği ve Konuşma Kuralı',
+    description: 'Canlı sesli oturumlarda sentetik ses kimliğinin korunması ve tek soru sorma kuralı.',
+    sortOrder: 22,
+    defaultValue: `ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.`,
+  },
+  {
+    key: 'prompt.flow_runtime_rules',
+    label: 'Akış Motoru Çalışma Kuralı',
+    description: 'Canlı görüşmede akış motoru aktifken bilgi güncelleme ve sıradaki adımı uygulama talimatı.',
+    sortOrder: 23,
+    defaultValue: `AKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.`,
+  },
+  {
+    key: 'prompt.simulator_system_rules',
+    label: 'Akış Simülatörü Sistem Talimatı',
+    description: 'Akış simülatöründe test yanıtları üretilirken kullanılan temel asistan talimatı.',
+    sortOrder: 24,
+    defaultValue: `Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.`,
+  },
+  {
+    key: 'prompt.simulator_voice_flow_rules',
+    label: 'Akış Simülatörü Sesli Akış Kuralı',
+    description: 'Akış simülatörünün sesli test modunda akış ve bilgi bankası araçlarını kullanma talimatı.',
+    sortOrder: 25,
+    defaultValue: `AKIŞ YÖNETİMİ: Hasta yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır ve araçtan gelen sıradaki görevi uygula. Bilgi bankasında aranacak sorular için bilgiBankasindaAra aracını kullan.`,
+  },
 ]
 
 const CORE_SYSTEM_PROMPT_KEYS = new Set([
@@ -231,4 +289,41 @@ export const PROMPT_SECTION_KEYS = PROMPT_SECTIONS
 /** Get default value for a specific section */
 export function getDefaultPromptValue(key: string): string | null {
   return PROMPT_SECTION_MAP.get(key)?.defaultValue ?? null
+}
+
+/** Platform panelindeki gruplu liste: grup adı → o gruptaki talimat anahtarları (sıra korunur). */
+export const PROMPT_GROUPS: ReadonlyArray<{ id: string; label: string; keys: readonly string[] }> = [
+  { id: 'identity', label: 'Kimlik ve Kişilik', keys: ['prompt.identity', 'prompt.personality', 'prompt.greeting_flow'] },
+  { id: 'scope', label: 'Kapsam ve Yasaklar', keys: ['prompt.scope', 'prompt.forbidden_patterns', 'prompt.general_rules'] },
+  { id: 'appointment', label: 'Randevu Kuralları', keys: ['prompt.appointment_rules', 'prompt.availability_rules', 'prompt.service_flow'] },
+  { id: 'price', label: 'Fiyat ve Hizmet', keys: ['prompt.price_policy', 'prompt.sales_flow'] },
+  { id: 'phone', label: 'Kanal: Telefon', keys: ['prompt.phone_channel_rules', 'prompt.phone_call_init', 'prompt.voice_identity_rules'] },
+  { id: 'whatsapp', label: 'Kanal: WhatsApp', keys: ['prompt.whatsapp_greeting_flow', 'prompt.whatsapp_live_rules'] },
+  { id: 'outbound', label: 'Giden Arama', keys: ['prompt.outbound_greeting_flow', 'prompt.outbound_call_init'] },
+  { id: 'vip', label: 'Özel Hat', keys: ['prompt.vip_default', 'prompt.vip_call_init'] },
+  { id: 'priority', label: 'Akış Önceliği', keys: ['prompt.flow_priority_rules', 'prompt.flow_runtime_rules', 'prompt.simulator_system_rules', 'prompt.simulator_voice_flow_rules'] },
+  { id: 'knowledge', label: 'Bilgi Bankası Şablonu', keys: ['prompt.rag_template'] },
+]
+
+/** Talimat metninde kullanılabilen değişkenler (kimlik: metindeki {{kimlik}} adı). */
+export const PROMPT_VARIABLES: Readonly<Record<string, readonly string[]>> = {
+  'prompt.greeting_flow': ['greeting'],
+  'prompt.outbound_greeting_flow': ['greeting'],
+  'prompt.phone_call_init': ['greeting'],
+  'prompt.outbound_call_init': ['greeting'],
+  'prompt.vip_call_init': ['greeting'],
+  'prompt.vip_default': ['callerName', 'callerPhone'],
+}
+
+/** Kullanıcıya gösterilecek açıklama: {{kod}} ifadeleri Türkçe adlara çevrilir. */
+export function humanizePromptDescription(text: string): string {
+  const names: Record<string, string> = {
+    greeting: 'karşılama mesajı',
+    callerName: 'arayan kişinin adı',
+    callerPhone: 'arayan kişinin telefonu',
+  }
+  return text
+    .replace(/\s*\(\{\{[^)]*\}\}\s*destekler\)/g, '')
+    .replace(/\{\{\s*(\w+)\s*\}\}(?: placeholder\\?'?ı)?/g, (_m, k: string) => names[k] ?? 'değişken')
+    .replace(/\bRAG \(bilgi bankası\)/g, 'Bilgi bankası')
 }

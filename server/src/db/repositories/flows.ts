@@ -64,11 +64,6 @@ export interface FlowNode {
     // ACTION node
     action?: string
     message?: string
-    webhookUrl?: string
-    webhookSecret?: string
-    webhookHeaders?: Record<string, string>
-    webhookBodyTemplate?: string
-    webhookResponseMapping?: Record<string, string>
     variableName?: string
     variableValue?: string
     waitSeconds?: number
@@ -301,62 +296,6 @@ export function evaluateConditionNode(
     fields,
     intentMatchedByAi,
   )
-}
-
-function readJsonPath(obj: unknown, path: string): unknown {
-  if (!obj || typeof obj !== 'object' || !path) return undefined
-  const parts = path.split('.').map(p => p.trim()).filter(Boolean)
-  let curr: any = obj
-  for (const part of parts) {
-    if (curr === null || curr === undefined || typeof curr !== 'object') return undefined
-    curr = curr[part]
-  }
-  return curr
-}
-
-export async function executeFlowWebhookAction(
-  node: FlowNode,
-  fields: Record<string, unknown>,
-): Promise<{ ok: boolean; mappedFields: Record<string, string>; status?: number; error?: string }> {
-  const url = String(node.data.webhookUrl || '').trim()
-  if (!url || !/^https?:\/\/.+/i.test(url)) {
-    return { ok: false, mappedFields: {}, error: 'Geçersiz Webhook URL' }
-  }
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(node.data.webhookHeaders || {}),
-  }
-  if (node.data.webhookSecret) {
-    headers['X-Webhook-Secret'] = String(node.data.webhookSecret)
-  }
-  let bodyStr: string
-  if (node.data.webhookBodyTemplate && node.data.webhookBodyTemplate.trim()) {
-    bodyStr = renderFlowTemplate(node.data.webhookBodyTemplate, fields)
-  } else {
-    bodyStr = JSON.stringify({ fields, nodeId: node.id, timestamp: new Date().toISOString() })
-  }
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: bodyStr,
-      signal: AbortSignal.timeout(10_000),
-    })
-    const mappedFields: Record<string, string> = {}
-    const data = await res.json().catch(() => null)
-    if (data && node.data.webhookResponseMapping && typeof node.data.webhookResponseMapping === 'object') {
-      for (const [targetField, jsonPath] of Object.entries(node.data.webhookResponseMapping)) {
-        const extracted = readJsonPath(data, jsonPath)
-        if (extracted !== undefined && extracted !== null) {
-          mappedFields[targetField] = String(extracted)
-        }
-      }
-    }
-    return { ok: res.ok, mappedFields, status: res.status }
-  } catch (err) {
-    return { ok: false, mappedFields: {}, error: err instanceof Error ? err.message : 'Webhook hatası' }
-  }
 }
 
 function normalizeFlowNodes(nodes: FlowNode[]): { nodes: FlowNode[]; changed: boolean } {
@@ -635,9 +574,6 @@ export function flowToPromptText(flow: ConversationFlow): string {
         } else if (act === 'end_call') {
           const msg = (node.data as Record<string, unknown>).message || ''
           lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${msg ? `"${msg}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
-        } else if (act === 'webhook') {
-          const url = String(actionData.webhookUrl || '')
-          lines.push(`${prefix}${step}. DIŞ SİSTEM (WEBHOOK) BİLDİRİMİ: Toplanan bilgileri kaydet (${url || 'webhook'}) ve bir sonraki adıma geç.`)
         } else if (act === 'set_variable') {
           lines.push(`${prefix}${step}. DEĞİŞKEN ATA: "${actionData.variableName || ''}" alanına "${actionData.variableValue || ''}" değerini ata ve devam et.`)
         } else if (act === 'send_sms') {

@@ -1,0 +1,133 @@
+/* Bilgi Bankası sekmesi — Clay/Neo (Tedavi Planlama standardı). Tüm zeminler opak, blur yok.
+   Ortak sınıflar: client/styles/clinic-depth.module.css. Burada yalnızca bu sekmeye özel düzen vardır. */
+
+.root { position: relative; display: flex; flex-direction: column; gap: 16px; font-size: 13px; line-height: 1.45; color: var(--foreground); }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.grow { flex: 1 1 200px; min-width: 0; }
+.h2 { margin: 0; font-size: 17px; font-weight: 800; color: var(--foreground); display: flex; align-items: center; gap: 8px; }
+.h3 { margin: 0; font-size: 14px; font-weight: 800; color: var(--foreground); display: flex; align-items: center; gap: 6px; }
+.sub { margin: 2px 0 0; font-size: 12px; color: var(--foreground-3); }
+.muted { color: var(--foreground-3); }
+.label { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 12px; font-weight: 700; color: var(--foreground-2); }
+.hint { margin-top: 4px; font-size: 11.5px; color: var(--foreground-3); }
+.error { margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--danger); }
+.counter { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--foreground-3); }
+.counterWarn { color: var(--danger); }
+.textarea { resize: vertical; line-height: 1.5; font-family: inherit; }
+.inputError { border-color: var(--danger) !important; }
+
+/* Özet sayaçları */
+.total { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--pc-border); border-radius: 12px; background: var(--pc-tint); color: var(--pc-tint-fg); font-size: 12px; font-weight: 700; box-shadow: var(--pc-clay-total); }
+.totalNum { font-size: 14px; font-weight: 800; }
+
+/* Süzgeç çubuğu */
+.searchWrap { position: relative; flex: 1 1 220px; min-width: 180px; max-width: 340px; }
+.searchIcon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--pc-muted); pointer-events: none; font-size: 12px; }
+.searchInput { padding-left: 30px !important; }
+.select { width: auto; min-width: 150px; cursor: pointer; }
+.chipRow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chipActive { composes: chip from '../../../../styles/clinic-depth.module.css'; border-color: #1d4ed8; background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; box-shadow: var(--pc-clay-primary); }
+.chipActive:hover { border-color: #1d4ed8; }
+.dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--pc-border); }
+
+/* Toplu işlem çubuğu */
+.bulkBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid #1d4ed8; border-radius: 12px; background: var(--pc-tint); color: var(--pc-tint-fg); font-weight: 700; box-shadow: var(--pc-neo-subcard); }
+.btnDanger { composes: btn from '../../../../styles/clinic-depth.module.css'; border-color: #fca5a5; background: #fef2f2; color: #b91c1c; }
+:global([data-theme="dark"]) .btnDanger { border-color: #b91c1c; background: #3a1217; color: #fca5a5; }
+.btnIcon { composes: btn from '../../../../styles/clinic-depth.module.css'; width: 30px; min-height: 30px; padding: 0; font-size: 13px; }
+.btnIconDanger { composes: btnDanger; width: 30px; min-height: 30px; padding: 0; font-size: 13px; }
+
+/* Liste */
+.list { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.listHead, .listRow { display: grid; grid-template-columns: 28px minmax(0, 1fr) 128px 104px 46px 112px; align-items: center; gap: 10px; padding: 8px 14px; }
+.listHead { border-bottom: 1.5px solid var(--pc-border); background: var(--card-inner, var(--pc-surface)); font-size: 11.5px; font-weight: 800; color: var(--foreground-2); }
+.sortBtn { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
+.sortBtn:hover { color: var(--pc-tint-fg); }
+.listRow { composes: tableRow from '../../../../styles/clinic-depth.module.css'; min-height: 46px; cursor: pointer; }
+.rowSelected { background: var(--pc-tint); }
+.titleCell { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--foreground); }
+.titleInactive { color: var(--foreground-3); }
+.meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--foreground-3); }
+.actions { display: flex; gap: 4px; justify-content: flex-end; }
+.checkbox { width: 16px; height: 16px; accent-color: #2563eb; cursor: pointer; }
+.badgeOff { composes: badge from '../../../../styles/clinic-depth.module.css'; background: var(--input-bg); color: var(--foreground-2); box-shadow: none; }
+.badgeWarn { composes: badge from '../../../../styles/clinic-depth.module.css'; border-color: #fcd34d; background: #fffbeb; color: #92400e; box-shadow: none; }
+:global([data-theme="dark"]) .badgeWarn { border-color: #b45309; background: #3a2508; color: #fcd34d; }
+.badgeOk { composes: badge from '../../../../styles/clinic-depth.module.css'; border-color: #86efac; background: #f0fdf4; color: #15803d; box-shadow: none; }
+:global([data-theme="dark"]) .badgeOk { border-color: #059669; background: #0b2e20; color: #34d399; }
+.badgeCell { overflow: hidden; }
+.badgeCell > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Kart görünümü */
+.cardGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.docCard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--pc-border); border-radius: 14px; background: var(--pc-surface); box-shadow: var(--pc-neo-subcard); cursor: pointer; }
+.docCardTop { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.docCardBody { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; font-size: 12px; color: var(--foreground-3); }
+.docCardFoot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; }
+
+/* Sayfalama */
+.pagerBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 14px; border-top: 1.5px solid var(--pc-border); }
+.pagerBarFree { composes: pagerBar; border-top: none; padding: 0; }
+.pageInfo { font-size: 12px; color: var(--foreground-3); }
+
+/* Durumlar */
+.state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 36px 16px; text-align: center; color: var(--foreground-3); }
+.stateTitle { font-size: 14px; font-weight: 800; color: var(--foreground); }
+.stateError .stateTitle { color: var(--danger); }
+.skeleton { height: 46px; border-bottom: 1px solid var(--pc-border); background: linear-gradient(90deg, var(--card-inner, var(--pc-surface)) 0%, var(--pc-tint) 50%, var(--card-inner, var(--pc-surface)) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.spinner { width: 16px; height: 16px; flex-shrink: 0; border: 2px solid var(--pc-border); border-top-color: var(--pc-blue); border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Modal gövdesi (Yeni Randevu standardı: 460px, opak, var(--modal-overlay)) */
+.modalForm { display: flex; flex-direction: column; overflow: hidden; max-height: 90vh; }
+.modalHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 20px; border-bottom: 1px solid var(--input-border); background: var(--card-inner); }
+.modalIcon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: #2563eb; color: #ffffff; font-size: 15px; box-shadow: var(--pc-clay-primary); }
+.modalTitle { margin: 0; font-size: 16px; font-weight: 800; line-height: 1.2; color: var(--foreground); }
+.modalBody { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; overflow-y: auto; background: var(--card-bg); }
+.modalFoot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--input-border); background: var(--card-inner); }
+.field { display: block; }
+.drop { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px; border: 1.5px dashed var(--input-border); border-radius: 12px; background: var(--input-bg); color: var(--foreground-2); text-align: center; cursor: pointer; box-shadow: var(--pc-neo-inset); }
+.dropActive { border-color: var(--pc-blue); background: var(--pc-tint); }
+.hiddenInput { display: none; }
+.swatchGrid { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 28px; height: 28px; border: 2px solid var(--pc-border); border-radius: 9px; cursor: pointer; box-shadow: var(--pc-clay-btn); }
+.swatchOn { border-color: var(--foreground); box-shadow: var(--pc-clay-primary); outline: 2px solid #2563eb; outline-offset: 1px; }
+.iconBtn { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--pc-border); border-radius: 9px; background: var(--pc-surface); font-size: 16px; cursor: pointer; box-shadow: var(--pc-clay-btn); }
+.iconBtnOn { border-color: #1d4ed8; background: var(--pc-tint); box-shadow: var(--pc-clay-pale); outline: 2px solid #2563eb; outline-offset: 1px; }
+.switchRow { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--foreground); }
+
+/* Sağ çekmece (Mesai Planla tarzı) */
+.drawerBackdrop { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: flex-end; background: var(--modal-overlay); }
+.drawer { display: flex; flex-direction: column; width: min(460px, 100vw); height: 100%; border-left: 1.5px solid var(--input-border); background: var(--card-bg); color: var(--foreground); box-shadow: var(--pc-modal-shadow); }
+.drawerHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 15px 20px; border-bottom: 1px solid var(--input-border); background: var(--card-inner); }
+.drawerBody { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; overflow-y: auto; }
+.drawerFoot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--input-border); background: var(--card-inner); }
+.previewText { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; color: var(--foreground); }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 12px; }
+.kvKey { font-weight: 700; color: var(--foreground-3); }
+
+/* Bildirim */
+.toast { position: fixed; top: 80px; right: 24px; z-index: 2000; max-width: 340px; padding: 10px 16px; border: 1.5px solid; border-radius: 12px; background: var(--card-bg); font-size: 13px; font-weight: 600; box-shadow: var(--pc-modal-shadow); animation: fadeIn .2s ease; }
+.toastOk { border-color: #15803d; color: #15803d; }
+.toastErr { border-color: var(--danger); color: var(--danger); }
+:global([data-theme="dark"]) .toastOk { border-color: #34d399; color: #34d399; }
+
+/* Sağ kolon düzeni */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 450px), 1fr)); gap: 16px; align-items: start; }
+.catPill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border: 1px solid var(--pc-border); border-radius: 999px; background: var(--pc-tint); color: var(--pc-tint-fg); font-size: 12px; font-weight: 700; box-shadow: var(--pc-clay-pale); }
+.catRemove { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: var(--pc-surface); color: var(--danger); font-size: 10px; cursor: pointer; }
+.accordion { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0; border: none; background: none; color: var(--foreground-2); font: inherit; font-weight: 800; cursor: pointer; }
+.flowNotice { padding: 10px 14px; border: 1px solid var(--flow-info-border); border-radius: 12px; background: var(--flow-info-bg); color: var(--flow-info-text); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .cardGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .listHead, .listRow { grid-template-columns: 28px minmax(0, 1fr) 104px 46px 112px; }
+  .hideNarrow { display: none; }
+}
+@media (max-width: 560px) {
+  .cardGrid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -76,7 +76,7 @@ export default function N8nMetaWhatsAppCard() {
       const detail = await api<N8nConfig>(`/${first.clinicId}/n8n`)
       applyConfig(detail)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'n8n Meta WhatsApp ayarları yüklenemedi.')
+      setError(cause instanceof Error ? cause.message : 'n8n ve Meta WhatsApp ayarları yüklenemedi.')
     } finally {
       setLoading(false)
     }
@@ -104,8 +104,8 @@ export default function N8nMetaWhatsAppCard() {
       applyConfig(updated)
       setNotice(
         rotateSecret
-          ? 'Yeni HMAC sırrı üretildi. Lütfen n8n ortam değişkenlerinize kopyalayın (yalnızca bir kez tam gösterilir).'
-          : 'n8n + Meta WhatsApp Cloud API ayarları kaydedildi.',
+          ? 'Yeni imza anahtarı üretildi. Lütfen n8n ayarlarınıza kopyalayın (yalnızca bir kez tam gösterilir).'
+          : 'n8n ve Meta WhatsApp ayarları kaydedildi.',
       )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ayarlar kaydedilemedi.')
@@ -124,7 +124,7 @@ export default function N8nMetaWhatsAppCard() {
       if (res.ok) setNotice(res.message)
       else setError(res.message)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'n8n webhook testi başarısız.')
+      setError(cause instanceof Error ? cause.message : 'n8n bağlantı testi başarısız.')
     } finally {
       setBusy(false)
     }
@@ -157,14 +157,14 @@ export default function N8nMetaWhatsAppCard() {
     <section className={styles.card} aria-labelledby="n8n-meta-wa-heading">
       <div className={styles.heading}>
         <div>
-          <h3 id="n8n-meta-wa-heading">WhatsApp — n8n + Resmi Meta Cloud API Köprüsü</h3>
+          <h3 id="n8n-meta-wa-heading">WhatsApp — n8n ve Resmi Meta Bağlantısı</h3>
           <p className={styles.description}>
-            Evolution API (QR) bağlantısını koruyarak, n8n üzerinden resmi Meta WhatsApp Business Cloud API ile ban riski olmadan mesajlaşma ve 24 saat penceresi uyumlu şablon gönderimi sağlar.
+            QR ile kurulan mevcut bağlantıyı koruyarak, n8n üzerinden resmi Meta WhatsApp Business hesabıyla engellenme riski olmadan mesajlaşmayı ve 24 saatlik süreye uyumlu şablon gönderimini sağlar.
           </p>
         </div>
         {config && (
           <span className={`${styles.badge} ${isN8nActive && isConfigured ? styles.connected : ''}`}>
-            {isN8nActive ? (isConfigured ? 'n8n Meta Aktif' : 'n8n Yapılandırma Eksik') : 'Evolution (QR) Seçili'}
+            {isN8nActive ? (isConfigured ? 'n8n ve Meta Aktif' : 'n8n Kurulumu Eksik') : 'QR Bağlantısı Seçili'}
           </span>
         )}
       </div>
@@ -173,26 +173,26 @@ export default function N8nMetaWhatsAppCard() {
       {notice && <p className={styles.notice} role="status">{notice}</p>}
 
       {loading ? (
-        <p>n8n Meta WhatsApp ayarları yükleniyor…</p>
+        <p>n8n ve Meta WhatsApp ayarları yükleniyor…</p>
       ) : !config ? (
         <p>Klinik bilgisi bulunamadı.</p>
       ) : (
         <>
           <div className={styles.grid}>
             <label className={styles.field}>
-              <span>Aktif WhatsApp Sağlayıcısı</span>
+              <span>Kullanılacak WhatsApp Bağlantısı</span>
               <select
                 value={provider}
                 disabled={busy}
                 onChange={e => setProvider(e.target.value as 'evolution' | 'n8n_meta')}
               >
-                <option value="evolution">Evolution API (Mevcut QR Bağlantısı)</option>
-                <option value="n8n_meta">n8n + Resmi Meta WhatsApp Cloud API</option>
+                <option value="evolution">Mevcut QR Bağlantısı</option>
+                <option value="n8n_meta">n8n ve Resmi Meta WhatsApp Bağlantısı</option>
               </select>
             </label>
 
             <label className={styles.field}>
-              <span>Meta Phone Number ID</span>
+              <span>Meta Telefon Numarası Kimliği</span>
               <input
                 type="text"
                 value={metaPhoneNumberId}
@@ -204,7 +204,7 @@ export default function N8nMetaWhatsAppCard() {
           </div>
 
           <label className={styles.field}>
-            <span>n8n Gönderim (Outbound) Webhook URL</span>
+            <span>n8n Giden Mesaj Bağlantı Adresi</span>
             <input
               type="url"
               value={sendWebhookUrl}
@@ -216,7 +216,7 @@ export default function N8nMetaWhatsAppCard() {
 
           <div className={styles.grid}>
             <div className={styles.field}>
-              <span>VoiceAI Gelen Mesaj (Inbound) Webhook Adresi</span>
+              <span>VoiceAI Gelen Mesaj Bağlantı Adresi</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   type="text"
@@ -226,7 +226,7 @@ export default function N8nMetaWhatsAppCard() {
                 <button
                   type="button"
                   className={styles.secondary}
-                  onClick={() => copyText(`${origin}${config.inboundWebhookPath}`, 'Inbound Webhook URL')}
+                  onClick={() => copyText(`${origin}${config.inboundWebhookPath}`, 'Gelen mesaj bağlantı adresi')}
                 >
                   Kopyala
                 </button>
@@ -234,7 +234,7 @@ export default function N8nMetaWhatsAppCard() {
             </div>
 
             <div className={styles.field}>
-              <span>HMAC İmza Sırrı (X-VoiceAI-Signature)</span>
+              <span>İmza Anahtarı (n8n doğrulaması için)</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   type="text"
@@ -245,7 +245,7 @@ export default function N8nMetaWhatsAppCard() {
                   <button
                     type="button"
                     className={styles.secondary}
-                    onClick={() => copyText(config.revealedInboundSecret!, 'HMAC sırrı')}
+                    onClick={() => copyText(config.revealedInboundSecret!, 'İmza anahtarı')}
                   >
                     Kopyala
                   </button>
@@ -256,14 +256,14 @@ export default function N8nMetaWhatsAppCard() {
                   disabled={busy}
                   onClick={() => void save(true)}
                 >
-                  Yeni Sır Üret
+                  Yeni Anahtar Üret
                 </button>
               </div>
             </div>
           </div>
 
           {isN8nActive && (
-            <div className={styles.preferences} aria-label="n8n Meta WhatsApp tercihleri">
+            <div className={styles.preferences} aria-label="n8n ve Meta WhatsApp tercihleri">
               <label>
                 <input
                   type="checkbox"
@@ -276,8 +276,8 @@ export default function N8nMetaWhatsAppCard() {
                   }}
                 />
                 <span>
-                  <strong>n8n Meta Gönderimleri Aktif</strong>
-                  <small>Randevu bildirimleri ve yanıtları n8n Meta Cloud API köprüsü üzerinden gönderilir.</small>
+                  <strong>n8n ve Meta Gönderimleri Aktif</strong>
+                  <small>Randevu bildirimleri ve yanıtları n8n ve Meta bağlantısı üzerinden gönderilir.</small>
                 </span>
               </label>
               <label>
@@ -288,17 +288,17 @@ export default function N8nMetaWhatsAppCard() {
                   onChange={e => setAiEnabled(e.target.checked)}
                 />
                 <span>
-                  <strong>AI Otomatik Yanıtları (Flow + Bilgi Tabanı)</strong>
-                  <small>Gelen mesajlara 24 saatlik pencere içinde AI ve Flow Builder akışıyla otomatik yanıt üretir.</small>
+                  <strong>Otomatik Yanıtlar (Konuşma Akışı ve Bilgi Bankası)</strong>
+                  <small>Gelen mesajlara 24 saatlik süre içinde yapay zeka ve konuşma akışıyla otomatik yanıt üretir.</small>
                 </span>
               </label>
             </div>
           )}
 
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--integration-border, var(--glass-border))' }}>
-            <strong style={{ fontSize: 13 }}>Onaylı Meta Şablonları (24 Saatlik Pencere Dışı Bildirimler İçin)</strong>
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1.5px solid var(--input-border)' }}>
+            <strong style={{ fontSize: 13 }}>Onaylı Meta Şablonları (24 Saatlik Süre Dışı Bildirimler İçin)</strong>
             <p className={styles.description} style={{ margin: '4px 0 10px' }}>
-              Son müşteri mesajından 24 saat geçtiyse Meta serbest metin gönderimini engeller; burada tanımlı onaylı şablon (mode=&quot;template&quot;) otomatik kullanılır.
+              Son müşteri mesajından 24 saat geçtiyse Meta serbest metin gönderimini engeller; burada tanımlı onaylı şablon otomatik kullanılır.
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <input
@@ -306,19 +306,19 @@ export default function N8nMetaWhatsAppCard() {
                 placeholder="Şablon adı (örn: randevu_hatirlatma)"
                 value={newTplName}
                 onChange={e => setNewTplName(e.target.value)}
-                style={{ flex: '2 1 200px', minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--integration-border-strong, var(--input-border))', background: 'var(--integration-surface, var(--input-bg))', color: 'var(--integration-text, var(--foreground))' }}
+                style={{ flex: '2 1 200px', minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', boxShadow: 'var(--pc-neo-inset)' }}
               />
               <input
                 type="text"
-                placeholder="Dil (tr)"
+                placeholder="Dil (örn: tr)"
                 value={newTplLang}
                 onChange={e => setNewTplLang(e.target.value)}
-                style={{ width: 80, minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--integration-border-strong, var(--input-border))', background: 'var(--integration-surface, var(--input-bg))', color: 'var(--integration-text, var(--foreground))' }}
+                style={{ width: 80, minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', boxShadow: 'var(--pc-neo-inset)' }}
               />
               <select
                 value={newTplCategory}
                 onChange={e => setNewTplCategory(e.target.value)}
-                style={{ minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--integration-border-strong, var(--input-border))', background: 'var(--integration-surface, var(--input-bg))', color: 'var(--integration-text, var(--foreground))' }}
+                style={{ minHeight: 38, padding: '8px 10px', borderRadius: 8, border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', boxShadow: 'var(--pc-neo-inset)' }}
               >
                 <option value="appointment_reminder">Randevu Hatırlatma</option>
                 <option value="general">Genel Bildirim</option>
@@ -335,7 +335,7 @@ export default function N8nMetaWhatsAppCard() {
                     <button
                       type="button"
                       onClick={() => removeTemplate(idx)}
-                      style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontWeight: 700 }}
+                      style={{ background: 'var(--card-bg)', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, fontWeight: 700 }}
                       aria-label={`${tpl.name} şablonunu kaldır`}
                     >
                       ✕
@@ -348,7 +348,7 @@ export default function N8nMetaWhatsAppCard() {
 
           <div className={styles.actions}>
             <button disabled={busy} onClick={() => void save(false)}>
-              {busy ? 'Kaydediliyor…' : 'n8n Meta Ayarlarını Kaydet'}
+              {busy ? 'Kaydediliyor…' : 'n8n ve Meta Ayarlarını Kaydet'}
             </button>
             <button
               type="button"

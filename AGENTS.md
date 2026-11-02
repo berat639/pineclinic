@@ -54,6 +54,25 @@
      - Bir hekim aynı anda **farklı iki hastaya** bakamaz (farklı hasta randevusu üzerine sürükleme/bırakma kilitlidir); ancak **aynı hastanın** birden fazla tedavisi tek seansta gruplanabilir veya mevcut seansın üstüne sürüklenerek birleştirilebilir.
 
 
+8. **Clay/Neo Zorunluluğu ve Element → Token Eşleme Tablosu**:
+   - Yeni eklenen veya değiştirilen her element Tedavi Planlama Clay/Neo sistemine uymalıdır. Ortak sınıflar: `client/styles/clinic-depth.module.css`; ortak ⓘ bileşeni: `client/app/admin/components/ui/InfoTooltip.tsx`.
+   | Element | Gölge | Zemin / Sınır |
+   |---|---|---|
+   | Ana kart / panel | `--pc-neo-card` | `--pc-surface` / `--pc-border` |
+   | İç grup kutusu | `--pc-neo-subcard` | `--card-inner` |
+   | Input, select, arama, sekme kanalı | `--pc-neo-inset` | `--input-bg` / `--input-border` |
+   | İkincil buton, seçilebilir öğe | `--pc-clay-btn` | `--pc-surface` |
+   | Bilgi/seçim rozeti, çip | `--pc-clay-pale` | `--pc-tint` / `--pc-tint-fg` |
+   | Birincil buton, aktif sekme | `--pc-clay-primary` | `linear-gradient(180deg,#2563eb,#1d4ed8)`, yazı `#ffffff` |
+   | Toplam / özet kutusu | `--pc-clay-total` | `--pc-total-bg` |
+   | Modal, drawer, tooltip, context menü | `--pc-modal-shadow` (beyaz hale yok) | `--card-bg`, `1.5px solid var(--input-border)` |
+9. **Modal Arka Plan Karartması İstisnası (Yarı Saydam Zorunlu)**:
+   - Modal/Drawer arka plan karartması ZORUNLU OLARAK yarı saydamdır: tam ekran katman her zaman `background: var(--modal-overlay)` olmalı, arkadaki sayfa soluk görünmelidir. Bu katman asla opak (`var(--card-bg)`) yapılmaz ve asla blur içermez. Opaklık kuralı modalın kendi gövdesi, kartlar, paneller ve inputlar için geçerlidir.
+10. **Arayüz Dili Türkçe Olmalıdır**:
+   - Arayüzde İngilizce kelime, kod adı, değişken adı (`caller.isVip`, `{{greeting}}`), sembolik operatör (`==`, `!=`, `>`, `AND/OR`) veya teknik jargon gösterilemez. Koşul bağlaçları yalnızca "ve" / "veya" olur.
+11. **Uzun Açıklamalar InfoTooltip İçinde**:
+   - Formlarda ve panellerde iki satırı geçen yardım veya açıklama metni doğrudan gösterilmez; başlığın yanındaki `InfoTooltip` (ⓘ) içinde verilir.
+
 ## Project Isolation Rules
 1. **gemini-live-test Bağımsızlığı**:
    - `gemini-live-test` klasörü tamamen ayrı ve bağımsız bir projedir. `voiceai` ile paralel geliştirilmemelidir.

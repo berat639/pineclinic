@@ -31,7 +31,7 @@ test('user_intent koşulu ve webhook aksiyonu doğrulama ve prompt üretiminde d
     id: 'webhook_node',
     type: 'ACTION',
     position: { x: 0, y: 2 },
-    data: { action: 'webhook', webhookUrl: 'https://example.com/hook' },
+    data: { action: 'webhook' },
   }
   const edges: FlowEdge[] = [
     { id: 'e1', source: 'start', target: 'intent_node' },
@@ -39,19 +39,8 @@ test('user_intent koşulu ve webhook aksiyonu doğrulama ve prompt üretiminde d
     { id: 'e3', source: 'intent_node', target: 'end', sourceHandle: 'false' },
     { id: 'e4', source: 'webhook_node', target: 'end' },
   ]
+  // Eski webhook node'u yayını engellemez; yalnızca uyarı üretir.
   const issues = validateConversationFlow([start, intentCond, webhookAction, end], edges)
   expect(issues.filter(i => i.level === 'error')).toHaveLength(0)
-
-  const badWebhook: FlowNode = {
-    id: 'bad_webhook',
-    type: 'ACTION',
-    position: { x: 0, y: 2 },
-    data: { action: 'webhook', webhookUrl: 'gecersiz-url' },
-  }
-  const badIssues = validateConversationFlow([start, intentCond, badWebhook, end], [
-    { id: 'e1', source: 'start', target: 'intent_node' },
-    { id: 'e2', source: 'intent_node', target: 'bad_webhook', sourceHandle: 'true' },
-    { id: 'e3', source: 'intent_node', target: 'end', sourceHandle: 'false' },
-  ])
-  expect(badIssues).toContainEqual(expect.objectContaining({ nodeId: 'bad_webhook', level: 'error' }))
+  expect(issues).toContainEqual(expect.objectContaining({ nodeId: 'webhook_node', level: 'warning' }))
 })

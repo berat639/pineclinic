@@ -1,6 +1,7 @@
 'use client'
 
 import EvolutionWhatsAppCard from './EvolutionWhatsAppCard'
+import { termLabel } from '@/lib/ui-glossary'
 import N8nMetaWhatsAppCard from './N8nMetaWhatsAppCard'
 import BillingIntegrationsCard from './BillingIntegrationsCard'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -17,9 +18,9 @@ const emptyIntegrationOverview = (): IntegrationOverview => ({ phone: emptyInteg
 const roleTabs = [
   { id: 'calendar', label: 'Takvim' },
   { id: 'patients', label: 'Hastalar' },
-  { id: 'payments', label: 'Ödemeler & Finans' },
-  { id: 'stok', label: 'Stok & Bakım' },
-  { id: 'knowledge', label: 'Bilgi Tabanı' },
+  { id: 'payments', label: 'Ödemeler ve Finans' },
+  { id: 'stok', label: 'Stok ve Bakım' },
+  { id: 'knowledge', label: termLabel('knowledgeBlock') },
   { id: 'klinik', label: 'Klinik Personeli' },
 ]
 
@@ -56,19 +57,19 @@ const DEFAULT_NOTIFICATION_POLICY_STATE: NotificationPolicyState = {
 
 const CHANNEL_META: Record<NotificationChannelKey, { title: string; desc: string }> = {
   whatsapp: {
-    title: '💬 WhatsApp (Interaktif Mesaj & Onay Linki)',
-    desc: 'Ücretsiz / hızlı kanal. Hasta "Geleceğim / Ertele / Gelmiyorum" yanıtı verebilir.',
+    title: '💬 WhatsApp (Etkileşimli Mesaj ve Onay Bağlantısı)',
+    desc: 'Ücretsiz ve hızlı kanal. Hasta "Geleceğim / Ertele / Gelmiyorum" yanıtı verebilir.',
   },
   sms: {
-    title: '📱 SMS (NetGSM Kısa Mesaj & Onay Linki)',
+    title: '📱 Kısa Mesaj (NetGSM ve Onay Bağlantısı)',
     desc: 'Yüksek ulaşım oranı. WhatsApp iletilemezse veya izin yoksa devreye girer.',
   },
   email: {
-    title: '✉️ E-Posta (SMTP Bilgilendirme & Onay Linki)',
+    title: '✉️ E-Posta (Bilgilendirme ve Onay Bağlantısı)',
     desc: 'Detaylı randevu özeti ve tek tıkla yanıt bağlantısı gönderir.',
   },
   assistant_call: {
-    title: '📞 Asistan ile Sesli Arama (AI Sesli Teyit)',
+    title: '📞 Asistan ile Sesli Arama (Sesli Teyit)',
     desc: 'Son kademe. Yazılı kanallardan yanıt alınamazsa sesli asistan arayarak teyit alır.',
   },
 }
@@ -96,9 +97,9 @@ function statusFor(service: 'phone' | 'sms' | 'smtp', state: IntegrationState) {
   if (!state.configured) return { label: 'Yapılandırılmadı', detail: 'Satış ekibinden kurulum talep edebilirsiniz.', tone: 'warning' as const, attention: true }
   if (!state.enabled) return { label: 'Etkin değil', detail: 'Ayarlar kaydedilmiş; test ve etkinleştirme bekleniyor.', tone: 'warning' as const, attention: true }
   if (service === 'phone') {
-    if (state.health === 'registered') return { label: 'Etkin · Bağlı', detail: state.callerId ? `Birincil numara: ${state.callerId}` : 'SIP kaydı aktif.', tone: 'success' as const, attention: false }
-    if (state.health === 'unregistered') return { label: 'Etkin · Bağlantı koptu', detail: 'SIP kaydı alınamadı. Satış ekibinin bağlantıyı kontrol etmesi gerekiyor.', tone: 'danger' as const, attention: true }
-    return { label: 'Etkin · Durum kontrol ediliyor', detail: 'Son SIP bağlantı kontrolü güncel değil.', tone: 'warning' as const, attention: true }
+    if (state.health === 'registered') return { label: 'Etkin · Bağlı', detail: state.callerId ? `Birincil numara: ${state.callerId}` : 'Telefon hattı kaydı aktif.', tone: 'success' as const, attention: false }
+    if (state.health === 'unregistered') return { label: 'Etkin · Bağlantı koptu', detail: 'Telefon hattı kaydı alınamadı. Satış ekibinin bağlantıyı kontrol etmesi gerekiyor.', tone: 'danger' as const, attention: true }
+    return { label: 'Etkin · Durum kontrol ediliyor', detail: 'Son hat bağlantı kontrolü güncel değil.', tone: 'warning' as const, attention: true }
   }
   if (state.test?.status === 'failed') return { label: 'Etkin · Son test başarısız', detail: state.test.message || 'Sağlayıcı bağlantısını kontrol edin.', tone: 'danger' as const, attention: true }
   if (state.test?.status === 'confirmed') return { label: 'Etkin · Test doğrulandı', detail: service === 'sms' ? `Başlık: ${state.senderId || '—'}` : `Gönderici: ${state.fromAddress || '—'}`, tone: 'success' as const, attention: false }
@@ -215,7 +216,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
 
 
       })
-      .catch(() => showToast('error', 'Entegrasyon verileri alınamadı'))
+      .catch(() => showToast('error', 'Bağlantı bilgileri alınamadı'))
       .finally(() => setLoading(false))
 
     fetch('/api/admin/settings/roles')
@@ -382,9 +383,9 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       if (!res.ok || data.error) throw new Error(data.error || 'Yükleme hatası')
       setBrandingLogoUrl(data.logoUrl)
       setLogoPreviewError(false)
-      showToast('success', 'Logo başarıyla yüklendi')
+      showToast('success', 'Amblem başarıyla yüklendi')
     } catch (err: any) {
-      showToast('error', err.message || 'Logo yüklenemedi')
+      showToast('error', err.message || 'Amblem yüklenemedi')
     } finally {
       setUploadingLogo(false)
     }
@@ -401,13 +402,13 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       )}
 
       {/* Marka / Logo Ayarları */}
-      <SettingsCard title="Marka ve Görünüm" description="Sistemde, özellikle hasta ekranlarında ve panelde görünecek kurum logonuz.">
+      <SettingsCard title="Marka ve Görünüm" description="Sistemde, özellikle hasta ekranlarında ve panelde görünecek kurum amblemi.">
         <div className={styles.logoRow}>
           <div className={styles.logoPreview}>
             {brandingLogoUrl && !logoPreviewError ? (
               <img
                 src={brandingLogoUrl}
-                alt="Logo"
+                alt="Amblem"
                 onError={() => setLogoPreviewError(true)}
               />
             ) : (
@@ -420,7 +421,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
               style={{ background: '#2563eb', color: '#ffffff' }}
             >
               <span style={{ color: '#ffffff' }}>
-                {uploadingLogo ? 'Yükleniyor...' : 'Logo Seç ve Yükle'}
+                {uploadingLogo ? 'Yükleniyor...' : 'Amblem Seç ve Yükle'}
               </span>
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoUpload} disabled={uploadingLogo} />
             </label>
@@ -431,10 +432,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
         </div>
       </SettingsCard>
 
-      {/* Yönetici Bildirim Kanal Önceliği ve Otomasyon Kuralları */}
+      {/* Yönetici Bildirim Kanal Önceliği ve Otomatik Kurallar */}
       <SettingsCard
-        title="🔔 Bildirim Kanal Önceliği ve Otomasyon Kuralları"
-        description="Randevu bilgilendirmesi, 24 saat öncesi onay (Geleceğim / Gelmiyorum / Ertele) ve periyodik kontrol hatırlatmalarında kullanılacak kanalların öncelik sırasını belirleyin. Sistem hastanın iletişim onamları ile bu sırayı kesiştirir ve üst sıradaki kanal iletildiğinde/onaylandığında alt sıradaki ücretli kanalları tüketmez."
+        title="🔔 Bildirim Kanal Önceliği ve Otomatik Kurallar"
+        description="Randevu bilgilendirmesi, 24 saat öncesi onay (Geleceğim, Gelmiyorum veya Ertele) ve periyodik kontrol hatırlatmalarında kullanılacak kanalların öncelik sırasını belirleyin. Sistem, hastanın iletişim izinleriyle bu sırayı birleştirir. Üst sıradaki kanaldan ulaşıldığında veya onay alındığında alt sıradaki ücretli kanallar kullanılmaz."
       >
         <div className={styles.priorityList}>
           {notificationPolicy.channelPriority.map((ch, idx) => {
@@ -541,14 +542,14 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
                 checked={notificationPolicy.quietHoursEnabled}
                 onChange={e => setNotificationPolicy(prev => ({ ...prev, quietHoursEnabled: e.target.checked }))}
               />
-              Sessiz Saat Koruması ({notificationPolicy.quietHoursStart} – {notificationPolicy.quietHoursEnd} arası bildirimleri sabah 09:00&apos;a ertele)
+              Sessiz saat koruması ({notificationPolicy.quietHoursStart} – {notificationPolicy.quietHoursEnd} arası bildirimleri sabah 09:00&apos;a ertele)
             </label>
           </div>
         </div>
 
         <div className={styles.policyActionRow}>
           <p className={styles.policyHint}>
-            💡 Hasta onay linkinden veya WhatsApp/Sesli Asistan üzerinden <strong>&quot;Geleceğim&quot;</strong>, <strong>&quot;Ertele&quot;</strong> veya <strong>&quot;Gelmiyorum&quot;</strong> dediğinde İnteraktif Takvim otomatik güncellenir.
+            💡 Hasta onay linkinden veya WhatsApp veya sesli asistan üzerinden <strong>&quot;Geleceğim&quot;</strong>, <strong>&quot;Ertele&quot;</strong> veya <strong>&quot;Gelmiyorum&quot;</strong> dediğinde Etkileşimli takvim otomatik güncellenir.
           </p>
           <button
             type="button"
@@ -562,10 +563,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </SettingsCard>
 
       <>
-        <ManagedIntegrationCard title="Çağrı Merkezi / Santral (VoIP)" service="phone" state={integrationStatus.phone} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="Çağrı Merkezi / Santral" service="phone" state={integrationStatus.phone} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
         <ManagedIntegrationCard title="Klinik Telefon Numaraları" service="phone" state={integrationStatus.phone} numbers onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
-        <ManagedIntegrationCard title="SMS Ayarları (NetGSM)" service="sms" state={integrationStatus.sms} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
-        <ManagedIntegrationCard title="E-Posta (SMTP)" service="smtp" state={integrationStatus.smtp} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="Kısa Mesaj Ayarları (NetGSM)" service="sms" state={integrationStatus.sms} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="E-Posta" service="smtp" state={integrationStatus.smtp} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
       </>
 
       <EvolutionWhatsAppCard />
@@ -583,7 +584,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
           <div>
             <h3 className={styles.cardTitle}>Rol Bazlı Sekme İzinleri</h3>
             <p className={styles.cardDescription}>
-              Alt kullanıcıların görebileceği sekmeleri ve Klinik Personeli sekmesi içindeki işlem yetkilerini belirleyin. Yönetici (yonetici) rolü her zaman tüm yetkilere sahiptir.
+              Alt kullanıcıların görebileceği sekmeleri ve Klinik Personeli sekmesi içindeki işlem yetkilerini belirleyin. Yönetici rolü her zaman tüm yetkilere sahiptir.
             </p>
           </div>
         </div>
@@ -595,10 +596,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
             const perms = staffRoleKey ? staffPermissions[staffRoleKey] : null
             const permDefs: Array<{ k: keyof StaffPermItem; label: string }> = [
               { k: 'viewShiftPlanner', label: 'Mesai Planla Sekmesini Görüntüleyebilir' },
-              { k: 'editShifts', label: 'Mesai Ekleyebilir / Düzenleyebilir / Silebilir' },
-              { k: 'manageLeaves', label: 'İzin ve Kapalı Saat Ekleyebilir / Kaldırabilir' },
+              { k: 'editShifts', label: 'Mesai ekleyebilir, düzenleyebilir veya silebilir' },
+              { k: 'manageLeaves', label: 'İzin ve kapalı saat ekleyebilir veya kaldırabilir' },
               { k: 'editClinicWorkingHours', label: 'Klinik Genel Mesai Saatini Değiştirebilir' },
-              { k: 'manageStaff', label: 'Personel Davet Edebilir / Hesap Dondurabilir' },
+              { k: 'manageStaff', label: 'Personel davet edebilir veya hesap dondurabilir' },
             ]
 
             return (
@@ -607,7 +608,7 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
                   {role === 'hekim'
                     ? 'Hekim Rolü'
                     : role === 'sekreter'
-                    ? 'Sekreter / Kayıt Personeli (host) Rolü'
+                    ? 'Sekreter / Kayıt Personeli Rolü'
                     : 'Asistan Rolü'}
                 </div>
 

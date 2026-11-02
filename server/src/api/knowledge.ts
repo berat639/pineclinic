@@ -35,6 +35,16 @@ export interface ReindexJobState {
 
 const reindexJobs = new Map<string, ReindexJobState>()
 
+/** Sınırlar client/lib/knowledge-input-rules.ts ile aynıdır. */
+const TITLE_MAX = 120
+const CONTENT_MAX = 50_000
+
+function limitError(title: string | undefined, content: string | undefined): string | null {
+  if (title !== undefined && title.length > TITLE_MAX) return `Başlık en fazla ${TITLE_MAX} karakter olabilir.`
+  if (content !== undefined && content.length > CONTENT_MAX) return `İçerik en fazla ${CONTENT_MAX} karakter olabilir.`
+  return null
+}
+
 function normalizeDirection(raw: unknown): 'inbound' | 'outbound' | 'both' {
   const val = String(raw ?? '').trim().toLowerCase()
   if (val === 'inbound' || val === 'outbound' || val === 'both') return val
@@ -115,7 +125,7 @@ async function handleUpload({ request, set }: { request: Request; set: { status?
     const fileEntry = form.get('file')
 
     if (fileEntry instanceof File && fileEntry.size > 0) {
-      title = (name || fileEntry.name.replace(/\.[^.]+$/, '') || 'Yüklenen belge').slice(0, 200)
+      title = (name || fileEntry.name.replace(/\.[^.]+$/, '') || 'Yüklenen belge').slice(0, TITLE_MAX)
       try {
         content = await extractTextFromFile(fileEntry)
       } catch (err) {
@@ -128,7 +138,7 @@ async function handleUpload({ request, set }: { request: Request; set: { status?
         return { error: 'Dosya içeriği okunamadı. Dosyanın bozuk olmadığından emin olun.' }
       }
     } else if (typeof textField === 'string' && textField.trim()) {
-      title = (name || 'Yüklenen metin').slice(0, 200)
+      title = (name || 'Yüklenen metin').slice(0, TITLE_MAX)
       content = textField.trim()
     } else {
       set.status = 400
@@ -138,6 +148,11 @@ async function handleUpload({ request, set }: { request: Request; set: { status?
     if (content.trim().length < 10) {
       set.status = 400
       return { error: 'İçerik en az 10 karakter olmalı' }
+    }
+    const uploadLimit = limitError(undefined, content)
+    if (uploadLimit) {
+      set.status = 400
+      return { error: uploadLimit }
     }
 
     let embeddedData: Awaited<ReturnType<typeof embedDocumentWithChunks>>
@@ -184,6 +199,11 @@ async function handleCreate({ body, set }: { body: unknown; set: { status?: numb
   try {
     const cleanTitle = String(title).trim()
     const cleanContent = String(content)
+    const createLimit = limitError(cleanTitle, cleanContent)
+    if (createLimit) {
+      set.status = 400
+      return { error: createLimit }
+    }
     let embeddedData: Awaited<ReturnType<typeof embedDocumentWithChunks>>
     try {
       embeddedData = await embedDocumentWithChunks(cleanTitle, cleanContent)
@@ -218,6 +238,14 @@ async function handleCreate({ body, set }: { body: unknown; set: { status?: numb
 
 async function handleUpdate({ params, body, set }: { params: Record<string, string>; body: unknown; set: { status?: number | string } }) {
   const { category, title, content, callDirection, active } = (body ?? {}) as Record<string, any>
+  const updateLimit = limitError(
+    title !== undefined ? String(title).trim() : undefined,
+    content !== undefined ? String(content) : undefined,
+  )
+  if (updateLimit) {
+    set.status = 400
+    return { error: updateLimit }
+  }
   let embeddedData: Awaited<ReturnType<typeof embedDocumentWithChunks>> | undefined
   if (content) {
     try {

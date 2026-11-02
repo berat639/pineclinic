@@ -1,23 +1,23 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import FlowBuilder from './FlowBuilder'
 import WhatsAppConversationsCard from './WhatsAppConversationsCard'
 import VoiceAiSettings from './VoiceAiSettings'
+import ConfirmModal from './ConfirmModal'
+import InfoTooltip from './ui/InfoTooltip'
+import KnowledgeDocList, { PAGE_SIZES, type SortDir, type SortKey, type ViewMode } from './knowledge/KnowledgeDocList'
+import KnowledgeDocPreview from './knowledge/KnowledgeDocPreview'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
-import { PhoneMaskedInput } from '@/lib/phone-mask'
-
-function Spinner() {
-  return (
-    <div style={{
-      width: 16, height: 16,
-      border: '2px solid rgba(255,255,255,0.08)',
-      borderTopColor: '#0369A1',
-      borderRadius: '50%',
-      animation: 'spin 0.7s linear infinite',
-      flexShrink: 0,
-    }} />
-  )
-}
+import { PhoneMaskedInput, normalizeTrPhone } from '@/lib/phone-mask'
+import { TERM_LABELS } from '@/lib/ui-glossary'
+import {
+  CALL_DIRECTION_LABELS, CATEGORY_COLORS, CATEGORY_ICONS, CATEGORY_LABEL_MAX, CONTENT_MAX, GREETING_MAX, TITLE_MAX,
+  cleanContent, cleanTitle, isCompleteTrPhone, mapServerError, maskCategoryLabel, maskContent, maskGreeting, maskTitle,
+  matchesSearch, uniqueSlug, validateContent, validateFile, validateGreeting, validateTitle,
+  type CallDirection, type FieldKey,
+} from '@/lib/knowledge-input-rules'
+import d from '../../../styles/clinic-depth.module.css'
+import s from './knowledge/KnowledgeTab.module.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,14 +26,14 @@ export interface KnowledgeDoc {
   category: string
   title: string
   content: string
-  callDirection: 'inbound' | 'outbound' | 'both'
+  callDirection: CallDirection
   active: boolean
   embeddedAt: string
   createdAt: string
   updatedAt: string
 }
 
-interface CategoryDef {
+export interface CategoryDef {
   id: string
   slug: string
   label: string
@@ -42,263 +42,315 @@ interface CategoryDef {
   sortOrder: number
 }
 
-type Category = string
+type Errors = Partial<Record<FieldKey | 'form', string>>
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
-
-interface ModalProps {
-  doc: Partial<KnowledgeDoc> | null
-  onClose: () => void
-  onSave: (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean; file?: File | null }) => Promise<void>
-  saving: boolean
-  categories: CategoryDef[]
+interface SaveData {
+  category: string
+  title: string
+  content: string
+  callDirection: CallDirection
+  active: boolean
+  file?: File | null
 }
 
-function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
+const DIRECTIONS: CallDirection[] = ['both', 'inbound', 'outbound']
+
+// ── Small shared pieces ───────────────────────────────────────────────────────
+
+function FieldError({ message }: { message?: string }) {
+  return message ? <div className={s.error} role="alert">{message}</div> : null
+}
+
+function Counter({ value, max }: { value: number; max: number }) {
+  return <span className={`${s.counter} ${value >= max ? s.counterWarn : ''}`}>{value.toLocaleString('tr-TR')}/{max.toLocaleString('tr-TR')}</span>
+}
+
+function ModalShell({ icon, title, subtitle, onClose, onSubmit, children, footer }: {
+  icon: string; title: string; subtitle: string; onClose: () => void; onSubmit: (e: React.FormEvent) => void
+  children: React.ReactNode; footer: React.ReactNode
+}) {
   const backdropDismiss = useBackdropDismiss(onClose)
-  const isEdit = !!doc?.id
-  const [category, setCategory] = useState<Category>((doc?.category as Category) || 'genel')
-  const [title, setTitle] = useState(doc?.title || '')
-  const [content, setContent] = useState(doc?.content || '')
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [callDirection, setCallDirection] = useState<'inbound' | 'outbound' | 'both'>((doc?.callDirection as 'inbound' | 'outbound' | 'both') || 'both')
-  const [active, setActive] = useState(doc?.active !== false)
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null
-    setSelectedFile(file)
-    if (file && !title.trim()) {
-      setTitle(file.name.replace(/\.[^.]+$/, ''))
-    }
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (selectedFile && !isEdit) {
-      onSave({
-        category,
-        title: title.trim() || selectedFile.name.replace(/\.[^.]+$/, ''),
-        content: content.trim(),
-        callDirection,
-        active,
-        file: selectedFile,
-      })
-      return
-    }
-    if (!title.trim() || !content.trim()) return
-    onSave({ category, title: title.trim(), content: content.trim(), callDirection, active })
-  }
-
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(15, 23, 42, 0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '16px',
-    }} {...backdropDismiss}>
-      <form
-        role="dialog"
-        aria-modal="true"
-        onSubmit={handleSubmit}
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'var(--card-bg)', border: '1.5px solid var(--input-border)',
-          borderRadius: 14, width: 'calc(100vw - 24px)', maxWidth: 460, maxHeight: '90vh',
-          boxShadow: 'var(--pc-modal-shadow)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}
-      >
-        {/* Header (Yeni Randevu Standardı) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
-              {isEdit ? '✏️' : '📄'}
-            </div>
+    <div className={d.backdrop} {...backdropDismiss}>
+      <form role="dialog" aria-modal="true" className={`${d.modal} ${s.modalForm}`} onSubmit={onSubmit} onClick={e => e.stopPropagation()} noValidate>
+        <div className={s.modalHead}>
+          <div className={s.row} style={{ flexWrap: 'nowrap' }}>
+            <div className={s.modalIcon}>{icon}</div>
             <div>
-              <h2 style={{ fontSize: '1.02rem', fontWeight: 700, margin: 0, color: 'var(--foreground)', lineHeight: 1.2 }}>
-                {isEdit ? 'Belge Düzenle' : 'Yeni Belge Ekle'}
-              </h2>
-              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
-                Bilgi bankası içeriğini kaydedin
-              </div>
+              <h2 className={s.modalTitle}>{title}</h2>
+              <div className={s.sub}>{subtitle}</div>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}>✕</button>
+          <button type="button" className={d.btn} onClick={onClose} aria-label="Kapat">✕</button>
         </div>
-
-        {/* Body */}
-        <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Kategori */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 6 }}>
-                Kategori
-              </label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {categories.map(cat => (
-                  <button key={cat.slug} type="button" onClick={() => setCategory(cat.slug)} style={{
-                    padding: '5px 11px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700,
-                    background: category === cat.slug ? '#2563eb' : 'var(--card-bg)',
-                    borderColor: category === cat.slug ? '#2563eb' : 'var(--input-border)',
-                    color: category === cat.slug ? '#ffffff' : 'var(--foreground)',
-                    boxShadow: category === cat.slug ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                  }}>
-                    <span style={{ color: category === cat.slug ? '#ffffff' : 'inherit' }}>{cat.icon} {cat.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Başlık */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                Başlık
-              </label>
-              <input
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder="Örn: Mayıs 2026 Kampanyası"
-                required
-                style={{
-                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
-                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
-                  fontSize: '0.85rem', outline: 'none', boxShadow: 'var(--pc-neo-inset)',
-                }}
-              />
-            </div>
-
-            {/* Dosya Yükleme (Yeni belgede) */}
-            {!isEdit && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                  📎 Dosyadan Yükle <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(PDF, DOCX, TXT, MD, CSV, JSON)</span>
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="file"
-                    accept=".txt,.md,.csv,.json,.pdf,.docx"
-                    onChange={handleFileChange}
-                    style={{
-                      flex: 1, fontSize: '0.78rem', color: 'var(--foreground-2)',
-                      padding: '6px 10px', background: 'var(--input-bg)',
-                      border: '1px dashed var(--input-border)', borderRadius: 8,
-                    }}
-                  />
-                  {selectedFile && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFile(null)}
-                      style={{
-                        padding: '6px 10px', borderRadius: 6, border: '1px solid var(--input-border)',
-                        background: 'var(--card-bg)', color: 'var(--foreground-2)', fontSize: '0.75rem', cursor: 'pointer',
-                      }}
-                    >
-                      Temizle
-                    </button>
-                  )}
-                </div>
-                {selectedFile && (
-                  <div style={{ fontSize: '0.74rem', color: '#22c55e', marginTop: 4 }}>
-                    Seçilen dosya: {selectedFile.name} ({Math.max(1, Math.round(selectedFile.size / 1024))} KB) — metin otomatik çıkarılacak
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* İçerik */}
-            {!selectedFile && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                  İçerik <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(AI bu metni okuyacak)</span>
-                </label>
-                <textarea
-                  value={content}
-                  onChange={e => setContent(e.target.value)}
-                  placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın..."
-                  required={!selectedFile}
-                  rows={5}
-                  style={{
-                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
-                    border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
-                    fontSize: '0.85rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
-                    lineHeight: 1.5, boxShadow: 'var(--pc-neo-inset)',
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Kullanım Yeri */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                🔀 Kullanım Yeri
-              </label>
-              <select
-                value={callDirection}
-                onChange={e => setCallDirection(e.target.value as any)}
-                style={{
-                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
-                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
-                  fontSize: '0.85rem', outline: 'none', cursor: 'pointer', boxShadow: 'var(--pc-neo-inset)',
-                }}
-              >
-                <option value="both">Tüm Aramalar (Varsayılan)</option>
-                <option value="inbound">Sadece Bizi Aradıklarında (Gelen Arama)</option>
-                <option value="outbound">Sadece Biz Aradığımızda (Giden Arama)</option>
-              </select>
-            </div>
-
-            {/* Aktif toggle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => setActive(!active)}
-                style={{
-                  width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', transition: 'all 0.2s', position: 'relative',
-                  background: active ? '#2563eb' : 'var(--input-border)',
-                }}
-              >
-                <span style={{
-                  position: 'absolute', top: 3, left: active ? 23 : 3, width: 18, height: 18,
-                  borderRadius: '50%', background: '#ffffff', transition: 'left 0.2s',
-                }} />
-              </button>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground)' }}>
-                {active ? 'Aktif — AI bu belgeyi kullanır' : 'Pasif — AI bu belgeyi kullanmaz'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
-          <button type="button" onClick={onClose} disabled={saving} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
-            İptal
-          </button>
-          <button type="submit" disabled={saving || !title.trim() || (!content.trim() && !selectedFile)} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: saving || !title.trim() || (!content.trim() && !selectedFile) ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: saving || !title.trim() || (!content.trim() && !selectedFile) ? 0.6 : 1 }}>
-            <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor…' : selectedFile ? 'Yükle & Kaydet' : 'Kaydet'}</span>
-          </button>
-        </div>
+        <div className={s.modalBody}>{children}</div>
+        <div className={s.modalFoot}>{footer}</div>
       </form>
     </div>
   )
 }
 
-// ── Helper ────────────────────────────────────────────────────────────────────
-
-function hexToRgb(hex: string): string {
-  if (!hex || hex.length < 7) return '96, 165, 250'
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `${r}, ${g}, ${b}`
+function Segment<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+  return (
+    <div className={d.segmentTrack} role="group" aria-label={label}>
+      {options.map(o => (
+        <button key={o.value} type="button" className={value === o.value ? d.segmentActive : d.segment} aria-pressed={value === o.value} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
-function fmtDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
-  catch { return d }
+// ── Doc modal ─────────────────────────────────────────────────────────────────
+
+interface DocModalProps {
+  doc: Partial<KnowledgeDoc> | null
+  onClose: () => void
+  onSave: (data: SaveData) => Promise<{ field: FieldKey | 'form'; message: string } | null>
+  saving: boolean
+  categories: CategoryDef[]
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+function DocModal({ doc, onClose, onSave, saving, categories }: DocModalProps) {
+  const isEdit = !!doc?.id
+  const [category, setCategory] = useState(doc?.category || 'genel')
+  const [title, setTitle] = useState(doc?.title || '')
+  const [content, setContent] = useState(doc?.content || '')
+  const [file, setFile] = useState<File | null>(null)
+  const [callDirection, setCallDirection] = useState<CallDirection>(doc?.callDirection || 'both')
+  const [active, setActive] = useState(doc?.active !== false)
+  const [errors, setErrors] = useState<Errors>({})
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const contentCheck = validateContent(content)
+  const titleOk = file ? true : validateTitle(title).ok
+  const canSave = !saving && (file ? validateFile(file).ok : titleOk && contentCheck.ok) && (file ? true : titleOk)
+
+  const pickFile = (picked: File | null) => {
+    if (!picked) { setFile(null); return }
+    const check = validateFile(picked)
+    if (!check.ok) { setFile(null); setErrors(prev => ({ ...prev, file: check.error })); return }
+    setErrors(prev => ({ ...prev, file: undefined }))
+    setFile(picked)
+    if (!cleanTitle(title)) setTitle(maskTitle(picked.name.replace(/\.[^.]+$/, '')))
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const next: Errors = {}
+    if (file) {
+      const f = validateFile(file); if (!f.ok) next.file = f.error
+    } else {
+      const t = validateTitle(title); if (!t.ok) next.title = t.error
+      if (!contentCheck.ok) next.content = contentCheck.error
+    }
+    setErrors(next)
+    if (Object.keys(next).length) return
+    const result = await onSave({
+      category,
+      title: cleanTitle(title) || (file ? cleanTitle(file.name.replace(/\.[^.]+$/, '')) : ''),
+      content: cleanContent(content),
+      callDirection,
+      active,
+      file: file && !isEdit ? file : null,
+    })
+    if (result) setErrors({ [result.field]: result.message })
+  }
+
+  return (
+    <ModalShell
+      icon={isEdit ? '✏️' : '📄'}
+      title={isEdit ? 'Belge Düzenle' : 'Yeni Belge Ekle'}
+      subtitle="Bilgi bankası içeriğini kaydedin"
+      onClose={onClose}
+      onSubmit={submit}
+      footer={(
+        <>
+          <button type="button" className={d.btn} onClick={onClose} disabled={saving}>İptal</button>
+          <button type="submit" className={d.btnPrimary} disabled={!canSave}>
+            {saving ? 'Kaydediliyor…' : file ? 'Yükle ve Kaydet' : 'Kaydet'}
+          </button>
+        </>
+      )}
+    >
+      <div className={d.subcard} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div className={s.label}>Kategori</div>
+          <div className={s.chipRow}>
+            {categories.map(cat => (
+              <button key={cat.slug} type="button" className={category === cat.slug ? s.chipActive : d.chip} aria-pressed={category === cat.slug} onClick={() => setCategory(cat.slug)}>
+                {cat.icon} {cat.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className={s.field}>
+          <span className={s.label}>Başlık <Counter value={title.length} max={TITLE_MAX} /></span>
+          <input className={`${d.input} ${errors.title ? s.inputError : ''}`} value={title} maxLength={TITLE_MAX} placeholder="Örn: Mayıs 2026 Kampanyası"
+            onChange={e => { setTitle(maskTitle(e.target.value)); setErrors(p => ({ ...p, title: undefined })) }} aria-invalid={!!errors.title} />
+          <FieldError message={errors.title} />
+        </label>
+
+        {!isEdit && (
+          <div>
+            <div className={s.label}>
+              📎 Dosyadan yükle
+              <InfoTooltip title="Desteklenen dosyalar">
+                TXT, MD, CSV, JSON, PDF ve DOCX dosyaları yüklenebilir. Dosya en fazla 10 MB olabilir. Metin dosyadan otomatik çıkarılır.
+              </InfoTooltip>
+            </div>
+            <div
+              className={`${s.drop} ${dragging ? s.dropActive : ''}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); pickFile(e.dataTransfer.files?.[0] ?? null) }}
+              role="button" tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
+            >
+              {file ? (
+                <>
+                  <strong>{file.name}</strong>
+                  <span className={s.muted}>{Math.max(1, Math.round(file.size / 1024))} KB</span>
+                  <button type="button" className={d.btn} onClick={ev => { ev.stopPropagation(); pickFile(null); if (fileRef.current) fileRef.current.value = '' }}>Dosyayı kaldır</button>
+                </>
+              ) : (
+                <span>Dosyayı buraya bırakın veya seçmek için tıklayın</span>
+              )}
+            </div>
+            <input ref={fileRef} type="file" className={s.hiddenInput} accept=".txt,.md,.csv,.json,.pdf,.docx" onChange={e => pickFile(e.target.files?.[0] ?? null)} />
+            <FieldError message={errors.file} />
+          </div>
+        )}
+
+        {!file && (
+          <label className={s.field}>
+            <span className={s.label}>
+              İçerik
+              <InfoTooltip title="Bu metin ne işe yarar?">
+                Yapay zeka asistan, aramalarda bu metni okuyarak hastalara bilgi verir. Fiyat, çalışma saati, kampanya gibi bilgileri açık ve kısa yazın.
+              </InfoTooltip>
+              <Counter value={content.length} max={CONTENT_MAX} />
+            </span>
+            <textarea className={`${d.input} ${s.textarea} ${errors.content ? s.inputError : ''}`} value={content} rows={5}
+              placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın…"
+              onChange={e => { setContent(maskContent(e.target.value)); setErrors(p => ({ ...p, content: undefined })) }} aria-invalid={!!errors.content} />
+            {!contentCheck.ok && content.length > 0 && !errors.content && <div className={s.hint}>{contentCheck.hint}</div>}
+            <FieldError message={errors.content} />
+          </label>
+        )}
+
+        <div>
+          <div className={s.label}>
+            Kullanım yeri
+            <InfoTooltip title="Belge hangi aramalarda kullanılır?">
+              “Gelen arama”: hasta kliniği aradığında. “Giden arama”: asistan hastayı aradığında. “Her ikisi”: her iki durumda da kullanılır.
+            </InfoTooltip>
+          </div>
+          <Segment value={callDirection} onChange={setCallDirection} label="Kullanım yeri" options={DIRECTIONS.map(v => ({ value: v, label: CALL_DIRECTION_LABELS[v] }))} />
+        </div>
+
+        <div className={s.switchRow}>
+          <button type="button" role="switch" aria-checked={active} className={d.switch} onClick={() => setActive(!active)} aria-label="Aktif durumu" />
+          <span>{active ? 'Aktif — asistan bu belgeyi kullanır' : 'Pasif — asistan bu belgeyi kullanmaz'}</span>
+        </div>
+        <FieldError message={errors.form} />
+      </div>
+    </ModalShell>
+  )
+}
+
+// ── Category modal ────────────────────────────────────────────────────────────
+
+function CategoryModal({ categories, onClose, onCreated, onError }: {
+  categories: CategoryDef[]; onClose: () => void; onCreated: () => Promise<void>; onError: (msg: string) => void
+}) {
+  const [label, setLabel] = useState('')
+  const [icon, setIcon] = useState<string>(CATEGORY_ICONS[0])
+  const [color, setColor] = useState<string>(CATEGORY_COLORS[0])
+  const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Errors>({})
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const clean = maskCategoryLabel(label).trim()
+    if (!clean) { setErrors({ label: 'Kategori adı zorunludur.' }); return }
+    setSaving(true)
+    try {
+      // Kod (slug) kullanıcıya gösterilmez; addan üretilir, çakışmada -2, -3 eklenir.
+      const slug = uniqueSlug(clean, categories.map(c => c.slug))
+      const res = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, label: clean, icon, color }),
+      })
+      if (res.ok) { await onCreated(); onClose(); return }
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      const mapped = mapServerError(res.status, data.error || 'Kategori eklenemedi')
+      setErrors({ [mapped.field]: mapped.message })
+    } catch {
+      onError('Kategori eklenemedi')
+    }
+    setSaving(false)
+  }
+
+  return (
+    <ModalShell icon="🗂️" title="Yeni Kategori" subtitle="Belgeleri gruplamak için kategori ekleyin" onClose={onClose} onSubmit={submit}
+      footer={(
+        <>
+          <button type="button" className={d.btn} onClick={onClose} disabled={saving}>İptal</button>
+          <button type="submit" className={d.btnPrimary} disabled={saving || !label.trim()}>{saving ? 'Ekleniyor…' : 'Kategori Ekle'}</button>
+        </>
+      )}>
+      <div className={d.subcard} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <label className={s.field}>
+          <span className={s.label}>Kategori adı <Counter value={label.length} max={CATEGORY_LABEL_MAX} /></span>
+          <input className={`${d.input} ${errors.label ? s.inputError : ''}`} value={label} maxLength={CATEGORY_LABEL_MAX} placeholder="Örn: Ortodonti"
+            onChange={e => { setLabel(maskCategoryLabel(e.target.value)); setErrors({}) }} aria-invalid={!!errors.label} />
+          <FieldError message={errors.label} />
+        </label>
+        <div>
+          <div className={s.label}>Simge</div>
+          <div className={s.swatchGrid}>
+            {CATEGORY_ICONS.map(i => (
+              <button key={i} type="button" className={`${s.iconBtn} ${icon === i ? s.iconBtnOn : ''}`} aria-pressed={icon === i} onClick={() => setIcon(i)}>{i}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className={s.label}>Renk</div>
+          <div className={s.swatchGrid}>
+            {CATEGORY_COLORS.map(c => (
+              <button key={c} type="button" className={`${s.swatch} ${color === c ? s.swatchOn : ''}`} style={{ background: c }} aria-pressed={color === c} aria-label={`Renk ${c}`} onClick={() => setColor(c)} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className={s.label}>Önizleme</div>
+          <span className={d.badge}><span className={s.dot} style={{ background: color }} />{icon} {label.trim() || 'Kategori adı'}</span>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+type ConfirmState =
+  | { kind: 'doc'; doc: KnowledgeDoc }
+  | { kind: 'bulkDelete' }
+  | { kind: 'category'; cat: CategoryDef }
+  | { kind: 'reindex' }
+
+const URL_KEYS = ['kb_q', 'kb_cat', 'kb_dir', 'kb_sort', 'kb_order', 'kb_page', 'kb_size'] as const
 
 export default function KnowledgeTab() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([])
@@ -306,15 +358,32 @@ export default function KnowledgeTab() {
   const [needsReindexCount, setNeedsReindexCount] = useState(0)
   const [reindexProgress, setReindexProgress] = useState<{ processed: number; total: number } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [categories, setCategories] = useState<CategoryDef[]>([])
-  const [catFilter, setCatFilter] = useState<Category | 'all'>('all')
-  const [directionFilter, setDirectionFilter] = useState<'all' | 'inbound' | 'outbound' | 'both'>('all')
   const [modal, setModal] = useState<{ open: boolean; doc: Partial<KnowledgeDoc> | null }>({ open: false, doc: null })
   const [saving, setSaving] = useState(false)
   const [reindexing, setReindexing] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  
-  // Greeting state
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [preview, setPreview] = useState<KnowledgeDoc | null>(null)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [catModalOpen, setCatModalOpen] = useState(false)
+  const [catMgmtOpen, setCatMgmtOpen] = useState(false)
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+
+  // Liste durumu (URL'de saklanır)
+  const [searchInput, setSearchInput] = useState('')
+  const [query, setQuery] = useState('')
+  const [catFilter, setCatFilter] = useState('all')
+  const [directionFilter, setDirectionFilter] = useState<'all' | CallDirection>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('updatedAt')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0])
+  const [view, setView] = useState<ViewMode>('list')
+  const [urlReady, setUrlReady] = useState(false)
+
+  // Karşılama / arayan numara
   const [greetingTab, setGreetingTab] = useState<'inbound' | 'outbound' | 'callerid'>('inbound')
   const [greetingText, setGreetingText] = useState('')
   const [greetingOutboundText, setGreetingOutboundText] = useState('')
@@ -322,39 +391,90 @@ export default function KnowledgeTab() {
   const [greetingLoading, setGreetingLoading] = useState(true)
   const [greetingSaving, setGreetingSaving] = useState(false)
   const [callerIdSaving, setCallerIdSaving] = useState(false)
+  const [greetingErrors, setGreetingErrors] = useState<Errors>({})
 
-  // Flow Builder Direction State
   const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
 
-  // Outbound Call Modal state
+  // Dış arama
   const [callModalOpen, setCallModalOpen] = useState(false)
   const [callPhone, setCallPhone] = useState('')
   const [calling, setCalling] = useState(false)
-  const callModalBackdropDismiss = useBackdropDismiss(() => setCallModalOpen(false))
+  const [callErrors, setCallErrors] = useState<Errors>({})
 
-  const handleOutboundCall = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!callPhone) return
-    setCalling(true)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type })
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3500)
+  }, [])
+
+  // URL ve tercih okuma (yalnızca ilk açılışta)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    const q = p.get('kb_q') ?? ''
+    setSearchInput(q); setQuery(q)
+    setCatFilter(p.get('kb_cat') || 'all')
+    const dir = p.get('kb_dir')
+    if (dir === 'inbound' || dir === 'outbound' || dir === 'both') setDirectionFilter(dir)
+    const sort = p.get('kb_sort')
+    if (sort === 'title' || sort === 'category' || sort === 'updatedAt' || sort === 'active') setSortKey(sort)
+    if (p.get('kb_order') === 'asc') setSortDir('asc')
+    const size = Number(p.get('kb_size'))
+    if ((PAGE_SIZES as readonly number[]).includes(size)) setPageSize(size)
+    setPage(Math.max(1, Number(p.get('kb_page')) || 1))
     try {
-      const res = await fetch('/api/admin/calls/outbound', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: callPhone, to: callPhone }),
-      })
-      if (res.ok) {
-        showToast('📞 Arama başlatıldı!')
-        setCallModalOpen(false)
-        setCallPhone('')
-      } else {
-        const data = await res.json()
-        showToast(data.error || 'Arama başarısız', 'error')
-      }
-    } catch {
-      showToast('Arama başarısız', 'error')
-    }
-    setCalling(false)
+      const stored = window.localStorage.getItem('kb_view')
+      if (stored === 'cards' || stored === 'list') setView(stored)
+    } catch { /* tercih okunamadı */ }
+    setUrlReady(true)
+  }, [])
+
+  // URL yazma
+  useEffect(() => {
+    if (!urlReady) return
+    const p = new URLSearchParams(window.location.search)
+    URL_KEYS.forEach(k => p.delete(k))
+    if (query) p.set('kb_q', query)
+    if (catFilter !== 'all') p.set('kb_cat', catFilter)
+    if (directionFilter !== 'all') p.set('kb_dir', directionFilter)
+    if (sortKey !== 'updatedAt') p.set('kb_sort', sortKey)
+    if (sortDir !== 'desc') p.set('kb_order', sortDir)
+    if (page > 1) p.set('kb_page', String(page))
+    if (pageSize !== PAGE_SIZES[0]) p.set('kb_size', String(pageSize))
+    const qs = p.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+  }, [urlReady, query, catFilter, directionFilter, sortKey, sortDir, page, pageSize])
+
+  // Arama gecikmesi (300 ms)
+  useEffect(() => {
+    const t = setTimeout(() => { setQuery(prev => { if (prev !== searchInput.trim()) setPage(1); return searchInput.trim() }) }, 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const changeView = (v: ViewMode) => {
+    setView(v)
+    try { window.localStorage.setItem('kb_view', v) } catch { /* yok say */ }
   }
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const [r, catRes] = await Promise.all([fetch('/api/knowledge'), fetch('/api/admin/categories')])
+      if (!r.ok) {
+        const result = await r.json().catch(() => ({})) as { error?: string }
+        throw new Error(result.error || 'Bilgi bankası yüklenemedi')
+      }
+      const data = await r.json()
+      setDocs(data.docs || [])
+      setTotalEmbedded(data.totalEmbedded || 0)
+      setNeedsReindexCount(data.needsReindex || 0)
+      if (catRes.ok) setCategories(await catRes.json())
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Bilgi bankası yüklenemedi')
+    }
+    setLoading(false)
+  }, [])
 
   const fetchGreeting = useCallback(async () => {
     try {
@@ -367,145 +487,58 @@ export default function KnowledgeTab() {
       const callerRes = await fetch('/api/admin/settings/outbound-caller-id')
       if (callerRes.ok) {
         const callerData = await callerRes.json() as { callerId?: string }
-        if (callerData.callerId) setOutboundCallerId(callerData.callerId)
+        if (callerData.callerId) setOutboundCallerId(normalizeTrPhone(callerData.callerId))
       }
-    } catch { /* ignore */ }
+    } catch { /* varsayılanlar kalır */ }
     setGreetingLoading(false)
   }, [])
 
-  const handleSaveGreeting = async (type: 'inbound' | 'outbound') => {
-    const textToSave = type === 'inbound' ? greetingText : greetingOutboundText
-    if (!textToSave.trim() || greetingSaving) return
-    setGreetingSaving(true)
-    try {
-      const bodyPayload = type === 'inbound' ? { greeting: greetingText.trim() } : { greetingOutbound: greetingOutboundText.trim() }
-      const res = await fetch('/api/admin/settings/greeting', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload),
-      })
-      if (res.ok) {
-        showToast(type === 'inbound' ? '✅ Gelen Karşılama Mesajı kaydedildi' : '✅ Giden Karşılama Mesajı kaydedildi')
-      } else {
-        showToast('Kayıt başarısız', 'error')
+  useEffect(() => { load(); fetchGreeting() }, [load, fetchGreeting])
+
+  const getCat = (slug: string) => categories.find(c => c.slug === slug)
+
+  // Süz → sırala → sayfala
+  const filtered = useMemo(() => {
+    const rows = docs.filter(doc => {
+      const matchCat = catFilter === 'all' || doc.category === catFilter
+      const dir = doc.callDirection || 'both'
+      const matchDir = directionFilter === 'all' || dir === directionFilter
+      const matchQ = !query || matchesSearch(`${doc.title} ${doc.content}`, query)
+      return matchCat && matchDir && matchQ
+    })
+    const mul = sortDir === 'asc' ? 1 : -1
+    const collator = new Intl.Collator('tr-TR')
+    return [...rows].sort((a, b) => {
+      switch (sortKey) {
+        case 'title': return collator.compare(a.title, b.title) * mul
+        case 'category': return collator.compare(getCat(a.category)?.label ?? a.category, getCat(b.category)?.label ?? b.category) * mul
+        case 'active': return (Number(a.active) - Number(b.active)) * mul
+        default: return (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()) * mul
       }
-    } catch {
-      showToast('Kayıt başarısız', 'error')
-    }
-    setGreetingSaving(false)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docs, catFilter, directionFilter, query, sortKey, sortDir, categories])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const pageDocs = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  useEffect(() => { if (!loading && page !== currentPage) setPage(currentPage) }, [loading, page, currentPage])
+
+  const onSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir(key === 'updatedAt' ? 'desc' : 'asc') }
+    setPage(1)
   }
 
-  const handleSaveCallerId = async () => {
-    if (!outboundCallerId.trim() || callerIdSaving) return
-    setCallerIdSaving(true)
-    try {
-      const res = await fetch('/api/admin/settings/outbound-caller-id', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callerId: outboundCallerId.trim() }),
-      })
-      if (res.ok) {
-        showToast('✅ Dış Arama CallerID kaydedildi')
-      } else {
-        showToast('Kayıt başarısız', 'error')
-      }
-    } catch {
-      showToast('Kayıt başarısız', 'error')
-    }
-    setCallerIdSaving(false)
-  }
+  const hasFilters = !!query || catFilter !== 'all' || directionFilter !== 'all'
+  const clearFilters = () => { setSearchInput(''); setQuery(''); setCatFilter('all'); setDirectionFilter('all'); setPage(1) }
 
-  const [togglingId, setTogglingId] = useState<string | null>(null)
-  const [catMgmtOpen, setCatMgmtOpen] = useState(false)
-  const [newCatSlug, setNewCatSlug] = useState('')
-  const [newCatLabel, setNewCatLabel] = useState('')
-  const [newCatIcon, setNewCatIcon] = useState('📁')
-  const [newCatColor, setNewCatColor] = useState('#60a5fa')
-  const [catSaving, setCatSaving] = useState(false)
-
-  const getCatColor = (slug: string) => categories.find(c => c.slug === slug)?.color ?? '#60a5fa'
-  const getCatIcon = (slug: string) => categories.find(c => c.slug === slug)?.icon ?? '📁'
-  const getCatLabel = (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug
-
-  const addCategory = async () => {
-    if (!newCatSlug.trim() || !newCatLabel.trim()) return
-    setCatSaving(true)
-    try {
-      const res = await fetch('/api/admin/categories', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: newCatSlug.trim().toLowerCase(), label: newCatLabel.trim(), icon: newCatIcon, color: newCatColor }),
-      })
-      if (res.ok) {
-        setNewCatSlug(''); setNewCatLabel(''); setNewCatIcon('📁'); setNewCatColor('#60a5fa')
-        await load()
-        showToast('✅ Kategori eklendi')
-      } else {
-        const data = await res.json()
-        showToast(data.error || 'Hata', 'error')
-      }
-    } catch { showToast('Kategori eklenemedi', 'error') }
-    setCatSaving(false)
-  }
-
-  const deleteCategory = async (id: string) => {
-    if (!confirm('Bu kategoriyi silmek istediğinizden emin misiniz? Bağlı belgeler Genel kategorisine taşınacak.')) return
-    try {
-      const res = await fetch(`/api/admin/categories/${id}`, { method: 'DELETE' })
-      if (res.ok) { await load(); showToast('🗑 Kategori silindi') }
-      else showToast('Silinemedi', 'error')
-    } catch { showToast('Hata', 'error') }
-  }
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
-
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
-  }
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [r, catRes] = await Promise.all([
-        fetch('/api/knowledge'),
-        fetch('/api/admin/categories'),
-      ])
-      if (!r.ok) {
-        const result = await r.json().catch(() => ({}))
-        throw new Error(result.error || 'Belge kaydedilemedi')
-      }
-      const data = await r.json()
-      setDocs(data.docs || [])
-      setTotalEmbedded(data.totalEmbedded || 0)
-      setNeedsReindexCount(data.needsReindex || 0)
-      if (catRes.ok) {
-        const cats = await catRes.json()
-        setCategories(cats)
-      }
-    } catch {
-      showToast('Bilgi bankası yüklenemedi', 'error')
-    }
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    load()
-    fetchGreeting()
-  }, [load, fetchGreeting])
-
-  // Filter both by category and call direction
-  const filtered = docs.filter(d => {
-    const matchCat = catFilter === 'all' || d.category === catFilter
-    const matchDir = directionFilter === 'all' || d.callDirection === directionFilter || (directionFilter === 'both' && (!d.callDirection || d.callDirection === 'both'))
-    return matchCat && matchDir
-  })
-
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
-  const handleSave = async (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean; file?: File | null }) => {
+  // ── CRUD ───────────────────────────────────────────────────────────────────
+  const handleSave = async (data: SaveData): Promise<{ field: FieldKey | 'form'; message: string } | null> => {
     setSaving(true)
     try {
       const isEdit = !!modal.doc?.id
+      let r: Response
       if (data.file && !isEdit) {
         const formData = new FormData()
         formData.append('file', data.file)
@@ -513,49 +546,40 @@ export default function KnowledgeTab() {
         formData.append('title', data.title)
         formData.append('callDirection', data.callDirection)
         formData.append('active', String(data.active))
-        const r = await fetch('/api/knowledge/upload', {
-          method: 'POST',
-          body: formData,
+        r = await fetch('/api/knowledge/upload', { method: 'POST', body: formData })
+      } else {
+        const { file: _unused, ...payload } = data
+        r = await fetch(isEdit ? `/api/knowledge/${modal.doc!.id}` : '/api/knowledge', {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
         })
-        const resData = await r.json().catch(() => ({}))
-        if (!r.ok) throw new Error(resData.error || 'Dosya yükleme başarısız')
-        setModal({ open: false, doc: null })
-        await load()
-        showToast('✅ Dosya yüklendi ve bilgi bankasına gömüldü')
-        setSaving(false)
-        return
       }
-
-      const url = isEdit ? `/api/knowledge/${modal.doc!.id}` : '/api/knowledge'
-      const method = isEdit ? 'PUT' : 'POST'
-      const r = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      const resData = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(resData.error || 'Kayıt başarısız')
+      const resData = await r.json().catch(() => ({})) as { error?: string }
+      if (!r.ok) {
+        setSaving(false)
+        return mapServerError(r.status, resData.error || 'Kayıt başarısız')
+      }
       setModal({ open: false, doc: null })
+      setPreview(null)
       await load()
-      showToast(isEdit ? '✅ Belge güncellendi ve yeniden gömüldü' : '✅ Belge eklendi ve gömüldü')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Kayıt başarısız', 'error')
+      showToast(isEdit ? '✅ Belge güncellendi ve bilgi bankasına yeniden işlendi' : data.file ? '✅ Dosya yüklendi ve bilgi bankasına işlendi' : '✅ Belge eklendi ve bilgi bankasına işlendi')
+    } catch {
+      setSaving(false)
+      return { field: 'form', message: 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.' }
     }
     setSaving(false)
+    return null
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Bu belgeyi silmek istediğinizden emin misiniz?')) return
-    setDeletingId(id)
-    try {
-      const r = await fetch(`/api/knowledge/${id}`, { method: 'DELETE' })
-      if (!r.ok) throw new Error()
-      setDocs(prev => prev.filter(d => d.id !== id))
-      showToast('🗑 Belge silindi')
-    } catch {
-      showToast('Silme başarısız', 'error')
-    }
-    setDeletingId(null)
+  const removeDocs = async (ids: string[]) => {
+    const results = await Promise.allSettled(ids.map(id => fetch(`/api/knowledge/${id}`, { method: 'DELETE' }).then(r => { if (!r.ok) throw new Error() })))
+    const okIds = ids.filter((_, i) => results[i].status === 'fulfilled')
+    setDocs(prev => prev.filter(x => !okIds.includes(x.id)))
+    setSelected(prev => { const n = new Set(prev); okIds.forEach(id => n.delete(id)); return n })
+    setPreview(prev => (prev && okIds.includes(prev.id) ? null : prev))
+    if (okIds.length === ids.length) showToast(`🗑 ${okIds.length} belge silindi`)
+    else showToast(`${ids.length - okIds.length} belge silinemedi`, 'error')
   }
 
   const handleToggle = async (id: string) => {
@@ -564,15 +588,25 @@ export default function KnowledgeTab() {
       const r = await fetch(`/api/knowledge/${id}/toggle`, { method: 'PATCH' })
       if (!r.ok) throw new Error()
       const data = await r.json()
-      setDocs(prev => prev.map(d => d.id === id ? { ...d, active: data.doc.active } : d))
+      setDocs(prev => prev.map(x => (x.id === id ? { ...x, active: data.doc.active } : x)))
+      setPreview(prev => (prev && prev.id === id ? { ...prev, active: data.doc.active } : prev))
     } catch {
       showToast('Durum değiştirilemedi', 'error')
     }
     setTogglingId(null)
   }
 
+  const bulkSetActive = async (target: boolean) => {
+    const ids = docs.filter(x => selected.has(x.id) && x.active !== target).map(x => x.id)
+    if (ids.length === 0) { showToast(target ? 'Seçili belgeler zaten aktif' : 'Seçili belgeler zaten pasif'); return }
+    const results = await Promise.allSettled(ids.map(id => fetch(`/api/knowledge/${id}/toggle`, { method: 'PATCH' }).then(r => { if (!r.ok) throw new Error() })))
+    const failed = results.filter(r => r.status === 'rejected').length
+    await load()
+    if (failed === 0) showToast(`✅ ${ids.length} belge ${target ? 'aktif' : 'pasif'} yapıldı`)
+    else showToast(`${failed} belgenin durumu değiştirilemedi`, 'error')
+  }
+
   const handleReindex = async () => {
-    if (!confirm(`${docs.length} belgenin tamamı yeniden embedding yapılacak. Devam?`)) return
     setReindexing(true)
     setReindexProgress({ processed: 0, total: docs.length })
     try {
@@ -582,9 +616,7 @@ export default function KnowledgeTab() {
         body: JSON.stringify({ async: docs.length > 8 }),
       })
       const data = await r.json().catch(() => ({}))
-      if (!r.ok || data.error) {
-        throw new Error(data.error || `Reindex başarısız (${r.status})`)
-      }
+      if (!r.ok || data.error) throw new Error(data.error || `Yeniden işleme başarısız (${r.status})`)
       if (data.background) {
         for (let poll = 0; poll < 120; poll++) {
           await new Promise(res => setTimeout(res, 1000))
@@ -594,493 +626,300 @@ export default function KnowledgeTab() {
           setReindexProgress({ processed: sdata.processed || 0, total: sdata.total || docs.length })
           if (sdata.status === 'completed' || sdata.status === 'failed' || sdata.status === 'idle') {
             await load()
-            if (sdata.status === 'failed') {
-              throw new Error(sdata.error || 'Reindex tamamlanamadı')
-            }
-            showToast(`✅ ${sdata.success || 0} belge yeniden indekslendi${sdata.skipped ? ` (${sdata.skipped} değişmeyen atlandı)` : ''}`)
+            if (sdata.status === 'failed') throw new Error(sdata.error || 'Yeniden işleme tamamlanamadı')
+            showToast(`✅ ${sdata.success || 0} belge yeniden işlendi${sdata.skipped ? ` (${sdata.skipped} değişmeyen atlandı)` : ''}`)
             break
           }
         }
       } else {
         await load()
-        showToast(`✅ ${data.results?.success || 0} belge yeniden indekslendi${data.results?.skipped ? ` (${data.results.skipped} değişmeyen atlandı)` : ''}`)
+        showToast(`✅ ${data.results?.success || 0} belge yeniden işlendi${data.results?.skipped ? ` (${data.results.skipped} değişmeyen atlandı)` : ''}`)
       }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Reindex başarısız', 'error')
+      showToast(err instanceof Error ? err.message : 'Yeniden işleme başarısız', 'error')
     }
     setReindexing(false)
     setReindexProgress(null)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const deleteCategory = async (cat: CategoryDef) => {
+    try {
+      const res = await fetch(`/api/admin/categories/${cat.id}`, { method: 'DELETE' })
+      if (res.ok) { if (catFilter === cat.slug) setCatFilter('all'); await load(); showToast('🗑 Kategori silindi') }
+      else showToast('Kategori silinemedi', 'error')
+    } catch { showToast('Kategori silinemedi', 'error') }
+  }
+
+  // ── Karşılama / arayan numara / dış arama ──────────────────────────────────
+  const handleSaveGreeting = async (type: 'inbound' | 'outbound') => {
+    const text = type === 'inbound' ? greetingText : greetingOutboundText
+    const check = validateGreeting(text)
+    if (!check.ok) { setGreetingErrors({ greeting: check.error }); return }
+    if (greetingSaving) return
+    setGreetingSaving(true)
+    setGreetingErrors({})
+    try {
+      const res = await fetch('/api/admin/settings/greeting', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(type === 'inbound' ? { greeting: text.trim() } : { greetingOutbound: text.trim() }),
+      })
+      if (res.ok) showToast(type === 'inbound' ? '✅ Gelen arama karşılama mesajı kaydedildi' : '✅ Giden arama karşılama mesajı kaydedildi')
+      else {
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        const mapped = mapServerError(res.status, data.error || 'Kayıt başarısız')
+        setGreetingErrors({ [mapped.field === 'form' ? 'greeting' : mapped.field]: mapped.message })
+      }
+    } catch { setGreetingErrors({ greeting: 'Sunucuya ulaşılamadı. Tekrar deneyin.' }) }
+    setGreetingSaving(false)
+  }
+
+  const handleSaveCallerId = async () => {
+    if (callerIdSaving) return
+    if (!isCompleteTrPhone(outboundCallerId)) { setGreetingErrors({ callerId: 'Numarayı 11 hane olacak şekilde tam girin.' }); return }
+    setCallerIdSaving(true)
+    setGreetingErrors({})
+    try {
+      const res = await fetch('/api/admin/settings/outbound-caller-id', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerId: outboundCallerId }),
+      })
+      if (res.ok) showToast('✅ Arayan numara kaydedildi')
+      else {
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        setGreetingErrors({ callerId: data.error || 'Kayıt başarısız' })
+      }
+    } catch { setGreetingErrors({ callerId: 'Sunucuya ulaşılamadı. Tekrar deneyin.' }) }
+    setCallerIdSaving(false)
+  }
+
+  const handleOutboundCall = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!isCompleteTrPhone(callPhone)) { setCallErrors({ phone: 'Telefon numarasını 11 hane olacak şekilde tam girin.' }); return }
+    setCalling(true)
+    setCallErrors({})
+    try {
+      const res = await fetch('/api/admin/calls/outbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: callPhone, to: callPhone }),
+      })
+      if (res.ok) {
+        showToast('📞 Arama başlatıldı')
+        setCallModalOpen(false)
+        setCallPhone('')
+      } else {
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        setCallErrors({ phone: data.error || 'Arama başlatılamadı' })
+      }
+    } catch { setCallErrors({ phone: 'Sunucuya ulaşılamadı. Tekrar deneyin.' }) }
+    setCalling(false)
+  }
+
+  const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const toggleAll = (ids: string[], on: boolean) => setSelected(prev => { const n = new Set(prev); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n })
+
+  const greetingValue = greetingTab === 'inbound' ? greetingText : greetingOutboundText
+  const processedLabel = `${totalEmbedded}/${docs.length}`
+
+  const confirmProps = (() => {
+    if (!confirm) return null
+    switch (confirm.kind) {
+      case 'doc': return { title: 'Belgeyi sil', message: `“${confirm.doc.title}” belgesi kalıcı olarak silinecek. Devam edilsin mi?`, variant: 'danger' as const, confirmText: 'Evet, sil', run: () => removeDocs([confirm.doc.id]) }
+      case 'bulkDelete': return { title: 'Seçili belgeleri sil', message: `${selected.size} belge kalıcı olarak silinecek. Devam edilsin mi?`, variant: 'danger' as const, confirmText: 'Evet, sil', run: () => removeDocs([...selected]) }
+      case 'category': return { title: 'Kategoriyi sil', message: `“${confirm.cat.label}” kategorisi silinecek. Bağlı belgeler “Genel” kategorisine taşınır.`, variant: 'danger' as const, confirmText: 'Evet, sil', run: () => deleteCategory(confirm.cat) }
+      case 'reindex': return { title: 'Belgeleri yeniden işle', message: `${docs.length} belgenin tamamı bilgi bankasına yeniden işlenecek. Değişmeyen belgeler atlanır. Devam edilsin mi?`, variant: 'primary' as const, confirmText: 'Yeniden işle', run: handleReindex }
+    }
+  })()
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  const flowOptions = [
+    { value: 'inbound' as const, label: `📥 ${TERM_LABELS.inbound} Akışı (Randevu)` },
+    { value: 'outbound' as const, label: `📤 ${TERM_LABELS.outbound} Akışı (Anket ve Takip)` },
+    { value: 'whatsapp' as const, label: '💬 WhatsApp Asistan Akışı' },
+  ]
 
   return (
-    <div style={{ position: 'relative' }}>
-      {/* Toast */}
-      {toast && (
-        <div style={{
-          position: 'fixed', top: 80, right: 24, zIndex: 2000,
-          background: 'var(--card-bg, #1e293b)',
-          border: `1px solid ${toast.type === 'success' ? '#22c55e' : '#ef4444'}`,
-          color: toast.type === 'success' ? '#22c55e' : '#ef4444',
-          borderRadius: 12, padding: '10px 18px', fontSize: '0.875rem', fontWeight: 500,
-          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-          animation: 'fadeIn 0.2s ease',
-          maxWidth: 340,
-        }}>
-          {toast.msg}
-        </div>
-      )}
+    <div className={s.root}>
+      {toast && <div className={`${s.toast} ${toast.type === 'success' ? s.toastOk : s.toastErr}`} role="status">{toast.msg}</div>}
 
-      {/* Header & Filter Controls */}
-      <div className="glass-card" style={{ padding: '1rem 1.25rem', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {/* Top bar: Action buttons */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+      {/* Başlık ve araç çubuğu */}
+      <div className={`${d.card} ${s.stack}`}>
+        <div className={s.spread}>
           <div>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              🧠 Bilgi Bankası & Yapay Zeka Akışları
-            </h2>
-            <p style={{ fontSize: '0.78rem', color: 'var(--foreground-3)', margin: '2px 0 0' }}>
-              Gelen ve giden aramalar için bilgi belgeleri, karşılama mesajları ve senaryolar
-            </p>
+            <h2 className={s.h2}>🧠 Bilgi Bankası ve Yapay Zeka Akışları</h2>
+            <p className={s.sub}>Gelen ve giden aramalar için bilgi belgeleri, karşılama mesajları ve senaryolar</p>
           </div>
-
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {!loading && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
-                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 8, fontSize: '0.78rem', color: 'var(--foreground-3)',
-              }}>
-                <span style={{ color: totalEmbedded === docs.length && docs.length > 0 && needsReindexCount === 0 ? '#22c55e' : '#f59e0b' }}>
-                  ⚡
-                </span>
-                {totalEmbedded}/{docs.length} embedding hazır
-                {needsReindexCount > 0 && (
-                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>
-                    ({needsReindexCount} yenilenmeli)
-                  </span>
-                )}
-              </div>
+          <div className={s.row}>
+            {!loading && !loadError && (
+              <span className={s.total}>
+                <span className={s.totalNum}>{processedLabel}</span> işlendi
+                {needsReindexCount > 0 && <span>· {needsReindexCount} bekliyor</span>}
+              </span>
             )}
-
-            <button
-              onClick={handleReindex}
-              disabled={reindexing || docs.length === 0}
-              className="btn btn-ghost"
-              style={{ fontSize: '0.8rem', padding: '6px 14px' }}
-            >
-              {reindexing
-                ? reindexProgress
-                  ? `⏳ İndeksleniyor (${reindexProgress.processed}/${reindexProgress.total})…`
-                  : '⏳ İndeksleniyor…'
-                : '🔄 Tümünü Yenile'}
+            <button type="button" className={d.btnMint} onClick={() => setConfirm({ kind: 'reindex' })} disabled={reindexing || docs.length === 0}>
+              {reindexing ? (reindexProgress ? `⏳ İşleniyor (${reindexProgress.processed}/${reindexProgress.total})…` : '⏳ İşleniyor…') : '🔄 Tümünü yeniden işle'}
             </button>
-
-            <button
-              onClick={() => setModal({ open: true, doc: null })}
-              className="btn btn-primary"
-              style={{ fontSize: '0.8rem', padding: '6px 16px' }}
-            >
-              + Yeni Belge
-            </button>
-            
-            <button
-              onClick={() => setCallModalOpen(true)}
-              className="btn btn-primary"
-              style={{ fontSize: '0.8rem', padding: '6px 16px', background: '#ec4899', borderColor: '#ec4899' }}
-            >
-              📞 Yapay Zeka ile Ara
-            </button>
+            <InfoTooltip title="Yeniden işleme nedir?">
+              Belgeler yapay zekanın arayabileceği biçime dönüştürülerek bilgi bankasına işlenir. Yapay zeka ayarı değiştiyse veya “bekliyor” görünen belge varsa yeniden işleyin; değişmeyen belgeler atlanır.
+            </InfoTooltip>
+            <button type="button" className={d.btnPrimary} onClick={() => setModal({ open: true, doc: null })}>+ Yeni Belge</button>
+            <button type="button" className={d.btnPale} onClick={() => { setCallErrors({}); setCallModalOpen(true) }}>📞 Yapay Zeka ile Ara</button>
           </div>
         </div>
 
-        {/* Filter bars */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          {/* Category filters */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--foreground-3)', marginRight: 4 }}>Kategori:</span>
-            {(['all', ...categories.map(c => c.slug)] as const).map(cat => (
-              <button key={cat} onClick={() => setCatFilter(cat as Category | 'all')} style={{
-                padding: '4px 10px', borderRadius: 8, border: '1px solid', fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s',
-                background: catFilter === cat ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.03)',
-                borderColor: catFilter === cat ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.08)',
-                color: catFilter === cat ? '#60a5fa' : '#94a3b8',
-              }}>
-                {cat === 'all' ? 'Tümü' : `${getCatIcon(cat)} ${getCatLabel(cat)}`}
-              </button>
-            ))}
+        <div className={s.row} style={{ paddingTop: 10, borderTop: '1px solid var(--pc-border)' }}>
+          <div className={s.searchWrap}>
+            <span className={s.searchIcon}>🔍</span>
+            <input className={`${d.input} ${s.searchInput}`} value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Belge başlığı veya içeriğinde ara…" aria-label="Belge ara" />
           </div>
+          <Segment value={directionFilter} onChange={v => { setDirectionFilter(v); setPage(1) }} label="Kullanım yeri süzgeci"
+            options={[{ value: 'all', label: 'Tümü' }, ...DIRECTIONS.map(v => ({ value: v, label: CALL_DIRECTION_LABELS[v] }))]} />
+          <div style={{ marginLeft: 'auto' }}>
+            <Segment value={view} onChange={changeView} label="Görünüm" options={[{ value: 'list', label: '☰ Liste' }, { value: 'cards', label: '▦ Kart' }]} />
+          </div>
+        </div>
+        <div className={s.chipRow}>
+          <span className={s.muted} style={{ fontWeight: 700, fontSize: 12 }}>Kategori:</span>
+          {[{ slug: 'all', label: 'Tümü', icon: '', color: '' }, ...categories].map(cat => (
+            <button key={cat.slug} type="button" className={catFilter === cat.slug ? s.chipActive : d.chip} aria-pressed={catFilter === cat.slug} onClick={() => { setCatFilter(cat.slug); setPage(1) }}>
+              {cat.icon} {cat.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Category Management */}
-      <div className="glass-card" style={{ padding: '0.75rem 1.25rem', marginBottom: '1rem' }}>
-        <button onClick={() => setCatMgmtOpen(!catMgmtOpen)} style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground-3)' }}>⚙️ Kategori Yönetimi</span>
-          <span style={{ fontSize: 12, color: 'var(--foreground-3)', transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+      {/* Kategori yönetimi */}
+      <div className={d.card}>
+        <button type="button" className={s.accordion} onClick={() => setCatMgmtOpen(!catMgmtOpen)} aria-expanded={catMgmtOpen}>
+          <span>⚙️ Kategori Yönetimi</span>
+          <span style={{ transform: catMgmtOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
         </button>
-
         {catMgmtOpen && (
-          <div style={{ marginTop: 12 }}>
-            {/* Existing categories */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-              {categories.map(cat => (
-                <div key={cat.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '4px 10px', borderRadius: 20,
-                  background: `rgba(${hexToRgb(cat.color)}, 0.15)`,
-                  border: `1px solid ${cat.color}`,
-                  fontSize: 12, color: cat.color,
-                }}>
-                  {cat.icon} {cat.label}
-                  {cat.slug !== 'genel' && (
-                    <button onClick={() => deleteCategory(cat.id)} style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: '#ef4444', fontSize: 11, padding: 0, marginLeft: 4,
-                    }}>✕</button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Add new category */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div style={{ flex: '1 1 100px' }}>
-                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Slug (key)</label>
-                <input value={newCatSlug} onChange={e => setNewCatSlug(e.target.value)} placeholder="ornek" style={{
-                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none',
-                }} />
-              </div>
-              <div style={{ flex: '1 1 120px' }}>
-                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Etiket</label>
-                <input value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)} placeholder="Örnek Kategori" style={{
-                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none',
-                }} />
-              </div>
-              <div style={{ flex: '0 0 50px' }}>
-                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>İkon</label>
-                <input value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} style={{
-                  width: '100%', padding: '5px 8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 6, color: 'var(--foreground)', fontSize: 11, outline: 'none', textAlign: 'center',
-                }} />
-              </div>
-              <div style={{ flex: '0 0 60px' }}>
-                <label style={{ fontSize: 10, color: 'var(--foreground-3)', display: 'block', marginBottom: 3 }}>Renk</label>
-                <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{
-                  width: '100%', height: 28, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent',
-                }} />
-              </div>
-              <button onClick={addCategory} disabled={catSaving || !newCatSlug.trim() || !newCatLabel.trim()} style={{
-                padding: '5px 14px', borderRadius: 6, background: 'rgba(34,197,94,0.15)',
-                border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', fontSize: 11,
-                cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
-              }}>
-                {catSaving ? '...' : '+ Ekle'}
-              </button>
-            </div>
+          <div className={s.row} style={{ marginTop: 12 }}>
+            {categories.map(cat => (
+              <span key={cat.id} className={s.catPill}>
+                <span className={s.dot} style={{ background: cat.color }} />{cat.icon} {cat.label}
+                {cat.slug !== 'genel' && <button type="button" className={s.catRemove} onClick={() => setConfirm({ kind: 'category', cat })} aria-label={`${cat.label} kategorisini sil`}>✕</button>}
+              </span>
+            ))}
+            <button type="button" className={d.btnMint} onClick={() => setCatModalOpen(true)}>+ Kategori Ekle</button>
           </div>
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', gap: 16, alignItems: 'start', marginBottom: 24 }}>
-        {/* Sol Kolon: Bilgi Bankası Belgeleri */}
-        <div>
-          {/* Loading */}
+      <div className={s.cols}>
+        {/* Sol: belgeler */}
+        <div className={s.stack}>
+          {selected.size > 0 && (
+            <div className={s.bulkBar}>
+              <span>{selected.size} belge seçili</span>
+              <button type="button" className={d.btnMint} onClick={() => bulkSetActive(true)}>Aktif yap</button>
+              <button type="button" className={d.btn} onClick={() => bulkSetActive(false)}>Pasif yap</button>
+              <button type="button" className={s.btnDanger} onClick={() => setConfirm({ kind: 'bulkDelete' })}>🗑 Sil</button>
+              <button type="button" className={d.btn} style={{ marginLeft: 'auto' }} onClick={() => setSelected(new Set())}>Seçimi temizle</button>
+            </div>
+          )}
+
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--foreground-3)' }}>⏳ Yükleniyor…</div>
+            <div className={`${d.card} ${s.list}`} aria-busy="true" aria-label="Belgeler yükleniyor">
+              {Array.from({ length: 6 }).map((_, i) => <div key={i} className={s.skeleton} />)}
+            </div>
+          ) : loadError ? (
+            <div className={`${d.card} ${s.state} ${s.stateError}`} role="alert">
+              <div style={{ fontSize: 32 }}>⚠️</div>
+              <div className={s.stateTitle}>Belgeler yüklenemedi</div>
+              <div>{loadError}</div>
+              <button type="button" className={d.btnPrimary} onClick={load}>Tekrar dene</button>
+            </div>
+          ) : docs.length === 0 ? (
+            <div className={`${d.card} ${s.state}`}>
+              <div style={{ fontSize: 36 }}>🧠</div>
+              <div className={s.stateTitle}>Bilgi bankanız henüz boş</div>
+              <div>Yapay zeka asistanın hastalara doğru bilgi verebilmesi için ilk belgeyi ekleyin.</div>
+              <button type="button" className={d.btnPrimary} onClick={() => setModal({ open: true, doc: null })}>+ İlk Belgeyi Ekle</button>
+            </div>
           ) : filtered.length === 0 ? (
-            <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--foreground-3)' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🧠</div>
-              <div style={{ marginBottom: '0.5rem' }}>Filtrelere uygun belge bulunamadı</div>
-              <div style={{ fontSize: '0.8rem', marginBottom: '1.25rem', color: '#475569' }}>
-                Yeni belge ekleyerek AI'ı bilgilendirin
-              </div>
-              <button onClick={() => setModal({ open: true, doc: null })} className="btn btn-primary" style={{ fontSize: '0.875rem' }}>
-                + İlk Belgeyi Ekle
-              </button>
+            <div className={`${d.card} ${s.state}`}>
+              <div style={{ fontSize: 32 }}>🔍</div>
+              <div className={s.stateTitle}>Filtrelere uygun belge bulunamadı</div>
+              {hasFilters && <button type="button" className={d.btn} onClick={clearFilters}>Filtreleri temizle</button>}
             </div>
           ) : (
-            /* Doc grid */
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '1rem' }}>
-              {filtered.map(doc => {
-                const color = getCatColor(doc.category)
-                const hasEmbedding = !!doc.embeddedAt
-                const dir = doc.callDirection || 'both'
-
-                return (
-                  <div key={doc.id} className="glass-card" style={{
-                    padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem',
-                    borderLeft: `3px solid ${color}`, opacity: doc.active ? 1 : 0.55,
-                    transition: 'opacity 0.2s',
-                  }}>
-                    {/* Top row */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-                          <span style={{
-                            fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-                            color, background: `rgba(${hexToRgb(color)}, 0.15)`,
-                            padding: '2px 8px', borderRadius: 20, border: `1px solid rgba(${hexToRgb(color)}, 0.25)`,
-                            flexShrink: 0,
-                          }}>
-                            {getCatIcon(doc.category)} {getCatLabel(doc.category)}
-                          </span>
-
-                          {/* Direction Badge (Only show if restricted) */}
-                          {dir !== 'both' && (
-                            <span style={{
-                              fontSize: '0.68rem', fontWeight: 600,
-                              padding: '2px 8px', borderRadius: 20,
-                              background: dir === 'inbound' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
-                              border: `1px solid ${dir === 'inbound' ? 'rgba(59,130,246,0.3)' : 'rgba(16,185,129,0.3)'}`,
-                              color: dir === 'inbound' ? '#60a5fa' : '#34d399',
-                            }} title={dir === 'inbound' ? 'Sadece Gelen Aramalarda Kullanılır' : 'Sadece Giden Aramalarda Kullanılır'}>
-                              {dir === 'inbound' ? '📥 Sadece Gelen' : '📤 Sadece Giden'}
-                            </span>
-                          )}
-                        </div>
-                        <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.3 }}>
-                          {doc.title}
-                        </h3>
-                      </div>
-
-                      {/* Active toggle */}
-                      <button
-                        onClick={() => handleToggle(doc.id)}
-                        disabled={togglingId === doc.id}
-                        title={doc.active ? 'Pasif yap' : 'Aktif yap'}
-                        style={{
-                          width: 38, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
-                          transition: 'all 0.2s', position: 'relative', flexShrink: 0,
-                          background: doc.active ? '#22c55e' : 'rgba(255,255,255,0.12)',
-                          opacity: togglingId === doc.id ? 0.5 : 1,
-                        }}
-                      >
-                        <span style={{
-                          position: 'absolute', top: 3, left: doc.active ? 19 : 3, width: 16, height: 16,
-                          borderRadius: '50%', background: 'white', transition: 'left 0.2s',
-                        }} />
-                      </button>
-                    </div>
-
-                    {/* Content accordion */}
-                    <div>
-                      <p style={{
-                        fontSize: '0.8rem', color: 'var(--foreground-3)', lineHeight: 1.55, margin: 0,
-                        ...(expandedId === doc.id ? {} : {
-                          display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                        }),
-                      }}>
-                        {doc.content}
-                      </p>
-                      <button
-                        onClick={() => setExpandedId(expandedId === doc.id ? null : doc.id)}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 0',
-                          fontSize: '0.72rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 4,
-                        }}
-                      >
-                        {expandedId === doc.id ? '▲ Küçült' : '▼ Tamamını gör'}
-                      </button>
-                    </div>
-
-                    {/* Footer */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.68rem', color: '#475569' }}>
-                        {hasEmbedding ? (
-                          <span style={{ color: '#22c55e' }}>✅ Embedding hazır</span>
-                        ) : (
-                          <span style={{ color: '#f59e0b' }}>⚠️ Embedding yok</span>
-                        )}
-                        {doc.embeddedAt && (
-                          <span style={{ marginLeft: 6, color: '#334155' }}>
-                            {fmtDate(doc.embeddedAt)}
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          onClick={() => setModal({ open: true, doc })}
-                          className="btn btn-ghost"
-                          style={{ padding: '4px 10px', fontSize: '0.73rem' }}
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          onClick={() => handleDelete(doc.id)}
-                          disabled={deletingId === doc.id}
-                          className="btn btn-danger"
-                          style={{ padding: '4px 10px', fontSize: '0.73rem', opacity: deletingId === doc.id ? 0.5 : 1 }}
-                        >
-                          {deletingId === doc.id ? '…' : '🗑'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            <KnowledgeDocList
+              docs={pageDocs} total={filtered.length} categories={categories} view={view}
+              sortKey={sortKey} sortDir={sortDir} onSort={onSort}
+              page={currentPage} pageSize={pageSize} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1) }}
+              selected={selected} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+              togglingId={togglingId} onToggleActive={handleToggle}
+              onOpen={setPreview} onEdit={doc => setModal({ open: true, doc })} onDelete={doc => setConfirm({ kind: 'doc', doc })}
+            />
           )}
         </div>
 
-        {/* Sağ Kolon: Gelen & Giden Karşılama Mesajları ve Ses Ayarları */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Karşılama Mesajı kartı (Tabs: Gelen / Giden / CallerID) */}
-          <div className="glass-card" style={{ padding: 20 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 14, paddingBottom: 12,
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-            }}>
+        {/* Sağ: karşılama ve ses ayarları */}
+        <div className={s.stack}>
+          <div className={d.card}>
+            <div className={s.spread} style={{ marginBottom: 12 }}>
               <div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>
-                  🗣️ Karşılama Mesajları & Hat Ayarı
-                </span>
-                <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '2px 0 0' }}>
-                  Gelen ve giden aramalar için ayrı açılış metinleri
-                </p>
+                <h3 className={s.h3}>
+                  🗣️ Karşılama Mesajları ve Hat Ayarı
+                  <InfoTooltip title="Karşılama mesajı">
+                    Arama açıldığında asistanın söylediği ilk cümledir. Gelen ve giden aramalar için ayrı mesaj yazabilirsiniz. En az 3, en fazla {GREETING_MAX} karakter olmalıdır.
+                  </InfoTooltip>
+                </h3>
+                <p className={s.sub}>Gelen ve giden aramalar için ayrı açılış metinleri</p>
               </div>
-              {greetingLoading && <Spinner />}
+              {greetingLoading && <div className={s.spinner} />}
             </div>
 
-            {/* Tab switchers */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 14, background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 10 }}>
-              <button
-                type="button"
-                onClick={() => setGreetingTab('inbound')}
-                style={{
-                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
-                  background: greetingTab === 'inbound' ? 'rgba(59,130,246,0.25)' : 'transparent',
-                  color: greetingTab === 'inbound' ? '#60a5fa' : 'var(--foreground-3)',
-                }}
-              >
-                📥 Gelen Arama
-              </button>
-              <button
-                type="button"
-                onClick={() => setGreetingTab('outbound')}
-                style={{
-                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
-                  background: greetingTab === 'outbound' ? 'rgba(16,185,129,0.25)' : 'transparent',
-                  color: greetingTab === 'outbound' ? '#34d399' : 'var(--foreground-3)',
-                }}
-              >
-                📤 Giden Arama
-              </button>
-              <button
-                type="button"
-                onClick={() => setGreetingTab('callerid')}
-                style={{
-                  flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, transition: 'all 0.2s',
-                  background: greetingTab === 'callerid' ? 'rgba(236,72,153,0.25)' : 'transparent',
-                  color: greetingTab === 'callerid' ? '#f472b6' : 'var(--foreground-3)',
-                }}
-              >
-                📞 Arayan Numara
-              </button>
+            <div className={d.segmentTrack} style={{ display: 'flex', marginBottom: 12 }} role="group" aria-label="Karşılama türü">
+              {([['inbound', `📥 ${TERM_LABELS.inbound}`], ['outbound', `📤 ${TERM_LABELS.outbound}`], ['callerid', '📞 Arayan Numara']] as const).map(([key, text]) => (
+                <button key={key} type="button" className={greetingTab === key ? d.segmentActive : d.segment} style={{ flex: 1 }} aria-pressed={greetingTab === key}
+                  onClick={() => { setGreetingTab(key); setGreetingErrors({}) }}>{text}</button>
+              ))}
             </div>
 
-            {!greetingLoading && (
-              <>
-                {/* 📥 Gelen Arama Karşılama */}
-                {greetingTab === 'inbound' && (
-                  <div>
-                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
-                      Müşteri kliniği aradığında AI asistanın söyleyeceği ilk karşılama cümlesi:
-                    </p>
-                    <textarea
-                      value={greetingText}
-                      onChange={(e) => setGreetingText(e.target.value)}
-                      rows={3}
-                      style={{
-                        width: '100%', padding: '10px 12px', fontSize: 12, lineHeight: 1.5,
-                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 8, color: 'var(--foreground)', resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-                      }}
-                      placeholder="Merhaba, hoş geldiniz! Ben Pine Klinik asistanınızım. Size nasıl yardımcı olabilirim?"
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveGreeting('inbound')}
-                        disabled={greetingSaving || !greetingText.trim()}
-                        className="btn btn-primary"
-                        style={{ fontSize: 12, padding: '6px 16px' }}
-                      >
-                        {greetingSaving ? 'Kaydediliyor...' : '📥 Gelen Karşılamayı Kaydet'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+            {!greetingLoading && greetingTab !== 'callerid' && (
+              <div>
+                <label className={s.label} htmlFor="kb-greeting">
+                  {greetingTab === 'inbound' ? 'Hasta kliniği aradığında söylenecek ilk cümle' : 'Asistan hastayı aradığında söylenecek ilk cümle'}
+                  <Counter value={greetingValue.length} max={GREETING_MAX} />
+                </label>
+                <textarea id="kb-greeting" className={`${d.input} ${s.textarea} ${greetingErrors.greeting ? s.inputError : ''}`} rows={3} value={greetingValue}
+                  onChange={e => {
+                    const v = maskGreeting(e.target.value)
+                    if (greetingTab === 'inbound') setGreetingText(v); else setGreetingOutboundText(v)
+                    setGreetingErrors({})
+                  }}
+                  placeholder={greetingTab === 'inbound' ? 'Merhaba, hoş geldiniz! Size nasıl yardımcı olabilirim?' : 'Merhaba, kliniğimizden arıyorum. Tedavi sonrası memnuniyet anketimiz için uygun musunuz?'} />
+                <FieldError message={greetingErrors.greeting} />
+                <div className={s.row} style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button type="button" className={d.btnPrimary} disabled={greetingSaving || !validateGreeting(greetingValue).ok} onClick={() => handleSaveGreeting(greetingTab as 'inbound' | 'outbound')}>
+                    {greetingSaving ? 'Kaydediliyor…' : greetingTab === 'inbound' ? 'Gelen karşılamayı kaydet' : 'Giden karşılamayı kaydet'}
+                  </button>
+                </div>
+              </div>
+            )}
 
-                {/* 📤 Giden Arama Karşılama */}
-                {greetingTab === 'outbound' && (
-                  <div>
-                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
-                      AI asistan hastayı/müşteriyi dış aramada aradığında söyleyeceği ilk karşılama cümlesi:
-                    </p>
-                    <textarea
-                      value={greetingOutboundText}
-                      onChange={(e) => setGreetingOutboundText(e.target.value)}
-                      rows={3}
-                      style={{
-                        width: '100%', padding: '10px 12px', fontSize: 12, lineHeight: 1.5,
-                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 8, color: 'var(--foreground)', resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-                      }}
-                      placeholder="Merhaba, ben Pine Klinik asistanıyım. Tedavi sonrası memnuniyet anketimiz için arıyorum..."
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveGreeting('outbound')}
-                        disabled={greetingSaving || !greetingOutboundText.trim()}
-                        className="btn btn-primary"
-                        style={{ fontSize: 12, padding: '6px 16px', background: '#10b981', borderColor: '#10b981' }}
-                      >
-                        {greetingSaving ? 'Kaydediliyor...' : '📤 Giden Karşılamayı Kaydet'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 📞 Dış Arama CallerID */}
-                {greetingTab === 'callerid' && (
-                  <div>
-                    <p style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 8, lineHeight: 1.5 }}>
-                      Robotun dış arama yaparken karşı tarafın ekranında görünecek NetGSM çıkış numarası:
-                    </p>
-                    <PhoneMaskedInput
-                      value={outboundCallerId}
-                      onValueChange={setOutboundCallerId}
-                      placeholder="0 (850) 309 61 19"
-                      style={{
-                        width: '100%', padding: '8px 12px', fontSize: 13,
-                        background: 'var(--input-bg, #0f172a)', border: '1px solid var(--input-border, #334155)',
-                        borderRadius: 8, color: 'var(--foreground)', outline: 'none',
-                      }}
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                      <button
-                        type="button"
-                        onClick={handleSaveCallerId}
-                        disabled={callerIdSaving || !outboundCallerId.trim()}
-                        className="btn btn-primary"
-                        style={{ fontSize: 12, padding: '6px 16px', background: '#ec4899', borderColor: '#ec4899' }}
-                      >
-                        {callerIdSaving ? 'Kaydediliyor...' : '📞 CallerID Kaydet'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
+            {!greetingLoading && greetingTab === 'callerid' && (
+              <div>
+                <div className={s.label}>
+                  Arayan numara
+                  <InfoTooltip title="Arayan numara nedir?">
+                    Asistan dışarı arama yaparken karşı tarafın ekranında görünecek telefon hattı numarasıdır. 11 hane olarak, 0 ile başlayarak girin.
+                  </InfoTooltip>
+                </div>
+                <PhoneMaskedInput value={outboundCallerId} onValueChange={v => { setOutboundCallerId(v); setGreetingErrors({}) }} placeholder="0 (850) 309 61 19"
+                  className={`${d.input} ${greetingErrors.callerId ? s.inputError : ''}`} />
+                <FieldError message={greetingErrors.callerId} />
+                <div className={s.row} style={{ justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button type="button" className={d.btnPrimary} disabled={callerIdSaving || !isCompleteTrPhone(outboundCallerId)} onClick={handleSaveCallerId}>
+                    {callerIdSaving ? 'Kaydediliyor…' : 'Arayan numarayı kaydet'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1088,174 +927,70 @@ export default function KnowledgeTab() {
         </div>
       </div>
 
-      <div style={{ marginTop: '1.5rem' }}>
-        <WhatsAppConversationsCard />
-      </div>
+      <WhatsAppConversationsCard />
 
-      {/* Alt Satır: Konuşma Akışı (Flow Builder - Gelen ve Giden Tabları) */}
-      <div className="glass-card" style={{ width: '100%', padding: '1.25rem', marginTop: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--flow-panel-border)', paddingBottom: '1rem' }}>
+      {/* Konuşma akışı */}
+      <div className={`${d.card} ${s.stack}`}>
+        <div className={s.spread}>
           <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              🔀 Konuşma Akışı Senaryoları (Flow Builder)
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', margin: '4px 0 0' }}>
-              Yapay zekanın görüşme esnasında soracağı soruları, kontrolleri ve randevu adımlarını görsel olarak tasarlayın
-            </p>
+            <h3 className={s.h3}>🔀 Konuşma Akışı Senaryoları</h3>
+            <p className={s.sub}>Yapay zekanın görüşme esnasında soracağı soruları, kontrolleri ve randevu adımlarını görsel olarak tasarlayın</p>
           </div>
-
-          {/* Flow Direction Selector Switcher */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', background: 'var(--input-bg)', padding: 5, borderRadius: 10, border: '1px solid var(--input-border)', boxShadow: 'var(--pc-neo-inset)' }}>
-            <button
-              type="button"
-              onClick={() => setFlowDirection('inbound')}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
-                background: flowDirection === 'inbound' ? '#2563eb' : 'var(--card-bg)',
-                borderColor: flowDirection === 'inbound' ? '#1d4ed8' : 'var(--input-border)',
-                color: flowDirection === 'inbound' ? '#ffffff' : 'var(--foreground)',
-                boxShadow: flowDirection === 'inbound' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-              }}
-            >
-              <span style={{ color: flowDirection === 'inbound' ? '#ffffff' : 'inherit' }}>📥 Gelen Arama Akışı (Randevu)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFlowDirection('outbound')}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
-                background: flowDirection === 'outbound' ? '#2563eb' : 'var(--card-bg)',
-                borderColor: flowDirection === 'outbound' ? '#1d4ed8' : 'var(--input-border)',
-                color: flowDirection === 'outbound' ? '#ffffff' : 'var(--foreground)',
-                boxShadow: flowDirection === 'outbound' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-              }}
-            >
-              <span style={{ color: flowDirection === 'outbound' ? '#ffffff' : 'inherit' }}>📤 Giden Arama Akışı (Anket & Takip)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFlowDirection('whatsapp')}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.18s',
-                background: flowDirection === 'whatsapp' ? '#2563eb' : 'var(--card-bg)',
-                borderColor: flowDirection === 'whatsapp' ? '#1d4ed8' : 'var(--input-border)',
-                color: flowDirection === 'whatsapp' ? '#ffffff' : 'var(--foreground)',
-                boxShadow: flowDirection === 'whatsapp' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-              }}
-            >
-              <span style={{ color: flowDirection === 'whatsapp' ? '#ffffff' : 'inherit' }}>💬 WhatsApp Asistan Akışı</span>
-            </button>
-          </div>
+          <Segment value={flowDirection} onChange={setFlowDirection} label="Akış türü" options={flowOptions} />
         </div>
-
-        {/* Current Flow Notice */}
-        <div style={{
-          padding: '10px 14px', borderRadius: 10, marginBottom: 16, fontSize: '0.8rem',
-          background: 'var(--flow-info-bg)',
-          border: '1px solid var(--flow-info-border)',
-          color: 'var(--flow-info-text)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
-        }}>
-          <span style={{ fontWeight: 600 }}>
-            {flowDirection === 'inbound'
-              ? '📥 Şu an Gelen Arama Akışı düzenleniyor — Kliniği arayan hastaların karşılama, sorgulama ve randevu akışıdır.'
-              : flowDirection === 'outbound'
-              ? '📤 Şu an Giden Arama Akışı düzenleniyor — Yapay zekanın dışarıya yaptığı memnuniyet anketi ve takip aramalarının akışıdır.'
-              : '💬 Şu an WhatsApp Asistan Akışı düzenleniyor — WhatsApp üzerinden gelen hasta mesajlarında uygulanacak konuşma akışıdır.'}
-          </span>
-          <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 10px', borderRadius: 12, background: 'var(--card-bg)', border: '1px solid var(--flow-info-border)', color: 'var(--foreground)' }}>
-            Aktif Kanal: {flowDirection === 'inbound' ? 'Gelen Arama' : flowDirection === 'outbound' ? 'Giden Arama' : 'WhatsApp'}
-          </span>
+        <div className={s.flowNotice}>
+          {flowDirection === 'inbound'
+            ? '📥 Şu an gelen arama akışı düzenleniyor — kliniği arayan hastaların karşılama, sorgulama ve randevu akışı.'
+            : flowDirection === 'outbound'
+            ? '📤 Şu an giden arama akışı düzenleniyor — asistanın yaptığı memnuniyet anketi ve takip aramalarının akışı.'
+            : '💬 Şu an WhatsApp asistan akışı düzenleniyor — WhatsApp üzerinden gelen hasta mesajlarında uygulanacak konuşma akışı.'}
         </div>
-
-        {/* FlowBuilder with dynamic direction key to force re-render/reload */}
         <FlowBuilder key={flowDirection} direction={flowDirection} />
       </div>
 
-      {/* Modal */}
-      {modal.open && (
-        <DocModal
-          doc={modal.doc}
-          onClose={() => !saving && setModal({ open: false, doc: null })}
-          onSave={handleSave}
-          saving={saving}
-          categories={categories}
+      {/* Önizleme çekmecesi */}
+      {preview && (
+        <KnowledgeDocPreview
+          doc={preview} category={getCat(preview.category)} toggling={togglingId === preview.id}
+          onClose={() => setPreview(null)}
+          onEdit={doc => { setPreview(null); setModal({ open: true, doc }) }}
+          onDelete={doc => setConfirm({ kind: 'doc', doc })}
+          onToggleActive={handleToggle}
         />
       )}
 
-      {/* Outbound Call Modal (Yeni Randevu 460px Standardı) */}
+      {modal.open && (
+        <DocModal doc={modal.doc} onClose={() => { if (!saving) setModal({ open: false, doc: null }) }} onSave={handleSave} saving={saving} categories={categories} />
+      )}
+
+      {catModalOpen && (
+        <CategoryModal categories={categories} onClose={() => setCatModalOpen(false)} onCreated={async () => { await load(); showToast('✅ Kategori eklendi') }} onError={m => showToast(m, 'error')} />
+      )}
+
       {callModalOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '16px',
-        }} {...callModalBackdropDismiss}>
-          <form
-            role="dialog"
-            aria-modal="true"
-            onSubmit={handleOutboundCall}
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: 'var(--card-bg)', border: '1.5px solid var(--input-border)',
-              borderRadius: 14, width: 'calc(100vw - 24px)', maxWidth: 460, maxHeight: '90vh',
-              boxShadow: 'var(--pc-modal-shadow)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            }}
-          >
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
-                  📞
-                </div>
-                <div>
-                  <h2 style={{ fontSize: '1.02rem', fontWeight: 700, margin: 0, color: 'var(--foreground)', lineHeight: 1.2 }}>Yapay Zeka ile Ara</h2>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>Giden arama akışı ile dış arama başlatın</div>
-                </div>
-              </div>
-              <button type="button" onClick={() => setCallModalOpen(false)} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}>✕</button>
+        <ModalShell icon="📞" title="Yapay Zeka ile Ara" subtitle="Giden arama akışı ile dış arama başlatın" onClose={() => setCallModalOpen(false)} onSubmit={handleOutboundCall}
+          footer={(
+            <>
+              <button type="button" className={d.btn} onClick={() => setCallModalOpen(false)} disabled={calling}>İptal</button>
+              <button type="submit" className={d.btnPrimary} disabled={calling || !isCompleteTrPhone(callPhone)}>{calling ? 'Aranıyor…' : 'Arama başlat'}</button>
+            </>
+          )}>
+          <div className={d.subcard}>
+            <div className={s.label}>
+              Hedef telefon numarası
+              <InfoTooltip title="Arama bilgileri">
+                Arama şu ayarlarla başlar: çıkış numarası {outboundCallerId ? `0 (${outboundCallerId.slice(1, 4)}) ${outboundCallerId.slice(4, 7)} ${outboundCallerId.slice(7, 9)} ${outboundCallerId.slice(9, 11)}` : '—'}, akış “giden arama akışı (anket ve takip)”, açılış cümlesi “giden arama karşılama mesajı”. Hastanın asistan arama izni olması gerekir.
+              </InfoTooltip>
             </div>
+            <PhoneMaskedInput value={callPhone} onValueChange={v => { setCallPhone(v); setCallErrors({}) }} placeholder="0 (5XX) XXX XX XX" className={`${d.input} ${callErrors.phone ? s.inputError : ''}`} />
+            <FieldError message={callErrors.phone} />
+          </div>
+        </ModalShell>
+      )}
 
-            {/* Body */}
-            <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                    Hedef Telefon Numarası
-                  </label>
-                  <PhoneMaskedInput
-                    value={callPhone}
-                    onValueChange={setCallPhone}
-                    placeholder="Örn: 0 (5XX) XXX XX XX"
-                    required
-                    style={{
-                      width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
-                      border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
-                      fontSize: '0.85rem', outline: 'none', boxShadow: 'var(--pc-neo-inset)',
-                    }}
-                  />
-                </div>
-
-                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--input-border)', borderRadius: 8, padding: '10px 12px', fontSize: '0.76rem', color: 'var(--foreground-2)' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--foreground)', marginBottom: 4 }}>ℹ️ Arama Parametreleri:</div>
-                  <div>• Çıkış Numarası: <strong>{outboundCallerId}</strong></div>
-                  <div>• Akış: <strong>Giden Arama Akışı (Anket/Takip)</strong></div>
-                  <div>• Açılış: <strong>Giden Karşılama Mesajı</strong></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
-              <button type="button" onClick={() => setCallModalOpen(false)} disabled={calling} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
-                İptal
-              </button>
-              <button type="submit" disabled={calling || !callPhone.trim()} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: calling || !callPhone.trim() ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: calling || !callPhone.trim() ? 0.6 : 1 }}>
-                <span style={{ color: '#ffffff' }}>{calling ? 'Aranıyor...' : 'Hemen Ara'}</span>
-              </button>
-            </div>
-          </form>
-        </div>
+      {confirmProps && (
+        <ConfirmModal isOpen title={confirmProps.title} message={confirmProps.message} variant={confirmProps.variant} confirmText={confirmProps.confirmText}
+          onClose={() => setConfirm(null)} onConfirm={() => { const run = confirmProps.run; setConfirm(null); void run() }} />
       )}
     </div>
   )

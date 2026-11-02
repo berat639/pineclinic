@@ -88,18 +88,11 @@ export async function recordAiTokenUsage(params: {
   }
 }
 
-async function resolveUsdTryRate(): Promise<number> {
-  try {
-    await ensureAiUsageTable()
-    const rows = await db.execute<{ value: string }>(sql`
-      SELECT value FROM platform_settings WHERE key = 'ai.usd_try_rate' LIMIT 1
-    `)
-    const parsed = Number(rows[0]?.value)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  } catch {}
-  const envRate = Number(process.env.USD_TRY_RATE)
-  if (Number.isFinite(envRate) && envRate > 0) return envRate
-  return 38.5
+// Sabit kur: yalnızca sunucuda hesapta kullanılır, istemciye gönderilmez.
+export const USD_TRY_RATE = 56.5
+
+export function usdToTry(usd: number): number {
+  return Number((usd * USD_TRY_RATE).toFixed(2))
 }
 
 // Blended Gemini Live/Flash approximate cost per 1M tokens in USD:
@@ -113,7 +106,6 @@ function estimateCostUsd(promptTokens: number, responseTokens: number, totalToke
 
 export async function getClinicTokenStats(clinicId?: string | null) {
   const effectiveClinicId = clinicId ?? currentClinicId()
-  const usdTryRate = await resolveUsdTryRate()
   if (!effectiveClinicId) {
     return {
       today: 0,
@@ -122,7 +114,7 @@ export async function getClinicTokenStats(clinicId?: string | null) {
       promptToday: 0,
       responseToday: 0,
       bySource: {} as Record<string, number>,
-      costTry: { today: 0, month: 0, usdTryRate },
+      costTry: { today: 0, month: 0, bySource: {} as Record<string, number> },
     }
   }
 
@@ -149,8 +141,11 @@ export async function getClinicTokenStats(clinicId?: string | null) {
       WHERE clinic_id = ${effectiveClinicId}::uuid
     `)
 
-    const sourceRows = await db.execute<{ source: string; total: number }>(sql`
-      SELECT source, COALESCE(SUM(total_tokens), 0)::bigint AS total
+    const sourceRows = await db.execute<{ source: string; prompt: number; response: number; total: number }>(sql`
+      SELECT source,
+        COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt,
+        COALESCE(SUM(response_tokens), 0)::bigint AS response,
+        COALESCE(SUM(total_tokens), 0)::bigint AS total
       FROM clinic_ai_usage_daily
       WHERE clinic_id = ${effectiveClinicId}::uuid
         AND day = (now() AT TIME ZONE 'Europe/Istanbul')::date
@@ -171,8 +166,12 @@ export async function getClinicTokenStats(clinicId?: string | null) {
       bySource[r.source] = Number(r.total || 0)
     }
 
-    const todayCostTry = Number((estimateCostUsd(promptToday, responseToday, today) * usdTryRate).toFixed(2))
-    const monthCostTry = Number((estimateCostUsd(monthPrompt, monthResponse, month) * usdTryRate).toFixed(2))
+    const todayCostTry = usdToTry(estimateCostUsd(promptToday, responseToday, today))
+    const monthCostTry = usdToTry(estimateCostUsd(monthPrompt, monthResponse, month))
+    const costBySource: Record<string, number> = {}
+    for (const r of sourceRows) {
+      costBySource[r.source] = usdToTry(estimateCostUsd(Number(r.prompt || 0), Number(r.response || 0), Number(r.total || 0)))
+    }
 
     return {
       today,
@@ -184,7 +183,7 @@ export async function getClinicTokenStats(clinicId?: string | null) {
       costTry: {
         today: todayCostTry,
         month: monthCostTry,
-        usdTryRate,
+        bySource: costBySource,
       },
     }
   } catch {
@@ -195,7 +194,7 @@ export async function getClinicTokenStats(clinicId?: string | null) {
       promptToday: 0,
       responseToday: 0,
       bySource: {} as Record<string, number>,
-      costTry: { today: 0, month: 0, usdTryRate },
+      costTry: { today: 0, month: 0, bySource: {} as Record<string, number> },
     }
   }
 }

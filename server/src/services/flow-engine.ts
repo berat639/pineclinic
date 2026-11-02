@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto'
 import { db } from '../db/client'
 import { flowSessions } from '../db/schema'
+import { isRemovedWebhookAction } from './flow-validation'
 import {
   evaluateConditionNode,
-  executeFlowWebhookAction,
   getActiveFlow,
   injectFlowSystemVariables,
   renderFlowTemplate,
@@ -178,11 +178,9 @@ export class FlowEngine {
             this.next(edgesFrom(this.state.flow.edges, node.id)[0])
             continue
           }
-          if (act === 'webhook' && this.mode === 'active') {
-            const wh = await executeFlowWebhookAction(node, this.state.fields)
-            if (Object.keys(wh.mappedFields).length > 0) {
-              this.state.fields = { ...this.state.fields, ...wh.mappedFields }
-            }
+          if (isRemovedWebhookAction(node)) {
+            // Kaldırılan eski akış webhook'u: çalışma anında pas geçilir (DB'ye dokunulmaz).
+            console.warn(`[FlowEngine] Kaldırılmış 'webhook' işlemi pas geçildi (node: ${node.id})`)
             this.state.completedActions.push(node.id)
             const outEdge = edgesFrom(this.state.flow.edges, node.id)[0]
             if (!outEdge) {

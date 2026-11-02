@@ -1859,33 +1859,30 @@ const app = new Elysia()
 
   // ── Prompt Section Settings ─────────────────────────────────────────────────
   .get('/api/admin/settings/prompts', async () => {
-    const dbSections = await getAllPromptSections()
-    return PROMPT_SECTIONS.map(section => ({
-      key: section.key,
-      label: section.label,
-      description: section.description,
-      sortOrder: section.sortOrder,
-      value: dbSections[section.key]?.value ?? section.defaultValue,
-      isCustom: Boolean(dbSections[section.key] && dbSections[section.key].value !== section.defaultValue),
-      updatedAt: dbSections[section.key]?.updatedAt ?? null,
-    }))
+    const { getEffectivePromptSections } = await import('./prompts/registry')
+    const effective = await getEffectivePromptSections()
+    return PROMPT_SECTIONS.map(section => {
+      const value = effective[section.key] ?? section.defaultValue
+      return {
+        key: section.key,
+        label: section.label,
+        description: section.description,
+        sortOrder: section.sortOrder,
+        value,
+        isCustom: value !== section.defaultValue,
+        updatedAt: null,
+      }
+    })
   })
 
-  .put('/api/admin/settings/prompts/:key', async ({ params, body, set }) => {
-    const { key } = params
-    const { value } = (body ?? {}) as { value?: string }
-    if (!key.startsWith('prompt.')) { set.status = 400; return { error: 'Geçersiz key' } }
-    if (!value || value.trim().length < 5) { set.status = 400; return { error: 'Değer en az 5 karakter olmalı' } }
-    await setPromptSection(key, value.trim())
-    return { success: true, key, updatedAt: new Date().toISOString() }
+  .put('/api/admin/settings/prompts/:key', async ({ set }) => {
+    set.status = 403
+    return { error: 'Sistem talimatları yalnızca platform yöneticisi tarafından PineClinic panelinden değiştirilebilir.' }
   })
 
-  .delete('/api/admin/settings/prompts/:key', async ({ params, set }) => {
-    const { key } = params
-    if (!key.startsWith('prompt.')) { set.status = 400; return { error: 'Geçersiz key' } }
-    await resetPromptSection(key)
-    const defaultVal = getDefaultPromptValue(key)
-    return { success: true, key, value: defaultVal }
+  .delete('/api/admin/settings/prompts/:key', async ({ set }) => {
+    set.status = 403
+    return { error: 'Sistem talimatları yalnızca platform yöneticisi tarafından PineClinic panelinden değiştirilebilir.' }
   })
 
   .post('/api/admin/settings/prompts/preview', async () => {
@@ -2176,6 +2173,34 @@ const app = new Elysia()
     } catch (error) {
       set.status = 500
       return { error: error instanceof Error ? error.message : 'Simülasyon çalıştırılamadı' }
+    }
+  })
+
+  .post('/api/admin/flow/explain-node', async ({ body, set }) => {
+    try {
+      const payload = (body ?? {}) as {
+        graphHash?: string
+        nodeId?: string
+        summary?: { does?: string; when?: string[]; next?: string[]; warnings?: string[] }
+        nodes?: unknown[]
+        edges?: unknown[]
+      }
+      if (!payload.nodeId || typeof payload.nodeId !== 'string') {
+        set.status = 400
+        return { error: 'Açıklanacak adım kimliği (nodeId) gereklidir.' }
+      }
+      const { explainFlowNode } = await import('./services/flow-explain')
+      return await explainFlowNode({
+        clinicId: currentClinicId(),
+        graphHash: typeof payload.graphHash === 'string' ? payload.graphHash : undefined,
+        nodeId: payload.nodeId,
+        summary: payload.summary,
+        nodes: Array.isArray(payload.nodes) ? (payload.nodes as any[]) : undefined,
+        edges: Array.isArray(payload.edges) ? (payload.edges as any[]) : undefined,
+      })
+    } catch (error) {
+      set.status = 500
+      return { error: error instanceof Error ? error.message : 'Adım açıklaması üretilemedi.' }
     }
   })
 

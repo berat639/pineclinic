@@ -2,10 +2,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { IMaskInput } from 'react-imask'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
+import PlatformSystemPrompts from './PlatformSystemPrompts'
 import styles from './PlatformClinicsTab.module.css'
 
 type Clinic = { id: string; name: string; hostname: string; isActive?: boolean }; type Test = { id: string; kind: string; status: string; message: string | null; revision: number; expiresAt?: string }; type State = { configured: boolean; enabled: boolean; revision: number; health: string; test: Test | null; tests?: Test[]; config?: Record<string, unknown> }; type Integrations = { phone: State; sms: State; smtp: State; connection: { ip: string; port: number; protocol: string } }; type Wa = { connectionState: string; expectedPhone: string | null; numberVerifiedAt: string | null }
-type GeminiKeyInfo = { configured: boolean; source: 'clinic' | 'shared' | 'missing'; last4: string | null; updatedAt: string | null }
+type GeminiKeyInfo = { configured: boolean; source: 'clinic' | 'shared' | 'missing'; last4: string | null; updatedAt: string | null; conflict?: boolean }
 type ClinicAdmin = { id: string; email: string; name: string; phone: string | null; role: string; active: boolean; isPlatformAdmin: boolean; createdAt: string }
 type ClinicAdminInvite = { id: string; email: string; name: string; role: string; status: string; expiresAt: string; createdAt: string }
 type ClinicAdminsPayload = { clinicId: string; clinicName: string; clinicIsActive: boolean; primaryHostname: string; admins: ClinicAdmin[]; invitations: ClinicAdminInvite[]; smtpStatus: { configured: boolean; enabled: boolean; ready: boolean; fromAddress: string | null; message: string } }
@@ -102,7 +103,7 @@ function Step({ complete, title, detail, action, disabled, onClick, onCancel }: 
 export default function PlatformClinicsTab() {
   const [clinics, setClinics] = useState<Clinic[]>([]), [selected, setSelected] = useState<string | null>(null), [ints, setInts] = useState<Integrations | null>(null), [wa, setWa] = useState<Wa | null>(null), [geminiKey, setGeminiKey] = useState<GeminiKeyInfo | null>(null), [geminiKeyInput, setGeminiKeyInput] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [error, setError] = useState(''), [name, setName] = useState(''), [host, setHost] = useState(''), [zone, setZone] = useState('Europe/Istanbul'), [waPhone, setWaPhone] = useState(''), [qr, setQr] = useState<string | null>(null)
   const [clinicAdmins, setClinicAdmins] = useState<ClinicAdmin[]>([]), [adminInvites, setAdminInvites] = useState<ClinicAdminInvite[]>([]), [adminSmtp, setAdminSmtp] = useState<{ ready: boolean; message: string }>({ ready: false, message: '' }), [adminMode, setAdminMode] = useState<'seed' | 'invite'>('seed'), [adminForm, setAdminForm] = useState({ name: '', email: '', password: '', phone: '' })
-  const [confirmFreezeClinic, setConfirmFreezeClinic] = useState<Clinic | null>(null), [confirmFreezeAdmin, setConfirmFreezeAdmin] = useState<ClinicAdmin | null>(null)
+  const [confirmFreezeClinic, setConfirmFreezeClinic] = useState<Clinic | null>(null), [confirmFreezeAdmin, setConfirmFreezeAdmin] = useState<ClinicAdmin | null>(null), [confirmRemoveKey, setConfirmRemoveKey] = useState(false)
   const [phone, setPhone] = useState<PhoneForm>({ username: '', password: '', numbers: [''], callerId: '', transferNumber: '', target: '' }), [sms, setSms] = useState({ username: '', password: '', senderId: '', target: '' }), [smtp, setSmtp] = useState({ host: '', port: '465', username: '', password: '', secure: 'ssl', fromName: '', fromAddress: '', target: '' }); const serial = useRef(0)
   const run = async (fn: () => Promise<void>) => { setBusy(true); setError(''); setNotice(''); try { await fn() } catch (e) { setError(e instanceof Error ? e.message : 'İşlem tamamlanamadı') } finally { setBusy(false) } }
   const load = useCallback(async () => setClinics(await api<Clinic[]>('/api/platform/clinics')), [])
@@ -439,9 +440,9 @@ export default function PlatformClinicsTab() {
       <section className={styles.card}>
         <div className={styles.setupHeading}>
           <div>
-            <h2 className={styles.title}>{clinic?.name} · Gemini Yapay Zeka API Anahtarı</h2>
+            <h2 className={styles.title}>{clinic?.name} · Yapay Zeka API Anahtarı</h2>
             <p className={styles.description}>
-              Kliniğe özel Google Gemini API anahtarı tanımlandığında sesli asistan, WhatsApp AI ve bilgi tabanı (embedding) işlemleri bu anahtar üzerinden çalışır; tanımlanmazsa platformun ortak anahtarı kullanılır.
+              Her klinik kendine ait ayrı bir anahtar kullanmalıdır (1 anahtar = 1 klinik). Tanımlandığında sesli asistan, yazışma asistanı ve bilgi bankası işlemleri bu anahtarla çalışır; tanımlanmazsa ortak yedek anahtar kullanılır.
             </p>
           </div>
           <div className={styles.rowActions}>
@@ -454,12 +455,13 @@ export default function PlatformClinicsTab() {
             </span>
           </div>
         </div>
+        {geminiKey?.conflict && <div className={styles.error}>Bu anahtar başka bir klinikle çakışıyor, lütfen yeni anahtar tanımlayın.</div>}
         <Field
-          label="Gemini API Anahtarı"
+          label="Yapay Zeka API Anahtarı"
           help={
             geminiKey?.configured
               ? `Kayıtlı anahtar: ••••${geminiKey.last4 || ''}${geminiKey.updatedAt ? ` · Son güncelleme: ${new Date(geminiKey.updatedAt).toLocaleString('tr-TR')}` : ''}. Değiştirmek istemiyorsanız boş bırakabilirsiniz.`
-              : 'Google AI Studio üzerinden alınan Gemini API anahtarını (AIza...) girin.'
+              : 'Yapay zeka hizmet sağlayıcısından alınan API anahtarını girin.'
           }
         >
           <input
@@ -484,7 +486,7 @@ export default function PlatformClinicsTab() {
               })
               setGeminiKey({ configured: saved.configured, source: saved.source, last4: saved.last4, updatedAt: saved.updatedAt })
               setGeminiKeyInput('')
-              setNotice('Kliniğe özel Gemini API anahtarı doğrulandı ve kaydedildi.')
+              setNotice('Kliniğe özel API anahtarı doğrulandı ve kaydedildi.')
             })}
           >
             Anahtarı doğrula ve kaydet
@@ -500,7 +502,7 @@ export default function PlatformClinicsTab() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(geminiKeyInput.trim() ? { apiKey: geminiKeyInput.trim() } : {}),
               })
-              setNotice(`Gemini API anahtarı testi başarılı (${res.latencyMs} ms).`)
+              setNotice(`API anahtarı testi başarılı (${res.latencyMs} ms).`)
             })}
           >
             Anahtarı test et
@@ -510,20 +512,34 @@ export default function PlatformClinicsTab() {
               type="button"
               className={styles.removeButton}
               disabled={busy}
-              onClick={() => void run(async () => {
-                if (!selected) return
-                const next = await api<GeminiKeyInfo>(`/api/platform/clinics/${selected}/gemini-key`, { method: 'DELETE' })
-                setGeminiKey(next)
-                setGeminiKeyInput('')
-                setNotice('Kliniğe özel Gemini API anahtarı kaldırıldı; ortak platform anahtarına geçildi.')
-              })}
+              onClick={() => setConfirmRemoveKey(true)}
             >
-              Özel anahtarı kaldır (Ortak anahtara dön)
+              Özel anahtarı kaldır
             </button>
           )}
         </div>
       </section>
     </>}
+    <PlatformSystemPrompts clinics={clinics} />
+    {confirmRemoveKey && (
+      <ConfirmModal
+        isOpen={true}
+        title="Özel Anahtarı Kaldır"
+        message="Kliniğe özel anahtar kaldırılacak. Bu klinik, yeni anahtar tanımlanana kadar ortak yedek anahtarla çalışır."
+        confirmText="Evet, Kaldır"
+        cancelText="Vazgeç"
+        variant="warning"
+        onConfirm={() => void run(async () => {
+          if (!selected) return
+          const next = await api<GeminiKeyInfo>(`/api/platform/clinics/${selected}/gemini-key`, { method: 'DELETE' })
+          setGeminiKey(next)
+          setGeminiKeyInput('')
+          setConfirmRemoveKey(false)
+          setNotice('Kliniğe özel anahtar kaldırıldı; klinik ortak yedek anahtarla çalışıyor.')
+        })}
+        onClose={() => setConfirmRemoveKey(false)}
+      />
+    )}
     {confirmFreezeClinic && (
       <ConfirmModal
         isOpen={true}

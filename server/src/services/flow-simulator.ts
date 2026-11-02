@@ -4,6 +4,19 @@ import { getGreeting } from '../db/repositories/settings'
 import { retrieveTopK, buildRagPrompt } from '../rag'
 import { getGeminiClient } from './gemini-client'
 import { recordAiTokenUsage } from '../db/repositories/ai-usage'
+import { currentClinicId } from '../tenancy/context'
+import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
+import { PROMPT_SECTION_KEYS } from '../data/default-prompts'
+import { resolveClinicGeminiKey } from './gemini-client'
+import { DEFAULT_LIVE_MODEL, isLiveModel } from './live-model-profile'
+import { getAiModel } from '../db/repositories/settings'
+
+/**
+ * GÜVENLİK SINIRI: Bu modül yalnızca bellekteki TASLAK akış üzerinde çalışır.
+ * Yayındaki akışa (flow-engine, flow_sessions), telefon hattına, randevu/not
+ * kayıtlarına ve ayarlara YAZMAZ. Tek yan etki, kullanım sayacına
+ * `source: 'simulator'` kaydı eklemektir.
+ */
 
 export interface SimulationMessage {
   role: 'ai' | 'user' | 'system' | 'action'
@@ -21,6 +34,19 @@ export interface FlowSimulationRequest {
   history?: Array<{ role: 'user' | 'model'; text: string }>
   userMessage?: string
   manualBranch?: 'true' | 'false'
+  /** 'adim' (varsayılan) | 'sesli_ayar' (sesli oturum ayarı) | 'sesli_bilgi' (sesli bilgi bankası araması) */
+  kind?: 'adim' | 'sesli_ayar' | 'sesli_bilgi'
+  /** Yapay zeka yanıtı üretmeden yalnızca akışı ilerletir (sesli mod aracı için). */
+  skipReply?: boolean
+}
+
+export interface SimulatorVoiceConfig {
+  available: boolean
+  message?: string
+  apiKey?: string
+  model?: string
+  systemPrompt?: string
+  greeting?: string
 }
 
 export interface FlowSimulationResponse {
@@ -33,6 +59,10 @@ export interface FlowSimulationResponse {
   completed: boolean
   aiPowered: boolean
   usedKnowledgeTitles: string[]
+  /** Sıradaki zorunlu görev (sesli moda araç yanıtı olarak verilir). */
+  nextInstruction?: string
+  voiceConfig?: SimulatorVoiceConfig
+  toolResult?: Record<string, unknown>
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -40,7 +70,6 @@ const ACTION_LABELS: Record<string, string> = {
   randevuOlustur: '📝 Randevu Oluştur',
   save_patient_note: '🗒️ Hastadan Not Al (Bankoya İlet)',
   notBirak: '🗒️ Anket / Hasta Notu Kaydet',
-  webhook: '🔗 Dış Sisteme Gönder (Webhook)',
   set_variable: '🔧 Değişken Ata',
   send_sms: '💬 SMS Gönder',
   wait_reprompt: '⏳ Bekle / Yeniden Sor',
@@ -82,7 +111,113 @@ function isFieldSatisfied(node: FlowNode, fields: Record<string, string>): boole
   return true
 }
 
+const NO_AI_MESSAGE = 'Bu klinik için yapay zeka bağlantısı tanımlı değil.'
+
+function emptyState(req: FlowSimulationRequest): FlowSimulationResponse {
+  return {
+    currentNodeId: req.currentNodeId ?? null,
+    visitedNodeIds: req.visitedNodeIds || [],
+    visitedEdgeIds: req.visitedEdgeIds || [],
+    fields: { ...(req.fields || {}) },
+    extractedFields: {},
+    logs: [],
+    completed: false,
+    aiPowered: false,
+    usedKnowledgeTitles: [],
+  }
+}
+
+async function resolveGreeting(direction: string): Promise<string> {
+  try {
+    return direction === 'outbound'
+      ? (await getGreeting('outbound')) || 'Merhaba, kliniğimizden memnuniyet anketi için arıyorum.'
+      : (await getGreeting('inbound')) || 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+  } catch {
+    return 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+  }
+}
+
+const DEFAULT_SIMULATOR_SYSTEM_RULES =
+  'Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.'
+const DEFAULT_SIMULATOR_VOICE_FLOW_RULES =
+  'AKIŞ YÖNETİMİ: Hasta yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır ve araçtan gelen sıradaki görevi uygula. Bilgi bankasında aranacak sorular için bilgiBankasindaAra aracını kullan.'
+
+/** Kliniğin (yoksa platformun) sistem talimatlarını sırayla birleştirir. Salt okunur. */
+async function buildClinicInstructions(clinicId: string | undefined, direction: string, greeting: string): Promise<string> {
+  const parts: string[] = []
+  for (const key of PROMPT_SECTION_KEYS) {
+    let value = ''
+    try { value = await getPromptTemplate(key, clinicId) } catch { value = '' }
+    if (!value) continue
+    if (key === 'prompt.greeting_flow') {
+      if (direction === 'outbound') {
+        value = (await getPromptTemplate('prompt.outbound_greeting_flow', clinicId).catch(() => '')) || value
+      } else if (direction === 'whatsapp') {
+        value = (await getPromptTemplate('prompt.whatsapp_greeting_flow', clinicId).catch(() => '')) || value
+      }
+      value = renderPromptTemplate(value, { greeting })
+    }
+    parts.push(value)
+  }
+  return parts.join('\n\n')
+}
+
+/** Taslak akış için sesli oturum ayarı. Kliniğin anahtarı, yoksa ortak yedek anahtar kullanılır. */
+async function buildVoiceConfig(req: FlowSimulationRequest, clinicId: string | undefined): Promise<SimulatorVoiceConfig> {
+  let apiKey = ''
+  try {
+    apiKey = (await resolveClinicGeminiKey(clinicId)).apiKey
+  } catch {
+    return { available: false, message: NO_AI_MESSAGE }
+  }
+  const direction = req.direction || 'inbound'
+  const greeting = await resolveGreeting(direction)
+  const saved = await getAiModel().catch(() => null)
+  const model = isLiveModel(saved) ? saved : isLiveModel(process.env.GEMINI_LIVE_MODEL) ? process.env.GEMINI_LIVE_MODEL! : DEFAULT_LIVE_MODEL
+  const flowPrompt = flowToPromptText({
+    id: 'sim', name: 'simulation', nodes: Array.isArray(req.nodes) ? req.nodes : [], edges: Array.isArray(req.edges) ? req.edges : [],
+    isActive: true, createdAt: '', updatedAt: '',
+  })
+  const [instructions, rawVoiceFlowRules] = await Promise.all([
+    buildClinicInstructions(clinicId, direction, greeting),
+    getPromptTemplate('prompt.simulator_voice_flow_rules', clinicId).catch(() => ''),
+  ])
+  const voiceFlowRules = renderPromptTemplate(rawVoiceFlowRules.trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES, {}).trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES
+  let ragContext = ''
+  try {
+    const docs = await retrieveTopK('kliniğin genel bilgileri, çalışma saatleri, hizmetler', 5, direction)
+    if (docs.length > 0) ragContext = await buildRagPrompt(docs)
+  } catch { /* bilgi bankası isteğe bağlı */ }
+  const systemPrompt = `BUGÜNÜN TARİHİ: ${getTodayIso()}. Bu bir SİMÜLASYONDUR; hiçbir kayıt gerçekten oluşturulmaz.
+
+${instructions}
+
+${flowPrompt}
+
+${voiceFlowRules}${ragContext}`
+  return { available: true, apiKey, model, systemPrompt, greeting }
+}
+
 export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise<FlowSimulationResponse> {
+  const clinicId = currentClinicId() || undefined
+  if (req.kind === 'sesli_ayar') {
+    return { ...emptyState(req), voiceConfig: await buildVoiceConfig(req, clinicId) }
+  }
+  if (req.kind === 'sesli_bilgi') {
+    const query = (req.userMessage || '').trim()
+    let titles: string[] = []
+    let text = ''
+    try {
+      const docs = query ? await retrieveTopK(query, 3, req.direction || 'inbound') : []
+      titles = docs.map(d => d.title)
+      text = docs.length > 0 ? await buildRagPrompt(docs) : ''
+    } catch { /* bilgi bankası isteğe bağlı */ }
+    return { ...emptyState(req), usedKnowledgeTitles: titles, toolResult: { sonuc: text || 'Bilgi bankasında ilgili kayıt bulunamadı.' } }
+  }
+  return runStep(req, clinicId)
+}
+
+async function runStep(req: FlowSimulationRequest, clinicId: string | undefined): Promise<FlowSimulationResponse> {
   const direction = req.direction || 'inbound'
   const nodes = Array.isArray(req.nodes) ? req.nodes : []
   const edges = Array.isArray(req.edges) ? req.edges : []
@@ -94,7 +229,7 @@ export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise
   const logs: SimulationMessage[] = []
   const usedKnowledgeTitles: string[] = []
 
-  const ai = await getGeminiClient().catch(() => null)
+  const ai = await getGeminiClient(clinicId).catch(() => null)
   const modelName = process.env.GEMINI_SIMULATION_MODEL || 'gemini-2.5-flash'
 
   const userMessage = (req.userMessage || '').trim()
@@ -201,6 +336,7 @@ Görev:
         const extractionMeta = (extractionResult as any).usageMetadata
         if (extractionMeta) {
           void recordAiTokenUsage({
+            clinicId,
             source: 'simulator',
             promptTokens: Number(extractionMeta.promptTokenCount ?? 0),
             responseTokens: Number(extractionMeta.candidatesTokenCount ?? 0),
@@ -255,15 +391,7 @@ Görev:
   // 4. Advance through the flow graph
   let completed = false
   let stoppedNode: FlowNode | undefined = undefined
-  let greetingText = ''
-  try {
-    greetingText =
-      direction === 'outbound'
-        ? (await getGreeting('outbound')) || 'Merhaba, kliniğimizden memnuniyet anketi için arıyorum.'
-        : (await getGreeting('inbound')) || 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
-  } catch {
-    greetingText = 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
-  }
+  const greetingText = await resolveGreeting(direction)
 
   let startedFromStartNode = false
 
@@ -381,6 +509,21 @@ Görev:
     stepInstruction = `Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
   }
 
+  if (req.skipReply) {
+    return {
+      currentNodeId: stoppedNode?.id ?? currId,
+      visitedNodeIds,
+      visitedEdgeIds,
+      fields,
+      extractedFields,
+      logs,
+      completed,
+      aiPowered: Boolean(ai),
+      usedKnowledgeTitles,
+      nextInstruction: stepInstruction || 'Akışta sıradaki adıma göre hastayla doğal biçimde devam et.',
+    }
+  }
+
   if (ai) {
     try {
       const historyContents = (req.history || []).slice(-10).map(h => ({
@@ -388,10 +531,16 @@ Görev:
         parts: [{ text: h.text }],
       }))
 
-      const sysInstruction = `Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.
+      const [clinicInstructions, rawSimRules] = await Promise.all([
+        buildClinicInstructions(clinicId, direction, greetingText),
+        getPromptTemplate('prompt.simulator_system_rules', clinicId).catch(() => ''),
+      ])
+      const simSystemRules = renderPromptTemplate(rawSimRules.trim() || DEFAULT_SIMULATOR_SYSTEM_RULES, {}).trim() || DEFAULT_SIMULATOR_SYSTEM_RULES
+      const sysInstruction = `${simSystemRules}
 Bugünün tarihi: ${getTodayIso()}.
 ${startedFromStartNode && !userMessage ? `Görüşme yeni başladı. İlk olarak şu karşılama mesajını söyle: "${greetingText}" ve ardından sıradaki adımın sorusunu doğalca ekle.` : ''}
 ${ragContext ? `\nKLİNİK BİLGİ BANKASI (Eğer kullanıcı bir soru sorduysa bu bilgilerle yanıtla):\n${ragContext}\n` : ''}
+${clinicInstructions ? `\nKLİNİK TALİMATLARI:\n${clinicInstructions}\n` : ''}
 ${flowPrompt}
 
 MEVCUT TOPLANAN BİLGİLER: ${JSON.stringify(fields)}
@@ -413,6 +562,7 @@ SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
       const genMeta = (gen as any).usageMetadata
       if (genMeta) {
         void recordAiTokenUsage({
+          clinicId,
           source: 'simulator',
           promptTokens: Number(genMeta.promptTokenCount ?? 0),
           responseTokens: Number(genMeta.candidatesTokenCount ?? 0),

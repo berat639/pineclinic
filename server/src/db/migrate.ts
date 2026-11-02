@@ -937,6 +937,43 @@ async function runMigrations() {
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_last4 TEXT`
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_updated_at TIMESTAMPTZ`
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_updated_by UUID REFERENCES users(id)`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_fingerprint TEXT`
+  // 1 anahtar = 1 klinik: mevcut kayıtların parmak izi doldurulur (tek kayıt hata verirse atlanır)
+  // ve kısmi benzersiz index yalnızca çakışma YOKSA oluşturulur.
+  try {
+    const { openSecret } = await import('../services/integration-secrets')
+    const { createHash } = await import('node:crypto')
+    const pending = await sql`SELECT id, gemini_api_key FROM clinics WHERE gemini_api_key IS NOT NULL AND gemini_key_fingerprint IS NULL`
+    for (const row of pending) {
+      try {
+        const plain = openSecret(row.gemini_api_key as string).trim()
+        if (!plain) continue
+        await sql`UPDATE clinics SET gemini_key_fingerprint = ${createHash('sha256').update(plain).digest('hex')} WHERE id = ${row.id}`
+      } catch { /* bu kayıt atlanır */ }
+    }
+    const dupes = await sql`
+      SELECT 1 FROM clinics WHERE gemini_key_fingerprint IS NOT NULL
+      GROUP BY gemini_key_fingerprint HAVING COUNT(*) > 1 LIMIT 1
+    `
+    if (dupes.length > 0) {
+      console.warn('[migrate] Aynı API anahtarı birden fazla klinikte kayıtlı; benzersiz index oluşturulmadı.')
+    } else {
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS clinics_gemini_key_fingerprint_uniq ON clinics (gemini_key_fingerprint) WHERE gemini_key_fingerprint IS NOT NULL`
+    }
+  } catch (err) {
+    console.warn('[migrate] Klinik anahtar parmak izi adımı atlandı:', err instanceof Error ? err.message : 'unknown')
+  }
+  await sql`
+    CREATE TABLE IF NOT EXISTS platform_prompt_history (
+      id         BIGSERIAL PRIMARY KEY,
+      key        TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      action     TEXT NOT NULL DEFAULT 'update',
+      changed_by UUID,
+      changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS platform_prompt_history_key_idx ON platform_prompt_history (key, changed_at DESC)`
 
   await sql`
     CREATE TABLE IF NOT EXISTS clinic_ai_usage_daily (

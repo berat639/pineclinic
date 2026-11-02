@@ -1,5 +1,10 @@
 import type { FlowEdge, FlowNode } from '../db/repositories/flows'
 
+/** Kaldırılmış eski 'webhook' ACTION node'u mu? Çalışma anında pas geçilir. */
+export function isRemovedWebhookAction(node: { type: string; data?: { action?: string } }): boolean {
+  return node.type === 'ACTION' && node.data?.action === 'webhook'
+}
+
 export type FlowValidationIssue = { nodeId?: string; level: 'error' | 'warning'; message: string }
 
 export const EXECUTABLE_ACTIONS = new Set([
@@ -88,10 +93,7 @@ export function validateConversationFlow(nodes: FlowNode[], edges: FlowEdge[]): 
       if (!node.data.action || !EXECUTABLE_ACTIONS.has(node.data.action)) {
         issues.push({ nodeId: node.id, level: 'error', message: 'Bu işlem için gerekli bağlantı henüz hazır değil.' })
       } else if (node.data.action === 'webhook') {
-        const url = String(node.data.webhookUrl || '').trim()
-        if (!url || !/^https?:\/\/.+/i.test(url)) {
-          issues.push({ nodeId: node.id, level: 'error', message: 'Webhook işlemi için geçerli bir URL (https://...) girin.' })
-        }
+        issues.push({ nodeId: node.id, level: 'warning', message: 'Dış sistem (webhook) işlemi artık desteklenmiyor; çalışma sırasında atlanır.' })
       } else if (node.data.action === 'set_variable') {
         if (!String(node.data.variableName || '').trim()) {
           issues.push({ nodeId: node.id, level: 'error', message: 'Değişken atama işlemi için değişken adı girin.' })

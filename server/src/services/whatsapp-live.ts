@@ -1,11 +1,14 @@
 import { GoogleGenAI, Modality, Type, type FunctionDeclaration } from '@google/genai'
 import { getGeminiClient } from './gemini-client'
 import { recordAiTokenUsage } from '../db/repositories/ai-usage'
+import { currentClinicId } from '../tenancy/context'
+import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
 
 export interface WhatsAppLiveInput {
   model: string
   textModel?: string
   useLiveAudio?: boolean
+  clinicId?: string
   systemPrompt: string
   text: string
   tools: FunctionDeclaration[]
@@ -14,6 +17,21 @@ export interface WhatsAppLiveInput {
 }
 
 const DEFAULT_WHATSAPP_TEXT_MODEL = 'gemini-2.5-flash'
+const DEFAULT_WHATSAPP_LIVE_RULES =
+  'Kısa Türkçe yanıtlar ver. Randevu işleminden önce kullanıcıdan tarih/saat ve isim için açık onay al. Araç başarı sonucunu almadan işlem yapıldı deme. Her kullanıcı mesajında en fazla bir randevu oluştur. Başka numaralara ait kişisel bilgi sorgulama. Personel istendiğinde insanaAktar kullan.'
+
+async function resolveWhatsAppSystemInstruction(basePrompt: string, clinicId?: string): Promise<string> {
+  const effectiveClinicId = clinicId ?? (currentClinicId() || undefined)
+  const rawTpl = await getPromptTemplate('prompt.whatsapp_live_rules', effectiveClinicId).catch(() => '')
+  const rules = renderPromptTemplate(rawTpl.trim() || DEFAULT_WHATSAPP_LIVE_RULES, {}).trim() || DEFAULT_WHATSAPP_LIVE_RULES
+  if (basePrompt.includes(DEFAULT_WHATSAPP_LIVE_RULES)) {
+    return basePrompt.replace(DEFAULT_WHATSAPP_LIVE_RULES, rules)
+  }
+  if (basePrompt.includes(rules)) {
+    return basePrompt
+  }
+  return basePrompt ? `${basePrompt}\n\n${rules}` : rules
+}
 
 /**
  * Generates a WhatsApp text reply using the fast text/chat model (generateContent + function calling)
@@ -36,6 +54,7 @@ async function generateWhatsAppReplyText(
   ai: GoogleGenAI,
 ): Promise<string> {
   const textModel = (input.textModel || process.env.GEMINI_TEXT_MODEL || DEFAULT_WHATSAPP_TEXT_MODEL).trim()
+  const systemInstruction = await resolveWhatsAppSystemInstruction(input.systemPrompt, input.clinicId)
   const contents: Array<Record<string, unknown>> = [
     { role: 'user', parts: [{ text: input.text }] },
   ]
@@ -46,7 +65,7 @@ async function generateWhatsAppReplyText(
       model: textModel,
       contents: contents as any,
       config: {
-        systemInstruction: input.systemPrompt,
+        systemInstruction,
         tools: input.tools.length > 0 ? [{ functionDeclarations: input.tools }] : undefined,
       },
     })
@@ -121,12 +140,13 @@ export async function generateWhatsAppReplyLive(
   }
   const timeout = setTimeout(() => fail(new Error('AI yanıt süresi aşıldı.')), 60_000)
   try {
+    const systemInstruction = await resolveWhatsAppSystemInstruction(input.systemPrompt, input.clinicId)
     const connecting = client.live.connect({
       model: input.model,
       config: {
         responseModalities: [Modality.AUDIO],
         outputAudioTranscription: {},
-        systemInstruction: input.systemPrompt,
+        systemInstruction,
         tools: [{ functionDeclarations: input.tools }],
       },
       callbacks: {

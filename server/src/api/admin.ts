@@ -1,4 +1,4 @@
-import { requireClinicId } from '../tenancy/context'
+import { currentClinicId, requireClinicId } from '../tenancy/context'
 import { Elysia, t } from 'elysia'
 import { eq, desc, sql } from 'drizzle-orm'
 import { db } from '../db/client'
@@ -378,3 +378,27 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
   })
 
   .put('/integrations', ({ set }) => { set.status = 403; return { error: 'Entegrasyonlar yalnız platform Klinikler ekranından yönetilir.' } })
+
+  // ── Flow Node Explanation ──────────────────────────────────────────────────
+  .post('/flow/explain-node', async ({ body, set }) => {
+    const payload = (body ?? {}) as {
+      graphHash?: string
+      nodeId?: string
+      summary?: { does?: string; when?: string[]; next?: string[]; warnings?: string[] }
+      nodes?: unknown[]
+      edges?: unknown[]
+    }
+    if (!payload.nodeId || typeof payload.nodeId !== 'string') {
+      set.status = 400
+      return { error: 'Açıklanacak adım kimliği (nodeId) gereklidir.' }
+    }
+    const { explainFlowNode } = await import('../services/flow-explain')
+    return explainFlowNode({
+      clinicId: currentClinicId(),
+      graphHash: typeof payload.graphHash === 'string' ? payload.graphHash : undefined,
+      nodeId: payload.nodeId,
+      summary: payload.summary,
+      nodes: Array.isArray(payload.nodes) ? (payload.nodes as any[]) : undefined,
+      edges: Array.isArray(payload.edges) ? (payload.edges as any[]) : undefined,
+    })
+  })

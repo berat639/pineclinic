@@ -84,3 +84,31 @@ n8n ortam değişkenlerine aşağıdaki değerleri tanımlayın:
    - **Kaydet** butonuna basın ve **Bağlantıyı Test Et** ile n8n erişimini doğrulayın.
 3. Dilediğiniz zaman veri kaybı olmadan **Evolution API (QR)** ve **n8n + Meta Cloud API** arasında geçiş yapabilirsiniz.
 
+
+---
+
+## Dokploy'da Kurulum
+
+1. Dokploy panelinde **Create Service → Template → n8n** seçerek n8n'i kurun (VoiceAI ile aynı projede/ağda olması önerilir).
+2. n8n servisine **HTTPS** bir alan adı bağlayın (ör. `n8n.ornekklinik.com`). Meta webhook'ları yalnızca geçerli SSL sertifikalı HTTPS adreslerini kabul eder; Dokploy'da **Domains** sekmesinde *HTTPS* ve *Let's Encrypt* seçeneklerini açın.
+3. n8n ortam değişkenlerine `WEBHOOK_URL=https://n8n.ornekklinik.com/` ekleyin; böylece Production webhook adresleri doğru alan adıyla üretilir.
+4. Adım 2'deki `VOICEAI_N8N_SECRET`, `META_VERIFY_TOKEN`, `META_PHONE_NUMBER_ID` ve `META_ACCESS_TOKEN` değerlerini n8n servisinin **Environment** bölümüne girin ve servisi yeniden dağıtın (Redeploy).
+5. Şablonları içe aktarıp **Active** yapın; Production URL'leri Meta (Adım 4) ve VoiceAI (Adım 5) tarafına girin.
+
+> Not: Phone Number ID, uygulamadaki telefon numarası değildir; Meta'nın WhatsApp Business hesabına eklenen numara için verdiği kimliktir (**WhatsApp > API Setup**).
+
+---
+
+## WhatsApp Business Uygulaması Numarası (Coexistence)
+
+Kliniğin numarası telefondaki **WhatsApp Business uygulamasında** kullanılıyorsa iki yol vardır:
+
+- **Coexistence (önerilen):** Numara, uygulamadan çıkarılmadan Cloud API'ye bağlanır. Meta'nın *Embedded Signup* akışında **"Mevcut WhatsApp Business uygulamasını bağla"** seçeneği ile telefondaki uygulamadan QR kodu okutarak onaylanır. Böylece hem telefon uygulaması hem VoiceAI aynı numarada çalışır; mesajlar iki tarafta da görünür.
+- **Numara taşıma:** Numara uygulamadan silinir ve Cloud API'ye taşınır. Bu durumda telefon uygulaması artık o numarayla kullanılamaz ve eski sohbet geçmişi uygulamada kalmaz.
+
+Coexistence için dikkat edilecekler:
+
+1. WhatsApp Business uygulaması güncel sürümde olmalı ve numara en az birkaç gündür aktif kullanılıyor olmalıdır.
+2. Bağlantıdan sonra telefon uygulamasını en az 14 günde bir açmanız gerekir; aksi halde bağlantı kopabilir.
+3. Bazı uygulama özellikleri (ör. gruplar, kaybolan mesajlar) bağlantıdan sonra kısıtlanabilir; güncel kısıtlar için Meta belgelerine bakın.
+4. Bağlantı tamamlandığında Meta'nın verdiği **Phone Number ID** değerini VoiceAI Entegrasyonlar sekmesine girin (Adım 5).

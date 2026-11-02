@@ -20,6 +20,20 @@ import {
 import '@xyflow/react/dist/style.css'
 import dagre from '@dagrejs/dagre'
 import { PhoneMaskedInput } from '@/lib/phone-mask'
+import NodeInfoBadge from './flow/NodeInfoBadge'
+import SimulatorVoicePanel from './flow/SimulatorVoicePanel'
+import {
+  summarizeFlow,
+  flowGraphHash,
+  describeCondition,
+  type NodeSummary,
+} from '@/lib/flow-path-summary'
+import {
+  FIELD_LABELS,
+  LOGIC_LABELS,
+  operatorOptions,
+  actionLabel,
+} from '@/lib/ui-glossary'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface FlowIssue {
@@ -34,6 +48,8 @@ interface BaseNodeTransient {
   _onDuplicate?: (id: string) => void
   _onDelete?: (id: string) => void
   _canDelete?: boolean
+  _summary?: NodeSummary
+  _explain?: (nodeId: string) => Promise<string | null>
 }
 
 interface FieldData extends BaseNodeTransient {
@@ -77,9 +93,6 @@ interface ActionData extends BaseNodeTransient {
   label: string
   action: string
   message?: string
-  webhookUrl?: string
-  webhookSecret?: string
-  webhookBodyTemplate?: string
   variableName?: string
   variableValue?: string
   promptInstruction?: string
@@ -127,12 +140,11 @@ const ACTION_LABELS: Record<string, string> = {
   randevuOlustur: '📝 Randevu Oluştur',
   save_patient_note: '🗒️ Hastadan Not Al (Bankoya İlet)',
   notBirak: '🗒️ Anket / Hasta Notu Kaydet',
-  webhook: '🔗 Dış Sisteme Gönder (Webhook)',
-  set_variable: '🔧 Değişken Ata',
-  send_sms: '💬 SMS Gönder',
-  wait_reprompt: '⏳ Bekle / Yeniden Sor',
-  wait: '⏳ Bekle / Yeniden Sor',
-  switch_prompt: '🔄 Prompt / Mod Değiştir',
+  set_variable: `🔧 ${actionLabel('set_variable')}`,
+  send_sms: `💬 ${actionLabel('send_sms')}`,
+  wait_reprompt: `⏳ ${actionLabel('wait_reprompt')}`,
+  wait: `⏳ ${actionLabel('wait_reprompt')}`,
+  switch_prompt: `🔄 ${actionLabel('switch_prompt')}`,
   end_call: '👋 Bilgi Ver ve Görüşmeyi Bitir',
   transfer_call: '📞 Aramayı Yetkiliye Aktar',
   transfer: '📞 Canlı Desteğe Aktar',
@@ -141,10 +153,13 @@ const ACTION_LABELS: Record<string, string> = {
   save_record: '💾 Veritabanına Kaydet',
 }
 
+/** Eski akışlardan kalan, artık desteklenmeyen dış bağlantı adımı. */
+const LEGACY_WEBHOOK_MESSAGE = 'Bu adım artık desteklenmiyor, silin.'
+
 // ── Client-Side Validation & Prompt Builder ───────────────────────────────────
 const EXECUTABLE_ACTIONS = new Set([
   'save_appointment_pending', 'randevuOlustur', 'save_patient_note', 'notBirak',
-  'transfer_call', 'transfer', 'end_call', 'send_wa_message', 'send_wa_location', 'save_record', 'webhook',
+  'transfer_call', 'transfer', 'end_call', 'send_wa_message', 'send_wa_location', 'save_record',
   'set_variable', 'send_sms', 'wait_reprompt', 'wait', 'switch_prompt',
 ])
 
@@ -204,13 +219,10 @@ function validateFlowClient(nodes: Node[], edges: Edge[]): FlowIssue[] {
     }
 
     if (node.type === 'actionNode') {
-      if (!d.action || !EXECUTABLE_ACTIONS.has(String(d.action))) {
+      if (d.action === 'webhook') {
+        issues.push({ nodeId: node.id, level: 'error', message: LEGACY_WEBHOOK_MESSAGE })
+      } else if (!d.action || !EXECUTABLE_ACTIONS.has(String(d.action))) {
         issues.push({ nodeId: node.id, level: 'error', message: 'Bu işlem için geçerli bir işlem tipi seçin.' })
-      } else if (d.action === 'webhook') {
-        const url = String(d.webhookUrl || '').trim()
-        if (!url || !/^https?:\/\/.+/i.test(url)) {
-          issues.push({ nodeId: node.id, level: 'error', message: 'Webhook işlemi için geçerli bir URL (https://...) girin.' })
-        }
       }
     }
   }
@@ -274,12 +286,8 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
         const val = d.conditionValue || ''
         if (field === 'user_intent' || d.operator === 'intent') {
           lines.push(`${prefix}${step}. KOŞUL (KULLANICI NİYETİ): Kullanıcının ifadesi "${val}" niyetini taşıyorsa:`)
-        } else if (field === 'kayitli') {
-          const isReg = String(val).toLowerCase() !== 'false'
-          lines.push(`${prefix}${step}. KOŞUL (HASTA KAYIT DURUMU): musteriSorgula sonucuna göre hasta ${isReg ? 'kayıtlı ise (kayitli=true)' : 'kayıtlı değilse (kayitli=false)'}:`)
         } else {
-          const op = d.operator === 'equals' ? '==' : d.operator === 'contains' ? 'içeriyorsa' : 'boş değilse'
-          lines.push(`${prefix}${step}. KOŞUL: "${field}" ${op} "${val}" ise:`)
+          lines.push(`${prefix}${step}. KOŞUL: ${describeCondition(d)} ise:`)
         }
         step++
         const nextEdges = edgeMap.get(nodeId) || []
@@ -308,7 +316,7 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
         } else if (act === 'end_call') {
           lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${d.message ? `"${d.message}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
         } else if (act === 'webhook') {
-          lines.push(`${prefix}${step}. DIŞ SİSTEM (WEBHOOK): Toplanan bilgileri ${d.webhookUrl || 'Webhook URL'} adresine gönder.`)
+          break
         } else {
           lines.push(`${prefix}${step}. RANDEVU OLUŞTUR: Toplanan bilgilerle randevuOlustur aracını çağır.`)
         }
@@ -588,6 +596,7 @@ function StartNode({ id, data, selected }: { id: string; data: StartData; select
       }}
     >
       <NodeQuickActions id={id} selected={selected} issue={data._issue} simStatus={data._simStatus} />
+      <NodeInfoBadge nodeId={id} summary={data._summary} explain={data._explain} />
       <span style={{ color: '#ffffff' }}>▶ {data.label || 'Karşılama Mesajı'}</span>
       <Handle
         type="source"
@@ -639,6 +648,7 @@ function FieldNode({ id, data, selected }: { id: string; data: FieldData; select
         onDuplicate={data._onDuplicate}
         onDelete={data._onDelete}
       />
+      <NodeInfoBadge nodeId={id} summary={data._summary} explain={data._explain} />
       <Handle
         type="target"
         position={Position.Top}
@@ -666,7 +676,7 @@ function FieldNode({ id, data, selected }: { id: string; data: FieldData; select
           )}
           {data.fieldType && data.fieldType !== 'text' && (
             <span style={{ fontSize: 9, padding: '2px 6px', background: '#2563eb', borderRadius: 8, color: '#ffffff', fontWeight: 700 }}>
-              <span style={{ color: '#ffffff' }}>{data.fieldType}</span>
+              <span style={{ color: '#ffffff' }}>{{ date: 'Tarih', time: 'Saat', enum: 'Seçenek', user: 'Hekim' }[data.fieldType] || data.fieldType}</span>
             </span>
           )}
         </div>
@@ -697,26 +707,242 @@ function FieldNode({ id, data, selected }: { id: string; data: FieldData; select
   )
 }
 
-function ConditionNode({ id, data, selected }: { id: string; data: ConditionData; selected?: boolean }) {
-  const labels: Record<string, string> = {
-    kayitli: 'Hasta Kayıtlı mı?',
-    user_intent: 'Kullanıcı Niyeti Algılama',
-  }
-  const presetField = PRESET_FIELDS.find(f => f.value === data.conditionField)
-  const humanLabel = labels[data.conditionField] || presetField?.label || (data.conditionField ? `${data.conditionField} Kontrolü` : 'Koşul Seçilmedi')
-  const isSim = data._simStatus === 'active'
+// ── Koşul Kuralları Editörü (ve / veya bağlaç çipli) ──────────────────────────
+const BOOLEAN_CONDITION_FIELDS = new Set(['kayitli', 'caller.isKnownPatient', 'caller.isVip', 'caller.hasUpcomingAppointment', 'clinic.isOpen'])
+const EXTRA_OPERATORS: Array<{ value: string; label: string }> = [
+  { value: 'contains', label: 'şu ifadeyi içeriyorsa' },
+  { value: 'notContains', label: 'şu ifadeyi içermiyorsa' },
+]
+type ConditionRule = { field: string; operator: string; value?: string; valueTo?: string }
 
+function ChipListInput({ value, onChange, style }: { value: string; onChange: (v: string) => void; style: React.CSSProperties }) {
+  const [draft, setDraft] = useState('')
+  const items = String(value || '').split(',').map(s => s.trim()).filter(Boolean)
+  const commit = (raw: string) => {
+    const t = raw.trim()
+    if (!t || items.includes(t)) { setDraft(''); return }
+    onChange([...items, t].join(','))
+    setDraft('')
+  }
+  return (
+    <div>
+      {items.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+          {items.map(it => (
+            <span key={it} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: 'var(--pc-tint)', border: '1px solid var(--pc-border)', boxShadow: 'var(--pc-clay-pale)', fontSize: 11, fontWeight: 700, color: 'var(--pc-tint-fg)' }}>
+              {it}
+              <button type="button" aria-label={`${it} değerini sil`} onClick={() => onChange(items.filter(x => x !== it).join(','))} style={{ border: 'none', background: 'var(--pc-tint)', color: 'var(--pc-tint-fg)', cursor: 'pointer', fontWeight: 800, padding: 0 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(draft) } }}
+        onBlur={() => commit(draft)}
+        placeholder="Bir değer yazıp Enter’a basın"
+        style={style}
+      />
+    </div>
+  )
+}
+
+function ConditionRulesEditor({
+  data,
+  update,
+  inputStyle,
+  customFieldNames,
+}: {
+  data: ConditionData
+  update: (u: Record<string, any>) => void
+  inputStyle: React.CSSProperties
+  customFieldNames: string[]
+}) {
+  const logic: 'AND' | 'OR' = data.conditionLogic === 'OR' ? 'OR' : 'AND'
+  const rules: ConditionRule[] = Array.isArray(data.rules) && data.rules.length > 0
+    ? (data.rules as ConditionRule[])
+    : [{ field: data.conditionField || '', operator: data.operator || 'equals', value: data.conditionValue, valueTo: data.conditionValueTo }]
+  const isIntent = rules.length === 1 && (rules[0].field === 'user_intent' || rules[0].operator === 'intent')
+
+  const commit = (next: ConditionRule[], nextLogic: 'AND' | 'OR' = logic) => {
+    const first = next[0] || { field: '', operator: 'equals' }
+    update({
+      rules: next.length > 1 ? next : undefined,
+      conditionLogic: next.length > 1 ? nextLogic : undefined,
+      conditionField: first.field,
+      operator: first.operator,
+      conditionValue: first.value ?? '',
+      conditionValueTo: first.valueTo,
+    })
+  }
+  const patch = (i: number, p: Partial<ConditionRule>) => commit(rules.map((r, idx) => (idx === i ? { ...r, ...p } : r)))
+
+  const operators = [
+    ...operatorOptions().filter(o => o.value !== 'between' || true),
+    ...EXTRA_OPERATORS,
+  ]
+
+  const renderField = (r: ConditionRule, i: number) => (
+    <select
+      value={r.field || ''}
+      onChange={e => {
+        const val = e.target.value
+        if (val === 'user_intent') { commit([{ field: val, operator: 'intent', value: '' }]); return }
+        const isBool = BOOLEAN_CONDITION_FIELDS.has(val)
+        patch(i, {
+          field: val,
+          operator: r.operator === 'intent' ? 'equals' : (r.operator || 'equals'),
+          ...(isBool && r.value !== 'true' && r.value !== 'false' ? { value: 'true' } : {}),
+        })
+      }}
+      style={inputStyle}
+    >
+      <option value="">Bir bilgi seçin…</option>
+      {i === 0 && rules.length === 1 && <option value="user_intent">🎯 Hastanın isteği (yapay zeka algılar)</option>}
+      <option value="kayitli">👤 Kayıtlı hasta mı?</option>
+      <optgroup label="Görüşme durumu">
+        {(Object.keys(FIELD_LABELS) as Array<keyof typeof FIELD_LABELS>)
+          .filter(k => k !== 'caller.isKnownPatient' || r.field === k)
+          .map(k => <option key={k} value={k}>{FIELD_LABELS[k]}</option>)}
+      </optgroup>
+      <optgroup label="Hazır bilgiler">
+        {PRESET_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+      </optgroup>
+      {customFieldNames.length > 0 && (
+        <optgroup label="Akıştaki özel bilgiler">
+          {customFieldNames.map(name => <option key={name} value={name}>{name}</option>)}
+        </optgroup>
+      )}
+    </select>
+  )
+
+  const renderValue = (r: ConditionRule, i: number) => {
+    if (r.operator === 'isEmpty' || r.operator === 'notEmpty') return null
+    if (BOOLEAN_CONDITION_FIELDS.has(r.field) && (r.operator === 'equals' || r.operator === 'notEquals')) {
+      return (
+        <select value={r.value === 'false' ? 'false' : 'true'} onChange={e => patch(i, { value: e.target.value })} style={inputStyle}>
+          <option value="true">Evet</option>
+          <option value="false">Hayır</option>
+        </select>
+      )
+    }
+    if (r.operator === 'between') {
+      return (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="number" value={r.value ?? ''} onChange={e => patch(i, { value: e.target.value })} placeholder="En az" style={inputStyle} />
+          <span style={{ color: 'var(--foreground-2)', fontWeight: 700 }}>ile</span>
+          <input type="number" value={r.valueTo ?? ''} onChange={e => patch(i, { valueTo: e.target.value })} placeholder="En çok" style={inputStyle} />
+        </div>
+      )
+    }
+    if (r.operator === 'in') return <ChipListInput value={r.value || ''} onChange={v => patch(i, { value: v })} style={inputStyle} />
+    const numeric = ['gt', 'gte', 'lt', 'lte'].includes(r.operator)
+    return (
+      <input
+        type={numeric ? 'number' : 'text'}
+        value={r.value ?? ''}
+        onChange={e => patch(i, { value: e.target.value })}
+        placeholder={numeric ? 'Bir sayı yazın' : 'Örn: ağrı, implant, acil'}
+        style={inputStyle}
+      />
+    )
+  }
+
+  if (isIntent) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Kontrol edilecek bilgi</label>
+          {renderField(rules[0], 0)}
+        </div>
+        <div style={{ padding: 12, borderRadius: 10, background: 'var(--flow-info-bg)', border: '1px solid var(--flow-info-border)' }}>
+          <label style={{ fontSize: 11, color: 'var(--flow-info-text)', display: 'block', marginBottom: 6, fontWeight: 700 }}>
+            🧠 Yapay zeka hangi isteği algılasın?
+          </label>
+          <textarea
+            value={rules[0].value || ''}
+            onChange={e => commit([{ field: 'user_intent', operator: 'intent', value: e.target.value }])}
+            placeholder="Örn: Arayan kişi fiyat bilgisi soruyor veya yetkili biriyle görüşmek istediğini söylüyor."
+            rows={3}
+            style={{ ...inputStyle, resize: 'vertical' }}
+          />
+          <div style={{ fontSize: 10, color: 'var(--flow-info-text)', marginTop: 8, lineHeight: 1.4 }}>
+            İstek algılanırsa <strong>✓ Evet</strong>, algılanmazsa <strong>✕ Hayır</strong> yoluna gidilir.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {rules.map((r, i) => (
+        <div key={i}>
+          {i > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '2px 0 8px' }}>
+              <button
+                type="button"
+                title="Tıklayarak ve / veya arasında değiştirin"
+                onClick={() => commit(rules, logic === 'AND' ? 'OR' : 'AND')}
+                style={{
+                  padding: '3px 16px', borderRadius: 999, border: '1.5px solid #1d4ed8', cursor: 'pointer',
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)', boxShadow: 'var(--pc-clay-primary)',
+                  fontSize: 11, fontWeight: 800,
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>{LOGIC_LABELS[logic]}</span>
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 12, background: 'var(--card-inner)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-neo-subcard)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)' }}>{i === 0 ? 'Eğer' : 'Koşul ' + (i + 1)}</span>
+              {rules.length > 1 && (
+                <button type="button" onClick={() => commit(rules.filter((_, idx) => idx !== i))} aria-label="Bu koşulu sil" style={{ border: '1px solid var(--input-border)', background: 'var(--pc-surface)', boxShadow: 'var(--pc-clay-btn)', color: 'var(--danger)', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '2px 8px' }}>Sil</button>
+              )}
+            </div>
+            {renderField(r, i)}
+            <select
+              value={r.operator || 'equals'}
+              onChange={e => patch(i, { operator: e.target.value })}
+              style={inputStyle}
+            >
+              {operators.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {r.operator === 'regex' && <option value="regex">desene uyuyorsa (eski)</option>}
+            </select>
+            {renderValue(r, i)}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => commit([...rules, { field: '', operator: 'equals', value: '' }])}
+        style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 10, border: '1.5px solid #93c5fd', background: 'var(--pc-surface)', boxShadow: 'var(--pc-clay-btn)', color: 'var(--pc-tint-fg)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+      >
+        + Koşul ekle ({LOGIC_LABELS[logic]})
+      </button>
+      <div style={{ fontSize: 11, color: 'var(--foreground-2)', lineHeight: 1.5 }}>
+        <strong>Yönlendirme:</strong> {describeCondition(data)} <span style={{ color: '#15803d', fontWeight: 700 }}>✓ Evet</span> yoluna, aksi halde <span style={{ color: '#dc2626', fontWeight: 700 }}>✕ Hayır</span> yoluna gidilir.
+      </div>
+    </div>
+  )
+}
+
+function ConditionNode({ id, data, selected }: { id: string; data: ConditionData; selected?: boolean }) {
+  const isSim = data._simStatus === 'active'
+  const ruleCount = Array.isArray(data.rules) && data.rules.length > 1 ? data.rules.length : 1
+  const presetField = PRESET_FIELDS.find(f => f.value === data.conditionField)
+  const glossaryField = (FIELD_LABELS as Record<string, string>)[data.conditionField === 'kayitli' ? 'caller.isKnownPatient' : data.conditionField]
+  const humanLabel = ruleCount > 1
+    ? `${ruleCount} koşul birlikte`
+    : data.conditionField === 'user_intent'
+    ? 'Hastanın isteği'
+    : glossaryField || presetField?.label || data.conditionField || 'Koşul seçilmedi'
   const summaryText = useMemo(() => {
-    if (data.conditionField === 'user_intent' || data.operator === 'intent') {
-      return data.conditionValue ? `🎯 "${data.conditionValue}"` : 'Niyet açıklaması girilmedi'
-    }
-    if (data.operator === 'notEmpty') return 'Boş değilse → Evet'
-    if (data.conditionField === 'kayitli') {
-      return data.conditionValue === 'false' ? 'Kayıtsız ise → Evet' : 'Kayıtlı ise → Evet'
-    }
-    const opLabel = data.operator === 'contains' ? 'içerir:' : 'eşit:'
-    return `${opLabel} "${data.conditionValue || '...'}"`
-  }, [data.conditionField, data.operator, data.conditionValue])
+    if (!data.conditionField && !(Array.isArray(data.rules) && data.rules.length)) return 'Koşul seçilmedi'
+    return `Eğer ${describeCondition(data)}`
+  }, [data])
 
   return (
     <div
@@ -752,6 +978,7 @@ function ConditionNode({ id, data, selected }: { id: string; data: ConditionData
         onDuplicate={data._onDuplicate}
         onDelete={data._onDelete}
       />
+      <NodeInfoBadge nodeId={id} summary={data._summary} explain={data._explain} />
       <Handle
         type="target"
         position={Position.Top}
@@ -828,7 +1055,7 @@ function ConditionNode({ id, data, selected }: { id: string; data: ConditionData
 }
 
 function ActionNode({ id, data, selected }: { id: string; data: ActionData; selected?: boolean }) {
-  const displayLabel = ACTION_LABELS[data.action] || data.label || '⚡ İşlem Seçilmedi'
+  const displayLabel = data.action === 'webhook' ? '⛔ Desteklenmeyen adım' : (ACTION_LABELS[data.action] || data.label || '⚡ İşlem Seçilmedi')
   const isSim = data._simStatus === 'active'
 
   return (
@@ -866,6 +1093,7 @@ function ActionNode({ id, data, selected }: { id: string; data: ActionData; sele
         onDuplicate={data._onDuplicate}
         onDelete={data._onDelete}
       />
+      <NodeInfoBadge nodeId={id} summary={data._summary} explain={data._explain} />
       <Handle
         type="target"
         position={Position.Top}
@@ -878,9 +1106,9 @@ function ActionNode({ id, data, selected }: { id: string; data: ActionData; sele
           Hedef: <strong>{data.transferNumber || 'Belirtilmedi'}</strong> ({data.requireConfirmation !== false ? 'Onaylı' : 'Doğrudan'})
         </div>
       )}
-      {data.action === 'webhook' && data.webhookUrl && (
-        <div style={{ marginTop: 5, fontSize: 9, color: 'var(--foreground-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          🔗 {data.webhookUrl}
+      {data.action === 'webhook' && (
+        <div style={{ marginTop: 6, fontSize: 10, fontWeight: 800, color: '#ffffff', background: '#dc2626', padding: '3px 8px', borderRadius: 6, border: '1px solid #b91c1c' }}>
+          <span style={{ color: '#ffffff' }}>⛔ {LEGACY_WEBHOOK_MESSAGE}</span>
         </div>
       )}
       {data.triggerKeywords && (
@@ -928,6 +1156,7 @@ function EndNode({ id, data, selected }: { id: string; data: EndData; selected?:
         canDelete={data._canDelete}
         onDelete={data._onDelete}
       />
+      <NodeInfoBadge nodeId={id} summary={data._summary} explain={data._explain} />
       <Handle
         type="target"
         position={Position.Top}
@@ -987,6 +1216,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   const [simVisitedEdgeIds, setSimVisitedEdgeIds] = useState<string[]>([])
   const [simFields, setSimFields] = useState<Record<string, string>>({ kayitli: 'false' })
   const [simInput, setSimInput] = useState('')
+  const [simMode, setSimMode] = useState<'text' | 'voice'>('text')
   const [simGlobalPhrase, setSimGlobalPhrase] = useState('')
   const [simLog, setSimLog] = useState<Array<{ role: 'system' | 'ai' | 'user' | 'action'; text: string }>>([])
 
@@ -998,7 +1228,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   const pushHistory = useCallback((nextNodes: Node[], nextEdges: Edge[], markDirty = true) => {
     if (skipHistoryRef.current) return
     const cleanNodes = nextNodes.map(n => {
-      const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, ...restData } = (n.data || {}) as any
+      const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, _summary, _explain, ...restData } = (n.data || {}) as any
       return { ...n, data: restData }
     })
     const snapshot = { nodes: structuredClone(cleanNodes), edges: structuredClone(nextEdges) }
@@ -1136,7 +1366,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     setNodes(nds => {
       const orig = nds.find(n => n.id === nodeId)
       if (!orig || orig.type === 'startNode') return nds
-      const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, ...cleanData } = (orig.data || {}) as any
+      const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, _summary, _explain, ...cleanData } = (orig.data || {}) as any
       const newId = `node_${Date.now()}`
       const copy: Node = {
         id: newId,
@@ -1156,6 +1386,38 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   const endNodeCount = useMemo(() => nodes.filter(n => n.type === 'endNode').length, [nodes])
   const simVisitedNodeSet = useMemo(() => new Set(simVisitedNodeIds), [simVisitedNodeIds])
   const simVisitedEdgeSet = useMemo(() => new Set(simVisitedEdgeIds), [simVisitedEdgeIds])
+
+  // Yol özetleri: yalnızca akışın yapısı değişince yeniden hesaplanır.
+  const graphHash = useMemo(() => flowGraphHash(nodes, edges), [nodes, edges])
+  const nodeSummaries = useMemo(() => summarizeFlow(nodes, edges), [graphHash]) // eslint-disable-line react-hooks/exhaustive-deps
+  const explainCacheRef = useRef<Map<string, string | null>>(new Map())
+  const explainNode = useCallback(async (nodeId: string): Promise<string | null> => {
+    const key = `${direction}:${graphHash}:${nodeId}`
+    if (explainCacheRef.current.has(key)) return explainCacheRef.current.get(key) ?? null
+    const summary = nodeSummaries[nodeId]
+    if (!summary) return null
+    let text: string | null = null
+    try {
+      // Yalnızca akışın yapısından üretilen özet gönderilir; hasta verisi gönderilmez.
+      const res = await fetch('/api/admin/flow/explain-node', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          graphHash,
+          nodeId,
+          summary: { does: summary.does, when: summary.when, next: summary.next, warnings: summary.warnings },
+        }),
+      })
+      if (res.ok) {
+        const json = await res.json()
+        text = json?.source && json.source !== 'local' && typeof json.text === 'string' ? json.text : null
+      }
+    } catch {
+      text = null
+    }
+    explainCacheRef.current.set(key, text)
+    return text
+  }, [direction, graphHash, nodeSummaries])
 
   const displayNodes = useMemo(() => {
     return nodes.map(n => {
@@ -1177,10 +1439,12 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
           _onDuplicate: duplicateNode,
           _onDelete: deleteNode,
           _canDelete: n.type !== 'startNode' && (n.type !== 'endNode' || endNodeCount > 1),
+          _summary: nodeSummaries[n.id],
+          _explain: explainNode,
         },
       }
     })
-  }, [nodes, liveIssues, simActive, simCurrentNodeId, simVisitedNodeSet, selectedNodeId, duplicateNode, deleteNode, endNodeCount])
+  }, [nodes, liveIssues, simActive, simCurrentNodeId, simVisitedNodeSet, selectedNodeId, duplicateNode, deleteNode, endNodeCount, nodeSummaries, explainNode])
 
   const displayEdges = useMemo(() => {
     return decorateEdges(edges, nodes, simActive ? simVisitedEdgeSet : undefined)
@@ -1344,7 +1608,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     setSaving(true)
     try {
       const serverNodes = nodes.map(n => {
-        const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, ...cleanData } = (n.data || {}) as any
+        const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, _summary, _explain, ...cleanData } = (n.data || {}) as any
         return {
           id: n.id,
           type: n.type === 'startNode' ? 'START' : n.type === 'fieldNode' ? 'FIELD' : n.type === 'conditionNode' ? 'CONDITION' : n.type === 'actionNode' ? 'ACTION' : 'END',
@@ -1624,7 +1888,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     setSimLoading(true)
     try {
       const serverNodes = nodes.map(n => {
-        const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, ...cleanData } = (n.data || {}) as any
+        const { _issue, _simStatus, _onDuplicate, _onDelete, _canDelete, _summary, _explain, ...cleanData } = (n.data || {}) as any
         return {
           id: n.id,
           type: n.type === 'startNode' ? 'START' : n.type === 'fieldNode' ? 'FIELD' : n.type === 'conditionNode' ? 'CONDITION' : n.type === 'actionNode' ? 'ACTION' : 'END',
@@ -1700,7 +1964,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     }
     const regVal = initialRegistered ?? simFields.kayitli ?? 'false'
     const initFields: Record<string, string> = { kayitli: regVal }
-    const initLog = [{ role: 'system' as const, text: `🧪 AI Simülasyonu başlatıldı (Hasta Kayıtlı mı: ${regVal === 'true' ? 'Evet' : 'Hayır'})` }]
+    const initLog = [{ role: 'system' as const, text: `🧪 Test başlatıldı (Kayıtlı hasta mı: ${regVal === 'true' ? 'Evet' : 'Hayır'})` }]
     setSimActive(true)
     setSimFields(initFields)
     setSimInput('')
@@ -1888,8 +2152,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
             onChange={e => updateRuntimeMode(e.target.value as 'legacy' | 'observe' | 'active')}
             style={{ ...inputStyle, width: 'auto', padding: '5px 9px', fontSize: 11, fontWeight: 600 }}
           >
-            <option value="legacy">Prompt Tabanlı (Esnek AI)</option>
-            <option value="observe">Gözlem Modu (Test / Log)</option>
+            <option value="legacy">Talimat Tabanlı (Esnek Yapay Zeka)</option>
+            <option value="observe">Gözlem Modu (Deneme / Kayıt)</option>
             <option value="active">Sıkı Akış Motoru (Adım Adım)</option>
           </select>
         </label>
@@ -2314,7 +2578,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                 boxShadow: rightTab === 'prompt' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
               }}
             >
-              <span style={{ color: rightTab === 'prompt' ? '#ffffff' : 'inherit' }}>📋 AI Prompt</span>
+              <span style={{ color: rightTab === 'prompt' ? '#ffffff' : 'inherit' }}>📋 Yapay Zeka Talimatı</span>
             </button>
           </div>
 
@@ -2549,12 +2813,12 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                             <option value="">Bir alan seçin...</option>
                             <optgroup label="📥 Gelen Arama / Randevu Alanları">
                               {PRESET_FIELDS.filter(f => f.group === 'inbound').map(f => (
-                                <option key={f.value} value={f.value}>{f.label} ({f.value})</option>
+                                <option key={f.value} value={f.value}>{f.label}</option>
                               ))}
                             </optgroup>
                             <optgroup label="📤 Giden Arama / Anket Alanları">
                               {PRESET_FIELDS.filter(f => f.group === 'outbound').map(f => (
-                                <option key={f.value} value={f.value}>{f.label} ({f.value})</option>
+                                <option key={f.value} value={f.value}>{f.label}</option>
                               ))}
                             </optgroup>
                           </select>
@@ -2590,9 +2854,9 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Veri Tipi ve Doğrulama</label>
                         <select value={d.fieldType || 'text'} onChange={e => updateSelectedNode({ fieldType: e.target.value as any })} style={inputStyle}>
                           <option value="text">Metin (Serbest Yanıt)</option>
-                          <option value="date">Tarih (YYYY-MM-DD)</option>
-                          <option value="time">Saat (HH:MM)</option>
-                          <option value="enum">Seçenekli Liste (Enum)</option>
+                          <option value="date">Tarih (GG.AA.YYYY)</option>
+                          <option value="time">Saat (SS:DD)</option>
+                          <option value="enum">Seçenekli Liste</option>
                           <option value="user">Sistem Kullanıcısı (Hekim / Personel)</option>
                         </select>
                       </div>
@@ -2641,115 +2905,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   const d = selectedNode.data as ConditionData
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Kontrol Edilecek Bilgi / Durum</label>
-                        <select
-                          value={d.conditionField || ''}
-                          onChange={e => {
-                            const val = e.target.value
-                            updateSelectedNode({
-                              conditionField: val,
-                              operator: val === 'user_intent' ? 'intent' : d.operator === 'intent' ? 'equals' : (d.operator || 'equals'),
-                              ...(val === 'kayitli' && !d.conditionValue ? { conditionValue: 'true' } : {}),
-                            })
-                          }}
-                          style={inputStyle}
-                        >
-                          <option value="">Bir alan seçin...</option>
-                          <option value="kayitli">👤 Hasta Sistemde Kayıtlı mı? (kayitli)</option>
-                          <option value="user_intent">🎯 Özel Niyet / İstek Algılama (user_intent)</option>
-                          <optgroup label="⚙️ Sistem Değişkenleri">
-                            <option value="caller.isKnownPatient">Kayıtlı Hasta mı? (caller.isKnownPatient)</option>
-                            <option value="caller.isVip">VIP Arayan mı? (caller.isVip)</option>
-                            <option value="caller.hasUpcomingAppointment">Yaklaşan Randevusu Var mı? (caller.hasUpcomingAppointment)</option>
-                            <option value="clinic.isOpen">Klinik Şu An Açık mı? (clinic.isOpen)</option>
-                            <option value="time.hour">Günün Saati 0-23 (time.hour)</option>
-                            <option value="time.weekday">Haftanın Günü 1-7 (time.weekday)</option>
-                            <option value="call.direction">Arama Yönü (call.direction)</option>
-                            <option value="call.channel">Kanal (call.channel)</option>
-                            <option value="call.silenceCount">Sessizlik Sayısı (call.silenceCount)</option>
-                            <option value="call.durationSec">Görüşme Süresi sn (call.durationSec)</option>
-                          </optgroup>
-                          <optgroup label="Hazır Alanlar">
-                            {PRESET_FIELDS.map(f => (
-                              <option key={f.value} value={f.value}>{f.label} ({f.value})</option>
-                            ))}
-                          </optgroup>
-                          {customCanvasFieldNames.length > 0 && (
-                            <optgroup label="Akıştaki Özel Alanlar">
-                              {customCanvasFieldNames.map(name => (
-                                <option key={name} value={name}>{name}</option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                      </div>
-
-                      {d.conditionField === 'user_intent' ? (
-                        <div style={{ padding: 12, borderRadius: 10, background: 'var(--flow-info-bg)', border: '1px solid var(--flow-info-border)' }}>
-                          <label style={{ fontSize: 11, color: 'var(--flow-info-text)', display: 'block', marginBottom: 6, fontWeight: 700 }}>
-                            🧠 Yapay Zeka Hangi Niyeti Algılasın?
-                          </label>
-                          <textarea
-                            value={d.conditionValue || ''}
-                            onChange={e => updateSelectedNode({ conditionValue: e.target.value, operator: 'intent' })}
-                            placeholder="Örn: Arayan kişi fiyat bilgisi soruyor veya yetkili biriyle görüşmek istediğini söylüyor."
-                            rows={3}
-                            style={{ ...inputStyle, resize: 'vertical' }}
-                          />
-                          <div style={{ fontSize: 10, color: 'var(--flow-info-text)', marginTop: 8, lineHeight: 1.4 }}>
-                            Bu niyet algılanırsa <strong>✓ Evet (Sol Yeşil Ok)</strong>, algılanmazsa <strong>✕ Hayır (Sağ Kırmızı Ok)</strong> yoluna gidilir.
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div>
-                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Karşılaştırma Kuralı</label>
-                            <select value={d.operator || 'equals'} onChange={e => updateSelectedNode({ operator: e.target.value as any })} style={inputStyle}>
-                              <option value="equals">Tam olarak eşitse (==)</option>
-                              <option value="notEquals">Eşit değilse (!=)</option>
-                              <option value="contains">Şu ifadeyi içeriyorsa</option>
-                              <option value="notContains">Şu ifadeyi içermiyorsa</option>
-                              <option value="startsWith">Şununla başlıyorsa</option>
-                              <option value="in">Listedeki değerlerden biriyse (virgüllü)</option>
-                              <option value="gt">Sayısal olarak büyükse (&gt;)</option>
-                              <option value="gte">Sayısal olarak büyük veya eşitse (&gt;=)</option>
-                              <option value="lt">Sayısal olarak küçükse (&lt;)</option>
-                              <option value="lte">Sayısal olarak küçük veya eşitse (&lt;=)</option>
-                              <option value="between">İki sayı arasındaysa (Örn: 9-18)</option>
-                              <option value="regex">Regex deseniyle eşleşiyorsa</option>
-                              <option value="notEmpty">Boş değilse (Cevap verildiyse)</option>
-                              <option value="isEmpty">Boşsa (Cevap verilmediyse)</option>
-                            </select>
-                          </div>
-
-                          {d.operator !== 'notEmpty' && d.operator !== 'isEmpty' && (
-                            <div style={{ padding: 12, borderRadius: 10, background: 'var(--flow-success-bg)', border: '1px solid #16a34a' }}>
-                              <label style={{ fontSize: 11, color: '#15803d', display: 'block', marginBottom: 6, fontWeight: 700 }}>
-                                ✓ Hangi Durumda &ldquo;Evet&rdquo; (Yeşil Ok) Yönüne Gidilsin?
-                              </label>
-                              <select
-                                value={d.conditionValue === 'true' || d.conditionValue === 'false' ? d.conditionValue : 'custom'}
-                                onChange={e => updateSelectedNode({ conditionValue: e.target.value === 'custom' ? '' : e.target.value })}
-                                style={{ ...inputStyle, marginBottom: d.conditionValue === 'true' || d.conditionValue === 'false' ? 0 : 8 }}
-                              >
-                                <option value="true">Evet / Olumluysa (true)</option>
-                                <option value="false">Hayır / Olumsuzsa (false)</option>
-                                <option value="custom">Özel Bir Kelime / Değer Gir...</option>
-                              </select>
-
-                              {d.conditionValue !== 'true' && d.conditionValue !== 'false' && (
-                                <input
-                                  value={d.conditionValue || ''}
-                                  onChange={e => updateSelectedNode({ conditionValue: e.target.value })}
-                                  placeholder="Örn: ağrı, implant, acil..."
-                                  style={inputStyle}
-                                />
-                              )}
-                            </div>
-                          )}
-                        </>
-                      )}
+                      <ConditionRulesEditor data={d} update={updateSelectedNode} inputStyle={inputStyle} customFieldNames={customCanvasFieldNames} />
                     </div>
                   )
                 })()}
@@ -2777,11 +2933,10 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <option value="">Bir işlem seçin...</option>
                           <option value="save_appointment_pending">📝 Randevu Talebi Oluştur (Onay Bekler)</option>
                           <option value="save_patient_note">🗒️ Hastadan Not Al (Bankoya İlet)</option>
-                          <option value="webhook">🔗 Dış Sisteme Gönder (Webhook API)</option>
-                          <option value="set_variable">🔧 Değişken Ata (set_variable)</option>
-                          <option value="send_sms">💬 SMS Gönder (send_sms)</option>
-                          <option value="wait_reprompt">⏳ Bekle / Yeniden Sor (wait_reprompt)</option>
-                          <option value="switch_prompt">🔄 Prompt / Mod Değiştir (switch_prompt)</option>
+                          <option value="set_variable">{ACTION_LABELS.set_variable}</option>
+                          <option value="send_sms">{ACTION_LABELS.send_sms}</option>
+                          <option value="wait_reprompt">{ACTION_LABELS.wait_reprompt}</option>
+                          <option value="switch_prompt">{ACTION_LABELS.switch_prompt}</option>
                           {direction === 'whatsapp' ? (
                             <option value="send_wa_message">📱 WhatsApp Mesajı Gönder</option>
                           ) : (
@@ -2806,37 +2961,17 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           style={inputStyle}
                         >
                           <option value="">Normal Akış Adımı (Olay Yok)</option>
-                          <option value="on_silence">🤫 Sessizlik Olduğunda (on_silence)</option>
-                          <option value="on_no_match">❓ Cevap Anlaşılamadığında (on_no_match)</option>
-                          <option value="on_transfer_fail">📵 Aktarım Başarısız Olduğunda (on_transfer_fail)</option>
-                          <option value="on_call_end">📴 Görüşme Kapandığında (on_call_end)</option>
-                          <option value="on_whatsapp_message">💬 WhatsApp Mesajı Geldiğinde (on_whatsapp_message)</option>
+                          <option value="on_silence">🤫 Sessiz Kalındığında</option>
+                          <option value="on_no_match">❓ Cevap Anlaşılamadığında</option>
+                          <option value="on_transfer_fail">📵 Aktarım Başarısız Olduğunda</option>
+                          <option value="on_call_end">📴 Görüşme Kapandığında</option>
+                          <option value="on_whatsapp_message">💬 WhatsApp Mesajı Geldiğinde</option>
                         </select>
                       </div>
 
                       {d.action === 'webhook' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <div>
-                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Webhook URL (HTTP POST)</label>
-                            <input
-                              value={d.webhookUrl || ''}
-                              onChange={e => updateSelectedNode({ webhookUrl: e.target.value })}
-                              placeholder="https://hooks.zapier.com/... veya n8n Webhook URL"
-                              style={inputStyle}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>
-                              JSON Gövde Şablonu (Opsiyonel, {'{{musteri_adi}}'} destekler)
-                            </label>
-                            <textarea
-                              value={(d.webhookBodyTemplate as string) || ''}
-                              onChange={e => updateSelectedNode({ webhookBodyTemplate: e.target.value })}
-                              placeholder={'{"name": "{{musteri_adi}}", "phone": "{{telefon}}"}'}
-                              rows={3}
-                              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
-                            />
-                          </div>
+                        <div style={{ padding: 12, borderRadius: 10, background: '#dc2626', border: '1px solid #b91c1c', fontSize: 12, fontWeight: 700 }}>
+                          <span style={{ color: '#ffffff' }}>⛔ {LEGACY_WEBHOOK_MESSAGE} Görüşme sırasında bu adım atlanır; üstteki çöp kutusuyla silebilirsiniz.</span>
                         </div>
                       )}
 
@@ -2852,7 +2987,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                             />
                           </div>
                           <div>
-                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Atanacak Değer ({'{{alan}}'} destekler)</label>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Atanacak Değer</label>
                             <input
                               value={(d.variableValue as string) || ''}
                               onChange={e => updateSelectedNode({ variableValue: e.target.value })}
@@ -2866,7 +3001,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                       {(d.action === 'send_sms' || d.action === 'wait_reprompt' || d.action === 'wait' || d.action === 'switch_prompt') && (
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>
-                            {d.action === 'send_sms' ? 'SMS Şablonu ({{musteri_adi}}, {{tarih}})' : d.action === 'switch_prompt' ? 'Yeni Prompt / Mod Talimatı' : 'Yeniden Sorulacak Mesaj'}
+                            {d.action === 'send_sms' ? 'SMS Mesaj Metni' : d.action === 'switch_prompt' ? 'Yeni Konuşma Talimatı' : 'Yeniden Sorulacak Mesaj'}
                           </label>
                           <textarea
                             value={(d.promptInstruction as string) || (d.message as string) || ''}
@@ -3036,7 +3171,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                 <div style={{ padding: 12, background: 'var(--card-inner)', border: '1px solid var(--input-border)', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--foreground)' }}>🧪 Canlı AI Simülatörü</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--foreground)' }}>🧪 Canlı Test</span>
                       <span
                         style={{
                           fontSize: 9,
@@ -3047,7 +3182,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           color: '#ffffff',
                         }}
                       >
-                        <span style={{ color: '#ffffff' }}>{simAiPowered ? '🤖 Canlı AI + RAG Aktif' : '🤖 AI Bağlantılı'}</span>
+                        <span style={{ color: '#ffffff' }}>{simAiPowered ? '🤖 Yapay zeka ve bilgi bankası etkin' : '🤖 Yapay zeka bağlantılı'}</span>
                       </span>
                     </div>
                     <button
@@ -3110,6 +3245,46 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   </div>
                 </div>
 
+                {/* Yazılı / Sesli anahtarı */}
+                <div role="tablist" aria-label="Test şekli" style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 12, background: 'var(--input-bg)', border: '1.5px solid var(--input-border)', boxShadow: 'var(--pc-neo-inset)' }}>
+                  {([['text', '⌨️ Yazılı'], ['voice', '🎙️ Sesli']] as const).map(([mode, label]) => {
+                    const active = simMode === mode
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setSimMode(mode)}
+                        style={{
+                          flex: 1, padding: '7px 10px', borderRadius: 9, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                          border: active ? '1.5px solid #1d4ed8' : '1.5px solid var(--input-border)',
+                          background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--pc-surface)',
+                          boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                        }}
+                      >
+                        <span style={{ color: active ? '#ffffff' : 'var(--foreground)' }}>{label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {simMode === 'voice' && (
+                  <SimulatorVoicePanel
+                    direction={direction === 'outbound' ? 'outbound' : 'inbound'}
+                    nodes={nodes}
+                    edges={edges}
+                    callerProfile={{ kayitli: simFields.kayitli === 'true' ? 'true' : 'false' }}
+                    onTranscript={e => setSimLog(prev => [...prev, { role: e.role === 'assistant' ? 'ai' : 'user', text: e.text }])}
+                    onNodeVisited={id => {
+                      setSimActive(true)
+                      setSimCurrentNodeId(id)
+                      setSimVisitedNodeIds(prev => (prev.includes(id) ? prev : [...prev, id]))
+                    }}
+                    onFieldsChanged={f => setSimFields(prev => ({ ...prev, ...f }))}
+                  />
+                )}
+
                 {/* Conversation Log */}
                 <div
                   style={{
@@ -3160,8 +3335,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   ))}
                 </div>
 
-                {/* Active Step Interactive Input (Works for any step with natural AI + RAG) */}
-                {(() => {
+                {/* Yazılı mod: seçili adım için mesaj girişi */}
+                {simMode === 'text' && (() => {
                   const d = (selectedSimNode?.data || {}) as FieldData
                   const preset = PRESET_FIELDS.find(p => p.value === d.fieldName)
                   const samples =
@@ -3174,8 +3349,8 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   return (
                     <div style={{ padding: 12, background: 'var(--card-inner)', border: '1.5px solid #2563eb', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>✍️ AI Asistana Mesaj Yazın {d.fieldName ? `(${d.fieldName})` : ''}:</span>
-                        {simLoading && <span style={{ fontSize: 10, color: '#2563eb' }}>🤖 AI yanıt üretiyor...</span>}
+                        <span>✍️ Yapay zeka asistana mesaj yazın:</span>
+                        {simLoading && <span style={{ fontSize: 10, color: '#2563eb' }}>🤖 Yanıt hazırlanıyor…</span>}
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <input
@@ -3183,7 +3358,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           disabled={simLoading}
                           onChange={e => setSimInput(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitSimulationField() } }}
-                          placeholder="Doğal cümle veya yanıt yazın (AI alanları otomatik çıkarır)..."
+                          placeholder="Doğal bir cümle yazın; bilgiler otomatik ayıklanır…"
                           style={{ ...inputStyle, flex: 1 }}
                         />
                         <button
@@ -3365,7 +3540,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         }}
       >
         <div>
-          <strong>💡 Kısa İpuçları:</strong> Düğümleri sürükleyerek taşıyın • Yuvarlak bağlantı noktalarından (●) sürükleyerek ok çizin • Seçili düğümü veya oku <strong>Delete / Backspace</strong> tuşuyla silebilirsiniz.
+          <strong>💡 Kısa İpuçları:</strong> Düğümleri sürükleyerek taşıyın • Yuvarlak bağlantı noktalarından (●) sürükleyerek ok çizin • Seçili düğümü veya oku <strong>Silme</strong> tuşuyla kaldırabilirsiniz.
         </div>
         {simActive && (
           <button

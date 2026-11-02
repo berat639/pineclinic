@@ -1,3 +1,5 @@
+import { createAudioContext } from "./browser-audio-support";
+
 /**
  * AudioStreamPlayer — Real-time audio playback for streaming PCM chunks.
  * Schedules audio buffers seamlessly one after another for gapless playback.
@@ -12,7 +14,7 @@ export class AudioStreamPlayer {
   private readonly maxScheduledAheadSeconds = 1.5;
 
   constructor(sampleRate = 24000) {
-    this.audioContext = new AudioContext({ sampleRate });
+    this.audioContext = createAudioContext({ sampleRate });
     this.gainNode = this.audioContext.createGain();
     this.gainNode.connect(this.audioContext.destination);
     // This constructor runs from the Start button handler. Resuming here keeps
@@ -123,7 +125,6 @@ export class MicrophoneCapture {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -131,7 +132,11 @@ export class MicrophoneCapture {
         },
       });
 
-      this.audioContext = new AudioContext({ sampleRate: 16000 });
+      // Cihazın kendi örnekleme hızında açılır (Firefox 16 kHz bağlamı reddeder);
+      // 16 kHz'e indirme audio-processor.js içinde yapılır.
+      this.audioContext = createAudioContext();
+      // Safari: bağlam kullanıcı jestiyle başlatılan çağrıdan açılır, resume zorunludur.
+      if (this.audioContext.state === "suspended") await this.audioContext.resume();
       const source = this.audioContext.createMediaStreamSource(this.stream);
 
       // Load AudioWorklet processor

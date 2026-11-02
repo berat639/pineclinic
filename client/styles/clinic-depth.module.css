@@ -1,0 +1,34 @@
+/* Ortak Clay/Neo derinlik sınıfları (Tedavi Planlama ölçüleri). Token'lar globals.css içindedir. Opak, blur yok. */
+.card { padding: 12px 14px; border: 1px solid var(--pc-border); border-radius: 19px; background: var(--pc-surface); color: var(--foreground); box-shadow: var(--pc-neo-card); font: 13px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+.subcard { padding: 9px 12px; border: 1px solid var(--pc-border); border-radius: 12px; background: var(--card-inner, var(--pc-surface)); color: var(--foreground); box-shadow: var(--pc-neo-subcard); }
+.input { width: 100%; min-height: 34px; padding: 6px 10px; border: 1px solid var(--pc-border); border-radius: 9px; background: var(--input-bg); color: var(--foreground); font: inherit; box-shadow: var(--pc-neo-inset); outline: none; transition: border-color .15s ease; }
+.input:focus { border-color: var(--pc-blue); }
+.input::placeholder { color: var(--pc-muted); }
+.segmentTrack { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--pc-border); border-radius: 12px; background: var(--input-bg); box-shadow: var(--pc-neo-inset); }
+.segment { min-height: 28px; padding: 4px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--pc-muted); font: inherit; font-weight: 600; cursor: pointer; transition: transform .1s ease, color .15s ease; }
+.segment:hover { color: var(--foreground); }
+.segmentActive { composes: segment; border-color: #1d4ed8; background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; box-shadow: var(--pc-clay-primary); }
+.segmentActive:hover { color: #ffffff; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 12px; border: 1px solid var(--pc-border); border-radius: 9px; background: var(--pc-surface); color: var(--pc-tint-fg); font: inherit; font-weight: 600; cursor: pointer; box-shadow: var(--pc-clay-btn); transition: transform .1s ease, filter .15s ease; }
+.btn:hover { filter: brightness(1.04); }
+.btn:active { transform: translateY(1px); box-shadow: var(--pc-neo-inset); }
+.btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+.btnPrimary { composes: btn; border-color: #1d4ed8; background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; box-shadow: var(--pc-clay-primary); }
+.btnPrimary *, .btnPrimary svg { color: #ffffff; }
+.btnPale { composes: btn; border-color: var(--pc-border); background: var(--pc-tint); color: var(--pc-tint-fg); box-shadow: var(--pc-clay-pale); }
+.btnMint { composes: btn; border-color: #86efac; background: #f0fdf4; color: #15803d; }
+:global([data-theme="dark"]) .btnMint { border-color: #059669; background: #0b2e20; color: #34d399; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border: 1px solid var(--pc-border); border-radius: 999px; background: var(--pc-tint); color: var(--pc-tint-fg); font-size: 11.5px; font-weight: 700; box-shadow: var(--pc-clay-pale); }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--pc-border); border-radius: 9px; background: var(--pc-surface); color: var(--foreground); font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: var(--pc-clay-btn); }
+.chip:hover { border-color: var(--pc-blue); }
+.switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; border: 1px solid var(--pc-border); border-radius: 999px; background: var(--input-bg); box-shadow: var(--pc-neo-inset); cursor: pointer; transition: background .15s ease; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #ffffff; border: 1px solid var(--pc-border); box-shadow: var(--pc-clay-btn); transition: transform .15s ease; }
+.switch[aria-checked="true"] { border-color: #1d4ed8; background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); }
+.tooltip { padding: 8px 10px; border: 1.5px solid var(--input-border); border-radius: 9px; background: var(--card-bg); color: var(--foreground); font-size: 12px; font-weight: 500; line-height: 1.45; box-shadow: var(--pc-modal-shadow); }
+/* Karartma katmanı bilerek yarı saydamdır (var(--modal-overlay)); blur yok. */
+.backdrop { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; padding: 12px; background: var(--modal-overlay); }
+.modal { width: min(460px, calc(100vw - 24px)); max-width: 460px; max-height: 90vh; overflow: auto; border: 1.5px solid var(--input-border); border-radius: 14px; background: var(--card-bg); color: var(--foreground); box-shadow: var(--pc-modal-shadow); }
+.tableRow { border-bottom: 1px solid var(--pc-border); transition: background .12s ease; }
+.tableRow:hover { background: var(--pc-tint); }
+.pager { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--pc-border); border-radius: 12px; background: var(--pc-surface); color: var(--foreground); font-size: 12px; box-shadow: var(--pc-neo-subcard); }

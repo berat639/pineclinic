@@ -30,8 +30,6 @@ export default function PromptEditor() {
   const [prompts, setPrompts] = useState<PromptSectionItem[]>([])
   const [selectedPromptKey, setSelectedPromptKey] = useState<string>('')
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({})
-  const [promptSaving, setPromptSaving] = useState(false)
-  const [promptNotice, setPromptNotice] = useState('')
   const [previewText, setPreviewText] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
@@ -122,43 +120,6 @@ export default function PromptEditor() {
 
   const activeFields = customFields.filter(f => f.active !== false)
   const activePrompt = prompts.find(p => p.key === selectedPromptKey) ?? prompts[0] ?? null
-
-  const savePromptSection = async (key: string) => {
-    const val = (promptDrafts[key] ?? '').trim()
-    if (val.length < 5) return
-    setPromptSaving(true)
-    setPromptNotice('')
-    try {
-      const res = await fetch(`/api/admin/settings/prompts/${encodeURIComponent(key)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: val }),
-      })
-      if (res.ok) {
-        setPrompts(prev => prev.map(p => p.key === key ? { ...p, value: val, isCustom: true, updatedAt: new Date().toISOString() } : p))
-        setPromptNotice('Prompt şablonu kaydedildi.')
-      }
-    } catch { /* ignore */ }
-    setPromptSaving(false)
-  }
-
-  const resetPromptSectionToDefault = async (key: string) => {
-    setPromptSaving(true)
-    setPromptNotice('')
-    try {
-      const res = await fetch(`/api/admin/settings/prompts/${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-      })
-      if (res.ok) {
-        const data = await res.json()
-        const nextVal = typeof data.value === 'string' ? data.value : ''
-        setPrompts(prev => prev.map(p => p.key === key ? { ...p, value: nextVal, isCustom: false, updatedAt: null } : p))
-        setPromptDrafts(prev => ({ ...prev, [key]: nextVal }))
-        setPromptNotice('Varsayılan şablona sıfırlandı.')
-      }
-    } catch { /* ignore */ }
-    setPromptSaving(false)
-  }
 
   const loadPromptPreview = async () => {
     setPreviewLoading(true)
@@ -299,19 +260,19 @@ export default function PromptEditor() {
 
       {/* System Prompt Sections Editor */}
       {prompts.length > 0 && activePrompt && (
-        <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--input-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>🧠 Sistem Prompt Şablonları (Gömülü Prompt Bağımsızlığı)</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>Sistem Talimatları (salt okunur)</div>
               <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 3 }}>
-                Tüm karşılama, kanal, akış önceliği ve konuşma kuralları veritabanından okunur; kliniğe özel düzenlenebilir.
+                Konuşma kuralları platform yöneticisi tarafından yönetilir; burada yalnızca görüntülenir.
               </div>
             </div>
             <button
               type="button"
               onClick={() => void (previewText !== null ? setPreviewText(null) : loadPromptPreview())}
               disabled={previewLoading}
-              style={{ padding: '6px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa' }}
+              style={{ padding: '6px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'var(--card-inner)', border: '1px solid var(--input-border)', color: 'var(--accent)' }}
             >
               {previewLoading ? 'Önizleme yükleniyor…' : previewText !== null ? 'Önizlemeyi Gizle' : 'Birleşik Prompt Önizlemesi'}
             </button>
@@ -324,16 +285,16 @@ export default function PromptEditor() {
                 <button
                   key={section.key}
                   type="button"
-                  onClick={() => { setSelectedPromptKey(section.key); setPromptNotice('') }}
+                  onClick={() => { setSelectedPromptKey(section.key);  }}
                   style={{
                     padding: '6px 10px',
                     borderRadius: 7,
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: 'pointer',
-                    color: selected ? '#fff' : 'var(--foreground-2)',
-                    background: selected ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${selected ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.08)'}`,
+                    color: selected ? '#ffffff' : 'var(--foreground-2)',
+                    background: selected ? '#2563eb' : 'var(--card-inner)',
+                    border: `1px solid ${selected ? '#1d4ed8' : 'var(--input-border)'}`,
                   }}
                 >
                   {section.label}
@@ -343,27 +304,27 @@ export default function PromptEditor() {
             })}
           </div>
 
-          <div style={{ padding: 14, borderRadius: 10, background: 'rgba(0,0,0,0.18)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ padding: 14, borderRadius: 10, background: 'var(--card-bg)', border: '1.5px solid var(--input-border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>{activePrompt.label}</div>
                 <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 2 }}>{activePrompt.description}</div>
               </div>
-              <code style={{ fontSize: 10, color: '#94a3b8', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: 4 }}>
-                {activePrompt.key}
-              </code>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#0369a1', background: '#e0f2fe', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: 999 }}>
+                Platformdan yönetilir
+              </span>
             </div>
 
             <textarea
               rows={6}
               value={promptDrafts[activePrompt.key] ?? activePrompt.value}
-              onChange={e => setPromptDrafts(prev => ({ ...prev, [activePrompt.key]: e.target.value }))}
+              readOnly
               style={{
                 width: '100%',
                 padding: '10px 12px',
                 borderRadius: 8,
-                background: 'rgba(0,0,0,0.28)',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
                 color: 'var(--foreground)',
                 fontSize: 11,
                 fontFamily: 'monospace',
@@ -373,33 +334,13 @@ export default function PromptEditor() {
               }}
             />
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 10, color: promptNotice ? '#22c55e' : 'var(--foreground-3)' }}>
-                {promptNotice || 'Değişkenler: {{greeting}}, {{customFields}}, {{doctorBlock}}, {{workingHoursBlock}}, {{knowledgeBlock}}'}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  disabled={promptSaving}
-                  onClick={() => void resetPromptSectionToDefault(activePrompt.key)}
-                  style={{ padding: '6px 12px', borderRadius: 7, fontSize: 11, cursor: 'pointer', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--foreground-3)' }}
-                >
-                  Varsayılana Sıfırla
-                </button>
-                <button
-                  type="button"
-                  disabled={promptSaving || (promptDrafts[activePrompt.key] ?? '').trim().length < 5}
-                  onClick={() => void savePromptSection(activePrompt.key)}
-                  style={{ padding: '6px 14px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}
-                >
-                  {promptSaving ? 'Kaydediliyor…' : 'Şablonu Kaydet'}
-                </button>
-              </div>
+            <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 10 }}>
+              Bu talimatlar platform yöneticisi tarafından yönetilir ve tüm kliniklerde aynı şekilde uygulanır. Karşılama mesajı, hekim, çalışma saatleri ve bilgi bankası bu kliniğe özel olarak düzenlenebilir.
             </div>
           </div>
 
           {previewText !== null && (
-            <pre style={{ marginTop: 12, padding: 12, borderRadius: 8, background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--foreground-2)', fontSize: 10, maxHeight: 260, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+            <pre style={{ marginTop: 12, padding: 12, borderRadius: 8, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground-2)', fontSize: 10, maxHeight: 260, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
               {previewText}
             </pre>
           )}

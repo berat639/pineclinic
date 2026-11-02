@@ -69,5 +69,25 @@ trigger: always_on
   - The selection box must never be dark blue with black text; it must use soft clinical pastel tones matching other appointment cards and synchronized with the procedure color.
   - A doctor cannot treat **two different patients** at the same time (dragging/dropping onto another patient's appointment is locked); however, multiple procedures for the **same patient** can be grouped into a single session or merged by dragging onto an existing session of that patient.
 
+## 8. Clay/Neo Mandate & Element → Token Mapping
+- Every newly added or modified element MUST follow the Treatment Planning Clay/Neo system. Shared classes: `client/styles/clinic-depth.module.css`; shared ⓘ component: `client/app/admin/components/ui/InfoTooltip.tsx`.
 
+| Element | Gölge | Zemin / Sınır |
+|---|---|---|
+| Ana kart / panel | `--pc-neo-card` | `--pc-surface` / `--pc-border` |
+| İç grup kutusu | `--pc-neo-subcard` | `--card-inner` |
+| Input, select, arama, sekme kanalı | `--pc-neo-inset` | `--input-bg` / `--input-border` |
+| İkincil buton, seçilebilir öğe | `--pc-clay-btn` | `--pc-surface` |
+| Bilgi/seçim rozeti, çip | `--pc-clay-pale` | `--pc-tint` / `--pc-tint-fg` |
+| Birincil buton, aktif sekme | `--pc-clay-primary` | `linear-gradient(180deg,#2563eb,#1d4ed8)`, yazı `#ffffff` |
+| Toplam / özet kutusu | `--pc-clay-total` | `--pc-total-bg` |
+| Modal, drawer, tooltip, context menü | `--pc-modal-shadow` (beyaz hale yok) | `--card-bg`, `1.5px solid var(--input-border)` |
 
+## 9. Modal Backdrop Exception (Semi-Transparent REQUIRED)
+- Modal/Drawer backdrop dimming is REQUIRED to be semi-transparent: the full-screen layer must always use `background: var(--modal-overlay)` so the page behind appears dimmed. It must never be opaque (`var(--card-bg)`) and never contain blur. The opacity rule applies to the modal body itself, cards, panels and inputs.
+
+## 10. Turkish UI Language Rule
+- The UI must not show English words, code names, variable names (`caller.isVip`, `{{greeting}}`), symbolic operators (`==`, `!=`, `>`, `AND/OR`) or technical jargon. Condition connectors are only "ve" / "veya".
+
+## 11. Long Explanations Go Into InfoTooltip
+- Help or explanatory text longer than two lines in forms and panels is never shown inline; it is given inside the `InfoTooltip` (ⓘ) next to the title.

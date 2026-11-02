@@ -1,5 +1,6 @@
-import { getAiModel, getAllPromptSections, getSetting } from '../db/repositories/settings'
+import { getAiModel, getSetting } from '../db/repositories/settings'
 import { PROMPT_SECTION_KEYS, getDefaultPromptValue } from '../data/default-prompts'
+import { getEffectivePromptSections, renderPromptTemplate } from '../prompts/registry'
 import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, isLiveModel } from './live-model-profile'
 
 export { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL }
@@ -15,8 +16,7 @@ export async function resolveLiveModel(): Promise<string> {
 export async function buildSystemPrompt(greeting: string, direction: string = 'inbound'): Promise<string> {
   let dbSections: Record<string, string> = {}
   try {
-    const rows = await getAllPromptSections()
-    dbSections = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.value]))
+    dbSections = await getEffectivePromptSections()
   } catch {}
 
   const parts: string[] = []
@@ -33,22 +33,22 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     // Minimal Flow Builder akışında varsayılan randevu senaryosu devreye
     // girerse model, akışta olmayan soruları kendiliğinden üretir.
     if (minimalFlow && key === 'prompt.appointment_rules') continue
-    let value = dbSections[key] ?? getDefaultPromptValue(key) ?? ''
+    let value = dbSections[key] || getDefaultPromptValue(key) || ''
     if (key === 'prompt.greeting_flow') {
       if (direction === 'whatsapp') {
         value = dbSections['prompt.whatsapp_greeting_flow']
-          ?? getDefaultPromptValue('prompt.whatsapp_greeting_flow')
-          ?? 'WhatsApp üzerinden yazılı destek veriyorsun. Kısa ve anlaşılır yanıtlar yaz. Kullanıcıyı her mesajda yeniden karşılama. Telefonla konuşma veya arama başlatma talimatlarını uygulama.'
+          || getDefaultPromptValue('prompt.whatsapp_greeting_flow')
+          || 'WhatsApp üzerinden yazılı destek veriyorsun. Kısa ve anlaşılır yanıtlar yaz. Kullanıcıyı her mesajda yeniden karşılama. Telefonla konuşma veya arama başlatma talimatlarını uygulama.'
       } else if (direction === 'outbound') {
         const outboundTpl = dbSections['prompt.outbound_greeting_flow']
-          ?? getDefaultPromptValue('prompt.outbound_greeting_flow')
-          ?? `GIDEN ARAMA (OUTBOUND) KARŞILAMA VE GÖREV TALİMATI:\nSen dış arama (outbound call) yapıyorsun. Karşı taraf telefonu açtığında İLK CÜMLE olarak KESİNLİKLE şu giden karşılama mesajını söyle:\n"{{greeting}}"\nArdından konuşma akışındaki adımları sırasıyla uygula.`
-        value = outboundTpl.includes('{{greeting}}')
-          ? outboundTpl.replace(/\{\{greeting\}\}/g, greeting)
+          || getDefaultPromptValue('prompt.outbound_greeting_flow')
+          || `GIDEN ARAMA (OUTBOUND) KARŞILAMA VE GÖREV TALİMATI:\nSen dış arama (outbound call) yapıyorsun. Karşı taraf telefonu açtığında İLK CÜMLE olarak KESİNLİKLE şu giden karşılama mesajını söyle:\n"{{greeting}}"\nArdından konuşma akışındaki adımları sırasıyla uygula.`
+        value = /\{\{\s*greeting\s*\}\}/.test(outboundTpl)
+          ? renderPromptTemplate(outboundTpl, { greeting })
           : `${outboundTpl}\n"${greeting}"`
       } else {
-        value = value.includes('{{greeting}}')
-          ? value.replace(/\{\{greeting\}\}/g, greeting)
+        value = /\{\{\s*greeting\s*\}\}/.test(value)
+          ? renderPromptTemplate(value, { greeting })
           : `GELEN ARAMA (INBOUND) KARŞILAMA:\nMüşteri aradığında şu karşılama mesajını söyle: "${greeting}"\nSonra müşterinin ne istediğini dinle ve yardımcı ol.`
       }
     }

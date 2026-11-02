@@ -33,6 +33,7 @@ import {
 import { FlowEngine } from './services/flow-engine'
 import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
 import { recordAiTokenUsage } from './db/repositories/ai-usage'
+import { getPromptTemplate, renderPromptTemplate } from './prompts/registry'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -658,12 +659,19 @@ export async function createLiveSession(
   const toolDeclarations = prepareLiveToolDeclarations(options.model, (await buildToolDeclarations(options.direction))
     .filter(tool => flowEngine || tool.name !== 'akisBilgisiGuncelle')
   )
-  const voiceInstruction = 'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.'
+  const fallbackVoiceInstruction = 'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.'
+  const fallbackFlowRuntimeInstruction = 'AKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.'
+  const [voiceTpl, flowRuntimeTpl] = await Promise.all([
+    getPromptTemplate('prompt.voice_identity_rules', options.clinicId).catch(() => ''),
+    flowEngine ? getPromptTemplate('prompt.flow_runtime_rules', options.clinicId).catch(() => '') : Promise.resolve(''),
+  ])
+  const voiceInstruction = renderPromptTemplate(voiceTpl.trim() || fallbackVoiceInstruction, {}).trim() || fallbackVoiceInstruction
+  const flowRuntimeInstruction = renderPromptTemplate(flowRuntimeTpl.trim() || fallbackFlowRuntimeInstruction, {}).trim() || fallbackFlowRuntimeInstruction
 
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
     systemInstruction: options.systemPrompt + '\n\n' + voiceInstruction + (flowEngine
-      ? '\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.'
+      ? '\n\n' + flowRuntimeInstruction
       : ''),
     speechConfig: {
       voiceConfig: {

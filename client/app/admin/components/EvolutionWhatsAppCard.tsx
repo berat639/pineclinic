@@ -51,8 +51,8 @@ export default function EvolutionWhatsAppCard() {
     try {
       const result = await api<{ qrcode: string | null; connectionState: string }>(`/${config.clinicId}/connect`, 'POST')
       setQr(result.qrcode); setConfig(current => current ? { ...current, connectionState: result.connectionState } : current)
-      setNotice(result.qrcode ? 'QR kodu hazır. Bu klinik telefonundan okutun.' : 'Bağlantı isteği gönderildi; durum kontrol ediliyor.')
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'WhatsApp QR kodu hazırlanamadı.') }
+      setNotice(result.qrcode ? 'Karekod hazır. Bu klinik telefonundan okutun.' : 'Bağlantı isteği gönderildi; durum kontrol ediliyor.')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'WhatsApp karekodu hazırlanamadı.') }
     finally { setBusy(false) }
   }
   const updatePreferences = async (next: Pick<Config, 'enabled' | 'aiEnabled'>) => {
@@ -70,7 +70,7 @@ export default function EvolutionWhatsAppCard() {
     try {
       const updated = await api<Config>(`/${config.clinicId}/disconnect`, 'DELETE')
       setConfig(updated); setQr(null); setConfirmDisconnect(false)
-      setNotice('WhatsApp bağlantısı kesildi. Yeniden bağlamak için QR kodu oluşturabilirsiniz.')
+      setNotice('WhatsApp bağlantısı kesildi. Yeniden bağlamak için karekod oluşturabilirsiniz.')
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'WhatsApp bağlantısı kesilemedi.') }
     finally { setBusy(false) }
   }
@@ -80,14 +80,14 @@ export default function EvolutionWhatsAppCard() {
     <div className={styles.heading}><div><h3 id="evolution-heading">WhatsApp bağlantısı</h3><p className={styles.description}>Bu kliniğin WhatsApp hattı merkezi platform tarafından yönetilir.</p></div>{config && <span className={`${styles.badge} ${connectionClass}`}>{states[config.connectionState] || states.unknown}</span>}</div>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
     {loading ? <p>WhatsApp ayarları yükleniyor…</p> : !config ? <p>WhatsApp bağlantısı için önce merkez panelden klinik kurulumu tamamlanmalıdır.</p> : <>
-      <p className={styles.managedInfo}>Klinik telefonu: <strong>{config.expectedPhone || 'Merkez panelden tanımlanmadı'}</strong><br />Gönderimler ve AI yanıtlarını aşağıdan yönetebilirsiniz.</p>
+      <p className={styles.managedInfo}>Klinik telefonu: <strong>{config.expectedPhone || 'Merkez panelden tanımlanmadı'}</strong><br />Gönderimler ve yapay zeka yanıtlarını aşağıdan yönetebilirsiniz.</p>
       <div className={styles.preferences} aria-label="WhatsApp tercihleri">
         <label><input type="checkbox" checked={config.enabled} disabled={busy || config.connectionState !== 'open'} onChange={event => void updatePreferences({ enabled: event.target.checked, aiEnabled: event.target.checked ? config.aiEnabled : false })} /><span><strong>Gönderimler</strong><small>Randevu ve bilgilendirme mesajlarını WhatsApp üzerinden gönderir.</small></span></label>
-        <label><input type="checkbox" checked={config.aiEnabled} disabled={busy || !config.enabled || config.connectionState !== 'open'} onChange={event => void updatePreferences({ enabled: config.enabled, aiEnabled: event.target.checked })} /><span><strong>AI otomatik yanıtları</strong><small>Gelen WhatsApp mesajlarına AI&apos;ın yanıt vermesini sağlar.</small></span></label>
+        <label><input type="checkbox" checked={config.aiEnabled} disabled={busy || !config.enabled || config.connectionState !== 'open'} onChange={event => void updatePreferences({ enabled: config.enabled, aiEnabled: event.target.checked })} /><span><strong>Yapay zeka otomatik yanıtları</strong><small>Gelen WhatsApp mesajlarına yapay zekanın yanıt vermesini sağlar.</small></span></label>
       </div>
-      <div className={styles.actions}>{config.connectionState !== 'open' && <button disabled={busy || !config.expectedPhone} onClick={connect}>{qr ? 'QR kodunu yenile' : 'WhatsApp bağla / QR göster'}</button>}<button className={styles.secondary} disabled={busy} onClick={() => { setError(''); void load() }}>Durumu yenile</button>{config.connectionState === 'open' && <button className={styles.danger} disabled={busy} onClick={() => setConfirmDisconnect(true)}>Bağlantıyı kes</button>}</div>
-      {confirmDisconnect && <div className={styles.confirm} role="alertdialog" aria-modal="true" aria-label="WhatsApp bağlantısını kes"><strong>WhatsApp bağlantısı kesilsin mi?</strong><p>Gönderimler ve AI otomatik yanıtları kapatılır. Yeniden bağlamak için QR kodunu tekrar okutmanız gerekir.</p><div className={styles.actions}><button className={styles.danger} disabled={busy} onClick={() => void disconnect()}>Bağlantıyı kes</button><button className={styles.secondary} disabled={busy} onClick={() => setConfirmDisconnect(false)}>Vazgeç</button></div></div>}
-      {qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt={`${config.clinicName} WhatsApp bağlantı QR kodu`} /><p>Telefonunda WhatsApp → Bağlı cihazlar → Cihaz bağla yolunu açıp kodu okut.</p></div>}
+      <div className={styles.actions}>{config.connectionState !== 'open' && <button disabled={busy || !config.expectedPhone} onClick={connect}>{qr ? 'Karekodu yenile' : 'WhatsApp bağla / Karekod göster'}</button>}<button className={styles.secondary} disabled={busy} onClick={() => { setError(''); void load() }}>Durumu yenile</button>{config.connectionState === 'open' && <button className={styles.danger} disabled={busy} onClick={() => setConfirmDisconnect(true)}>Bağlantıyı kes</button>}</div>
+      {confirmDisconnect && <div className={styles.confirm} role="alertdialog" aria-modal="true" aria-label="WhatsApp bağlantısını kes"><strong>WhatsApp bağlantısı kesilsin mi?</strong><p>Gönderimler ve yapay zeka otomatik yanıtları kapatılır. Yeniden bağlamak için karekodu tekrar okutmanız gerekir.</p><div className={styles.actions}><button className={styles.danger} disabled={busy} onClick={() => void disconnect()}>Bağlantıyı kes</button><button className={styles.secondary} disabled={busy} onClick={() => setConfirmDisconnect(false)}>Vazgeç</button></div></div>}
+      {qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt={`${config.clinicName} WhatsApp bağlantı karekodu`} /><p>Telefonunda WhatsApp → Bağlı cihazlar → Cihaz bağla yolunu açıp karekodu okut.</p></div>}
     </>}
   </section>
 }

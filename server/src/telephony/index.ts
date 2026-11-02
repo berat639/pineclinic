@@ -556,6 +556,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const todayStr = getTodayTurkish()
             const callerName = vipRecord?.contactName || 'Misafirimiz'
 
+            const initPromptKey = isVip
+              ? 'prompt.vip_call_init'
+              : direction === 'outbound'
+                ? 'prompt.outbound_call_init'
+                : 'prompt.phone_call_init'
+
             const [
               ragContext,
               systemPromptBase,
@@ -563,6 +569,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               activeGreeting,
               phoneRulesTpl,
               flowPriorityTpl,
+              callInitTpl,
               clinicAi,
             ] = await Promise.all([
               (async () => {
@@ -588,7 +595,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               isVip
                 ? (async () => {
                   if (vipRecord?.customPrompt?.trim()) return vipRecord.customPrompt.trim()
-                  const vipTpl = await getPromptTemplate('prompt.vip_default', state.clinicId)
+                  const vipTpl = await getPromptTemplate('prompt.vip_default', state.clinicId).catch(() => '')
+                  if (!vipTpl.trim()) return ''
                   return renderPromptTemplate(vipTpl, {
                     callerName,
                     callerPhone: state.callerPhone || 'Bilinmiyor',
@@ -603,12 +611,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
                 return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben klinik asistanınızım.' : 'Merhaba, hoş geldiniz!')
               })(),
-              getPromptTemplate('prompt.phone_channel_rules', state.clinicId),
-              getPromptTemplate('prompt.flow_priority_rules', state.clinicId),
+              getPromptTemplate('prompt.phone_channel_rules', state.clinicId).catch(() => ''),
+              getPromptTemplate('prompt.flow_priority_rules', state.clinicId).catch(() => ''),
+              getPromptTemplate(initPromptKey, state.clinicId).catch(() => ''),
               getGeminiClient(state.clinicId).catch(() => ai),
             ])
 
-            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\n${phoneRulesTpl}`
+            const resolvedPhoneRules = renderPromptTemplate(phoneRulesTpl, {})
+            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\n${resolvedPhoneRules}`
             const model = voiceSettings.model
             const voiceName = voiceSettings.voiceName
             const silenceTimeoutSec = voiceSettings.callSilenceTimeout
@@ -643,7 +653,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
             }
 
-            const flowPriorityInstructions = `\n\n${flowPriorityTpl}`
+            const flowPriorityInstructions = `\n\n${renderPromptTemplate(flowPriorityTpl, {})}`
             const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
             console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
             if (minimalGreetingEndFlow) {
@@ -813,14 +823,20 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const initParts: string[] = []
 
             if (isVip) {
+              const fallbackVipInit = `Sistem bildirimi: Özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "{{greeting}}"\n\nKESİN KURAL: Asla telefon numarası veya kayıt sorma. Tamamen samimi, neşeli ve doğal bir şekilde özel kişisel asistan olarak konuşmaya başla.`
+              const renderedVipInit = renderPromptTemplate(callInitTpl.trim() || fallbackVipInit, { greeting: activeGreeting }).trim()
               initParts.push(
-                `Sistem bildirimi: Özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla telefon numarası veya kayıt sorma. Tamamen samimi, neşeli ve doğal bir şekilde özel kişisel asistan olarak konuşmaya başla.`
+                renderedVipInit || `Sistem bildirimi: Özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla telefon numarası veya kayıt sorma. Tamamen samimi, neşeli ve doğal bir şekilde özel kişisel asistan olarak konuşmaya başla.`
               )
             } else {
+              const fallbackCallInit = direction === 'outbound'
+                ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "{{greeting}}"`
+                : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "{{greeting}}"`
+              const renderedCallInit = renderPromptTemplate(callInitTpl.trim() || fallbackCallInit, { greeting: activeGreeting }).trim()
               initParts.push(
-                direction === 'outbound'
+                renderedCallInit || (direction === 'outbound'
                   ? `Sistem bildirimi: Dış arama (outbound call) yapıldı ve karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu giden arama karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
-                  : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`
+                  : `Sistem bildirimi: Müşteri TELEFON üzerinden sesli görüşmeye bağlandı. İLK OLARAK KESİNLİKLE şu karşılama mesajını söyleyerek söze başla: "${activeGreeting}"`)
               )
 
               // Müşteri tanıma: UUID frame open() async await'leri sırasında gelir,
