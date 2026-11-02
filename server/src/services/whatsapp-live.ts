@@ -49,8 +49,8 @@ export async function generateWhatsAppReply(input: WhatsAppLiveInput, ai = new G
             }
           }).catch(() => fail(new Error('AI işlem hatası.')))
         },
-        onerror: () => fail(new Error('Gemini Live bağlantısı kurulamadı.')),
-        onclose: () => { if (!settled) fail(new Error('Gemini Live bağlantısı kapandı.')) },
+        onerror: () => fail(new Error('Canlı AI bağlantısı kurulamadı.')),
+        onclose: () => { if (!settled) fail(new Error('Canlı AI bağlantısı kapandı.')) },
       },
     })
     // Close late connections too, including when the setup deadline expires.

@@ -2920,7 +2920,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           color: '#ffffff',
                         }}
                       >
-                        <span style={{ color: '#ffffff' }}>{simAiPowered ? '🤖 Gemini AI + RAG Aktif' : '🤖 AI Bağlantılı'}</span>
+                        <span style={{ color: '#ffffff' }}>{simAiPowered ? '🤖 Canlı AI + RAG Aktif' : '🤖 AI Bağlantılı'}</span>
                       </span>
                     </div>
                     <button

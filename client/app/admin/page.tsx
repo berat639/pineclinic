@@ -185,8 +185,13 @@ const TABS: { id: Tab; label: string }[] = [
 
 const AI_MODEL_META: Record<string, { label: string; tagline: string; tier: 'Premium' | 'Dengeli' | 'Ekonomik' }> = {
   'gemini-3.8-live': {
-    label: 'Gemini 3.8 Live',
+    label: 'Akıcı (Canlı Ses Modeli)',
     tagline: 'Kararlı, düşük gecikmeli gerçek zamanlı ses modeli.',
+    tier: 'Premium',
+  },
+  'gemini-3.8-live-extended-thinking': {
+    label: 'Düşünen (Gelişmiş Ses Modeli)',
+    tagline: 'Karmaşık talepleri ve çok adımlı işlemleri arka planda değerlendirir.',
     tier: 'Premium',
   },
 }
@@ -709,7 +714,7 @@ export default function AdminPage() {
                       style={{ ...voipInputStyle, flex: 1 }}
                     >
                       {aiAvailable.map(m => (
-                        <option key={m} value={m}>{AI_MODEL_META[m]?.label ?? m}</option>
+                        <option key={m} value={m}>{AI_MODEL_META[m]?.label ?? 'Canlı Ses Modeli'}</option>
                       ))}
                     </select>
                     <button

@@ -1424,7 +1424,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] knowledge/upload embedding:', e)
         set.status = 500
-        return { error: 'Gömme (embedding) başarısız — GEMINI_API_KEY ayarını kontrol edin.' }
+        return { error: 'Gömme (embedding) başarısız — yapay zeka API anahtarı ayarını kontrol edin.' }
       }
 
       const doc = await createDoc(
@@ -1449,7 +1449,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] Admin embedding hatası:', e)
         set.status = 502
-        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
       }
       const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
@@ -1471,7 +1471,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] Admin re-embed hatası:', e)
         set.status = 502
-        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
       }
     }
     const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
@@ -1703,7 +1703,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] Embedding hatası:', e)
         set.status = 502
-        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
       }
       const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
       return { success: true, doc }
@@ -1719,7 +1719,7 @@ const app = new Elysia()
       } catch (e) {
         console.error('[RAG] Re-embed hatası:', e)
         set.status = 502
-        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Gemini embedding ayarını ve bağlantıyı kontrol edin.' }
+        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
       }
     }
     const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)

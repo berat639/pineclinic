@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
-      return NextResponse.json({ error: 'GEMINI_API_KEY is not set' }, { status: 500 })
+      return NextResponse.json({ error: 'Yapay zeka API anahtarı yapılandırılmamış' }, { status: 500 })
     }
 
     const defaultProcs = ["Kompozit Dolgu", "Kanal Tedavisi", "Çekim", "Detertraj", "İmplant"]
