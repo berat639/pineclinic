@@ -118,6 +118,37 @@ export const clinics = pgTable('clinics', {
   whatsappActivatedBy: uuid('whatsapp_activated_by').references(() => users.id),
   whatsappAiEnabled: boolean('whatsapp_ai_enabled').notNull().default(false),
   whatsappEnabled: boolean('whatsapp_enabled').notNull().default(false),
+  // n8n + Meta WhatsApp Cloud API bridge (coexists with Evolution)
+  whatsappProvider: text('whatsapp_provider').notNull().default('evolution'),
+  n8nInboundSecret: text('n8n_inbound_secret'),
+  n8nSendWebhookUrl: text('n8n_send_webhook_url'),
+  metaPhoneNumberId: text('meta_phone_number_id'),
+  whatsappTemplates: jsonb('whatsapp_templates').notNull().default([]),
+  // Per-clinic Gemini API key (AES-256-GCM encrypted via integration-secrets)
+  geminiApiKey: text('gemini_api_key'),
+  geminiKeyLast4: text('gemini_key_last4'),
+  geminiKeyUpdatedAt: timestamp('gemini_key_updated_at', { withTimezone: true }),
+  geminiKeyUpdatedBy: uuid('gemini_key_updated_by').references(() => users.id),
+})
+
+export const clinicAiUsageDaily = pgTable('clinic_ai_usage_daily', {
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  day: date('day').notNull(),
+  source: text('source').notNull().default('live_phone'),
+  promptTokens: bigint('prompt_tokens', { mode: 'number' }).notNull().default(0),
+  responseTokens: bigint('response_tokens', { mode: 'number' }).notNull().default(0),
+  totalTokens: bigint('total_tokens', { mode: 'number' }).notNull().default(0),
+  callCount: integer('call_count').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.clinicId, t.day, t.source] }),
+  index('clinic_ai_usage_daily_clinic_day_idx').on(t.clinicId, t.day),
+])
+
+export const platformSettings = pgTable('platform_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
 export const clinicDomains = pgTable('clinic_domains', {
@@ -171,6 +202,7 @@ export const whatsappConversations = pgTable('whatsapp_conversations', {
   // Conversation history stored as JSON array of {role, text} for Gemini chat
   history: jsonb('history').notNull().default([]),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow(),
+  lastInboundAt: timestamp('last_inbound_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => [uniqueIndex('wa_conversation_identity').on(t.clinicId, t.instanceName, t.remoteJid)])
@@ -525,7 +557,7 @@ export const completedWorks = pgTable('completed_works', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
-// Single-doc + single-embedding model (admin UI uses category/title/content/active)
+// Single-doc + multi-chunk model (admin UI uses category/title/content/active)
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').notNull().references(() => clinics.id),
@@ -534,11 +566,28 @@ export const knowledgeDocuments = pgTable('knowledge_documents', {
   content: text('content').notNull(),
   active: boolean('active').notNull().default(true),
   callDirection: text('call_direction').notNull().default('both'),
+  embeddingModel: text('embedding_model'),
+  embeddingDims: integer('embedding_dims'),
+  contentHash: text('content_hash'),
   // embedding vector(768) is managed via raw SQL — pgvector type not in drizzle-orm/pg-core
   embeddedAt: timestamp('embedded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
+
+export const knowledgeDocChunks = pgTable('knowledge_doc_chunks', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clinicId: uuid('clinic_id').notNull().references(() => clinics.id, { onDelete: 'cascade' }),
+  documentId: uuid('document_id').notNull().references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
+  chunkIndex: integer('chunk_index').notNull().default(0),
+  content: text('content').notNull().default(''),
+  callDirection: text('call_direction').notNull().default('both'),
+  // embedding vector(768) is managed via raw SQL
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => [
+  index('knowledge_doc_chunks_doc_idx').on(t.documentId, t.chunkIndex),
+  index('knowledge_doc_chunks_clinic_idx').on(t.clinicId),
+])
 
 export const recordings = pgTable('recordings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -931,7 +980,7 @@ export const vipAssistants = pgTable('vip_assistants', {
   clinicId: uuid('clinic_id').references(() => clinics.id),
   phone: text('phone').notNull(),
   contactName: text('contact_name'),
-  greeting: text('greeting').notNull().default("Merhaba! Ben Berat Bey'in kişisel asistanı Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?"),
+  greeting: text('greeting').notNull().default('Merhaba! Ben kişisel asistanınız Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?'),
   customPrompt: text('custom_prompt'),
   groundingEnabled: boolean('grounding_enabled').notNull().default(true),
   active: boolean('active').notNull().default(true),

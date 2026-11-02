@@ -1,5 +1,6 @@
 import { platformIntegrations } from './api/platform-integrations'
 import { whatsappPlugin } from './api/whatsapp'
+import { knowledgePlugin } from './api/knowledge'
 import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, resolveLiveModel, buildSystemPrompt } from './services/assistant-config'
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
@@ -56,7 +57,7 @@ import {
   getBranding,
   setBranding,
 } from './db/repositories/settings'
-import { embedText, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
+import { embedText, getPreWarmEmbedding, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
 
 const PUBLIC_DIR = resolve(import.meta.dir, '../public')
@@ -392,6 +393,7 @@ const app = new Elysia()
   .use(yoneticiPlugin)
   .use(financePlugin)
   .use(platformPlugin)
+  .use(knowledgePlugin)
 
   // ── Public Opt-out API ─────────────────────────────────────────────────────
   .get('/api/public/optout/:id', async ({ params, set }: any) => {
@@ -1361,142 +1363,28 @@ const app = new Elysia()
   }))
 
   // ── /api/admin/* aliases ─────────────────────────────────────────────────
-  .get('/api/admin/stats', async () => ({
-    concurrent: { active: sessions.size },
-    accounts: { active: 1 },
-    tokens: { today: 0 },
-    appointments: (await readAppointments()).length,
-    recordings: (await listRecordings()).length,
-  }))
-
-  .get('/api/admin/knowledge', async () => {
-    const docs = await listDocs()
-    const { total, embedded } = await countEmbedded()
-    return { docs, totalEmbedded: embedded, total }
-  })
-
-  /** FormData: name?, category?, file? | text? — admin panel quick upload */
-  .post('/api/admin/knowledge/upload', async ({ request, set }) => {
-    const ALLOWED_CATEGORIES = ['genel', 'tedavi', 'estetik', 'kampanya', 'sss', 'hizmet'] as const
-    type Category = typeof ALLOWED_CATEGORIES[number]
-
-    let content: string
-    let title: string
-    try {
-      const form = await request.formData()
-      const name = String(form.get('name') ?? '').trim()
-      const categoryRaw = String(form.get('category') ?? '').trim().toLowerCase()
-      const category: Category = (ALLOWED_CATEGORIES as readonly string[]).includes(categoryRaw)
-        ? (categoryRaw as Category)
-        : 'genel'
-      const textField = form.get('text')
-      const fileEntry = form.get('file')
-
-      if (fileEntry instanceof File && fileEntry.size > 0) {
-        title = (name || fileEntry.name || 'Yüklenen belge').slice(0, 200)
-        const mime = fileEntry.type || 'application/octet-stream'
-        const textMimes = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
-        if (textMimes.some(t => mime === t || mime.startsWith(`${t};`))) {
-          content = await fileEntry.text()
-        } else {
-          set.status = 400
-          return {
-            error:
-              'Bu dosya türü için şimdilik yalnızca düz metin desteklenir (.txt, .md, .csv, .json). PDF veya Word için metni kopyalayıp aşağıdaki kutuya yapıştırın.',
-          }
-        }
-      } else if (typeof textField === 'string' && textField.trim()) {
-        title = (name || 'Yüklenen metin').slice(0, 200)
-        content = textField.trim()
-      } else {
-        set.status = 400
-        return { error: 'Dosya veya metin gerekli' }
-      }
-
-      if (content.trim().length < 10) {
-        set.status = 400
-        return { error: 'İçerik en az 10 karakter olmalı' }
-      }
-
-      let embedding: number[] = []
-      try {
-        embedding = await embedText(content)
-      } catch (e) {
-        console.error('[RAG] knowledge/upload embedding:', e)
-        set.status = 500
-        return { error: 'Gömme (embedding) başarısız — yapay zeka API anahtarı ayarını kontrol edin.' }
-      }
-
-      const doc = await createDoc(
-        { category, title, content, callDirection: 'both', active: true },
-        embedding,
-      )
-      return { success: true, id: doc.id, name: doc.title, category: doc.category, message: 'Belge indekslendi' }
-    } catch (e) {
-      console.error('[Admin] knowledge/upload:', e)
-      set.status = 500
-      return { error: String(e) }
+  .get('/api/admin/stats', async () => {
+    const clinicId = currentClinicId()
+    const clinicActiveSessions = clinicId
+      ? Array.from(sessions.values()).filter(s => s.clinicId === clinicId).length
+      : sessions.size
+    const [{ getClinicTokenStats }, { resolveClinicGeminiKeyInfo }] = await Promise.all([
+      import('./db/repositories/ai-usage'),
+      import('./services/gemini-client'),
+    ])
+    const [tokenStats, keyInfo] = await Promise.all([
+      getClinicTokenStats(clinicId),
+      resolveClinicGeminiKeyInfo(clinicId ?? undefined),
+    ])
+    return {
+      concurrent: { active: clinicActiveSessions },
+      accounts: { active: keyInfo.source === 'missing' ? 0 : 1 },
+      keySource: keyInfo.source,
+      tokens: tokenStats,
+      costTry: tokenStats.costTry,
+      appointments: (await readAppointments()).length,
+      recordings: (await listRecordings()).length,
     }
-  })
-
-  .post('/api/admin/knowledge', async ({ body, set }) => {
-    const { category, title, content, callDirection, active } = body as any
-    if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
-    try {
-      let embedding: number[]
-      try {
-        embedding = await embedText(content)
-      } catch (e) {
-        console.error('[RAG] Admin embedding hatası:', e)
-        set.status = 502
-        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
-      }
-      const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
-      return { success: true, doc }
-    } catch (e) { set.status = 500; return { error: String(e) } }
-  })
-
-  .delete('/api/admin/knowledge/:id', async ({ params, set }) => {
-    const deleted = await deleteDoc(params.id)
-    if (!deleted) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, id: params.id }
-  })
-
-  .put('/api/admin/knowledge/:id', async ({ params, body, set }) => {
-    const { category, title, content, callDirection, active } = body as any
-    let newEmbedding: number[] | undefined
-    if (content) {
-      try {
-        newEmbedding = await embedText(content)
-      } catch (e) {
-        console.error('[RAG] Admin re-embed hatası:', e)
-        set.status = 502
-        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
-      }
-    }
-    const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
-    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, doc }
-  })
-
-  .patch('/api/admin/knowledge/:id/toggle', async ({ params, set }) => {
-    const doc = await toggleDoc(params.id)
-    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, doc }
-  })
-
-  .post('/api/admin/knowledge/reindex', async () => {
-    const docs = await listDocs()
-    const results = { success: 0, failed: 0, total: docs.length }
-    for (const doc of docs) {
-      try {
-        const embedding = await embedText(doc.content)
-        await updateDocEmbedding(doc.id, embedding)
-        results.success++
-        console.log(`[RAG] Admin Reindex: "${doc.title}" ✓`)
-      } catch (e) { results.failed++; console.error(`[RAG] "${doc.title}":`, e) }
-    }
-    return { success: true, results }
   })
 
   // ── VIP Personal Assistant Management ─────────────────────────────────────
@@ -1684,73 +1572,6 @@ const app = new Elysia()
     const deleted = await deleteRecording(params.id)
     if (!deleted) { set.status = 404; return { error: 'Recording not found' } }
     return { success: true, id: params.id }
-  })
-
-  // ── Knowledge (RAG) endpoints ─────────────────────────────────────────────
-  .get('/api/knowledge', async () => {
-    const docs = await listDocs()
-    const { total, embedded } = await countEmbedded()
-    return { docs, totalEmbedded: embedded, total }
-  })
-
-  .post('/api/knowledge', async ({ body, set }) => {
-    const { category, title, content, callDirection, active } = body as any
-    if (!category || !title || !content) { set.status = 400; return { error: 'category, title ve content zorunludur' } }
-    try {
-      let embedding: number[]
-      try {
-        embedding = await embedText(content)
-      } catch (e) {
-        console.error('[RAG] Embedding hatası:', e)
-        set.status = 502
-        return { error: 'Belge kaydedilmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
-      }
-      const doc = await createDoc({ category, title, content, callDirection, active: active !== false }, embedding)
-      return { success: true, doc }
-    } catch (e) { set.status = 500; return { error: String(e) } }
-  })
-
-  .put('/api/knowledge/:id', async ({ params, body, set }) => {
-    const { category, title, content, callDirection, active } = body as any
-    let newEmbedding: number[] | undefined
-    if (content) {
-      try {
-        newEmbedding = await embedText(content)
-      } catch (e) {
-        console.error('[RAG] Re-embed hatası:', e)
-        set.status = 502
-        return { error: 'Belge güncellenmedi: gömme (embedding) oluşturulamadı. Yapay zeka embedding ayarını ve bağlantıyı kontrol edin.' }
-      }
-    }
-    const doc = await updateDoc(params.id, { category, title, content, callDirection, active }, newEmbedding)
-    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, doc }
-  })
-
-  .delete('/api/knowledge/:id', async ({ params, set }) => {
-    const deleted = await deleteDoc(params.id)
-    if (!deleted) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, id: params.id }
-  })
-
-  .patch('/api/knowledge/:id/toggle', async ({ params, set }) => {
-    const doc = await toggleDoc(params.id)
-    if (!doc) { set.status = 404; return { error: 'Belge bulunamadı' } }
-    return { success: true, doc }
-  })
-
-  .post('/api/knowledge/reindex', async () => {
-    const docs = await listDocs()
-    const results = { success: 0, failed: 0, total: docs.length }
-    for (const doc of docs) {
-      try {
-        const embedding = await embedText(doc.content)
-        await updateDocEmbedding(doc.id, embedding)
-        results.success++
-        console.log(`[RAG] Reindex: "${doc.title}" ✓`)
-      } catch (e) { results.failed++; console.error(`[RAG] "${doc.title}":`, e) }
-    }
-    return { success: true, results }
   })
 
   // ── Google Calendar OAuth ──────────────────────────────────────────────────
@@ -2045,7 +1866,7 @@ const app = new Elysia()
       description: section.description,
       sortOrder: section.sortOrder,
       value: dbSections[section.key]?.value ?? section.defaultValue,
-      isCustom: !!dbSections[section.key],
+      isCustom: Boolean(dbSections[section.key] && dbSections[section.key].value !== section.defaultValue),
       updatedAt: dbSections[section.key]?.updatedAt ?? null,
     }))
   })
@@ -2160,89 +1981,19 @@ const app = new Elysia()
 
   // ── Voice AI Settings ────────────────────────────────────────────────────────
   .get('/api/admin/settings/voice', async () => {
-    const { getSetting } = await import('./db/repositories/settings')
-    const { normalizeThinkingLevel } = await import('./services/live-model-profile')
-    return {
-      model: await resolveLiveModel(),
-      thinkingLevel: normalizeThinkingLevel(await getSetting('ai.thinking_level')),
-      googleSearchGrounding: (await getSetting('ai.google_search_grounding')) === 'true',
-      codeExecution: (await getSetting('ai.code_execution')) === 'true',
-      urlContext: (await getSetting('ai.url_context')) === 'true',
-
-      startWaitSeconds: Number(await getSetting('ai.start_wait_seconds')) || 0.4,
-      startOnPunctuationSeconds: Number(await getSetting('ai.start_punctuation_seconds')) || 0.1,
-      startNoPunctuationSeconds: Number(await getSetting('ai.start_no_punctuation_seconds')) || 1.5,
-
-      stopNumWords: Number(await getSetting('ai.stop_num_words')) || 0,
-      stopVoiceSeconds: Number(await getSetting('ai.stop_voice_seconds')) || 0.2,
-      stopBackoffSeconds: Number(await getSetting('ai.stop_backoff_seconds')) || 0.2,
-
-      callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
-      callSilenceCloseTimeout: Number(await getSetting('ai.call_silence_close_timeout')) || 15,
-      callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
-      maxActivePhoneCalls: Math.min(5, Math.max(2, Number(await getSetting('ai.max_active_phone_calls')) || 3)),
-      voiceName: (await getSetting('ai.voice_name')) || 'Aoede',
-    }
+    const { resolveVoiceSettings } = await import('./services/voice-settings')
+    return resolveVoiceSettings()
   })
   .put('/api/admin/settings/voice', async ({ body, set }) => {
-    const { setSetting, setAiModel } = await import('./db/repositories/settings')
-    const { isLiveModel, normalizeThinkingLevel } = await import('./services/live-model-profile')
-    const config = body as any
-    if (config.model !== undefined && !isLiveModel(config.model)) {
+    const { validateVoiceSettings, saveVoiceSettings } = await import('./services/voice-settings')
+    const config = (body ?? {}) as Record<string, unknown>
+    const validation = validateVoiceSettings(config)
+    if (!validation.valid) {
       set.status = 400
-      return { error: 'Geçersiz canlı model seçimi' }
+      return { error: validation.error || 'Geçersiz sesli AI ayarları', fieldErrors: validation.fieldErrors }
     }
-    if (config.thinkingLevel !== undefined && !['LOW', 'MEDIUM', 'HIGH'].includes(String(config.thinkingLevel).toUpperCase())) {
-      set.status = 400
-      return { error: 'Düşünme seviyesi düşük, orta veya yüksek olmalıdır' }
-    }
-    if (config.callMaxDuration !== undefined) {
-      const seconds = Number(config.callMaxDuration)
-      if (!Number.isFinite(seconds) || seconds < 180 || seconds > 900) {
-        set.status = 400
-        return { error: 'Maksimum görüşme süresi 3 ile 15 dakika arasında olmalıdır' }
-      }
-    }
-    if (config.maxActivePhoneCalls !== undefined) {
-      const maxActive = Number(config.maxActivePhoneCalls)
-      if (!Number.isInteger(maxActive) || maxActive < 2 || maxActive > 5) {
-        set.status = 400
-        return { error: 'Aktif telefon çağrısı kapasitesi 2 ile 5 arasında olmalıdır' }
-      }
-    }
-    for (const key of ['callSilenceTimeout', 'callSilenceCloseTimeout'] as const) {
-      if (config[key] !== undefined) {
-        const seconds = Number(config[key])
-        if (!Number.isFinite(seconds) || seconds < 5 || seconds > 120) {
-          set.status = 400
-          return { error: 'Sessizlik süreleri 5 ile 120 saniye arasında olmalıdır' }
-        }
-      }
-    }
-    if (config.model !== undefined) await setAiModel(config.model)
-    if (config.thinkingLevel !== undefined) await setSetting('ai.thinking_level', normalizeThinkingLevel(config.thinkingLevel))
-    if (config.googleSearchGrounding !== undefined) await setSetting('ai.google_search_grounding', String(config.googleSearchGrounding))
-    if (config.codeExecution !== undefined) await setSetting('ai.code_execution', String(config.codeExecution))
-    if (config.urlContext !== undefined) await setSetting('ai.url_context', String(config.urlContext))
-
-    if (config.startWaitSeconds !== undefined) await setSetting('ai.start_wait_seconds', String(config.startWaitSeconds))
-    if (config.startOnPunctuationSeconds !== undefined) await setSetting('ai.start_punctuation_seconds', String(config.startOnPunctuationSeconds))
-    if (config.startNoPunctuationSeconds !== undefined) await setSetting('ai.start_no_punctuation_seconds', String(config.startNoPunctuationSeconds))
-
-    if (config.stopNumWords !== undefined) await setSetting('ai.stop_num_words', String(config.stopNumWords))
-    if (config.stopVoiceSeconds !== undefined) await setSetting('ai.stop_voice_seconds', String(config.stopVoiceSeconds))
-    if (config.stopBackoffSeconds !== undefined) await setSetting('ai.stop_backoff_seconds', String(config.stopBackoffSeconds))
-
-    if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
-    if (config.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(config.callSilenceCloseTimeout))
-    if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
-    if (config.maxActivePhoneCalls !== undefined) {
-      const maxActive = Number(config.maxActivePhoneCalls)
-      await setSetting('ai.max_active_phone_calls', String(maxActive))
-    }
-    if (config.voiceName !== undefined) await setSetting('ai.voice_name', String(config.voiceName))
-
-    return { success: true }
+    const saved = await saveVoiceSettings(config)
+    return { success: true, settings: saved }
   })
 
   .get('/api/admin/settings/roles', async () => {
@@ -2505,7 +2256,19 @@ const app = new Elysia()
 
   // ── Direct Mode: Session Config ──────────────────────────────────────────────
   // Client bağlanmadan önce dinamik system prompt, RAG context ve tool declarations alır
-  .get('/api/direct-session-config', async () => {
+  .get('/api/direct-session-config', async ({ set }) => {
+    const clinicId = currentClinicId()
+    const { resolveVoiceSettings } = await import('./services/voice-settings')
+    const voiceSettings = await resolveVoiceSettings(clinicId ?? undefined)
+    if (clinicId) {
+      const activeForClinic = Array.from(sessions.values()).filter(s => s.clinicId === clinicId).length
+      if (activeForClinic >= voiceSettings.maxActivePhoneCalls) {
+        set.status = 429
+        return { error: `Klinik eşzamanlı AI görüşme kapasitesi (${voiceSettings.maxActivePhoneCalls}) dolu. Lütfen biraz sonra tekrar deneyin.` }
+      }
+    }
+    const { issueWebToolSessionKey } = await import('./services/flow-engine')
+    const sessionKey = clinicId ? issueWebToolSessionKey(clinicId) : undefined
     const { buildToolDeclarations } = await import('./gemini')
     const greeting = await getGreeting() ?? DEFAULT_GREETING
     const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
@@ -2514,25 +2277,16 @@ const app = new Elysia()
     // RAG pre-warm
     let ragContext = ''
     try {
-      const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+      const preWarmEmbedding = await getPreWarmEmbedding()
       const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
       if (topDocs.length > 0) {
         ragContext = await buildRagPrompt(topDocs)
       }
     } catch { /* ignore */ }
 
-    const model = await resolveLiveModel()
+    const model = voiceSettings.model
     const branding = await getBranding()
-    const { getSetting } = await import('./db/repositories/settings')
-    const [voiceName, startWaitSeconds, callSilenceTimeout, callSilenceCloseTimeout, callMaxDuration, thinkingLevel] = await Promise.all([
-      getSetting('ai.voice_name'),
-      getSetting('ai.start_wait_seconds'),
-      getSetting('ai.call_silence_timeout'),
-      getSetting('ai.call_silence_close_timeout'),
-      getSetting('ai.call_max_duration'),
-      getSetting('ai.thinking_level'),
-    ])
-    const { normalizeThinkingLevel, prepareLiveToolDeclarations } = await import('./services/live-model-profile')
+    const { prepareLiveToolDeclarations } = await import('./services/live-model-profile')
     const toolDeclarations = prepareLiveToolDeclarations(model, (await buildToolDeclarations())
       .filter(t => t.name !== 'cagriySonlandir'))
 
@@ -2540,17 +2294,16 @@ const app = new Elysia()
       systemPrompt: systemPrompt + ragContext,
       toolDeclarations,
       model,
-      thinkingLevel: normalizeThinkingLevel(thinkingLevel),
-      // Live models only produce audio. Written chat uses the normal Gemini
-      // content API with this safe default instead of requesting TEXT from Live.
+      thinkingLevel: voiceSettings.thinkingLevel,
       textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
       greeting,
       branding,
-      voiceName: voiceName || 'Aoede',
-      startWaitSeconds: Number.isFinite(Number(startWaitSeconds)) ? Math.max(0, Number(startWaitSeconds)) : 0.4,
-      callSilenceTimeout: Number(callSilenceTimeout) || 30,
-      callSilenceCloseTimeout: Number(callSilenceCloseTimeout) || 15,
-      callMaxDuration: Number(callMaxDuration) || 600,
+      voiceName: voiceSettings.voiceName,
+      startWaitSeconds: voiceSettings.startWaitSeconds,
+      callSilenceTimeout: voiceSettings.callSilenceTimeout,
+      callSilenceCloseTimeout: voiceSettings.callSilenceCloseTimeout,
+      callMaxDuration: voiceSettings.callMaxDuration,
+      sessionKey,
     }
   })
 
@@ -2559,12 +2312,23 @@ const app = new Elysia()
   // bağlantısının tool call'larını karşılar. Ses direkt Gemini'ye gider,
   // ama tool call'lar bu HTTP endpoint'ler üzerinden sunucuya gelir.
 
-  .post('/api/tools/search-knowledge', async ({ body, set }) => {
-    const { sorgu } = (body ?? {}) as { sorgu?: string }
+  .post('/api/tools/search-knowledge', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
+    const { sorgu, direction } = (body ?? {}) as { sorgu?: string; direction?: string }
     if (!sorgu?.trim()) { set.status = 400; return { error: 'sorgu parametresi zorunlu' } }
     try {
       const { searchKnowledge } = await import('./services/knowledge')
-      const results = await searchKnowledge(sorgu, 5)
+      const results = await searchKnowledge(sorgu, {
+        limit: 5,
+        direction: direction === 'outbound' ? 'outbound' : 'inbound',
+        channel: 'web_direct',
+      })
       if (results.length === 0) return { sonuc: 'Bilgi tabanında ilgili bilgi bulunamadı.' }
       const content = results
         .map((r, i) => `[${i + 1}] (${r.documentName})\n${r.chunkText}`)
@@ -2576,7 +2340,14 @@ const app = new Elysia()
     }
   })
 
-  .post('/api/tools/customer-query', async ({ body, set }) => {
+  .post('/api/tools/customer-query', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
     const { telefon } = (body ?? {}) as { telefon?: string }
     if (!telefon?.trim()) { set.status = 400; return { error: 'telefon parametresi zorunlu' } }
     const digits = telefon.replace(/\D/g, '')
@@ -2616,7 +2387,14 @@ const app = new Elysia()
     }
   })
 
-  .post('/api/tools/create-appointment', async ({ body, set }) => {
+  .post('/api/tools/create-appointment', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
     const args = (body ?? {}) as Record<string, string>
     const name = args.musteri_adi || args.ad_soyad || args.hasta_adi || ''
     const phone = args.telefon || args.phone || ''
@@ -2632,7 +2410,7 @@ const app = new Elysia()
       const { createAssistantAppointment } = await import('./services/assistant-appointments')
       const appointment = await createAssistantAppointment(
         { ...args, musteri_adi: name, telefon: phone, tarih, saat },
-        { sessionId: `direct-${randomUUID().slice(0, 8)}`, clinicId: currentClinicId() || undefined, source: 'web_ai' },
+        { sessionId: `direct-${randomUUID().slice(0, 8)}`, clinicId, source: 'web_ai' },
       )
       console.log('[Tools/Appointment]', appointment.id, appointment.customerName)
       return { success: true, message: `Kontrol randevusu talebiniz alındı; klinik onayı bekleniyor.`, id: appointment.id }
@@ -2643,7 +2421,14 @@ const app = new Elysia()
     }
   })
 
-  .post('/api/tools/check-availability', async ({ body }) => {
+  .post('/api/tools/check-availability', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
     const args = (body ?? {}) as { tarih?: string; baslangic_tarih?: string; bitis_tarih?: string }
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/
     const hasValidDate = (args.tarih && dateRegex.test(args.tarih)) || (args.baslangic_tarih && dateRegex.test(args.baslangic_tarih))
@@ -2719,10 +2504,18 @@ app.ws('/ws', {
       ; (ws.data as any).pingTimer = pingTimer
 
     try {
+      const { resolveVoiceSettings } = await import('./services/voice-settings')
+      const voiceSettings = await resolveVoiceSettings(tenant.clinicId)
+      const activeForClinic = Array.from(sessions.values()).filter(s => s.clinicId === tenant.clinicId).length
+      if (activeForClinic >= voiceSettings.maxActivePhoneCalls) {
+        ws.send(JSON.stringify({ type: 'error', message: `Klinik eşzamanlı AI görüşme kapasitesi (${voiceSettings.maxActivePhoneCalls}) dolu.` }))
+        ws.close()
+        return
+      }
       // RAG pre-warm
       let ragContext = ''
       try {
-        const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+        const preWarmEmbedding = await getPreWarmEmbedding()
         const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
         if (topDocs.length > 0) {
           ragContext = await buildRagPrompt(topDocs)
@@ -2733,12 +2526,14 @@ app.ws('/ws', {
       const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
       const greeting = await getGreeting() ?? DEFAULT_GREETING
       const systemPrompt = dateHeader + await buildSystemPrompt(greeting) + ragContext
-      const model = await resolveLiveModel()
-      const { getSetting } = await import('./db/repositories/settings')
-      const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
+      const model = voiceSettings.model
+      const voiceName = voiceSettings.voiceName
       console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
 
-      const session = await createLiveSession(getAI(), {
+      const { getGeminiClient } = await import('./services/gemini-client')
+      const clinicAi = await getGeminiClient(tenant.clinicId).catch(() => getAI())
+
+      const session = await createLiveSession(clinicAi, {
         onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
         onAudio: (pcm) => {
           ws.send(pcm)
@@ -2885,6 +2680,24 @@ app.ws('/ws', {
       const { ensureWhatsAppSetupSchema } = await import('./db/repositories/whatsapp')
       await ensureWhatsAppSetupSchema()
     } catch (e) { console.error('[WhatsApp] Startup ensure schema error:', e) }
+
+    try {
+      const { ensureKnowledgeSchema } = await import('./db/repositories/knowledge')
+      await ensureKnowledgeSchema()
+    } catch (e) { console.error('[Knowledge] Startup ensure schema error:', e) }
+
+    try {
+      const [{ ensureAiUsageTable }, { ensureClinicGeminiKeyColumns }, { ensurePromptTemplates }] = await Promise.all([
+        import('./db/repositories/ai-usage'),
+        import('./services/gemini-client'),
+        import('./prompts/registry'),
+      ])
+      await Promise.all([
+        ensureAiUsageTable(),
+        ensureClinicGeminiKeyColumns(),
+        ensurePromptTemplates(),
+      ])
+    } catch (e) { console.error('[Startup] Faz 6 bootstrap error:', e) }
 
     // Stale session temizliği — zombi/takılı session'ları periyodik olarak kapat
     setInterval(() => {

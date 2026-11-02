@@ -197,25 +197,27 @@ async function runMigrations() {
     )
   `
 
-  // ── Knowledge: single-doc model with vector(768) embedding ──────────────
-  // If old chunk-model tables exist, drop them safely.
-  await sql`DROP TABLE IF EXISTS knowledge_chunks CASCADE`
+  // ── Knowledge: document + chunk model with vector(768) embedding ────────
+  await sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`.catch(() => {})
 
   // Recreate knowledge_documents in single-doc shape (idempotent on fresh DB).
   // For existing DBs with the old shape, we add missing columns and ignore
   // legacy ones (name/file_type/original_text/chunk_count remain harmless).
   await sql`
     CREATE TABLE IF NOT EXISTS knowledge_documents (
-      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      category      TEXT NOT NULL DEFAULT 'genel',
-      title         TEXT NOT NULL DEFAULT '',
-      content       TEXT NOT NULL DEFAULT '',
-      call_direction TEXT NOT NULL DEFAULT 'both',
-      active        BOOLEAN NOT NULL DEFAULT true,
-      embedding     vector(768),
-      embedded_at   TIMESTAMPTZ,
-      created_at    TIMESTAMPTZ DEFAULT now(),
-      updated_at    TIMESTAMPTZ DEFAULT now()
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      category        TEXT NOT NULL DEFAULT 'genel',
+      title           TEXT NOT NULL DEFAULT '',
+      content         TEXT NOT NULL DEFAULT '',
+      call_direction  TEXT NOT NULL DEFAULT 'both',
+      active          BOOLEAN NOT NULL DEFAULT true,
+      embedding       vector(768),
+      embedding_model TEXT,
+      embedding_dims  INTEGER,
+      content_hash    TEXT,
+      embedded_at     TIMESTAMPTZ,
+      created_at      TIMESTAMPTZ DEFAULT now(),
+      updated_at      TIMESTAMPTZ DEFAULT now()
     )
   `
 
@@ -226,6 +228,9 @@ async function runMigrations() {
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS call_direction TEXT NOT NULL DEFAULT 'both'`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS active     BOOLEAN NOT NULL DEFAULT true`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedding  vector(768)`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedding_model TEXT`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedding_dims INTEGER`
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS content_hash TEXT`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS embedded_at TIMESTAMPTZ`
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()`
 
@@ -294,7 +299,7 @@ async function runMigrations() {
       id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       phone            TEXT NOT NULL UNIQUE,
       contact_name     TEXT,
-      greeting         TEXT NOT NULL DEFAULT 'Merhaba! Ben Berat Bey''in kişisel asistanı Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?',
+      greeting         TEXT NOT NULL DEFAULT 'Merhaba! Ben kişisel asistanınız Pine Asistan, hoş geldiniz! Nasıl yardımcı olabilirim?',
       custom_prompt    TEXT,
       grounding_enabled BOOLEAN NOT NULL DEFAULT true,
       active           BOOLEAN NOT NULL DEFAULT true,
@@ -919,6 +924,43 @@ async function runMigrations() {
     await tx.unsafe(readFileSync(new URL('./evolution-migration.sql', import.meta.url), 'utf8'))
   })
 
+  // ── n8n + Meta WhatsApp Cloud API bridge columns (idempotent) ─────────────
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_provider TEXT NOT NULL DEFAULT 'evolution'`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_inbound_secret TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_send_webhook_url TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_phone_number_id TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_templates JSONB NOT NULL DEFAULT '[]'::jsonb`
+  await sql`ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_inbound_at TIMESTAMPTZ`
+
+  // ── Per-clinic Gemini API key & AI token usage metering (Faz 6) ──────────
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_api_key TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_last4 TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_updated_at TIMESTAMPTZ`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS gemini_key_updated_by UUID REFERENCES users(id)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS clinic_ai_usage_daily (
+      clinic_id       UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      day             DATE NOT NULL DEFAULT (now() AT TIME ZONE 'Europe/Istanbul')::date,
+      source          TEXT NOT NULL DEFAULT 'live_phone',
+      prompt_tokens   BIGINT NOT NULL DEFAULT 0,
+      response_tokens BIGINT NOT NULL DEFAULT 0,
+      total_tokens    BIGINT NOT NULL DEFAULT 0,
+      call_count      INTEGER NOT NULL DEFAULT 0,
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (clinic_id, day, source)
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS clinic_ai_usage_daily_clinic_day_idx ON clinic_ai_usage_daily (clinic_id, day DESC)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+
   // ── Multi-tenant clinics and hostname routing ────────────────────────────
   // Existing installations are backfilled into one default clinic. New
   // clinics are provisioned from a verified platform-admin login on a hostname
@@ -1114,6 +1156,22 @@ async function runMigrations() {
   // Values that only need to be unique inside a clinic must not remain global.
   await sql`ALTER TABLE knowledge_categories DROP CONSTRAINT IF EXISTS knowledge_categories_slug_unique`
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_categories_clinic_slug_unique ON knowledge_categories (clinic_id, slug)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS knowledge_doc_chunks (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id      UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+      document_id    UUID NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+      chunk_index    INTEGER NOT NULL DEFAULT 0,
+      content        TEXT NOT NULL DEFAULT '',
+      call_direction TEXT NOT NULL DEFAULT 'both',
+      embedding      vector(768),
+      created_at     TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS knowledge_doc_chunks_doc_idx ON knowledge_doc_chunks (document_id, chunk_index)`
+  await sql`CREATE INDEX IF NOT EXISTS knowledge_doc_chunks_clinic_idx ON knowledge_doc_chunks (clinic_id)`
+  await sql`CREATE INDEX IF NOT EXISTS knowledge_doc_chunks_embedding_idx ON knowledge_doc_chunks USING hnsw (embedding vector_cosine_ops)`
 
   await sql`ALTER TABLE vip_assistants DROP CONSTRAINT IF EXISTS vip_assistants_phone_unique`
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS vip_assistants_clinic_phone_unique ON vip_assistants (clinic_id, phone)`

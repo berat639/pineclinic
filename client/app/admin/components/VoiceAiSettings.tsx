@@ -29,7 +29,11 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
   const [settings, setSettings] = useState<VoiceSettings>(DEFAULTS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const patch = (values: Partial<VoiceSettings>) => setSettings(current => ({ ...current, ...values }))
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const patch = (values: Partial<VoiceSettings>) => {
+    setFieldErrors({})
+    setSettings(current => ({ ...current, ...values }))
+  }
 
   useEffect(() => {
     fetch('/api/admin/settings/voice').then(async response => {
@@ -39,16 +43,31 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
     }).catch(() => onToast('Sesli AI ayarları yüklenemedi', 'error')).finally(() => setLoading(false))
   }, [onToast])
 
-  const save = async () => {
+  const persistSettings = async (target: VoiceSettings, toastMessage = 'Sesli AI ayarları kaydedildi') => {
     setSaving(true)
+    setFieldErrors({})
     try {
-      const response = await fetch('/api/admin/settings/voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })
+      const response = await fetch('/api/admin/settings/voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(result.error || 'Kayıt başarısız')
-      onToast('Sesli AI ayarları kaydedildi')
+      if (!response.ok) {
+        if (result?.fieldErrors && typeof result.fieldErrors === 'object') {
+          setFieldErrors(result.fieldErrors as Record<string, string>)
+        }
+        throw new Error(result.error || 'Kayıt başarısız')
+      }
+      if (result?.settings) {
+        setSettings({ ...DEFAULTS, ...result.settings })
+      }
+      onToast(toastMessage)
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Kayıt başarısız', 'error')
     } finally { setSaving(false) }
+  }
+
+  const save = () => void persistSettings(settings, 'Sesli AI ayarları kaydedildi')
+  const resetToDefaults = () => {
+    setSettings(DEFAULTS)
+    void persistSettings(DEFAULTS, 'Sesli AI ayarları hızlı ve akıcı varsayılanlara sıfırlandı')
   }
 
   const tabs: Array<[Tab, string]> = [['model', 'Model'], ['voice', 'Ses ve Türkçe'], ['conversation', 'Konuşma'], ['telephony', 'Telefon ve Çağrı']]
@@ -116,8 +135,13 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
         <select value={settings.maxActivePhoneCalls} onChange={event => patch({ maxActivePhoneCalls: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{[2, 3, 4, 5].map(count => <option key={count} value={count}>{count} aktif çağrı</option>)}</select>
       </label>
     </div>}
+    {Object.keys(fieldErrors).length > 0 && (
+      <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 7, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', fontSize: 11, color: '#f87171' }}>
+        {Object.values(fieldErrors).join(' · ')}
+      </div>
+    )}
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
-      <button onClick={() => setSettings(DEFAULTS)} style={{ padding: '7px 10px', borderRadius: 7, color: 'var(--accent)', background: 'var(--card-inner)', border: '1px solid var(--input-border)', cursor: 'pointer', fontSize: 11 }}>Hızlı ve akıcı ayara sıfırla</button>
+      <button onClick={resetToDefaults} disabled={saving} style={{ padding: '7px 10px', borderRadius: 7, color: 'var(--accent)', background: 'var(--card-inner)', border: '1px solid var(--input-border)', cursor: saving ? 'wait' : 'pointer', fontSize: 11 }}>Hızlı ve akıcı ayara sıfırla</button>
       <button onClick={save} disabled={saving} style={{ padding: '7px 12px', borderRadius: 7, color: '#fff', background: 'var(--accent)', border: '1px solid var(--accent)', cursor: saving ? 'wait' : 'pointer', fontSize: 11, fontWeight: 700 }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</button>
     </div>
   </div>

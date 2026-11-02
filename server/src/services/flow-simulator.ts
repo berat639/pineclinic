@@ -1,7 +1,9 @@
-import { GoogleGenAI, Type } from '@google/genai'
-import { type FlowEdge, type FlowNode, flowToPromptText } from '../db/repositories/flows'
+import { Type } from '@google/genai'
+import { evaluateConditionNode, renderFlowTemplate, type FlowEdge, type FlowNode, flowToPromptText } from '../db/repositories/flows'
 import { getGreeting } from '../db/repositories/settings'
 import { retrieveTopK, buildRagPrompt } from '../rag'
+import { getGeminiClient } from './gemini-client'
+import { recordAiTokenUsage } from '../db/repositories/ai-usage'
 
 export interface SimulationMessage {
   role: 'ai' | 'user' | 'system' | 'action'
@@ -39,6 +41,11 @@ const ACTION_LABELS: Record<string, string> = {
   save_patient_note: '🗒️ Hastadan Not Al (Bankoya İlet)',
   notBirak: '🗒️ Anket / Hasta Notu Kaydet',
   webhook: '🔗 Dış Sisteme Gönder (Webhook)',
+  set_variable: '🔧 Değişken Ata',
+  send_sms: '💬 SMS Gönder',
+  wait_reprompt: '⏳ Bekle / Yeniden Sor',
+  wait: '⏳ Bekle / Yeniden Sor',
+  switch_prompt: '🔄 Prompt / Mod Değiştir',
   end_call: '👋 Bilgi Ver ve Görüşmeyi Bitir',
   transfer_call: '📞 Aramayı Yetkiliye Aktar',
   transfer: '📞 Canlı Desteğe Aktar',
@@ -54,31 +61,13 @@ function getTodayIso(): string {
 function evaluateDeterministicCondition(
   node: FlowNode,
   fields: Record<string, string>,
-  intentMatchedByAi?: boolean
+  intentMatchedByAi?: boolean,
+  direction?: string,
 ): boolean {
-  const field = String(node.data.conditionField || '')
-  const actual = String(fields[field] ?? '').trim()
-  const expected = String(node.data.conditionValue || '').trim()
-
-  if (field === 'user_intent' || node.data.operator === 'intent') {
-    if (typeof intentMatchedByAi === 'boolean') return intentMatchedByAi
-    const aLow = actual.toLocaleLowerCase('tr-TR')
-    if (['true', 'evet', '1'].includes(aLow)) return true
-    if (['false', 'hayır', 'hayir', '0'].includes(aLow)) return false
-    const words = expected.toLocaleLowerCase('tr-TR').split(/[\s,;:.!?]+/).filter(w => w.length >= 3)
-    return words.some(w => aLow.includes(w))
-  }
-
-  if (node.data.operator === 'notEmpty') return actual.length > 0
-  if (node.data.operator === 'contains') {
-    return actual.toLocaleLowerCase('tr-TR').includes(expected.toLocaleLowerCase('tr-TR'))
-  }
-
-  const aLow = actual.toLocaleLowerCase('tr-TR')
-  const eLow = expected.toLocaleLowerCase('tr-TR')
-  if (eLow === 'true') return ['true', 'evet', '1'].includes(aLow)
-  if (eLow === 'false') return ['false', 'hayır', 'hayir', '0'].includes(aLow)
-  return aLow === eLow
+  return evaluateConditionNode(node, fields, intentMatchedByAi, {
+    direction: direction || 'inbound',
+    channel: direction === 'whatsapp' ? 'whatsapp' : 'phone',
+  })
 }
 
 function isFieldSatisfied(node: FlowNode, fields: Record<string, string>): boolean {
@@ -105,8 +94,7 @@ export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise
   const logs: SimulationMessage[] = []
   const usedKnowledgeTitles: string[] = []
 
-  const apiKey = process.env.GEMINI_API_KEY
-  const ai = apiKey ? new GoogleGenAI({ apiKey }) : null
+  const ai = await getGeminiClient().catch(() => null)
   const modelName = process.env.GEMINI_SIMULATION_MODEL || 'gemini-2.5-flash'
 
   const userMessage = (req.userMessage || '').trim()
@@ -139,7 +127,7 @@ export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise
 
   if (userMessage) {
     try {
-      const docs = await retrieveTopK(userMessage, 3)
+      const docs = await retrieveTopK(userMessage, 3, direction)
       if (docs.length > 0) {
         usedKnowledgeTitles.push(...docs.map(d => d.title))
         ragContext = await buildRagPrompt(docs)
@@ -210,6 +198,16 @@ Görev:
           },
         })
 
+        const extractionMeta = (extractionResult as any).usageMetadata
+        if (extractionMeta) {
+          void recordAiTokenUsage({
+            source: 'simulator',
+            promptTokens: Number(extractionMeta.promptTokenCount ?? 0),
+            responseTokens: Number(extractionMeta.candidatesTokenCount ?? 0),
+            totalTokens: Number(extractionMeta.totalTokenCount ?? 0),
+            callCount: 1,
+          })
+        }
         const parsed = JSON.parse(extractionResult.text || '{}')
         if (parsed.fields && typeof parsed.fields === 'object') {
           for (const [k, v] of Object.entries(parsed.fields)) {
@@ -315,7 +313,7 @@ Görev:
         break
       }
 
-      const matched = evaluateDeterministicCondition(node, fields, aiIntentMatched)
+      const matched = evaluateDeterministicCondition(node, fields, aiIntentMatched, direction)
       const branch = matched ? 'true' : 'false'
       logs.push({
         role: 'system',
@@ -334,6 +332,11 @@ Görev:
 
     if (node.type === 'ACTION') {
       const act = String(node.data.action || '')
+      if (act === 'set_variable' && node.data.variableName) {
+        const varVal = renderFlowTemplate(String(node.data.variableValue ?? ''), fields)
+        fields[node.data.variableName] = varVal
+        extractedFields[node.data.variableName] = varVal
+      }
       const actTitle = ACTION_LABELS[act] || node.data.label || act
       logs.push({
         role: 'action',
@@ -407,6 +410,15 @@ SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
         },
       })
 
+      const genMeta = (gen as any).usageMetadata
+      if (genMeta) {
+        void recordAiTokenUsage({
+          source: 'simulator',
+          promptTokens: Number(genMeta.promptTokenCount ?? 0),
+          responseTokens: Number(genMeta.candidatesTokenCount ?? 0),
+          totalTokens: Number(genMeta.totalTokenCount ?? 0),
+        })
+      }
       const aiText = (gen.text || '').trim()
       if (aiText) {
         logs.push({ role: 'ai', text: `🤖 AI Asistan: ${aiText}` })

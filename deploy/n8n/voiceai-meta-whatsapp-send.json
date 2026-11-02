@@ -1,0 +1,121 @@
+{
+  "name": "VoiceAI — Meta WhatsApp Outbound Send Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voiceai-whatsapp-send",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "voiceai-send-webhook",
+      "name": "VoiceAI Outbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ],
+      "webhookId": "voiceai-meta-wa-send"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst body = item.body || item;\nconst phoneNumberId = body.phoneNumberId || $env.META_PHONE_NUMBER_ID;\n\nif (body.mode === 'ping') {\n  return [{ json: { isPing: true, messageId: 'ping-ok' } }];\n}\n\nlet graphPayload;\nif (body.mode === 'template' && body.template) {\n  graphPayload = {\n    messaging_product: 'whatsapp',\n    to: body.to,\n    type: 'template',\n    template: {\n      name: body.template.name,\n      language: { code: body.template.language || 'tr' },\n      components: body.template.components || []\n    }\n  };\n} else if (body.mode === 'location' && body.location) {\n  graphPayload = {\n    messaging_product: 'whatsapp',\n    to: body.to,\n    type: 'location',\n    location: body.location\n  };\n} else {\n  graphPayload = {\n    messaging_product: 'whatsapp',\n    recipient_type: 'individual',\n    to: body.to,\n    type: 'text',\n    text: { preview_url: false, body: body.text }\n  };\n}\n\nreturn [{ json: { isPing: false, phoneNumberId, graphPayload } }];"
+      },
+      "id": "build-graph-payload",
+      "name": "Build Meta Graph Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v21.0/' + $json.phoneNumberId + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.META_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.graphPayload) }}",
+        "options": {}
+      },
+      "id": "meta-graph-send",
+      "name": "Send via Meta Cloud API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ messageId: $json.messages?.[0]?.id || $json.messageId || 'sent' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-message-id",
+      "name": "Return Message ID",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1020,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "VoiceAI Outbound Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Meta Graph Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Meta Graph Payload": {
+      "main": [
+        [
+          {
+            "node": "Send via Meta Cloud API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Meta Cloud API": {
+      "main": [
+        [
+          {
+            "node": "Return Message ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

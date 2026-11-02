@@ -1,6 +1,7 @@
 'use client'
 
 import EvolutionWhatsAppCard from './EvolutionWhatsAppCard'
+import N8nMetaWhatsAppCard from './N8nMetaWhatsAppCard'
 import BillingIntegrationsCard from './BillingIntegrationsCard'
 import { useEffect, useState, type ReactNode } from 'react'
 import styles from './IntegrationsTab.module.css'
@@ -568,6 +569,8 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </>
 
       <EvolutionWhatsAppCard />
+
+      <N8nMetaWhatsAppCard />
 
       <BillingIntegrationsCard />
 

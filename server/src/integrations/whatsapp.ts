@@ -1,5 +1,26 @@
-/** Evolution API v2 (WHATSAPP-BAILEYS). Never log credentials or webhook bodies. */
-import { timingSafeEqual } from 'node:crypto'
+/** Evolution API v2 (WHATSAPP-BAILEYS) & n8n Meta WhatsApp Cloud API bridge. Never log credentials or webhook bodies. */
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export type WhatsAppProviderType = 'evolution' | 'n8n_meta'
+
+export interface WhatsAppTemplateDefinition {
+  name: string
+  language: string
+  category?: string
+  bodyPreview?: string
+  paramKeys?: string[]
+}
+
+export interface WhatsAppSendResult {
+  messageId: string
+}
+
+export interface WhatsAppTransport {
+  readonly provider: WhatsAppProviderType
+  sendText(to: string, text: string): Promise<WhatsAppSendResult>
+  sendTemplate(to: string, template: { name: string; language: string; components?: unknown[] }): Promise<WhatsAppSendResult>
+  sendLocation?(to: string, location: { latitude: number; longitude: number; name?: string; address?: string }): Promise<WhatsAppSendResult>
+}
 
 export interface WhatsAppCredentials { baseUrl: string; apiKey: string; instanceName: string }
 export interface EvolutionQrResponse {
@@ -136,4 +157,269 @@ export function parseEvolutionMessages(payload: unknown, now = Date.now()): Inco
     try { if (phoneJid) phone = normalizePhone(phoneJid.split('@')[0]) } catch { /* unresolved sender identity */ }
     return [{ externalId: key.id, remoteJid: phone ? `${phone.slice(1)}@s.whatsapp.net` : remoteJid, phone, text: text.trim(), fromMe: key.fromMe === true, timestamp }]
   })
+}
+
+export function validateN8nWebhookUrl(value: string): string {
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error('Geçerli bir HTTP/HTTPS n8n webhook adresi girin.')
+  }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new Error('Geçerli bir HTTP/HTTPS n8n webhook adresi girin.')
+  }
+  return url.toString()
+}
+
+export function signN8nPayload(rawBody: string, secret: string, timestampSec = Math.floor(Date.now() / 1000)): { timestamp: string; signature: string } {
+  const ts = String(timestampSec)
+  const digest = createHmac('sha256', secret).update(`${ts}.${rawBody}`).digest('hex')
+  return { timestamp: ts, signature: `sha256=${digest}` }
+}
+
+/**
+ * Verifies X-VoiceAI-Signature: sha256=HMAC_SHA256(secret, timestamp + "." + rawBody)
+ * with ±300s replay protection on X-VoiceAI-Timestamp.
+ */
+export function verifyN8nSignature(
+  rawBody: string,
+  timestampHeader: string | null,
+  signatureHeader: string | null,
+  secret: string,
+  nowMs = Date.now(),
+): boolean {
+  if (!secret || secret.length < 32 || !timestampHeader || !signatureHeader) return false
+  const tsNum = Number(timestampHeader.trim())
+  if (!Number.isFinite(tsNum)) return false
+  // Accept seconds or milliseconds in header, normalize to seconds for comparison
+  const tsMs = tsNum > 1e12 ? tsNum : tsNum * 1000
+  if (Math.abs(nowMs - tsMs) > 300_000) return false
+
+  const expectedSig = `sha256=${createHmac('sha256', secret).update(`${timestampHeader.trim()}.${rawBody}`).digest('hex')}`
+  const a = Buffer.from(signatureHeader.trim())
+  const b = Buffer.from(expectedSig)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+/**
+ * Parses inbound WhatsApp messages from n8n bridge (either normalized VoiceAI format
+ * or raw Meta WhatsApp Cloud API webhook payload).
+ */
+export function parseN8nInboundMessages(payload: unknown, now = Date.now()): IncomingWhatsAppMessage[] {
+  if (!payload || typeof payload !== 'object') return []
+  const p = payload as any
+
+  const rawItems: any[] = []
+  if (Array.isArray(p.entry)) {
+    for (const entry of p.entry) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        const value = change?.value
+        const msgs = Array.isArray(value?.messages) ? value.messages : []
+        for (const msg of msgs) {
+          rawItems.push({
+            externalId: msg?.id,
+            from: msg?.from,
+            timestamp: msg?.timestamp,
+            type: msg?.type,
+            text:
+              msg?.text?.body ??
+              msg?.button?.text ??
+              msg?.interactive?.button_reply?.title ??
+              msg?.interactive?.list_reply?.title,
+          })
+        }
+      }
+    }
+  } else if (Array.isArray(p.messages)) {
+    rawItems.push(...p.messages)
+  } else if (Array.isArray(p)) {
+    rawItems.push(...p)
+  } else {
+    rawItems.push(p)
+  }
+
+  return rawItems.flatMap((item: any): IncomingWhatsAppMessage[] => {
+    const externalId = typeof item?.externalId === 'string' ? item.externalId.trim() : typeof item?.id === 'string' ? item.id.trim() : ''
+    const rawFrom = typeof item?.from === 'string' ? item.from.trim() : typeof item?.phone === 'string' ? item.phone.trim() : ''
+    if (!externalId || !rawFrom) return []
+
+    let phone: string
+    try {
+      phone = normalizePhone(rawFrom)
+    } catch {
+      return []
+    }
+
+    const rawText =
+      typeof item?.text === 'string'
+        ? item.text
+        : typeof item?.text?.body === 'string'
+          ? item.text.body
+          : typeof item?.interactiveReply?.title === 'string'
+            ? item.interactiveReply.title
+            : typeof item?.interactive?.button_reply?.title === 'string'
+              ? item.interactive.button_reply.title
+              : typeof item?.interactive?.list_reply?.title === 'string'
+                ? item.interactive.list_reply.title
+                : ''
+
+    if (typeof rawText !== 'string' || !rawText.trim() || rawText.length > 12_000) return []
+
+    let tsMs = now
+    if (item?.timestamp !== undefined && item?.timestamp !== null && item?.timestamp !== '') {
+      const n = Number(item.timestamp)
+      if (Number.isFinite(n) && n > 0) {
+        tsMs = n > 1e12 ? n : n * 1000
+      }
+    }
+    if (tsMs < now - 10 * 60_000 || tsMs > now + 60_000) return []
+
+    return [{
+      externalId,
+      remoteJid: `${phone.slice(1)}@s.whatsapp.net`,
+      phone,
+      text: rawText.trim(),
+      fromMe: item?.fromMe === true,
+      timestamp: tsMs,
+    }]
+  })
+}
+
+export interface N8nStatusUpdate {
+  providerMessageId: string
+  status: string
+}
+
+export function parseN8nStatusUpdates(payload: unknown): N8nStatusUpdate[] {
+  if (!payload || typeof payload !== 'object') return []
+  const p = payload as any
+  const items: any[] = []
+  if (Array.isArray(p.entry)) {
+    for (const entry of p.entry) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        const statuses = Array.isArray(change?.value?.statuses) ? change.value.statuses : []
+        items.push(...statuses)
+      }
+    }
+  } else if (Array.isArray(p.statuses)) {
+    items.push(...p.statuses)
+  } else if (Array.isArray(p)) {
+    items.push(...p)
+  } else {
+    items.push(p)
+  }
+
+  return items.flatMap((u: any): N8nStatusUpdate[] => {
+    const id = typeof u?.providerMessageId === 'string'
+      ? u.providerMessageId.trim()
+      : typeof u?.externalId === 'string'
+        ? u.externalId.trim()
+        : typeof u?.id === 'string'
+          ? u.id.trim()
+          : ''
+    const status = typeof u?.status === 'string' ? u.status.trim().toLowerCase().slice(0, 40) : ''
+    if (!id || !status) return []
+    return [{ providerMessageId: id, status }]
+  })
+}
+
+export class EvolutionTransport implements WhatsAppTransport {
+  readonly provider: WhatsAppProviderType = 'evolution'
+  constructor(private readonly creds: WhatsAppCredentials) {}
+
+  async sendText(to: string, text: string): Promise<WhatsAppSendResult> {
+    return sendWhatsAppText(to, this.creds, text)
+  }
+
+  async sendTemplate(to: string, template: { name: string; language: string; components?: unknown[] }): Promise<WhatsAppSendResult> {
+    return sendWhatsAppText(to, this.creds, `[${template.name}]`)
+  }
+}
+
+export interface N8nMetaConfig {
+  clinicId: string
+  sendWebhookUrl: string
+  secret: string
+  phoneNumberId?: string | null
+}
+
+export class N8nMetaTransport implements WhatsAppTransport {
+  readonly provider: WhatsAppProviderType = 'n8n_meta'
+  constructor(private readonly config: N8nMetaConfig) {}
+
+  private async postToN8n(payload: Record<string, unknown>): Promise<WhatsAppSendResult> {
+    const url = validateN8nWebhookUrl(this.config.sendWebhookUrl)
+    const rawBody = JSON.stringify({
+      clinicId: this.config.clinicId,
+      phoneNumberId: this.config.phoneNumberId || undefined,
+      ...payload,
+    })
+    const { timestamp, signature } = signN8nPayload(rawBody, this.config.secret)
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-VoiceAI-Timestamp': timestamp,
+          'X-VoiceAI-Signature': signature,
+        },
+        body: rawBody,
+        signal: AbortSignal.timeout(20_000),
+        redirect: 'error',
+      })
+    } catch {
+      throw new EvolutionError(0, true)
+    }
+    if (!res.ok) {
+      throw new EvolutionError(res.status, res.status >= 500)
+    }
+    let data: any = {}
+    try {
+      data = await res.json()
+    } catch {
+      throw new EvolutionError(res.status, true)
+    }
+    const messageId =
+      (typeof data?.messageId === 'string' && data.messageId.trim()) ||
+      (typeof data?.messages?.[0]?.id === 'string' && data.messages[0].id.trim()) ||
+      (typeof data?.id === 'string' && data.id.trim()) ||
+      ''
+    if (!messageId) throw new EvolutionError(200, true)
+    return { messageId }
+  }
+
+  private normalizeRecipient(to: string): string {
+    const clean = to.endsWith('@s.whatsapp.net') ? to.split('@')[0] : to
+    return normalizePhone(clean).slice(1)
+  }
+
+  async sendText(to: string, text: string): Promise<WhatsAppSendResult> {
+    return this.postToN8n({
+      to: this.normalizeRecipient(to),
+      mode: 'text',
+      text,
+    })
+  }
+
+  async sendTemplate(to: string, template: { name: string; language: string; components?: unknown[] }): Promise<WhatsAppSendResult> {
+    return this.postToN8n({
+      to: this.normalizeRecipient(to),
+      mode: 'template',
+      template: {
+        name: template.name,
+        language: template.language || 'tr',
+        components: template.components ?? [],
+      },
+    })
+  }
+
+  async sendLocation(to: string, location: { latitude: number; longitude: number; name?: string; address?: string }): Promise<WhatsAppSendResult> {
+    return this.postToN8n({
+      to: this.normalizeRecipient(to),
+      mode: 'location',
+      location,
+    })
+  }
 }

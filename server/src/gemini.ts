@@ -32,6 +32,7 @@ import {
 } from './services/transfer-triggers'
 import { FlowEngine } from './services/flow-engine'
 import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
+import { recordAiTokenUsage } from './db/repositories/ai-usage'
 
 /** randevuOlustur'a şablon/placeholder sızmasını engelle */
 export function validateLiveCustomerIdentity(customerName: string | undefined, phone: string | undefined): string | null {
@@ -269,7 +270,7 @@ export async function createLiveSession(
           console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
           return {
             success: false,
-            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp Berat Bey\'e iletebilirim.',
+            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp yetkililerimize iletebilirim.',
           }
         }
 
@@ -296,7 +297,7 @@ export async function createLiveSession(
 
         return {
           success: false,
-          message: 'Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, Berat Bey\'e iletirim.',
+          message: 'Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, yetkililerimize iletirim.',
         }
       } catch (err) {
         transferAttempted = false
@@ -391,7 +392,11 @@ export async function createLiveSession(
       const sorgu = (args.sorgu as string) ?? ''
       console.log(`[Knowledge] searchKnowledgeBase sorgu: "${sorgu}"`)
       try {
-        const results = await searchKnowledge(sorgu, 5)
+        const results = await searchKnowledge(sorgu, {
+          limit: 5,
+          direction: options.direction || 'inbound',
+          channel: options.telephonyChannel ? 'phone' : 'web_socket',
+        })
         console.log(`[Knowledge] Sonuç sayısı: ${results.length}${results.length > 0 ? ` → ${results.map(r => r.documentName).join(', ')}` : ''}`)
         if (results.length === 0) {
           return { sonuc: 'Bilgi tabanında ilgili bilgi bulunamadı.' }
@@ -436,6 +441,15 @@ export async function createLiveSession(
         }
 
         if (!customer) {
+          if (dentalPatient) {
+            await syncFlowLookup(true, dentalPatient.name)
+            return {
+              kayitli: true,
+              musteri_adi: dentalPatient.name,
+              doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+              sonuc: `Hasta Adı: ${dentalPatient.name}\nTelefon: ${dentalPatient.phone || rawPhone}${doktorGecmisi.length > 0 ? `\nDoktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}` : ''}`,
+            }
+          }
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
           if (knowledgeCustomer) {
             await syncFlowLookup(true, knowledgeCustomer.name)
@@ -444,15 +458,6 @@ export async function createLiveSession(
               musteri_adi: knowledgeCustomer.name,
               doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
               sonuc: `Hasta Adı: ${knowledgeCustomer.name}`,
-            }
-          }
-          if (dentalPatient) {
-            await syncFlowLookup(true, dentalPatient.name)
-            return {
-              kayitli: true,
-              musteri_adi: dentalPatient.name,
-              doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
-              sonuc: `Hasta Adı: ${dentalPatient.name}\nTelefon: ${dentalPatient.phone || rawPhone}${doktorGecmisi.length > 0 ? `\nDoktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}` : ''}`,
             }
           }
           if (doktorGecmisi.length > 0) {
@@ -724,6 +729,9 @@ export async function createLiveSession(
   }
 
   function buildCallbacks() {
+    let lastReportedPrompt = 0
+    let lastReportedResponse = 0
+    let lastReportedTotal = 0
     return {
       // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
       onopen: () => {},
@@ -905,11 +913,30 @@ export async function createLiveSession(
 
         // Usage metadata (token counts) — emitted periodically by Gemini
         if (msg.usageMetadata) {
-          callbacks.onUsage?.(msg.usageMetadata as {
+          const meta = msg.usageMetadata as {
             promptTokenCount?: number
             candidatesTokenCount?: number
             totalTokenCount?: number
-          })
+          }
+          const curPrompt = Math.max(0, Number(meta.promptTokenCount) || 0)
+          const curResponse = Math.max(0, Number(meta.candidatesTokenCount) || 0)
+          const curTotal = Math.max(curPrompt + curResponse, Number(meta.totalTokenCount) || 0)
+          const deltaPrompt = curTotal >= lastReportedTotal ? Math.max(0, curPrompt - lastReportedPrompt) : curPrompt
+          const deltaResponse = curTotal >= lastReportedTotal ? Math.max(0, curResponse - lastReportedResponse) : curResponse
+          const deltaTotal = curTotal >= lastReportedTotal ? Math.max(0, curTotal - lastReportedTotal) : curTotal
+          lastReportedPrompt = curPrompt
+          lastReportedResponse = curResponse
+          lastReportedTotal = curTotal
+          if (deltaTotal > 0 && options.clinicId) {
+            void recordAiTokenUsage({
+              clinicId: options.clinicId,
+              source: options.telephonyChannel ? 'live_phone' : 'live_web',
+              promptTokens: deltaPrompt,
+              responseTokens: deltaResponse,
+              totalTokens: deltaTotal,
+            })
+          }
+          callbacks.onUsage?.(meta)
         }
       },
       onerror: (e: unknown) => callbacks.onError(e),
@@ -1079,6 +1106,13 @@ export async function createLiveSession(
   }
 
   await connect()
+  if (options.clinicId) {
+    void recordAiTokenUsage({
+      clinicId: options.clinicId,
+      source: options.telephonyChannel ? 'live_phone' : 'live_web',
+      callCount: 1,
+    })
+  }
   // setupComplete'in gelmesini bekle (maksimum 4s timeout)
   await Promise.race([
     setupPromise,

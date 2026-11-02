@@ -6,7 +6,6 @@ import { checkRedisHealth } from '../db/redis'
 import { checkDbHealth } from '../db/client'
 import { accounts, accountUsage, businessSettings } from '../db/schema'
 import { getQueueStats } from '../queue/session-queue'
-import { indexDocument, indexDocumentDirect, deleteDocument, listDocuments, extractTextFromFile } from '../services/knowledge'
 
 export const adminPlugin = new Elysia({ prefix: '/api/admin' })
 
@@ -379,54 +378,3 @@ export const adminPlugin = new Elysia({ prefix: '/api/admin' })
   })
 
   .put('/integrations', ({ set }) => { set.status = 403; return { error: 'Entegrasyonlar yalnız platform Klinikler ekranından yönetilir.' } })
-
-  .get('/knowledge', async () => {
-    return listDocuments()
-  })
-
-  .post('/knowledge/upload', async ({ body }) => {
-    const { name, text, file } = body as { name?: string; text?: string; file?: File }
-
-    let content: string
-    let fileName: string
-    let fileType: string
-
-    if (file && file.size > 0) {
-      fileName = name || file.name
-      fileType = file.type || 'text/plain'
-
-      const TEXT_TYPES = ['text/plain', 'text/markdown', 'text/csv', 'application/json']
-      if (TEXT_TYPES.some(t => fileType.startsWith(t))) {
-        content = await file.text()
-      } else {
-        const buffer = await file.arrayBuffer()
-        try {
-          content = await extractTextFromFile(buffer, fileType, fileName)
-          // If extracted text is too short, fall back to direct binary embedding
-          if (content.trim().length < 50) throw new Error('yetersiz metin')
-        } catch {
-          console.log(`[Admin] "${fileName}" metin çıkartılamadı — direkt binary embedding`)
-          const id = await indexDocumentDirect(fileName, fileType, buffer)
-          return { id, name: fileName, message: 'Döküman direkt indexlendi' }
-        }
-      }
-    } else if (text?.trim()) {
-      fileName = name || 'Manuel Giriş'
-      fileType = 'text/plain'
-      content = text.trim()
-    } else {
-      return new Response(JSON.stringify({ error: 'Dosya veya metin gerekli' }), { status: 400 })
-    }
-
-    if (content.length < 10) {
-      return new Response(JSON.stringify({ error: 'İçerik çok kısa' }), { status: 400 })
-    }
-
-    const id = await indexDocument(fileName, fileType, content)
-    return { id, name: fileName, message: 'Döküman indexlendi' }
-  })
-
-  .delete('/knowledge/:id', async ({ params }) => {
-    await deleteDocument(params.id)
-    return { success: true }
-  })

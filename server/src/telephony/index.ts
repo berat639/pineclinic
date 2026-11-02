@@ -21,6 +21,9 @@ import { runWithTenantContext } from '../tenancy/context'
 import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, encodeHangupFrame } from './audiosocket'
 import { downsample24to8, upsample8to16 } from './resample'
 import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../services/transfer-triggers'
+import { getGeminiClient } from '../services/gemini-client'
+import { resolveVoiceSettings } from '../services/voice-settings'
+import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
 
 // ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
 //
@@ -542,49 +545,26 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const direction = state.callerDirection || 'inbound'
             console.log(`[${shortId}] Arama yönü: ${direction}, arayan: ${state.callerPhone || 'bilinmiyor'}, kanal: ${state.callerChannel || 'bilinmiyor'}, clinicId: ${state.clinicId}, hostname: ${state.hostname}`)
 
-            // VIP Arayan Kontrolü (Berat Bey'in Kişisel Asistanı Pine Asistan)
+            // VIP Arayan Kontrolü
             const vipRecord = state.callerPhone ? await findVipByPhone(state.callerPhone) : null
             const isVip = Boolean(vipRecord && vipRecord.active)
             if (isVip && vipRecord) {
               console.log(`[${shortId}] 🌟 VIP Arayan algılandı: ${state.callerPhone} (${vipRecord.contactName || 'Özel Kişi'})`)
             }
 
-            // RAG + prompt + model sorgusunu paralel yap → 2-4s tasarruf
+            // RAG + prompt + model + ses ayarlarını paralel çözümle
             const todayStr = getTodayTurkish()
-            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\nTELEFON KANALI TALİMATLARI: Görüşme doğal olarak bittiğinde (karşı taraf AÇIKÇA veda edip aramayı bitirmek istediğini belirttiğinde, tüm konular tamamlandıktan sonra) cagriySonlandir aracını çağır. Karşı taraf "görüşürüz", "iyi günler", "teşekkürler hoşça kalın" gibi kapanış ifadeleri kullandıktan sonra KISA bir veda cümlesi söyle, ardından cagriySonlandir çağır. "Araştırıp döneceğim", "bir dakika", "kontrol edeyim" gibi geçici durumlar için KESINLİKLE çağırma.\n\nDİYALOG SIRASI: Her turda yalnızca tek bir kısa soru veya tek bir talep yönelt. Karşı taraf cevap vermeden yeni bir soru sorma, peş peşe soru/araç çağrısı üretme ve karşı taraf konuşurken araya girme. Cevabı aldıktan sonra kısa bir onay verip sıradaki tek soruya geç.\n\nSES VE DİKSİYON TALİMATI: Lütfen kelimelerin içindeki sessiz harfleri yutmadan çok net bir İstanbul Türkçesi ile konuş. "Yardımcı olabilirim" gibi kelimeleri telaffuz ederken harfleri yutmamaya özellikle dikkat et.\n\nKESİN DİL VE ANLAMA KURALI: Sen yalnızca ve sadece TÜRKÇE konuşan bir asistansın. Karşı tarafın söylediği her şeyi istisnasız TÜRKÇE olarak dinle, algıla ve anla. Sadece TÜRKÇE cevap ver. Asla İngilizce, Japonca veya başka yabancı dillerde yanıt üretme.`
-
             const callerName = vipRecord?.contactName || 'Misafirimiz'
-            const isOwnerCall = state.callerPhone?.replace(/\D/g, '').endsWith('5076652367')
 
-            const pineAsistanDefaultPrompt = `Sen "Pine Asistan"sın — Berat Bey'in (Berat İnceçam) kişisel, samimi, sıcakkanlı, neşeli, esprili ve son derece zeki genel asistanısın.
-
-KİMLİK VE DAVRANIŞ KURALLARI:
-- Sen bir klinik veya diş sağlığı asistanı DEĞİLSİN. Karşıdaki kişiye KESİNLİKLE diş randevusu, klinik tedavisi, muayene veya diş hekimliği konularını dayatma veya sorma.
-- Karşıdaki kişiyi telefon numarası, ad soyad veya kayıt sorma gibi bürokratik işlemlerle ASLA yorma. Numara ve kimlik zaten sistemde kayıtlıdır.
-- Berat Bey'in kişisel asistanı olarak konuş: Samimi, sıcacık, pozitif, neşeli ve gerektiğinde kahkaha atabilen bir tarzın olsun.
-- Esprili ve sıcak kanlı ol. Komik bir şey söylendiğinde gül, neşeyle karşılık ver ("Hahaha", "İlahi!", "Çok iyiymiş!").
-- Karşıdaki kişi sana herhangi bir soru sorarsa (fıkra, hava durumu, genel kültür, teknoloji, günlük sohbet, Berat Bey hakkında): Mutlaka samimi, güler yüzlü ve doyurucu bir şekilde cevap ver. Sohbeti canlı tut.
-- Fıkra istendiğinde: Çok komik, kısa, neşeli bir fıkra anlat ve kendin de gülerek keyifli bir ortam oluştur ("Hahaha!").
-- Ankara veya herhangi bir şehrin hava durumu sorulduğunda: havaDurumuSorgula aracını kullanarak güncel sıcaklığı ve durumu söyle, ardından tatlı bir yorum ekle.
-- Berat Bey'e iletilmesi gereken bir not, mesaj veya konu varsa dikkatle dinle ve "Berat Bey'e mutlaka ileteceğim" de.
-- Güncel konular, genel kültür, teknoloji, günlük sohbet veya karşı tarafın sormak istediği her konuda serbestçe ve keyifle sohbet et.
-
-HATTINDAKİ KİŞİ HAKKINDA BİLGİ:
-- Arayan Kişi: ${callerName}
-- Telefon Numarası: ${state.callerPhone || 'Bilinmiyor'}
-${isOwnerCall
-                ? `- DİKKAT: Şu anda seninle konuşan kişi bizzat Berat Bey'in ta kendisidir (senin yöneticin/sahibin). Kendisine "Berat Bey" diye hitap et.`
-                : `- Kendisine ismiyle (${callerName}) hitap et. Kendisini tanıdığını ve Berat Bey'in yakın çevresinden olduğunu hissettir.`
-              }
-
-ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
-- Aktarım hedefi ve tetikleyici ifadeler yalnızca aktif Flow Builder "Aramayı Aktar" işlem düğümünden gelir.
-- Koddan, örneklerden veya tahminden telefon numarası üretme; işlem düğümünde bulunmayan hiçbir hedefe aktarma yapma.
-- İşlem düğümünde onay açıksa açık olumlu cevap gelmeden aktardığını söyleme ve aramaAktar aracını çağırma.
-- Acil bir durum varsa aktarım teklif edebilirsin; fakat yalnızca aktif işlem düğümündeki kural eşleşirse aktarımı başlat.
-`
-
-            const [ragContext, systemPromptBase, model, voiceName, activeGreeting, silenceTimeoutSec, silenceCloseSec, maxCallDurationSec, startWaitSec, thinkingLevel] = await Promise.all([
+            const [
+              ragContext,
+              systemPromptBase,
+              voiceSettings,
+              activeGreeting,
+              phoneRulesTpl,
+              flowPriorityTpl,
+              clinicAi,
+            ] = await Promise.all([
               (async () => {
                 try {
                   const preWarmEmbedding = await withTimeout(
@@ -593,8 +573,6 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
                     'RAG başlangıç zaman aşımı',
                   )
                   const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
-                  // Telefon görüşmesinde akış dışı/eğlence belgeleri Flow Builder
-                  // kuralını gevşetmemeli. Klinik bilgi belgeleri korunur.
                   const flowSafeDocs = topDocs.filter(d => !/akış dışı|eğlence|fıkra|asistan kişilik|sohbet/i.test(d.title))
                   if (flowSafeDocs.length > 0) {
                     console.log(
@@ -609,43 +587,35 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
               })(),
               isVip
                 ? (async () => {
-                  return vipRecord?.customPrompt?.trim() || pineAsistanDefaultPrompt
+                  if (vipRecord?.customPrompt?.trim()) return vipRecord.customPrompt.trim()
+                  const vipTpl = await getPromptTemplate('prompt.vip_default', state.clinicId)
+                  return renderPromptTemplate(vipTpl, {
+                    callerName,
+                    callerPhone: state.callerPhone || 'Bilinmiyor',
+                  })
                 })()
                 : buildSystemPrompt(direction),
-              resolveLiveModel(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                return (await getSetting('ai.voice_name', state.clinicId)) || 'Aoede'
-              })(),
+              resolveVoiceSettings(state.clinicId),
               (async () => {
                 if (isVip && vipRecord?.greeting) {
                   return vipRecord.greeting
                 }
                 const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
-                return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben Pine Klinik asistanıyım.' : 'Merhaba, hoş geldiniz!')
+                return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben klinik asistanınızım.' : 'Merhaba, hoş geldiniz!')
               })(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                return Number(await getSetting('ai.call_silence_timeout', state.clinicId)) || 30
-              })(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                return Number(await getSetting('ai.call_silence_close_timeout', state.clinicId)) || 15
-              })(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                return Number(await getSetting('ai.call_max_duration', state.clinicId)) || DEFAULT_MAX_CALL_SECONDS
-              })(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                const configured = Number(await getSetting('ai.start_wait_seconds', state.clinicId))
-                return Number.isFinite(configured) ? Math.max(0, configured) : 0.4
-              })(),
-              (async () => {
-                const { getSetting } = await import('../db/repositories/settings')
-                return await getSetting('ai.thinking_level', state.clinicId)
-              })(),
+              getPromptTemplate('prompt.phone_channel_rules', state.clinicId),
+              getPromptTemplate('prompt.flow_priority_rules', state.clinicId),
+              getGeminiClient(state.clinicId).catch(() => ai),
             ])
+
+            const phoneInstructions = `\n\nBUGÜNÜN TARİHİ: ${todayStr}.\n\n${phoneRulesTpl}`
+            const model = voiceSettings.model
+            const voiceName = voiceSettings.voiceName
+            const silenceTimeoutSec = voiceSettings.callSilenceTimeout
+            const silenceCloseSec = voiceSettings.callSilenceCloseTimeout
+            const maxCallDurationSec = voiceSettings.callMaxDuration
+            const startWaitSec = voiceSettings.startWaitSeconds
+            const thinkingLevel = voiceSettings.thinkingLevel
 
             state.voiceName = voiceName
             const silenceWarnSeconds = Math.min(120, Math.max(5, silenceTimeoutSec))
@@ -673,7 +643,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
               console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
             }
 
-            const flowPriorityInstructions = `\n\nAKTİF FLOW BUILDER KURALI (EN YÜKSEK ÖNCELİK): Klinik için aktif bir konuşma akışı varsa yalnızca o akışın düğümlerini ve sırasını uygula. Varsayılan randevu, kişilik, eğlence veya sohbet talimatları bu akışı geçersiz kılamaz. Kullanıcı meditasyon, resim, hava durumu, günlük hayat, fıkra veya başka klinik dışı bir konu açarsa bu konuyu açıklama, sohbeti sürdürme ve yeni soru sorma. Yalnızca tek cümleyle aktif akışa dön: "Bu görüşmeyi klinik ve randevu işlemleriyle sürdürebilirim; akışımıza dönelim." Kullanıcı akışa dönerse kaldığın adımdan devam et. Kullanıcı dönmezse ikinci kez aynı kısa yönlendirmeyi yap ve görüşmeyi sonlandırmaya yönel. Maksimum süre uyarısı geldiğinde yeni konu açma; mevcut adımı tamamla, kısa veda et ve cagriySonlandir aracını çağır.`
+            const flowPriorityInstructions = `\n\n${flowPriorityTpl}`
             const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
             console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
             if (minimalGreetingEndFlow) {
@@ -681,7 +651,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
             }
 
             const pendingSession = createLiveSession(
-                ai,
+                clinicAi,
                 {
                   onReady: () => {
                     console.log(`[${shortId}] Gemini Live ready (phone)`)
@@ -844,7 +814,7 @@ ARAMA AKTARMA KURALI (ÇOK ÖNEMLİ):
 
             if (isVip) {
               initParts.push(
-                `Sistem bildirimi: Berat Bey'in özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla diş, klinik, randevu veya telefon numarası sorma. Tamamen samimi, neşeli ve doğal bir şekilde Berat Bey'in kişisel asistanı Pine Asistan olarak konuşmaya başla.`
+                `Sistem bildirimi: Özel VIP hattı arandı. Karşı taraf telefonu açtı. İLK OLARAK KESİNLİKLE şu karşılama mesajını harfiyen söyleyerek söze başla: "${activeGreeting}"\n\nKESİN KURAL: Asla telefon numarası veya kayıt sorma. Tamamen samimi, neşeli ve doğal bir şekilde özel kişisel asistan olarak konuşmaya başla.`
               )
             } else {
               initParts.push(

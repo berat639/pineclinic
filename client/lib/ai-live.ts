@@ -36,15 +36,24 @@ export type SessionConfig = {
   callSilenceCloseTimeout?: number
   callMaxDuration?: number
   flowSession?: { id: string; token: string; revision?: number }
+  sessionKey?: string
 }
 
 // ── Tool call → server HTTP ────────────────────────────────────────────────
-async function handleToolCall(name: string, args: Record<string, unknown>, flowSession?: { id: string; token: string; revision?: number }): Promise<Record<string, unknown>> {
+async function handleToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  flowSession?: { id: string; token: string; revision?: number },
+  sessionKey?: string,
+): Promise<Record<string, unknown>> {
+  const token = flowSession?.token || sessionKey
   const post = async (path: string, body: Record<string, unknown>) => {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['x-flow-session-key'] = token
       const res = await fetch(path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       })
       return await res.json()
@@ -102,6 +111,7 @@ export class AiLiveSession {
   private _isConnected = false
   private _sendGuard = false
   private flowSession?: { id: string; token: string; revision?: number }
+  private sessionKey?: string
   private _interactionInProgress = false
 
   constructor(callbacks: LiveChatCallbacks) {
@@ -111,6 +121,7 @@ export class AiLiveSession {
   async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
     const modelName = config.model || 'gemini-3.8-live'
     this.flowSession = config.flowSession
+    this.sessionKey = config.flowSession?.token || config.sessionKey
     this._interactionInProgress = false
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
@@ -279,7 +290,7 @@ export class AiLiveSession {
 
         const results = await Promise.all(functionCalls.map(async (call) => ({
           name: call.name,
-          response: await handleToolCall(call.name ?? '', (call.args ?? {}) as Record<string, unknown>, this.flowSession),
+          response: await handleToolCall(call.name ?? '', (call.args ?? {}) as Record<string, unknown>, this.flowSession, this.sessionKey),
         })))
         this.textHistory.push({
           role: 'user',
@@ -321,7 +332,7 @@ export class AiLiveSession {
     // Tool calls
     if (message.toolCall?.functionCalls?.length) {
       for (const fc of message.toolCall.functionCalls) {
-        handleToolCall(fc.name ?? '', fc.args as Record<string, unknown>, this.flowSession)
+        handleToolCall(fc.name ?? '', fc.args as Record<string, unknown>, this.flowSession, this.sessionKey)
           .then((result) => {
             if (this.session && this._isConnected) {
               try {

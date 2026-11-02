@@ -14,6 +14,12 @@ import { hasMatchingRequestOrigin, isPlatformAdminRequest } from '../platform/ac
 import { activateWhatsApp, clearWhatsAppSetup, configureWhatsAppSetup, prepareWhatsAppQr, publicWhatsAppConfig, refreshWhatsAppConnection } from '../db/repositories/whatsapp'
 import { credentialsFor } from '../db/repositories/whatsapp'
 import { requestEvolutionQr } from '../integrations/whatsapp'
+import {
+  deleteClinicGeminiKey,
+  resolveClinicGeminiKeyInfo,
+  setClinicGeminiKey,
+  testClinicGeminiKey,
+} from '../services/gemini-client'
 
 const clinicParams = t.Object({ clinicId: t.String({ format: 'uuid' }) })
 
@@ -63,6 +69,49 @@ export const platformPlugin = new Elysia({ prefix: '/api/platform' })
     try { return await activateWhatsApp(params.clinicId, user.id) }
     catch (error) { set.status = 400; return { error: error instanceof Error ? error.message : 'WhatsApp etkinleştirilemedi.' } }
   }, { params: clinicParams })
+  .get('/clinics/:clinicId/gemini-key', async ({ params, cookie, request, set }) => {
+    if (!(await requirePlatformAdmin(cookie, request, set))) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
+    try {
+      return await resolveClinicGeminiKeyInfo(params.clinicId)
+    } catch (error) {
+      set.status = 400
+      return { error: error instanceof Error ? error.message : 'Gemini anahtarı durumu alınamadı.' }
+    }
+  }, { params: clinicParams })
+  .put('/clinics/:clinicId/gemini-key', async ({ params, body, cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) { set.status = 404; return { error: 'Sayfa bulunamadı.' } }
+    const user = await requirePlatformAdmin(cookie, request, set)
+    if (!user) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
+    try {
+      const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null
+      return await setClinicGeminiKey(params.clinicId, body.apiKey, user.id, ip)
+    } catch (error) {
+      set.status = 400
+      return { error: error instanceof Error ? error.message : 'Gemini API anahtarı kaydedilemedi.' }
+    }
+  }, { params: clinicParams, body: t.Object({ apiKey: t.String({ minLength: 10, maxLength: 256 }) }) })
+  .delete('/clinics/:clinicId/gemini-key', async ({ params, cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) { set.status = 404; return { error: 'Sayfa bulunamadı.' } }
+    const user = await requirePlatformAdmin(cookie, request, set)
+    if (!user) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
+    try {
+      const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null
+      return await deleteClinicGeminiKey(params.clinicId, user.id, ip)
+    } catch (error) {
+      set.status = 400
+      return { error: error instanceof Error ? error.message : 'Gemini API anahtarı kaldırılamadı.' }
+    }
+  }, { params: clinicParams })
+  .post('/clinics/:clinicId/gemini-key/test', async ({ params, body, cookie, request, set }) => {
+    if (!isPlatformAdminRequest(request) || !hasMatchingRequestOrigin(request)) { set.status = 404; return { error: 'Sayfa bulunamadı.' } }
+    if (!(await requirePlatformAdmin(cookie, request, set))) return { error: 'Bu işlem yalnızca platform yöneticisine açıktır.' }
+    try {
+      return await testClinicGeminiKey(params.clinicId, body?.apiKey)
+    } catch (error) {
+      set.status = 400
+      return { error: error instanceof Error ? error.message : 'Gemini API anahtarı testi başarısız.' }
+    }
+  }, { params: clinicParams, body: t.Optional(t.Object({ apiKey: t.Optional(t.String({ maxLength: 256 })) })) })
   .get('/clinics', async ({ cookie, request, set }) => {
     if (!isPlatformAdminRequest(request)) {
       set.status = 404

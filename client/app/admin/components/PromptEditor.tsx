@@ -8,6 +8,16 @@ interface CustomField {
   active?: boolean
 }
 
+interface PromptSectionItem {
+  key: string
+  label: string
+  description: string
+  sortOrder: number
+  value: string
+  isCustom: boolean
+  updatedAt: string | null
+}
+
 export default function PromptEditor() {
   const [loading, setLoading] = useState(true)
   const [customFields, setCustomFields] = useState<CustomField[]>([])
@@ -17,15 +27,37 @@ export default function PromptEditor() {
   const [newFieldReq, setNewFieldReq] = useState(false)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editDesc, setEditDesc] = useState('')
+  const [prompts, setPrompts] = useState<PromptSectionItem[]>([])
+  const [selectedPromptKey, setSelectedPromptKey] = useState<string>('')
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({})
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptNotice, setPromptNotice] = useState('')
+  const [previewText, setPreviewText] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/settings/tools')
+      const [res, promptsRes] = await Promise.all([
+        fetch('/api/admin/settings/tools'),
+        fetch('/api/admin/settings/prompts'),
+      ])
       if (res.ok) {
         const toolData = await res.json()
         const cfItem = toolData.find((t: { key: string }) => t.key === 'tools.custom_fields')
         if (cfItem?.value) {
           try { setCustomFields(JSON.parse(cfItem.value)) } catch { /* ignore */ }
+        }
+      }
+      if (promptsRes.ok) {
+        const promptData = (await promptsRes.json()) as PromptSectionItem[]
+        if (Array.isArray(promptData)) {
+          setPrompts(promptData)
+          const drafts: Record<string, string> = {}
+          for (const p of promptData) drafts[p.key] = p.value
+          setPromptDrafts(drafts)
+          if (promptData.length > 0) {
+            setSelectedPromptKey(prev => prev || promptData[0].key)
+          }
         }
       }
     } catch { /* ignore */ }
@@ -89,6 +121,56 @@ export default function PromptEditor() {
   }
 
   const activeFields = customFields.filter(f => f.active !== false)
+  const activePrompt = prompts.find(p => p.key === selectedPromptKey) ?? prompts[0] ?? null
+
+  const savePromptSection = async (key: string) => {
+    const val = (promptDrafts[key] ?? '').trim()
+    if (val.length < 5) return
+    setPromptSaving(true)
+    setPromptNotice('')
+    try {
+      const res = await fetch(`/api/admin/settings/prompts/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: val }),
+      })
+      if (res.ok) {
+        setPrompts(prev => prev.map(p => p.key === key ? { ...p, value: val, isCustom: true, updatedAt: new Date().toISOString() } : p))
+        setPromptNotice('Prompt şablonu kaydedildi.')
+      }
+    } catch { /* ignore */ }
+    setPromptSaving(false)
+  }
+
+  const resetPromptSectionToDefault = async (key: string) => {
+    setPromptSaving(true)
+    setPromptNotice('')
+    try {
+      const res = await fetch(`/api/admin/settings/prompts/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const nextVal = typeof data.value === 'string' ? data.value : ''
+        setPrompts(prev => prev.map(p => p.key === key ? { ...p, value: nextVal, isCustom: false, updatedAt: null } : p))
+        setPromptDrafts(prev => ({ ...prev, [key]: nextVal }))
+        setPromptNotice('Varsayılan şablona sıfırlandı.')
+      }
+    } catch { /* ignore */ }
+    setPromptSaving(false)
+  }
+
+  const loadPromptPreview = async () => {
+    setPreviewLoading(true)
+    try {
+      const res = await fetch('/api/admin/settings/prompts/preview', { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        setPreviewText(typeof data.prompt === 'string' ? data.prompt : '')
+      }
+    } catch { /* ignore */ }
+    setPreviewLoading(false)
+  }
 
   if (loading) {
     return (
@@ -214,6 +296,115 @@ export default function PromptEditor() {
           <strong style={{ color: 'var(--foreground-3)' }}>Nasıl çalışır:</strong> AI alanları yukarıdaki sırayla sorar. Açıklama = AI&apos;nın sorusu. ↑↓ sıra değiştir. ★ zorunlu yap. Toggle ile kapat. Tıklayarak düzenle.
         </div>
       </div>
+
+      {/* System Prompt Sections Editor */}
+      {prompts.length > 0 && activePrompt && (
+        <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>🧠 Sistem Prompt Şablonları (Gömülü Prompt Bağımsızlığı)</div>
+              <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginTop: 3 }}>
+                Tüm karşılama, kanal, akış önceliği ve konuşma kuralları veritabanından okunur; kliniğe özel düzenlenebilir.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void (previewText !== null ? setPreviewText(null) : loadPromptPreview())}
+              disabled={previewLoading}
+              style={{ padding: '6px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa' }}
+            >
+              {previewLoading ? 'Önizleme yükleniyor…' : previewText !== null ? 'Önizlemeyi Gizle' : 'Birleşik Prompt Önizlemesi'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            {prompts.map(section => {
+              const selected = section.key === activePrompt.key
+              return (
+                <button
+                  key={section.key}
+                  type="button"
+                  onClick={() => { setSelectedPromptKey(section.key); setPromptNotice('') }}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 7,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: selected ? '#fff' : 'var(--foreground-2)',
+                    background: selected ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${selected ? 'var(--accent, #3b82f6)' : 'rgba(255,255,255,0.08)'}`,
+                  }}
+                >
+                  {section.label}
+                  {section.isCustom ? ' ●' : ''}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ padding: 14, borderRadius: 10, background: 'rgba(0,0,0,0.18)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>{activePrompt.label}</div>
+                <div style={{ fontSize: 10, color: 'var(--foreground-3)', marginTop: 2 }}>{activePrompt.description}</div>
+              </div>
+              <code style={{ fontSize: 10, color: '#94a3b8', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: 4 }}>
+                {activePrompt.key}
+              </code>
+            </div>
+
+            <textarea
+              rows={6}
+              value={promptDrafts[activePrompt.key] ?? activePrompt.value}
+              onChange={e => setPromptDrafts(prev => ({ ...prev, [activePrompt.key]: e.target.value }))}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'rgba(0,0,0,0.28)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'var(--foreground)',
+                fontSize: 11,
+                fontFamily: 'monospace',
+                lineHeight: 1.5,
+                resize: 'vertical',
+                outline: 'none',
+              }}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 10, color: promptNotice ? '#22c55e' : 'var(--foreground-3)' }}>
+                {promptNotice || 'Değişkenler: {{greeting}}, {{customFields}}, {{doctorBlock}}, {{workingHoursBlock}}, {{knowledgeBlock}}'}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={promptSaving}
+                  onClick={() => void resetPromptSectionToDefault(activePrompt.key)}
+                  style={{ padding: '6px 12px', borderRadius: 7, fontSize: 11, cursor: 'pointer', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--foreground-3)' }}
+                >
+                  Varsayılana Sıfırla
+                </button>
+                <button
+                  type="button"
+                  disabled={promptSaving || (promptDrafts[activePrompt.key] ?? '').trim().length < 5}
+                  onClick={() => void savePromptSection(activePrompt.key)}
+                  style={{ padding: '6px 14px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}
+                >
+                  {promptSaving ? 'Kaydediliyor…' : 'Şablonu Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {previewText !== null && (
+            <pre style={{ marginTop: 12, padding: 12, borderRadius: 8, background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--foreground-2)', fontSize: 10, maxHeight: 260, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+              {previewText}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   )
 }

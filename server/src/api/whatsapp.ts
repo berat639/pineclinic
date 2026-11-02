@@ -2,9 +2,33 @@ import { Elysia, t } from 'elysia'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { clinics, whatsappConversations, whatsappMessages } from '../db/schema'
-import { credentialsFor, disconnectWhatsApp, ensureEvolutionInstance, getWhatsAppClinic, publicWhatsAppConfig, recordIncomingMessage, refreshWhatsAppConnection, saveWhatsAppConfig, updateWhatsAppPreferences } from '../db/repositories/whatsapp'
+import {
+  credentialsFor,
+  disconnectWhatsApp,
+  ensureEvolutionInstance,
+  ensureWhatsAppSetupSchema,
+  getOrInitN8nWhatsAppConfig,
+  getWhatsAppClinic,
+  publicWhatsAppConfig,
+  recordIncomingMessage,
+  refreshWhatsAppConnection,
+  saveN8nWhatsAppConfig,
+  saveWhatsAppConfig,
+  updateWhatsAppPreferences,
+} from '../db/repositories/whatsapp'
 import { authenticateRequest } from '../middleware/auth'
-import { evolutionRequest, EvolutionError, parseEvolutionMessages, requestEvolutionQr, verifyWebhookSecret } from '../integrations/whatsapp'
+import {
+  evolutionRequest,
+  EvolutionError,
+  parseEvolutionMessages,
+  parseN8nInboundMessages,
+  parseN8nStatusUpdates,
+  requestEvolutionQr,
+  signN8nPayload,
+  validateN8nWebhookUrl,
+  verifyN8nSignature,
+  verifyWebhookSecret,
+} from '../integrations/whatsapp'
 import { openSecret } from '../services/integration-secrets'
 import { requireClinicId } from '../tenancy/context'
 
@@ -107,6 +131,65 @@ const admin = new Elysia({ prefix: '/api/admin/whatsapp' })
     if (body.action === 'retry') await db.update(whatsappConversations).set({ aiPaused: false }).where(eq(whatsappConversations.id, current.conversationId))
     return { success: true }
   }, { params: messageParams, body: t.Object({ action: t.Union([t.Literal('retry'), t.Literal('resolve')]) }) })
+  .get('/:clinicId/n8n', async ({ params }) => {
+    assertCurrentClinic(params.clinicId)
+    return getOrInitN8nWhatsAppConfig(params.clinicId)
+  }, { params: clinicParams })
+  .put('/:clinicId/n8n', async ({ params, body }) => {
+    assertCurrentClinic(params.clinicId)
+    return saveN8nWhatsAppConfig(params.clinicId, body)
+  }, {
+    params: clinicParams,
+    body: t.Object({
+      provider: t.Optional(t.Union([t.Literal('evolution'), t.Literal('n8n_meta')])),
+      n8nSendWebhookUrl: t.Optional(t.String({ maxLength: 600 })),
+      metaPhoneNumberId: t.Optional(t.String({ maxLength: 120 })),
+      enabled: t.Optional(t.Boolean()),
+      aiEnabled: t.Optional(t.Boolean()),
+      rotateSecret: t.Optional(t.Boolean()),
+      templates: t.Optional(t.Array(t.Object({
+        name: t.String({ maxLength: 120 }),
+        language: t.String({ maxLength: 20 }),
+        category: t.Optional(t.String({ maxLength: 60 })),
+        bodyPreview: t.Optional(t.String({ maxLength: 1000 })),
+        paramKeys: t.Optional(t.Array(t.String({ maxLength: 60 }))),
+      }))),
+    }),
+  })
+  .post('/:clinicId/n8n/test', async ({ params }) => {
+    assertCurrentClinic(params.clinicId)
+    await ensureWhatsAppSetupSchema()
+    const clinic = await getWhatsAppClinic(params.clinicId)
+    if (!clinic.n8nSendWebhookUrl || !clinic.n8nInboundSecret) {
+      throw new Error('Önce n8n gönderim webhook adresini kaydedin.')
+    }
+    const url = validateN8nWebhookUrl(clinic.n8nSendWebhookUrl)
+    const rawBody = JSON.stringify({
+      clinicId: clinic.id,
+      mode: 'ping',
+      phoneNumberId: clinic.metaPhoneNumberId || undefined,
+      timestamp: Date.now(),
+    })
+    const { timestamp, signature } = signN8nPayload(rawBody, openSecret(clinic.n8nInboundSecret))
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-VoiceAI-Timestamp': timestamp,
+        'X-VoiceAI-Signature': signature,
+      },
+      body: rawBody,
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    })
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: res.ok
+        ? 'n8n webhook bağlantısı başarılı.'
+        : `n8n webhook HTTP ${res.status} döndürdü.`,
+    }
+  }, { params: clinicParams })
 
 export const whatsappPlugin = new Elysia()
   .post('/api/whatsapp/evolution/:clinicId', async ({ params, body, request, set }) => {
@@ -136,4 +219,76 @@ export const whatsappPlugin = new Elysia()
     // Acknowledge only after the inbox has committed. The worker recovers independently of Redis.
     return { status: 'ok' }
   }, { params: clinicParams })
+  .post('/api/whatsapp/n8n/:clinicId/inbound', async ({ params, body, request, set }) => {
+    await ensureWhatsAppSetupSchema()
+    const clinic = await getWhatsAppClinic(params.clinicId)
+    if (!clinic.n8nInboundSecret) {
+      set.status = 401
+      return { error: 'Yetkisiz webhook.' }
+    }
+    const rawBody = typeof body === 'string' ? body : JSON.stringify(body ?? {})
+    const secret = openSecret(clinic.n8nInboundSecret)
+    const valid = verifyN8nSignature(
+      rawBody,
+      request.headers.get('x-voiceai-timestamp'),
+      request.headers.get('x-voiceai-signature'),
+      secret,
+    )
+    if (!valid) {
+      set.status = 401
+      return { error: 'Geçersiz webhook imzası veya zaman damgası.' }
+    }
+    let payload: unknown
+    try {
+      payload = typeof body === 'string' ? JSON.parse(body) : body
+    } catch {
+      set.status = 400
+      return { error: 'Geçersiz JSON gövdesi.' }
+    }
+    const messages = parseN8nInboundMessages(payload)
+    let recorded = 0
+    for (const message of messages) {
+      const id = await recordIncomingMessage(clinic, message, 'n8n_meta')
+      if (id) recorded++
+    }
+    return { status: 'ok', received: messages.length, recorded }
+  }, { params: clinicParams, parse: 'text' })
+  .post('/api/whatsapp/n8n/:clinicId/status', async ({ params, body, request, set }) => {
+    await ensureWhatsAppSetupSchema()
+    const clinic = await getWhatsAppClinic(params.clinicId)
+    if (!clinic.n8nInboundSecret) {
+      set.status = 401
+      return { error: 'Yetkisiz webhook.' }
+    }
+    const rawBody = typeof body === 'string' ? body : JSON.stringify(body ?? {})
+    const secret = openSecret(clinic.n8nInboundSecret)
+    const valid = verifyN8nSignature(
+      rawBody,
+      request.headers.get('x-voiceai-timestamp'),
+      request.headers.get('x-voiceai-signature'),
+      secret,
+    )
+    if (!valid) {
+      set.status = 401
+      return { error: 'Geçersiz webhook imzası veya zaman damgası.' }
+    }
+    let payload: unknown
+    try {
+      payload = typeof body === 'string' ? JSON.parse(body) : body
+    } catch {
+      set.status = 400
+      return { error: 'Geçersiz JSON gövdesi.' }
+    }
+    const updates = parseN8nStatusUpdates(payload)
+    for (const update of updates.slice(0, 100)) {
+      await db.update(whatsappMessages).set({
+        deliveryStatus: update.status,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(whatsappMessages.providerMessageId, update.providerMessageId),
+        sql`${whatsappMessages.conversationId} IN (SELECT id FROM whatsapp_conversations WHERE clinic_id = ${clinic.id} AND instance_name = 'n8n_meta')`,
+      ))
+    }
+    return { status: 'ok', updated: updates.length }
+  }, { params: clinicParams, parse: 'text' })
   .use(admin)

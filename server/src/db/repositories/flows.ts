@@ -1,9 +1,45 @@
-import { and, desc, eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../client'
 import { conversationFlows } from '../schema'
 import { requireClinicId } from '../../tenancy/context'
 import { getTransferConfirmationQuestion } from '../../services/transfer-triggers'
-export { validateConversationFlow, type FlowValidationIssue } from '../../services/flow-validation'
+export { validateConversationFlow, type FlowValidationIssue, EXECUTABLE_ACTIONS, FLOW_EVENT_TRIGGERS } from '../../services/flow-validation'
+
+export type FlowConditionOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'contains'
+  | 'notContains'
+  | 'startsWith'
+  | 'regex'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'between'
+  | 'in'
+  | 'isEmpty'
+  | 'notEmpty'
+  | 'intent'
+
+export interface FlowConditionRule {
+  field: string
+  operator: FlowConditionOperator
+  value?: string
+  valueTo?: string
+}
+
+export interface FlowConditionGroup {
+  logic: 'AND' | 'OR'
+  rules: Array<FlowConditionRule | FlowConditionGroup>
+}
+
+export type FlowEventTrigger =
+  | 'on_silence'
+  | 'on_no_match'
+  | 'on_transfer_fail'
+  | 'on_call_end'
+  | 'on_whatsapp_message'
 
 export interface FlowNode {
   id: string
@@ -17,16 +53,29 @@ export interface FlowNode {
     required?: boolean
     fieldType?: 'text' | 'date' | 'time' | 'enum' | 'user'
     enumValues?: string[]
-    // CONDITION node
+    // CONDITION node (legacy + compound)
     conditionField?: string
-    operator?: 'equals' | 'contains' | 'notEmpty' | 'intent'
+    operator?: FlowConditionOperator
     conditionValue?: string
+    conditionValueTo?: string
+    conditionLogic?: 'AND' | 'OR'
+    rules?: FlowConditionRule[]
+    conditionGroup?: FlowConditionGroup
     // ACTION node
     action?: string
     message?: string
     webhookUrl?: string
+    webhookSecret?: string
+    webhookHeaders?: Record<string, string>
+    webhookBodyTemplate?: string
+    webhookResponseMapping?: Record<string, string>
+    variableName?: string
+    variableValue?: string
+    waitSeconds?: number
+    promptInstruction?: string
     transferNumber?: string
     triggerKeywords?: string
+    eventTrigger?: FlowEventTrigger
     requireConfirmation?: boolean
     confirmationQuestion?: string
   }
@@ -71,6 +120,243 @@ const LEGACY_FIELD_ALIASES: Record<string, string> = {
 
 const LEGACY_CONDITION_ALIASES: Record<string, string> = {
   is_registered: 'kayitli',
+}
+
+export function injectFlowSystemVariables(
+  fields: Record<string, unknown> = {},
+  ctx?: {
+    direction?: string
+    channel?: string
+    silenceCount?: number
+    durationSec?: number
+    now?: Date
+  },
+): Record<string, unknown> {
+  const now = ctx?.now ?? new Date()
+  const istanbulParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Istanbul',
+    hour: 'numeric',
+    hour12: false,
+    weekday: 'short',
+  }).formatToParts(now)
+  const hourStr = istanbulParts.find(p => p.type === 'hour')?.value ?? String(now.getHours())
+  const hour = Number(hourStr) % 24
+  const weekdayMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }
+  const weekdayShort = istanbulParts.find(p => p.type === 'weekday')?.value ?? 'Mon'
+  const weekday = weekdayMap[weekdayShort] ?? 1
+  const isOpen = weekday >= 1 && weekday <= 6 && hour >= 9 && hour < 19
+
+  const kayitliVal = fields['kayitli'] ?? fields['caller.isKnownPatient']
+  const isKnown =
+    kayitliVal !== undefined
+      ? ['true', 'evet', '1'].includes(String(kayitliVal).toLocaleLowerCase('tr-TR'))
+      : false
+
+  return {
+    ...fields,
+    'caller.isKnownPatient': fields['caller.isKnownPatient'] ?? String(isKnown),
+    'caller.isVip': fields['caller.isVip'] ?? 'false',
+    'caller.hasUpcomingAppointment': fields['caller.hasUpcomingAppointment'] ?? 'false',
+    'call.direction': ctx?.direction ?? fields['call.direction'] ?? 'inbound',
+    'call.channel': ctx?.channel ?? fields['call.channel'] ?? 'phone',
+    'call.silenceCount': String(ctx?.silenceCount ?? fields['call.silenceCount'] ?? 0),
+    'call.durationSec': String(ctx?.durationSec ?? fields['call.durationSec'] ?? 0),
+    'time.hour': String(fields['time.hour'] ?? hour),
+    'time.weekday': String(fields['time.weekday'] ?? weekday),
+    'clinic.isOpen': String(fields['clinic.isOpen'] ?? isOpen),
+  }
+}
+
+export function renderFlowTemplate(template: string, fields: Record<string, unknown>): string {
+  if (!template) return ''
+  return template.replace(/\{\{\s*(?:fields\.)?([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => {
+    const val = fields[key]
+    return val !== undefined && val !== null ? String(val) : ''
+  })
+}
+
+function isRuleGroup(item: FlowConditionRule | FlowConditionGroup): item is FlowConditionGroup {
+  return 'logic' in item && Array.isArray((item as FlowConditionGroup).rules)
+}
+
+export function evaluateConditionRule(
+  rule: FlowConditionRule,
+  fields: Record<string, unknown>,
+  intentMatchedByAi?: boolean,
+): boolean {
+  const field = String(rule.field || '').trim()
+  const op = rule.operator || 'equals'
+  const rawVal = fields[field] ?? (field === 'caller.isKnownPatient' ? fields['kayitli'] : field === 'kayitli' ? fields['caller.isKnownPatient'] : undefined)
+  const actual = String(rawVal ?? '').trim()
+  const expected = String(rule.value ?? '').trim()
+  const expectedTo = String(rule.valueTo ?? '').trim()
+
+  if (field === 'user_intent' || op === 'intent') {
+    if (typeof intentMatchedByAi === 'boolean') return intentMatchedByAi
+    if (!actual) return false
+    const actualLow = actual.toLocaleLowerCase('tr-TR')
+    if (['true', 'evet', '1', 'var'].includes(actualLow)) return true
+    if (['false', 'hayır', 'hayir', '0', 'yok'].includes(actualLow)) return false
+    const expectedWords = expected.toLocaleLowerCase('tr-TR').split(/[\s,;:.!?]+/).filter(w => w.length >= 3)
+    return expectedWords.some(w => actualLow.includes(w)) || actualLow.includes(expected.toLocaleLowerCase('tr-TR'))
+  }
+
+  const actualLow = actual.toLocaleLowerCase('tr-TR')
+  const expectedLow = expected.toLocaleLowerCase('tr-TR')
+
+  switch (op) {
+    case 'isEmpty':
+      return actual.length === 0
+    case 'notEmpty':
+      return actual.length > 0
+    case 'contains':
+      return actualLow.includes(expectedLow)
+    case 'notContains':
+      return !actualLow.includes(expectedLow)
+    case 'startsWith':
+      return actualLow.startsWith(expectedLow)
+    case 'regex': {
+      if (!expected) return false
+      try {
+        return new RegExp(expected, 'i').test(actual)
+      } catch {
+        return false
+      }
+    }
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      const aNum = Number(actual.replace(',', '.'))
+      const eNum = Number(expected.replace(',', '.'))
+      if (!Number.isFinite(aNum) || !Number.isFinite(eNum)) return false
+      if (op === 'gt') return aNum > eNum
+      if (op === 'gte') return aNum >= eNum
+      if (op === 'lt') return aNum < eNum
+      return aNum <= eNum
+    }
+    case 'between': {
+      const aNum = Number(actual.replace(',', '.'))
+      const parts = expectedTo ? [expected, expectedTo] : expected.split(/\s*[,;-]\s*/)
+      const low = Number((parts[0] ?? '').replace(',', '.'))
+      const high = Number((parts[1] ?? '').replace(',', '.'))
+      if (!Number.isFinite(aNum) || !Number.isFinite(low) || !Number.isFinite(high)) return false
+      return aNum >= Math.min(low, high) && aNum <= Math.max(low, high)
+    }
+    case 'in': {
+      const items = expectedLow.split(/[,;|]+/).map(s => s.trim()).filter(Boolean)
+      return items.includes(actualLow)
+    }
+    case 'notEquals': {
+      if (expectedLow === 'true') return !['true', 'evet', '1'].includes(actualLow)
+      if (expectedLow === 'false') return !['false', 'hayır', 'hayir', '0'].includes(actualLow)
+      return actualLow !== expectedLow
+    }
+    case 'equals':
+    default: {
+      if (expectedLow === 'true' && (actualLow === 'true' || actualLow === 'evet' || actualLow === '1')) return true
+      if (expectedLow === 'false' && (actualLow === 'false' || actualLow === 'hayır' || actualLow === 'hayir' || actualLow === '0')) return true
+      return actualLow === expectedLow
+    }
+  }
+}
+
+export function evaluateConditionGroup(
+  group: FlowConditionGroup,
+  fields: Record<string, unknown>,
+  intentMatchedByAi?: boolean,
+): boolean {
+  if (!group.rules || group.rules.length === 0) return false
+  const evalItem = (item: FlowConditionRule | FlowConditionGroup): boolean =>
+    isRuleGroup(item)
+      ? evaluateConditionGroup(item, fields, intentMatchedByAi)
+      : evaluateConditionRule(item, fields, intentMatchedByAi)
+  return group.logic === 'OR' ? group.rules.some(evalItem) : group.rules.every(evalItem)
+}
+
+export function evaluateConditionNode(
+  node: FlowNode,
+  rawFields: Record<string, unknown>,
+  intentMatchedByAi?: boolean,
+  ctx?: { direction?: string; channel?: string; silenceCount?: number; durationSec?: number },
+): boolean {
+  const fields = injectFlowSystemVariables(rawFields, ctx)
+  if (node.data.conditionGroup && Array.isArray(node.data.conditionGroup.rules) && node.data.conditionGroup.rules.length > 0) {
+    return evaluateConditionGroup(node.data.conditionGroup, fields, intentMatchedByAi)
+  }
+  if (Array.isArray(node.data.rules) && node.data.rules.length > 0) {
+    return evaluateConditionGroup(
+      { logic: node.data.conditionLogic === 'OR' ? 'OR' : 'AND', rules: node.data.rules },
+      fields,
+      intentMatchedByAi,
+    )
+  }
+  return evaluateConditionRule(
+    {
+      field: String(node.data.conditionField || ''),
+      operator: node.data.operator || 'equals',
+      value: node.data.conditionValue,
+      valueTo: node.data.conditionValueTo,
+    },
+    fields,
+    intentMatchedByAi,
+  )
+}
+
+function readJsonPath(obj: unknown, path: string): unknown {
+  if (!obj || typeof obj !== 'object' || !path) return undefined
+  const parts = path.split('.').map(p => p.trim()).filter(Boolean)
+  let curr: any = obj
+  for (const part of parts) {
+    if (curr === null || curr === undefined || typeof curr !== 'object') return undefined
+    curr = curr[part]
+  }
+  return curr
+}
+
+export async function executeFlowWebhookAction(
+  node: FlowNode,
+  fields: Record<string, unknown>,
+): Promise<{ ok: boolean; mappedFields: Record<string, string>; status?: number; error?: string }> {
+  const url = String(node.data.webhookUrl || '').trim()
+  if (!url || !/^https?:\/\/.+/i.test(url)) {
+    return { ok: false, mappedFields: {}, error: 'Geçersiz Webhook URL' }
+  }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(node.data.webhookHeaders || {}),
+  }
+  if (node.data.webhookSecret) {
+    headers['X-Webhook-Secret'] = String(node.data.webhookSecret)
+  }
+  let bodyStr: string
+  if (node.data.webhookBodyTemplate && node.data.webhookBodyTemplate.trim()) {
+    bodyStr = renderFlowTemplate(node.data.webhookBodyTemplate, fields)
+  } else {
+    bodyStr = JSON.stringify({ fields, nodeId: node.id, timestamp: new Date().toISOString() })
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: bodyStr,
+      signal: AbortSignal.timeout(10_000),
+    })
+    const mappedFields: Record<string, string> = {}
+    const data = await res.json().catch(() => null)
+    if (data && node.data.webhookResponseMapping && typeof node.data.webhookResponseMapping === 'object') {
+      for (const [targetField, jsonPath] of Object.entries(node.data.webhookResponseMapping)) {
+        const extracted = readJsonPath(data, jsonPath)
+        if (extracted !== undefined && extracted !== null) {
+          mappedFields[targetField] = String(extracted)
+        }
+      }
+    }
+    return { ok: res.ok, mappedFields, status: res.status }
+  } catch (err) {
+    return { ok: false, mappedFields: {}, error: err instanceof Error ? err.message : 'Webhook hatası' }
+  }
 }
 
 function normalizeFlowNodes(nodes: FlowNode[]): { nodes: FlowNode[]; changed: boolean } {
@@ -131,8 +417,6 @@ export async function getActiveFlow(direction: string = 'inbound', explicitClini
   if (rows.length === 0) return null
   const r = rows[0]
   const normalized = normalizeFlowNodes(r.nodes as FlowNode[])
-  // Self-heal flows that were saved by older Flow Builder versions. This is
-  // deliberately idempotent and preserves the graph and user-authored text.
   if (normalized.changed) {
     await db.update(conversationFlows)
       .set({ nodes: normalized.nodes, updatedAt: new Date() })
@@ -154,9 +438,6 @@ export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: 
   const normalized = normalizeFlowNodes(nodes)
   nodes = normalized.nodes
   const existing = await getActiveFlow(direction)
-  // Eski sürümlerde aynı klinik/yön için birden fazla aktif kayıt oluşabiliyordu.
-  // Kaydetme sırasında yalnızca bu akışı aktif bırak; çalışma zamanı da en son
-  // güncellenen kaydı seçsin.
   await db
     .update(conversationFlows)
     .set({ isActive: false })
@@ -200,11 +481,6 @@ export function getFieldNodes(flow: ConversationFlow): FlowNode[] {
   return flow.nodes.filter(n => n.type === 'FIELD' && n.data.fieldName)
 }
 
-/**
- * Akış yalnızca karşılama ve bitişten oluşuyorsa modelin randevu akışını
- * kendiliğinden başlatmasına izin verilmez. Bu, Flow Builder'daki minimal
- * akışın varsayılan randevu prompt'ları tarafından ezilmesini önler.
- */
 export function isMinimalGreetingEndFlow(flow: ConversationFlow): boolean {
   const start = flow.nodes.find(n => n.type === 'START')
   if (!start) return false
@@ -235,7 +511,7 @@ export function flowToToolFields(flow: ConversationFlow): {
   for (const node of getFieldNodes(flow)) {
     const originalName = node.data.fieldName!
     const safeName = originalName.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
-    
+
     if (properties[safeName]) continue
     const prop: { type: string; description: string; enum?: string[] } = {
       type: 'STRING',
@@ -248,6 +524,31 @@ export function flowToToolFields(flow: ConversationFlow): {
     if (node.data.required) requiredSet.add(safeName)
   }
   return { properties, required: [...requiredSet] }
+}
+
+const OPERATOR_LABELS: Record<string, string> = {
+  equals: '==',
+  notEquals: '!=',
+  contains: 'içeriyorsa',
+  notContains: 'içermiyorsa',
+  startsWith: 'ile başlıyorsa',
+  regex: 'regex eşleşiyorsa',
+  gt: '>',
+  gte: '>=',
+  lt: '<',
+  lte: '<=',
+  between: 'arasındaysa',
+  in: 'listesindeyse',
+  isEmpty: 'boşsa',
+  notEmpty: 'boş değilse',
+  intent: 'niyetini taşıyorsa',
+}
+
+function formatRuleText(r: FlowConditionRule): string {
+  const opLabel = OPERATOR_LABELS[r.operator] || r.operator
+  if (r.operator === 'isEmpty' || r.operator === 'notEmpty') return `"${r.field}" ${opLabel}`
+  if (r.operator === 'between') return `"${r.field}" ${r.value || ''} ile ${r.valueTo || ''} ${opLabel}`
+  return `"${r.field}" ${opLabel} "${r.value || ''}"`
 }
 
 export function flowToPromptText(flow: ConversationFlow): string {
@@ -268,7 +569,6 @@ export function flowToPromptText(flow: ConversationFlow): string {
   let step = 1
   const visited = new Set<string>()
 
-  // DFS keeps each branch together instead of interleaving
   function traverse(nodeId: string, indent: number) {
     if (visited.has(nodeId)) return
     visited.add(nodeId)
@@ -289,13 +589,16 @@ export function flowToPromptText(flow: ConversationFlow): string {
       case 'CONDITION': {
         const field = node.data.conditionField
         const val = node.data.conditionValue || ''
-        if (field === 'user_intent' || node.data.operator === 'intent') {
+        if (Array.isArray(node.data.rules) && node.data.rules.length > 0) {
+          const joiner = node.data.conditionLogic === 'OR' ? ' VEYA ' : ' VE '
+          lines.push(`${prefix}${step}. KOŞUL (${node.data.conditionLogic || 'AND'}): ${node.data.rules.map(formatRuleText).join(joiner)} ise:`)
+        } else if (field === 'user_intent' || node.data.operator === 'intent') {
           lines.push(`${prefix}${step}. KOŞUL (KULLANICI NİYETİ): Kullanıcının ifadesi "${val}" niyetini taşıyorsa:`)
-        } else if (field === 'kayitli') {
+        } else if (field === 'kayitli' || field === 'caller.isKnownPatient') {
           const isRegisteredExpected = val.toLowerCase() !== 'false' && val.toLowerCase() !== 'hayır'
           lines.push(`${prefix}${step}. KOŞUL (HASTA KAYIT DURUMU): musteriSorgula sonucuna göre hasta sistemde ${isRegisteredExpected ? 'kayıtlı ise (kayitli=true)' : 'kayıtlı değilse (kayitli=false)'}:`)
         } else {
-          const op = node.data.operator === 'equals' ? '==' : node.data.operator === 'contains' ? 'içeriyorsa' : 'boş değilse'
+          const op = OPERATOR_LABELS[node.data.operator || 'equals'] || '=='
           lines.push(`${prefix}${step}. KOŞUL: "${field}" ${op} "${val}" ise:`)
         }
         step++
@@ -335,6 +638,14 @@ export function flowToPromptText(flow: ConversationFlow): string {
         } else if (act === 'webhook') {
           const url = String(actionData.webhookUrl || '')
           lines.push(`${prefix}${step}. DIŞ SİSTEM (WEBHOOK) BİLDİRİMİ: Toplanan bilgileri kaydet (${url || 'webhook'}) ve bir sonraki adıma geç.`)
+        } else if (act === 'set_variable') {
+          lines.push(`${prefix}${step}. DEĞİŞKEN ATA: "${actionData.variableName || ''}" alanına "${actionData.variableValue || ''}" değerini ata ve devam et.`)
+        } else if (act === 'send_sms') {
+          lines.push(`${prefix}${step}. SMS GÖNDER: Hastaya "${actionData.message || ''}" içerikli bilgilendirme SMS'ini ilet.`)
+        } else if (act === 'wait_reprompt' || act === 'wait') {
+          lines.push(`${prefix}${step}. BEKLE / YENİDEN SOR: "${actionData.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'}" cümlesiyle hastayı yönlendir.`)
+        } else if (act === 'switch_prompt') {
+          lines.push(`${prefix}${step}. MOD / TALİMAT DEĞİŞTİR: Bundan sonraki konuşmada şu talimata göre davran: "${actionData.promptInstruction || actionData.message || ''}".`)
         } else {
           lines.push(`${prefix}${step}. Randevu bilgilerini toplayıp randevuOlustur aracını çağır.`)
         }
@@ -358,26 +669,35 @@ export function flowToPromptText(flow: ConversationFlow): string {
   }
 
   traverse(startNode.id, 0)
-  
-  // ── Global Tetikleyiciler (Bağımsız veya Bağlı Kalan Tüm Aksiyonlar) ──
-  const globalActions = flow.nodes.filter(n => n.type === 'ACTION' && (n.data as any).triggerKeywords)
+
+  // ── Global Tetikleyiciler & Olay Düğümleri ──
+  const globalActions = flow.nodes.filter(n => n.type === 'ACTION' && ((n.data as any).triggerKeywords || (n.data as any).eventTrigger))
   if (globalActions.length > 0) {
     lines.push('\n⚡ GLOBAL TETİKLEYİCİLER (Görüşmenin HERHANGİ bir anında geçerlidir):')
     for (const node of globalActions) {
       const actionData = node.data as Record<string, unknown>
       const act = actionData.action
-      
-      if (act === 'transfer_call') {
+      const ev = actionData.eventTrigger as string | undefined
+
+      if (ev === 'on_silence') {
+        lines.push(`- [SESSİZLİK OLAYI] Müşteri sessiz kaldığında: ${actionData.message ? `"${actionData.message}" de` : 'nazikçe tekrar sor'}.`)
+      } else if (ev === 'on_no_match') {
+        lines.push(`- [ANLAŞILAMAMA OLAYI] Müşterinin cevabı anlaşılamadığında: ${actionData.message ? `"${actionData.message}" de` : 'kısaca tekrar etmesini rica et'}.`)
+      } else if (ev === 'on_transfer_fail') {
+        lines.push(`- [AKTARIM HATASI OLAYI] Aktarım yapılamazsa: ${actionData.message ? `"${actionData.message}" diyerek` : ''} hastaNotKaydet ile iletişim notu al.`)
+      }
+
+      if (act === 'transfer_call' && actionData.triggerKeywords) {
         const { target, keywords, requiresConfirmation, questionInstruction } = getTransferPromptConfig(actionData)
         if (requiresConfirmation) {
           lines.push(`- Eğer müşteri "${keywords}" ifadelerinden birini kullanır veya bu ifadelerden belirgin bir parça söylerse, akışı kes ve ${questionInstruction}. Açıkça olumlu cevap gelmeden aramaAktar aracını çağırma veya aktardığını söyleme. Onay gelince aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
         } else {
           lines.push(`- Eğer müşteri "${keywords}" ifadelerinden birini kullanırsa, akışı derhal kesip aramaAktar aracını çağır ve "hedef" parametresini "${target}" yap.`)
         }
-      } else if (act === 'send_wa_location') {
+      } else if (act === 'send_wa_location' && actionData.triggerKeywords) {
         const keywords = String(actionData.triggerKeywords || '')
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanır veya konum/adres/yol tarifi isterse, akışı derhal kesip whatsappKonumGonder aracını çağır. Başarılı sonuçtan sonra konumu WhatsApp'tan gönderdiğini söyle.`)
-      } else if (act === 'end_call') {
+      } else if (act === 'end_call' && actionData.triggerKeywords) {
         const keywords = String(actionData.triggerKeywords || '')
         const msg = (node.data as Record<string, unknown>).message || ''
         lines.push(`- Eğer müşteri "${keywords}" ifadelerini kullanırsa, akışı derhal kesip cagriySonlandir() aracını çağır. ${msg ? `Öncesinde "${msg}" de.` : ''}`)
@@ -385,8 +705,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
     }
   }
 
-  // Ayrıca START düğümüne bağlı olmayan (bağımsız) akış parçalarını da işle
-  const unvisitedRoots = flow.nodes.filter(n => !visited.has(n.id) && !flow.edges.some(e => e.target === n.id))
+  const unvisitedRoots = flow.nodes.filter(n => !visited.has(n.id) && !flow.edges.some(e => e.target === n.id) && !(n.type === 'ACTION' && ((n.data as any).triggerKeywords || (n.data as any).eventTrigger)))
   for (const root of unvisitedRoots) {
     if (root.type !== 'END') {
       lines.push(`\nBAĞIMSIZ AKIŞ KURALI:`)
@@ -394,19 +713,17 @@ export function flowToPromptText(flow: ConversationFlow): string {
     }
   }
 
-  // Minimal karşılama → bitiş akışı, varsayılan randevu sorularını başlatmaz.
   if (isMinimalGreetingEndFlow(flow)) {
     lines.push(`\nMİNİMAL AKIŞ KURALI:\nKarşılama mesajını yalnızca bir kez söyle. Sonra karşı tarafın konuşmasını bekle; kendiliğinden randevu, şikayet, tarih, saat veya başka soru sorma. Karşı taraf bir soru sorarsa yalnızca o soruya kısa cevap ver ve yeni konu başlatma. Akışta başka adım olmadığı için görüşmeyi kendi kendine uzatma.`)
-  // Eğer akışta sadece START düğümü varsa veya akış bittikten sonra:
   } else {
-  const outgoing = edgeMap.get(startNode.id) || []
-  if (outgoing.length === 0) {
-    lines.push(`\nGENEL VE DOĞAL SOHBET TALİMATI:
+    const outgoing = edgeMap.get(startNode.id) || []
+    if (outgoing.length === 0) {
+      lines.push(`\nGENEL VE DOĞAL SOHBET TALİMATI:
 Karşılama mesajını söyledikten sonra karşı tarafın (müşterinin/hastanın) söylediği her cümleye mutlaka doğal, samimi, ilgili ve mantıklı cevaplar ver. Sorularına cevap ver, sohbeti devam ettir ve asla sessiz kalma. Karşı taraf görüşmeyi bitirmek istediğinde vedalaş.`)
-  } else {
-    lines.push(`\nGENEL İLETİŞİM KURALI:
+    } else {
+      lines.push(`\nGENEL İLETİŞİM KURALI:
 Akış adımlarını takip ederken karşı taraf farklı bir şey söyler veya soru sorarsa, önce samimi ve net bir şekilde cevabını ver, ardından akışa devam et. Asla cevapsız bırakma.`)
-  }
+    }
   }
 
   return lines.join('\n')

@@ -1,6 +1,5 @@
 /**
- * services/knowledge.ts — JSON tabanlı RAG köprüsü
- * PostgreSQL/pgvector yerine knowledge.json + cosine similarity kullanır
+ * services/knowledge.ts — PostgreSQL / pgvector tabanlı RAG arama servisi
  */
 import { embedText as ragEmbedText, retrieveTopK } from '../rag'
 import { searchByText } from '../db/repositories/knowledge'
@@ -12,17 +11,29 @@ export type KnowledgeSearchResult = {
   documentName: string
 }
 
-/** Search knowledge base using our JSON-based RAG engine */
+export interface SearchKnowledgeOptions {
+  limit?: number
+  direction?: string
+  channel?: string
+}
+
+/** Search knowledge base using pgvector similarity + text fallback */
 export async function searchKnowledge(
   query: string,
-  limit = 5,
+  optionsOrLimit: number | SearchKnowledgeOptions = 5,
 ): Promise<KnowledgeSearchResult[]> {
+  const opts: SearchKnowledgeOptions = typeof optionsOrLimit === 'number'
+    ? { limit: optionsOrLimit }
+    : optionsOrLimit
+  const limit = opts.limit ?? 5
+  const direction = opts.direction || (opts.channel === 'whatsapp' ? 'whatsapp' : 'inbound')
+
   const allResults: KnowledgeSearchResult[] = []
   const seenIds = new Set<string>()
 
   // 1. Embedding-based arama
   try {
-    const results = await retrieveTopK(query, limit)
+    const results = await retrieveTopK(query, limit, direction)
     for (const r of results) {
       if (!seenIds.has(r.id)) {
         seenIds.add(r.id)
@@ -35,7 +46,7 @@ export async function searchKnowledge(
 
   // 2. Text-based arama — her zaman çalıştır, embedding sonuçlarını tamamlar
   try {
-    const textResults = await searchByText(query, limit)
+    const textResults = await searchByText(query, limit, direction)
     for (const r of textResults) {
       if (!seenIds.has(r.id)) {
         seenIds.add(r.id)
@@ -54,10 +65,3 @@ export async function searchKnowledge(
 export async function embedText(text: string): Promise<number[]> {
   return ragEmbedText(text)
 }
-
-// Stub exports for API compatibility
-export async function indexDocument(...args: any[]): Promise<string> { return '' }
-export async function indexDocumentDirect(...args: any[]): Promise<string> { return '' }
-export async function deleteDocument(...args: any[]): Promise<void> {}
-export async function listDocuments(...args: any[]): Promise<[]> { return [] }
-export async function extractTextFromFile(...args: any[]): Promise<string> { return '' }

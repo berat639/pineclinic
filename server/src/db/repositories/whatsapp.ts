@@ -3,7 +3,21 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '../client'
 import { clinics, patients, whatsappConversations, whatsappMessages } from '../schema'
 import { openSecret, sealSecret } from '../../services/integration-secrets'
-import { detectOptOut, evolutionRequest, EvolutionError, normalizePhone, validateEvolutionUrl, type IncomingWhatsAppMessage, type WhatsAppCredentials } from '../../integrations/whatsapp'
+import {
+  detectOptOut,
+  evolutionRequest,
+  EvolutionError,
+  EvolutionTransport,
+  N8nMetaTransport,
+  normalizePhone,
+  validateEvolutionUrl,
+  validateN8nWebhookUrl,
+  type IncomingWhatsAppMessage,
+  type WhatsAppCredentials,
+  type WhatsAppProviderType,
+  type WhatsAppTemplateDefinition,
+  type WhatsAppTransport,
+} from '../../integrations/whatsapp'
 
 export type Clinic = typeof clinics.$inferSelect
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -23,11 +37,51 @@ export function credentialsFor(clinic: Clinic): WhatsAppCredentials {
   if (!clinic.evolutionBaseUrl || !clinic.evolutionApiKey || !clinic.evolutionInstanceName) throw new Error('Evolution bağlantı ayarları eksik.')
   return { baseUrl: clinic.evolutionBaseUrl, apiKey: openSecret(clinic.evolutionApiKey), instanceName: clinic.evolutionInstanceName }
 }
+export function normalizeWhatsAppTemplates(raw: unknown): WhatsAppTemplateDefinition[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item: any): WhatsAppTemplateDefinition[] => {
+    const name = typeof item?.name === 'string' ? item.name.trim() : ''
+    const language = typeof item?.language === 'string' && item.language.trim() ? item.language.trim() : 'tr'
+    if (!name || !/^[a-z0-9_]{1,120}$/i.test(name)) return []
+    const category = typeof item?.category === 'string' ? item.category.trim() : 'general'
+    const bodyPreview = typeof item?.bodyPreview === 'string' ? item.bodyPreview.slice(0, 1000) : undefined
+    const paramKeys = Array.isArray(item?.paramKeys)
+      ? item.paramKeys.filter((k: unknown): k is string => typeof k === 'string' && Boolean(k.trim())).map((k: string) => k.trim())
+      : undefined
+    return [{ name, language, category, bodyPreview, paramKeys }]
+  })
+}
+
+export function resolveActiveWhatsAppInstanceName(clinic: Clinic, providerOverride?: WhatsAppProviderType): string | null {
+  const provider = providerOverride ?? (clinic.whatsappProvider === 'n8n_meta' ? 'n8n_meta' : 'evolution')
+  if (provider === 'n8n_meta') return 'n8n_meta'
+  return clinic.evolutionInstanceName
+}
+
+export function transportForClinic(clinic: Clinic): WhatsAppTransport {
+  if (clinic.whatsappProvider === 'n8n_meta') {
+    if (!clinic.n8nSendWebhookUrl || !clinic.n8nInboundSecret) {
+      throw new Error('n8n Meta WhatsApp bağlantı ayarları eksik.')
+    }
+    return new N8nMetaTransport({
+      clinicId: clinic.id,
+      sendWebhookUrl: clinic.n8nSendWebhookUrl,
+      secret: openSecret(clinic.n8nInboundSecret),
+      phoneNumberId: clinic.metaPhoneNumberId,
+    })
+  }
+  return new EvolutionTransport(credentialsFor(clinic))
+}
+
 export function publicWhatsAppConfig(clinic: Clinic) {
+  const provider: WhatsAppProviderType = clinic.whatsappProvider === 'n8n_meta' ? 'n8n_meta' : 'evolution'
   return {
     clinicId: clinic.id, clinicName: clinic.name,
+    provider,
     enabled: clinic.whatsappEnabled, aiEnabled: clinic.whatsappAiEnabled,
-    connectionState: clinic.evolutionConnectionState,
+    connectionState: provider === 'n8n_meta'
+      ? (clinic.n8nSendWebhookUrl && clinic.n8nInboundSecret ? 'open' : 'unconfigured')
+      : clinic.evolutionConnectionState,
     setupStatus: clinic.whatsappSetupStatus,
     expectedPhone: clinic.whatsappExpectedPhone,
     linkedPhone: clinic.whatsappLinkedPhone,
@@ -35,7 +89,101 @@ export function publicWhatsAppConfig(clinic: Clinic) {
     testPhone: clinic.whatsappTestPhone,
     testVerifiedAt: clinic.whatsappTestVerifiedAt?.toISOString() || null,
     activatedAt: clinic.whatsappActivatedAt?.toISOString() || null,
+    n8nConfigured: Boolean(clinic.n8nSendWebhookUrl && clinic.n8nInboundSecret),
+    metaPhoneNumberId: clinic.metaPhoneNumberId || null,
   }
+}
+
+export function publicN8nWhatsAppConfig(clinic: Clinic, revealedInboundSecret?: string | null) {
+  let inboundSecretPreview: string | null = null
+  if (clinic.n8nInboundSecret) {
+    try {
+      const plain = openSecret(clinic.n8nInboundSecret)
+      inboundSecretPreview = `${plain.slice(0, 6)}...${plain.slice(-4)}`
+    } catch {
+      inboundSecretPreview = '••••'
+    }
+  }
+  return {
+    clinicId: clinic.id,
+    clinicName: clinic.name,
+    provider: (clinic.whatsappProvider === 'n8n_meta' ? 'n8n_meta' : 'evolution') as WhatsAppProviderType,
+    enabled: clinic.whatsappEnabled,
+    aiEnabled: clinic.whatsappAiEnabled,
+    n8nSendWebhookUrl: clinic.n8nSendWebhookUrl || '',
+    metaPhoneNumberId: clinic.metaPhoneNumberId || '',
+    inboundWebhookPath: `/api/whatsapp/n8n/${clinic.id}/inbound`,
+    statusWebhookPath: `/api/whatsapp/n8n/${clinic.id}/status`,
+    hasInboundSecret: Boolean(clinic.n8nInboundSecret),
+    inboundSecretPreview,
+    revealedInboundSecret: revealedInboundSecret || null,
+    templates: normalizeWhatsAppTemplates(clinic.whatsappTemplates),
+  }
+}
+
+export async function getOrInitN8nWhatsAppConfig(id: string) {
+  await ensureWhatsAppSetupSchema()
+  const clinic = await getWhatsAppClinic(id)
+  if (!clinic.n8nInboundSecret) {
+    const plain = randomBytes(32).toString('hex')
+    const [updated] = await db.update(clinics).set({
+      n8nInboundSecret: sealSecret(plain),
+    }).where(eq(clinics.id, id)).returning()
+    return publicN8nWhatsAppConfig(updated, plain)
+  }
+  return publicN8nWhatsAppConfig(clinic, null)
+}
+
+export async function saveN8nWhatsAppConfig(
+  id: string,
+  input: {
+    provider?: WhatsAppProviderType
+    n8nSendWebhookUrl?: string
+    metaPhoneNumberId?: string
+    enabled?: boolean
+    aiEnabled?: boolean
+    rotateSecret?: boolean
+    templates?: WhatsAppTemplateDefinition[]
+  },
+) {
+  await ensureWhatsAppSetupSchema()
+  const clinic = await getWhatsAppClinic(id)
+  const provider: WhatsAppProviderType = input.provider ?? (clinic.whatsappProvider === 'n8n_meta' ? 'n8n_meta' : 'evolution')
+  const sendUrlRaw = input.n8nSendWebhookUrl !== undefined ? input.n8nSendWebhookUrl.trim() : (clinic.n8nSendWebhookUrl || '')
+  const sendWebhookUrl = sendUrlRaw ? validateN8nWebhookUrl(sendUrlRaw) : null
+  const metaPhoneNumberId = input.metaPhoneNumberId !== undefined
+    ? (input.metaPhoneNumberId.trim() || null)
+    : clinic.metaPhoneNumberId
+
+  let revealedSecret: string | null = null
+  let secretCipher = clinic.n8nInboundSecret
+  if (!secretCipher || input.rotateSecret) {
+    revealedSecret = randomBytes(32).toString('hex')
+    secretCipher = sealSecret(revealedSecret)
+  }
+
+  const nextEnabled = input.enabled !== undefined ? input.enabled : clinic.whatsappEnabled
+  const nextAiEnabled = input.aiEnabled !== undefined ? input.aiEnabled : clinic.whatsappAiEnabled
+
+  if (provider === 'n8n_meta' && (nextEnabled || nextAiEnabled) && !sendWebhookUrl) {
+    throw new Error('n8n Meta WhatsApp gönderimlerini açmak için n8n gönderim webhook adresini girin.')
+  }
+
+  const templates = input.templates !== undefined
+    ? normalizeWhatsAppTemplates(input.templates)
+    : normalizeWhatsAppTemplates(clinic.whatsappTemplates)
+
+  const [updated] = await db.update(clinics).set({
+    whatsappProvider: provider,
+    n8nSendWebhookUrl: sendWebhookUrl,
+    metaPhoneNumberId,
+    n8nInboundSecret: secretCipher,
+    whatsappTemplates: templates,
+    whatsappEnabled: nextEnabled,
+    whatsappAiEnabled: nextEnabled && nextAiEnabled,
+  }).where(eq(clinics.id, id)).returning()
+
+  return publicN8nWhatsAppConfig(updated, revealedSecret)
 }
 export async function saveWhatsAppConfig(id: string, input: { baseUrl: string; instanceName: string; apiKey?: string; enabled: boolean; aiEnabled: boolean }) {
   const clinic = await getWhatsAppClinic(id)
@@ -240,6 +388,12 @@ export async function ensureWhatsAppSetupSchema() {
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_test_verified_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_at timestamptz`)
   await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_activated_by uuid REFERENCES users(id)`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_provider text NOT NULL DEFAULT 'evolution'`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_inbound_secret text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_send_webhook_url text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_phone_number_id text`)
+  await db.execute(sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_templates jsonb NOT NULL DEFAULT '[]'::jsonb`)
+  await db.execute(sql`ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_inbound_at timestamptz`)
 }
 
 /** An explicit QR retry replaces a previously mismatched linked device first. */
@@ -300,11 +454,18 @@ export function patientPhoneMatches(phone: string) {
   return sql`regexp_replace(${patients.phone}, '[^0-9]', '', 'g') IN (${sql.join(variants.map(v => sql`${v}`), sql`, `)})`
 }
 
-export async function ensureConversation(tx: DbTransaction, clinic: Clinic, remoteJid: string, phone: string | null) {
-  const identity = `${clinic.id}:${clinic.evolutionInstanceName}:${remoteJid}`
+export async function ensureConversation(
+  tx: DbTransaction,
+  clinic: Clinic,
+  remoteJid: string,
+  phone: string | null,
+  providerOverride?: WhatsAppProviderType,
+) {
+  const instanceName = resolveActiveWhatsAppInstanceName(clinic, providerOverride)
+  const identity = `${clinic.id}:${instanceName}:${remoteJid}`
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${identity}, 0))`)
   let [conversation] = await tx.select().from(whatsappConversations).where(and(
-    eq(whatsappConversations.clinicId, clinic.id), eq(whatsappConversations.instanceName, clinic.evolutionInstanceName!), eq(whatsappConversations.remoteJid, remoteJid),
+    eq(whatsappConversations.clinicId, clinic.id), eq(whatsappConversations.instanceName, instanceName!), eq(whatsappConversations.remoteJid, remoteJid),
   )).limit(1)
   if (conversation) return conversation
   if (phone) {
@@ -313,21 +474,25 @@ export async function ensureConversation(tx: DbTransaction, clinic: Clinic, remo
       sql`regexp_replace(${whatsappConversations.patientPhone}, '[^0-9]', '', 'g') = ${phone.slice(1)}`,
     )).orderBy(desc(whatsappConversations.updatedAt)).limit(1)
     if (legacy) {
-      [conversation] = await tx.update(whatsappConversations).set({ instanceName: clinic.evolutionInstanceName, remoteJid, patientPhone: phone })
+      [conversation] = await tx.update(whatsappConversations).set({ instanceName, remoteJid, patientPhone: phone })
         .where(eq(whatsappConversations.id, legacy.id)).returning()
       return conversation
     }
   }
   const [patient] = phone ? await tx.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, clinic.id), patientPhoneMatches(phone))).limit(1) : []
   ;[conversation] = await tx.insert(whatsappConversations).values({
-    clinicId: clinic.id, instanceName: clinic.evolutionInstanceName, remoteJid, patientPhone: phone, patientId: patient?.id,
+    clinicId: clinic.id, instanceName, remoteJid, patientPhone: phone, patientId: patient?.id,
   }).returning()
   return conversation
 }
 
-export async function recordIncomingMessage(clinic: Clinic, message: IncomingWhatsAppMessage): Promise<string | null> {
+export async function recordIncomingMessage(
+  clinic: Clinic,
+  message: IncomingWhatsAppMessage,
+  providerOverride?: WhatsAppProviderType,
+): Promise<string | null> {
   return db.transaction(async tx => {
-    const conversation = await ensureConversation(tx, clinic, message.remoteJid, message.phone)
+    const conversation = await ensureConversation(tx, clinic, message.remoteJid, message.phone, providerOverride)
     if (message.fromMe) {
       const [own] = await tx.select({ id: whatsappMessages.id }).from(whatsappMessages).where(and(
         eq(whatsappMessages.conversationId, conversation.id),
@@ -341,8 +506,11 @@ export async function recordIncomingMessage(clinic: Clinic, message: IncomingWha
       status: message.fromMe ? 'received' : detectOptOut(message.text) || (clinic.whatsappAiEnabled && !conversation.aiPaused) ? 'pending' : 'held',
     }).onConflictDoNothing().returning()
     if (!inserted) return null
+    const msgDate = new Date(message.timestamp)
     await tx.update(whatsappConversations).set({
-      lastMessageAt: new Date(message.timestamp), updatedAt: new Date(), ...(message.fromMe ? { aiPaused: true } : {}),
+      lastMessageAt: msgDate,
+      ...(message.fromMe ? { aiPaused: true } : { lastInboundAt: msgDate }),
+      updatedAt: new Date(),
     }).where(eq(whatsappConversations.id, conversation.id))
     return conversation.id
   })

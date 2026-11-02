@@ -36,7 +36,11 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
   if (!WHATSAPP_TOOL_NAMES.has(name)) return { success: false, message: 'Bu araç WhatsApp kanalında kullanılamaz.' }
   try {
     if (name === 'searchKnowledgeBase') {
-      const results = await searchKnowledge(String(args.sorgu || '').slice(0, 1000), 5)
+      const results = await searchKnowledge(String(args.sorgu || '').slice(0, 1000), {
+        limit: 5,
+        direction: 'whatsapp',
+        channel: 'whatsapp',
+      })
       return { sonuc: results.map(r => `${r.documentName}: ${r.chunkText}`).join('\n\n') || 'İlgili bilgi bulunamadı.' }
     }
     if (name === 'randevuMusaitlikKontrol') {

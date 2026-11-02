@@ -1,7 +1,14 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { patients, whatsappConversations, whatsappMessages } from '../db/schema'
-import { credentialsFor, getWhatsAppClinic, patientPhoneMatches } from '../db/repositories/whatsapp'
+import {
+  credentialsFor,
+  getWhatsAppClinic,
+  normalizeWhatsAppTemplates,
+  patientPhoneMatches,
+  resolveActiveWhatsAppInstanceName,
+  transportForClinic,
+} from '../db/repositories/whatsapp'
 import { getSetting } from '../db/repositories/settings'
 import { detectLocationRequest, detectOptOut, EvolutionError, sendWhatsAppText } from '../integrations/whatsapp'
 import { buildSystemPrompt, resolveLiveModel } from './assistant-config'
@@ -71,7 +78,8 @@ async function processWhatsAppConversationInTenant(conversationId: string) {
       const { revokePatientConsent } = await import('./patient-consent')
       for (const patient of affected) await revokePatientConsent(clinic.id, patient.id, ['whatsapp'])
     }
-    if (!clinic.whatsappEnabled || clinic.evolutionInstanceName !== conversation.instanceName ||
+    const activeInstanceName = resolveActiveWhatsAppInstanceName(clinic)
+    if (!clinic.whatsappEnabled || activeInstanceName !== conversation.instanceName ||
       (!optOut && (conversation.aiPaused || (message.direction === 'inbound' && !clinic.whatsappAiEnabled)))) {
       await updateMessage(message.id, { status: 'held' })
       if (message.direction === 'notification') await recordDelivery(clinic.id, message.externalId, 'blocked')
@@ -99,14 +107,49 @@ async function processWhatsAppConversationInTenant(conversationId: string) {
         if (!replyText) {
           const previous = await db.select().from(whatsappMessages).where(and(eq(whatsappMessages.conversationId, conversationId), sql`${whatsappMessages.sequence} < ${message.sequence}`))
             .orderBy(desc(whatsappMessages.sequence)).limit(25)
-          const history = [...(Array.isArray(conversation.history) ? conversation.history.slice(-20) : []), ...previous.reverse().flatMap(m => [
+          const messageHistory = previous.reverse().flatMap(m => [
             { role: m.direction === 'inbound' ? 'user' : 'model', text: m.text },
             ...(m.direction === 'inbound' && m.status === 'sent' && m.replyText ? [{ role: 'model', text: m.replyText }] : []),
-          ])]
+          ])
+          const history = messageHistory.length > 0
+            ? messageHistory
+            : (Array.isArray(conversation.history) ? conversation.history.slice(-20) : [])
           const prompt = await buildSystemPrompt('', 'whatsapp')
+          let flowStepInstruction = ''
+          try {
+            const { FlowEngine } = await import('./flow-engine')
+            const waEngine = await FlowEngine.create({
+              clinicId: clinic.id,
+              direction: 'whatsapp',
+              channel: 'whatsapp',
+              initialFields: {
+                ...(conversation.patientPhone ? { telefon: conversation.patientPhone } : {}),
+                ...(conversation.patientId ? { kayitli: 'true', 'caller.isKnownPatient': 'true' } : {}),
+              },
+            })
+            if (waEngine) {
+              const step = await waEngine.accept({
+                fields: { son_mesaj: message.text },
+                eventTrigger: 'on_whatsapp_message',
+              })
+              if (step.next?.prompt) {
+                flowStepInstruction = `\nSıradaki Akış Adımı Görevi: ${step.next.prompt}`
+              }
+              await waEngine.close()
+            }
+          } catch {}
           const tools = (await buildToolDeclarations('whatsapp')).filter(t => WHATSAPP_TOOL_NAMES.has(t.name || ''))
-          replyText = await generateWhatsAppReply({ model: await resolveLiveModel(), text: message.text,
-            systemPrompt: `${prompt}
+          const [liveModel, textModelSetting, useLiveSetting] = await Promise.all([
+            resolveLiveModel(),
+            getSetting('ai.text_model'),
+            getSetting('whatsapp.use_live_api'),
+          ])
+          replyText = await generateWhatsAppReply({
+            model: liveModel,
+            textModel: textModelSetting || process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
+            useLiveAudio: useLiveSetting === 'true',
+            text: message.text,
+            systemPrompt: `${prompt}${flowStepInstruction}
 
 Kanal: WhatsApp. Klinik: ${clinic.name}. Tarih/saat: ${new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}.
 Doğrulanmış gönderici telefonu: ${conversation.patientPhone || 'bilinmiyor'}.
@@ -121,7 +164,8 @@ ${JSON.stringify(history).slice(-24000)}`,
       }
       // Re-read global controls immediately before the externally visible action.
       const currentClinic = await getWhatsAppClinic(clinic.id)
-      if (!currentClinic.whatsappEnabled || currentClinic.evolutionInstanceName !== conversation.instanceName) {
+      const currentInstanceName = resolveActiveWhatsAppInstanceName(currentClinic)
+      if (!currentClinic.whatsappEnabled || currentInstanceName !== conversation.instanceName) {
         await updateMessage(message.id, { status: 'held' })
         if (message.direction === 'notification') await recordDelivery(clinic.id, message.externalId, 'blocked')
         continue
@@ -129,6 +173,49 @@ ${JSON.stringify(history).slice(-24000)}`,
       if (message.direction === 'notification' && !await notificationAllowed(clinic.id, conversation.patientId, conversation.patientPhone)) {
         await updateMessage(message.id, { status: 'skipped' }); await recordDelivery(clinic.id, message.externalId, 'blocked'); continue
       }
+
+      if (currentClinic.whatsappProvider === 'n8n_meta') {
+        const lastInboundMs = conversation.lastInboundAt ? new Date(conversation.lastInboundAt).getTime() : 0
+        const within24hWindow = lastInboundMs > 0 && Date.now() - lastInboundMs < 24 * 60 * 60_000
+        const transport = transportForClinic(currentClinic)
+        if (!within24hWindow) {
+          const templates = normalizeWhatsAppTemplates(currentClinic.whatsappTemplates)
+          const selectedTemplate = (message.direction === 'notification'
+            ? templates.find(t => t.category === 'appointment_reminder')
+            : undefined) || templates[0]
+          if (!selectedTemplate) {
+            await updateMessage(message.id, {
+              status: 'held',
+              replyText,
+              error: '24 saatlik Meta penceresi dışında ve onaylı şablon tanımlı değil.',
+            })
+            if (message.direction === 'notification') await recordDelivery(clinic.id, message.externalId, 'blocked')
+            continue
+          }
+          await updateMessage(message.id, { status: 'sending', replyText, attempts: message.attempts + 1 })
+          sending = true
+          const sent = await transport.sendTemplate(conversation.remoteJid!, {
+            name: selectedTemplate.name,
+            language: selectedTemplate.language || 'tr',
+            components: [
+              {
+                type: 'body',
+                parameters: [{ type: 'text', text: replyText }],
+              },
+            ],
+          })
+          await updateMessage(message.id, { status: 'sent', providerMessageId: sent.messageId, error: null })
+          if (message.direction === 'notification') await recordDelivery(clinic.id, message.externalId, 'sent')
+          continue
+        }
+        await updateMessage(message.id, { status: 'sending', replyText, attempts: message.attempts + 1 })
+        sending = true
+        const sent = await transport.sendText(conversation.remoteJid!, replyText)
+        await updateMessage(message.id, { status: 'sent', providerMessageId: sent.messageId, error: null })
+        if (message.direction === 'notification') await recordDelivery(clinic.id, message.externalId, 'sent')
+        continue
+      }
+
       const credentials = credentialsFor(currentClinic)
       await updateMessage(message.id, { status: 'sending', replyText, attempts: message.attempts + 1 })
       sending = true

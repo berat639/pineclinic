@@ -1,18 +1,29 @@
 import { randomUUID } from 'crypto'
-import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client'
 import { flowSessions } from '../db/schema'
-import { getActiveFlow, type ConversationFlow, type FlowEdge, type FlowNode, validateConversationFlow } from '../db/repositories/flows'
+import {
+  evaluateConditionNode,
+  executeFlowWebhookAction,
+  getActiveFlow,
+  injectFlowSystemVariables,
+  renderFlowTemplate,
+  validateConversationFlow,
+  type ConversationFlow,
+  type FlowEdge,
+  type FlowEventTrigger,
+  type FlowNode,
+} from '../db/repositories/flows'
 import { getSetting } from '../db/repositories/settings'
 
 export type FlowRuntimeMode = 'legacy' | 'observe' | 'active'
-export type FlowChannel = 'web_direct' | 'web_socket' | 'phone'
+export type FlowChannel = 'web_direct' | 'web_socket' | 'phone' | 'whatsapp'
 
 export type FlowEngineEvent = {
   id?: string
   revision?: number
   fields?: Record<string, unknown>
   intent?: 'continue' | 'end' | 'new_person'
+  eventTrigger?: FlowEventTrigger
 }
 
 export type FlowEngineResult = {
@@ -41,27 +52,6 @@ function cleanFields(fields: Record<string, unknown> = {}) {
 }
 
 function edgesFrom(edges: FlowEdge[], nodeId: string) { return edges.filter(edge => edge.source === nodeId) }
-
-function conditionMatches(node: FlowNode, fields: Record<string, unknown>) {
-  const field = String(node.data.conditionField || '')
-  const actual = String(fields[field] ?? '').trim()
-  const expected = String(node.data.conditionValue || '').trim()
-  if (node.data.operator === 'notEmpty') return actual.length > 0
-  if (node.data.operator === 'intent' || field === 'user_intent') {
-    if (!actual) return false
-    const actualLow = actual.toLocaleLowerCase('tr-TR')
-    if (['true', 'evet', '1', 'var'].includes(actualLow)) return true
-    if (['false', 'hayır', 'hayir', '0', 'yok'].includes(actualLow)) return false
-    const expectedWords = expected.toLocaleLowerCase('tr-TR').split(/[\s,;:.!?]+/).filter(w => w.length >= 3)
-    return expectedWords.some(w => actualLow.includes(w)) || actualLow.includes(expected.toLocaleLowerCase('tr-TR'))
-  }
-  if (node.data.operator === 'contains') return actual.toLocaleLowerCase('tr-TR').includes(expected.toLocaleLowerCase('tr-TR'))
-  const actualNorm = actual.toLocaleLowerCase('tr-TR')
-  const expectedNorm = expected.toLocaleLowerCase('tr-TR')
-  if (expectedNorm === 'true' && (actualNorm === 'true' || actualNorm === 'evet' || actualNorm === '1')) return true
-  if (expectedNorm === 'false' && (actualNorm === 'false' || actualNorm === 'hayır' || actualNorm === 'hayir' || actualNorm === '0')) return true
-  return actualNorm === expectedNorm
-}
 
 function validField(node: FlowNode, fields: Record<string, unknown>) {
   const name = node.data.fieldName || ''
@@ -100,9 +90,13 @@ export class FlowEngine {
     const mode = args.mode || await resolveFlowRuntimeMode(args.clinicId)
     if (mode === 'legacy') return null
     const start = flow.nodes.find(node => node.type === 'START')
+    const initialWithSys = injectFlowSystemVariables(cleanFields(args.initialFields), {
+      direction: args.direction,
+      channel: args.channel,
+    })
     const engine = new FlowEngine({
       id: randomUUID(), mode, channel: args.channel, direction: args.direction, clinicId: args.clinicId,
-      state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: cleanFields(args.initialFields), handledEvents: {}, completedActions: [] },
+      state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: initialWithSys, handledEvents: {}, completedActions: [] },
     })
     await engine.persist()
     return engine
@@ -131,10 +125,24 @@ export class FlowEngine {
   private promptFor(node: FlowNode) {
     if (node.type === 'FIELD') return node.data.description || `${node.data.fieldName || 'Bu bilgiyi'} kullanıcıdan kısa ve açık biçimde iste.`
     if (node.type === 'END') return node.data.message || 'Görüşmeyi kısa ve nazikçe tamamla.'
+    if (node.type === 'ACTION') {
+      const act = String(node.data.action || '')
+      if (act === 'wait_reprompt' || act === 'wait') {
+        return renderFlowTemplate(node.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?', this.state.fields)
+      }
+      if (act === 'switch_prompt') {
+        return renderFlowTemplate(node.data.promptInstruction || node.data.message || '', this.state.fields)
+      }
+    }
     return undefined
   }
 
   private async advance(): Promise<FlowEngineResult> {
+    this.state.fields = injectFlowSystemVariables(this.state.fields, {
+      direction: this.direction,
+      channel: this.channel,
+    })
+
     for (let guard = 0; guard < this.state.flow.nodes.length + 2; guard += 1) {
       const node = this.node()
       if (!node) return { success: false, revision: this.revision, fields: this.state.fields, message: 'Akışın devam edeceği adım bulunamadı.' }
@@ -144,10 +152,55 @@ export class FlowEngine {
         this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue
       }
       if (node.type === 'CONDITION') {
-        const branch = conditionMatches(node, this.state.fields) ? 'true' : 'false'
+        const matched = evaluateConditionNode(node, this.state.fields, undefined, {
+          direction: this.direction,
+          channel: this.channel,
+        })
+        const branch = matched ? 'true' : 'false'
         this.next(edgesFrom(this.state.flow.edges, node.id).find(edge => edge.sourceHandle === branch)); continue
       }
       if (node.type === 'ACTION') {
+        const act = String(node.data.action || '')
+        if (!this.state.completedActions.includes(node.id)) {
+          if (act === 'set_variable') {
+            const varName = String(node.data.variableName || '').trim()
+            if (varName) {
+              this.state.fields[varName] = renderFlowTemplate(String(node.data.variableValue ?? ''), this.state.fields)
+            }
+            this.state.completedActions.push(node.id)
+            this.next(edgesFrom(this.state.flow.edges, node.id)[0])
+            continue
+          }
+          if (act === 'switch_prompt') {
+            const instr = renderFlowTemplate(String(node.data.promptInstruction || node.data.message || ''), this.state.fields)
+            if (instr) this.state.fields['activePromptOverride'] = instr
+            this.state.completedActions.push(node.id)
+            this.next(edgesFrom(this.state.flow.edges, node.id)[0])
+            continue
+          }
+          if (act === 'webhook' && this.mode === 'active') {
+            const wh = await executeFlowWebhookAction(node, this.state.fields)
+            if (Object.keys(wh.mappedFields).length > 0) {
+              this.state.fields = { ...this.state.fields, ...wh.mappedFields }
+            }
+            this.state.completedActions.push(node.id)
+            const outEdge = edgesFrom(this.state.flow.edges, node.id)[0]
+            if (!outEdge) {
+              return { success: true, revision: this.revision, fields: this.state.fields, completed: true }
+            }
+            this.next(outEdge)
+            continue
+          }
+          if (act === 'wait_reprompt' || act === 'wait') {
+            this.state.completedActions.push(node.id)
+            return {
+              success: true,
+              revision: this.revision,
+              fields: this.state.fields,
+              next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) },
+            }
+          }
+        }
         if (this.mode === 'observe') return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type }, message: 'Akış bu adımda bir işlem yapacaktı.' }
         if (!this.state.completedActions.includes(node.id)) return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type } }
         this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue
@@ -164,6 +217,12 @@ export class FlowEngine {
       if (replay) return { ...replay, replayed: true }
       if (event.revision !== undefined && event.revision !== this.revision) return { success: false, revision: this.revision, fields: this.state.fields, message: 'Bu görüşme adımı güncel değil.' }
       if (event.intent === 'new_person') { this.state.fields = {}; this.state.completedActions = []; const start = this.state.flow.nodes.find(node => node.type === 'START'); this.state.currentNodeId = start?.id }
+      if (event.eventTrigger) {
+        const triggerNode = this.state.flow.nodes.find(n => n.type === 'ACTION' && n.data.eventTrigger === event.eventTrigger)
+        if (triggerNode) {
+          this.state.currentNodeId = triggerNode.id
+        }
+      }
       this.state.fields = { ...this.state.fields, ...cleanFields(event.fields) }
       const result = await this.advance()
       this.revision += 1
@@ -193,12 +252,47 @@ export class FlowEngine {
 
 const liveEngines = new Map<string, FlowEngine>()
 const webSessionKeys = new Map<string, string>()
+const webToolSessionKeys = new Map<string, { clinicId: string; expiresAt: number }>()
+const WEB_TOOL_KEY_TTL_MS = 2 * 60 * 60_000
+
+export function issueWebToolSessionKey(clinicId: string): string {
+  const now = Date.now()
+  if (webToolSessionKeys.size > 500) {
+    for (const [k, v] of webToolSessionKeys) {
+      if (v.expiresAt <= now) webToolSessionKeys.delete(k)
+    }
+  }
+  const token = randomUUID() + randomUUID().replace(/-/g, '')
+  webToolSessionKeys.set(token, { clinicId, expiresAt: now + WEB_TOOL_KEY_TTL_MS })
+  return token
+}
+
+export function isAuthorizedWebToolSession(clinicId: string, token: string | undefined): boolean {
+  if (!token || !clinicId) return false
+  const now = Date.now()
+  const standalone = webToolSessionKeys.get(token)
+  if (standalone) {
+    if (standalone.expiresAt <= now) {
+      webToolSessionKeys.delete(token)
+      return false
+    }
+    if (standalone.clinicId === clinicId) return true
+  }
+  for (const [engineId, expectedToken] of webSessionKeys) {
+    if (expectedToken === token) {
+      const engine = liveEngines.get(engineId)
+      if (engine && engine.clinicId === clinicId) return true
+    }
+  }
+  return false
+}
+
 export function keepFlowEngine(engine: FlowEngine) { liveEngines.set(engine.id, engine); return engine }
 export function getFlowEngine(id: string) { return liveEngines.get(id) }
 export async function createWebFlowSession(clinicId: string, direction = 'inbound') {
   const engine = await FlowEngine.create({ clinicId, direction, channel: 'web_direct' })
   if (!engine) return null
-  const token = randomUUID() + randomUUID().replace(/-/g, '')
+  const token = issueWebToolSessionKey(clinicId)
   keepFlowEngine(engine); webSessionKeys.set(engine.id, token)
   return { id: engine.id, token, revision: 0 }
 }

@@ -1,5 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { detectLocationRequest, detectOptOut, evolutionConnectionState, normalizeEvolutionQr, normalizePhone, parseEvolutionMessages, verifyWebhookSecret } from './whatsapp'
+import {
+  detectLocationRequest,
+  detectOptOut,
+  evolutionConnectionState,
+  normalizeEvolutionQr,
+  normalizePhone,
+  parseEvolutionMessages,
+  parseN8nInboundMessages,
+  parseN8nStatusUpdates,
+  signN8nPayload,
+  verifyN8nSignature,
+  verifyWebhookSecret,
+} from './whatsapp'
 
 const now = Date.now()
 const payload = (overrides: Record<string, unknown> = {}) => ({
@@ -69,5 +81,66 @@ describe('WhatsApp safety helpers', () => {
     expect(verifyWebhookSecret(secret, secret)).toBe(true)
     expect(verifyWebhookSecret('b'.repeat(64), secret)).toBe(false)
     expect(verifyWebhookSecret('short', 'short')).toBe(false)
+  })
+
+  test('verifies n8n HMAC signature with ±300s replay protection', () => {
+    const secret = 'c'.repeat(64)
+    const rawBody = JSON.stringify({ externalId: 'wamid.1', from: '905551112233', text: 'Selam' })
+    const tsSec = Math.floor(now / 1000)
+    const { timestamp, signature } = signN8nPayload(rawBody, secret, tsSec)
+    expect(verifyN8nSignature(rawBody, timestamp, signature, secret, now)).toBe(true)
+    // Tampered body fails
+    expect(verifyN8nSignature(`${rawBody} `, timestamp, signature, secret, now)).toBe(false)
+    // Expired timestamp (>300s) fails
+    expect(verifyN8nSignature(rawBody, timestamp, signature, secret, now + 305_000)).toBe(false)
+  })
+
+  test('parses both normalized n8n inbound messages and raw Meta Cloud API webhook entries', () => {
+    const normalized = parseN8nInboundMessages({
+      provider: 'n8n_meta',
+      externalId: 'wamid.HBgM',
+      from: '905551112233',
+      timestamp: Math.floor(now / 1000),
+      text: 'Randevu almak istiyorum',
+    }, now)
+    expect(normalized).toEqual([{
+      externalId: 'wamid.HBgM',
+      remoteJid: '905551112233@s.whatsapp.net',
+      phone: '+905551112233',
+      text: 'Randevu almak istiyorum',
+      fromMe: false,
+      timestamp: Math.floor(now / 1000) * 1000,
+    }])
+
+    const metaRaw = parseN8nInboundMessages({
+      entry: [{
+        changes: [{
+          value: {
+            messages: [{
+              id: 'wamid.META2',
+              from: '905559998877',
+              timestamp: String(Math.floor(now / 1000)),
+              type: 'text',
+              text: { body: 'Merhaba klinik' },
+            }],
+          },
+        }],
+      }],
+    }, now)
+    expect(metaRaw).toHaveLength(1)
+    expect(metaRaw[0]?.externalId).toBe('wamid.META2')
+    expect(metaRaw[0]?.phone).toBe('+905559998877')
+    expect(metaRaw[0]?.text).toBe('Merhaba klinik')
+  })
+
+  test('parses n8n and Meta delivery status updates', () => {
+    expect(parseN8nStatusUpdates({ providerMessageId: 'wamid.1', status: 'delivered' })).toEqual([
+      { providerMessageId: 'wamid.1', status: 'delivered' },
+    ])
+    expect(parseN8nStatusUpdates({
+      entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.2', status: 'read' }] } }] }],
+    })).toEqual([
+      { providerMessageId: 'wamid.2', status: 'read' },
+    ])
   })
 })

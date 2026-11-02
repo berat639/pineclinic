@@ -1,0 +1,128 @@
+{
+  "name": "VoiceAI — Meta WhatsApp Inbound Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "meta-whatsapp-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "meta-verify-get",
+      "name": "Meta Webhook Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 180],
+      "webhookId": "voiceai-meta-wa-verify"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.verify_token'] === $env.META_VERIFY_TOKEN ? $json.query['hub.challenge'] : 'Forbidden' }}",
+        "options": {
+          "responseCode": "={{ $json.query['hub.verify_token'] === $env.META_VERIFY_TOKEN ? 200 : 403 }}"
+        }
+      },
+      "id": "meta-verify-respond",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [500, 180]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meta-whatsapp-inbound",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "meta-inbound-post",
+      "name": "Meta Webhook Inbound (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 380],
+      "webhookId": "voiceai-meta-wa-inbound"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body || $input.first().json;\nconst clinicId = $env.VOICEAI_CLINIC_ID;\nconst secret = $env.VOICEAI_N8N_SECRET;\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst messages = [];\n\nfor (const entry of entries) {\n  for (const change of (entry.changes || [])) {\n    const value = change.value || {};\n    const phoneNumberId = value.metadata?.phone_number_id || '';\n    for (const msg of (value.messages || [])) {\n      const text =\n        msg.text?.body ||\n        msg.button?.text ||\n        msg.interactive?.button_reply?.title ||\n        msg.interactive?.list_reply?.title ||\n        '';\n      if (!text) continue;\n      messages.push({\n        clinicId,\n        provider: 'n8n_meta',\n        externalId: msg.id,\n        from: msg.from,\n        phoneNumberId,\n        timestamp: Number(msg.timestamp || Math.floor(Date.now() / 1000)),\n        type: msg.type || 'text',\n        text\n      });\n    }\n  }\n}\n\nif (messages.length === 0) return [];\n\nconst rawBody = JSON.stringify({ messages });\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst signature = 'sha256=' + crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');\n\nreturn [{\n  json: {\n    clinicId,\n    rawBody,\n    timestamp,\n    signature\n  }\n}];"
+      },
+      "id": "normalize-and-sign",
+      "name": "Normalize & Sign HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VOICEAI_BASE_URL + '/api/whatsapp/n8n/' + $json.clinicId + '/inbound' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-VoiceAI-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-VoiceAI-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.rawBody }}",
+        "options": {}
+      },
+      "id": "forward-to-voiceai",
+      "name": "Forward to VoiceAI Inbound",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 380]
+    }
+  ],
+  "connections": {
+    "Meta Webhook Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Respond Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Webhook Inbound (POST)": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Sign HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Sign HMAC": {
+      "main": [
+        [
+          {
+            "node": "Forward to VoiceAI Inbound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
+

@@ -49,7 +49,7 @@ type Category = string
 interface ModalProps {
   doc: Partial<KnowledgeDoc> | null
   onClose: () => void
-  onSave: (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean }) => Promise<void>
+  onSave: (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean; file?: File | null }) => Promise<void>
   saving: boolean
   categories: CategoryDef[]
 }
@@ -60,11 +60,31 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   const [category, setCategory] = useState<Category>((doc?.category as Category) || 'genel')
   const [title, setTitle] = useState(doc?.title || '')
   const [content, setContent] = useState(doc?.content || '')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [callDirection, setCallDirection] = useState<'inbound' | 'outbound' | 'both'>((doc?.callDirection as 'inbound' | 'outbound' | 'both') || 'both')
   const [active, setActive] = useState(doc?.active !== false)
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null
+    setSelectedFile(file)
+    if (file && !title.trim()) {
+      setTitle(file.name.replace(/\.[^.]+$/, ''))
+    }
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (selectedFile && !isEdit) {
+      onSave({
+        category,
+        title: title.trim() || selectedFile.name.replace(/\.[^.]+$/, ''),
+        content: content.trim(),
+        callDirection,
+        active,
+        file: selectedFile,
+      })
+      return
+    }
     if (!title.trim() || !content.trim()) return
     onSave({ category, title: title.trim(), content: content.trim(), callDirection, active })
   }
@@ -146,25 +166,65 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
               />
             </div>
 
+            {/* Dosya Yükleme (Yeni belgede) */}
+            {!isEdit && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                  📎 Dosyadan Yükle <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(PDF, DOCX, TXT, MD, CSV, JSON)</span>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="file"
+                    accept=".txt,.md,.csv,.json,.pdf,.docx"
+                    onChange={handleFileChange}
+                    style={{
+                      flex: 1, fontSize: '0.78rem', color: 'var(--foreground-2)',
+                      padding: '6px 10px', background: 'var(--input-bg)',
+                      border: '1px dashed var(--input-border)', borderRadius: 8,
+                    }}
+                  />
+                  {selectedFile && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFile(null)}
+                      style={{
+                        padding: '6px 10px', borderRadius: 6, border: '1px solid var(--input-border)',
+                        background: 'var(--card-bg)', color: 'var(--foreground-2)', fontSize: '0.75rem', cursor: 'pointer',
+                      }}
+                    >
+                      Temizle
+                    </button>
+                  )}
+                </div>
+                {selectedFile && (
+                  <div style={{ fontSize: '0.74rem', color: '#22c55e', marginTop: 4 }}>
+                    Seçilen dosya: {selectedFile.name} ({Math.max(1, Math.round(selectedFile.size / 1024))} KB) — metin otomatik çıkarılacak
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* İçerik */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
-                İçerik <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(AI bu metni okuyacak)</span>
-              </label>
-              <textarea
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın..."
-                required
-                rows={5}
-                style={{
-                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
-                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
-                  fontSize: '0.85rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
-                  lineHeight: 1.5, boxShadow: 'var(--pc-neo-inset)',
-                }}
-              />
-            </div>
+            {!selectedFile && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                  İçerik <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(AI bu metni okuyacak)</span>
+                </label>
+                <textarea
+                  value={content}
+                  onChange={e => setContent(e.target.value)}
+                  placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın..."
+                  required={!selectedFile}
+                  rows={5}
+                  style={{
+                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
+                    fontSize: '0.85rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
+                    lineHeight: 1.5, boxShadow: 'var(--pc-neo-inset)',
+                  }}
+                />
+              </div>
+            )}
 
             {/* Kullanım Yeri */}
             <div>
@@ -213,8 +273,8 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
           <button type="button" onClick={onClose} disabled={saving} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
             İptal
           </button>
-          <button type="submit" disabled={saving || !title.trim() || !content.trim()} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: saving || !title.trim() || !content.trim() ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: saving || !title.trim() || !content.trim() ? 0.6 : 1 }}>
-            <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</span>
+          <button type="submit" disabled={saving || !title.trim() || (!content.trim() && !selectedFile)} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: saving || !title.trim() || (!content.trim() && !selectedFile) ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: saving || !title.trim() || (!content.trim() && !selectedFile) ? 0.6 : 1 }}>
+            <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor…' : selectedFile ? 'Yükle & Kaydet' : 'Kaydet'}</span>
           </button>
         </div>
       </form>
@@ -243,6 +303,8 @@ function fmtDate(d: string) {
 export default function KnowledgeTab() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([])
   const [totalEmbedded, setTotalEmbedded] = useState(0)
+  const [needsReindexCount, setNeedsReindexCount] = useState(0)
+  const [reindexProgress, setReindexProgress] = useState<{ processed: number; total: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<CategoryDef[]>([])
   const [catFilter, setCatFilter] = useState<Category | 'all'>('all')
@@ -416,6 +478,7 @@ export default function KnowledgeTab() {
       const data = await r.json()
       setDocs(data.docs || [])
       setTotalEmbedded(data.totalEmbedded || 0)
+      setNeedsReindexCount(data.needsReindex || 0)
       if (catRes.ok) {
         const cats = await catRes.json()
         setCategories(cats)
@@ -439,10 +502,30 @@ export default function KnowledgeTab() {
   })
 
   // ── CRUD ─────────────────────────────────────────────────────────────────────
-  const handleSave = async (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean }) => {
+  const handleSave = async (data: { category: Category; title: string; content: string; callDirection: 'inbound' | 'outbound' | 'both'; active: boolean; file?: File | null }) => {
     setSaving(true)
     try {
       const isEdit = !!modal.doc?.id
+      if (data.file && !isEdit) {
+        const formData = new FormData()
+        formData.append('file', data.file)
+        formData.append('category', data.category)
+        formData.append('title', data.title)
+        formData.append('callDirection', data.callDirection)
+        formData.append('active', String(data.active))
+        const r = await fetch('/api/knowledge/upload', {
+          method: 'POST',
+          body: formData,
+        })
+        const resData = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(resData.error || 'Dosya yükleme başarısız')
+        setModal({ open: false, doc: null })
+        await load()
+        showToast('✅ Dosya yüklendi ve bilgi bankasına gömüldü')
+        setSaving(false)
+        return
+      }
+
       const url = isEdit ? `/api/knowledge/${modal.doc!.id}` : '/api/knowledge'
       const method = isEdit ? 'PUT' : 'POST'
       const r = await fetch(url, {
@@ -450,7 +533,8 @@ export default function KnowledgeTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-      if (!r.ok) throw new Error()
+      const resData = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(resData.error || 'Kayıt başarısız')
       setModal({ open: false, doc: null })
       await load()
       showToast(isEdit ? '✅ Belge güncellendi ve yeniden gömüldü' : '✅ Belge eklendi ve gömüldü')
@@ -490,15 +574,42 @@ export default function KnowledgeTab() {
   const handleReindex = async () => {
     if (!confirm(`${docs.length} belgenin tamamı yeniden embedding yapılacak. Devam?`)) return
     setReindexing(true)
+    setReindexProgress({ processed: 0, total: docs.length })
     try {
-      const r = await fetch('/api/knowledge/reindex', { method: 'PUT' })
-      const data = await r.json()
-      await load()
-      showToast(`✅ ${data.results?.success || 0} belge yeniden indekslendi`)
-    } catch {
-      showToast('Reindex başarısız', 'error')
+      const r = await fetch('/api/knowledge/reindex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ async: docs.length > 8 }),
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok || data.error) {
+        throw new Error(data.error || `Reindex başarısız (${r.status})`)
+      }
+      if (data.background) {
+        for (let poll = 0; poll < 120; poll++) {
+          await new Promise(res => setTimeout(res, 1000))
+          const sr = await fetch('/api/knowledge/reindex/status')
+          if (!sr.ok) break
+          const sdata = await sr.json()
+          setReindexProgress({ processed: sdata.processed || 0, total: sdata.total || docs.length })
+          if (sdata.status === 'completed' || sdata.status === 'failed' || sdata.status === 'idle') {
+            await load()
+            if (sdata.status === 'failed') {
+              throw new Error(sdata.error || 'Reindex tamamlanamadı')
+            }
+            showToast(`✅ ${sdata.success || 0} belge yeniden indekslendi${sdata.skipped ? ` (${sdata.skipped} değişmeyen atlandı)` : ''}`)
+            break
+          }
+        }
+      } else {
+        await load()
+        showToast(`✅ ${data.results?.success || 0} belge yeniden indekslendi${data.results?.skipped ? ` (${data.results.skipped} değişmeyen atlandı)` : ''}`)
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Reindex başarısız', 'error')
     }
     setReindexing(false)
+    setReindexProgress(null)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -541,10 +652,15 @@ export default function KnowledgeTab() {
                 background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: 8, fontSize: '0.78rem', color: 'var(--foreground-3)',
               }}>
-                <span style={{ color: totalEmbedded === docs.length && docs.length > 0 ? '#22c55e' : '#f59e0b' }}>
+                <span style={{ color: totalEmbedded === docs.length && docs.length > 0 && needsReindexCount === 0 ? '#22c55e' : '#f59e0b' }}>
                   ⚡
                 </span>
                 {totalEmbedded}/{docs.length} embedding hazır
+                {needsReindexCount > 0 && (
+                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                    ({needsReindexCount} yenilenmeli)
+                  </span>
+                )}
               </div>
             )}
 
@@ -554,7 +670,11 @@ export default function KnowledgeTab() {
               className="btn btn-ghost"
               style={{ fontSize: '0.8rem', padding: '6px 14px' }}
             >
-              {reindexing ? '⏳ İndeksleniyor…' : '🔄 Tümünü Yenile'}
+              {reindexing
+                ? reindexProgress
+                  ? `⏳ İndeksleniyor (${reindexProgress.processed}/${reindexProgress.total})…`
+                  : '⏳ İndeksleniyor…'
+                : '🔄 Tümünü Yenile'}
             </button>
 
             <button

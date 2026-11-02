@@ -1,0 +1,27 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=Europe/Istanbul
+      - TZ=Europe/Istanbul
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}
+      - VOICEAI_BASE_URL=${APP_URL:-http://server:3001}
+      - VOICEAI_CLINIC_ID=${VOICEAI_CLINIC_ID:-}
+      - VOICEAI_N8N_SECRET=${VOICEAI_N8N_SECRET:-}
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-}
+      - META_PHONE_NUMBER_ID=${META_PHONE_NUMBER_ID:-}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./deploy/n8n:/home/node/voiceai-workflows:ro
+
+volumes:
+  n8n_data:
+

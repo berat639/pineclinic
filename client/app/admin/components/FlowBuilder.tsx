@@ -50,8 +50,26 @@ interface ConditionData extends BaseNodeTransient {
   [key: string]: unknown
   label: string
   conditionField: string
-  operator: 'equals' | 'contains' | 'notEmpty' | 'intent'
+  operator:
+    | 'equals'
+    | 'notEquals'
+    | 'contains'
+    | 'notContains'
+    | 'startsWith'
+    | 'regex'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'between'
+    | 'in'
+    | 'isEmpty'
+    | 'notEmpty'
+    | 'intent'
   conditionValue: string
+  conditionValueTo?: string
+  conditionLogic?: 'AND' | 'OR'
+  rules?: Array<{ field: string; operator: string; value?: string; valueTo?: string }>
 }
 
 interface ActionData extends BaseNodeTransient {
@@ -60,6 +78,12 @@ interface ActionData extends BaseNodeTransient {
   action: string
   message?: string
   webhookUrl?: string
+  webhookSecret?: string
+  webhookBodyTemplate?: string
+  variableName?: string
+  variableValue?: string
+  promptInstruction?: string
+  eventTrigger?: string
   transferNumber?: string
   triggerKeywords?: string
   requireConfirmation?: boolean
@@ -104,6 +128,11 @@ const ACTION_LABELS: Record<string, string> = {
   save_patient_note: '🗒️ Hastadan Not Al (Bankoya İlet)',
   notBirak: '🗒️ Anket / Hasta Notu Kaydet',
   webhook: '🔗 Dış Sisteme Gönder (Webhook)',
+  set_variable: '🔧 Değişken Ata',
+  send_sms: '💬 SMS Gönder',
+  wait_reprompt: '⏳ Bekle / Yeniden Sor',
+  wait: '⏳ Bekle / Yeniden Sor',
+  switch_prompt: '🔄 Prompt / Mod Değiştir',
   end_call: '👋 Bilgi Ver ve Görüşmeyi Bitir',
   transfer_call: '📞 Aramayı Yetkiliye Aktar',
   transfer: '📞 Canlı Desteğe Aktar',
@@ -116,6 +145,7 @@ const ACTION_LABELS: Record<string, string> = {
 const EXECUTABLE_ACTIONS = new Set([
   'save_appointment_pending', 'randevuOlustur', 'save_patient_note', 'notBirak',
   'transfer_call', 'transfer', 'end_call', 'send_wa_message', 'send_wa_location', 'save_record', 'webhook',
+  'set_variable', 'send_sms', 'wait_reprompt', 'wait', 'switch_prompt',
 ])
 
 function validateFlowClient(nodes: Node[], edges: Edge[]): FlowIssue[] {
@@ -196,7 +226,7 @@ function validateFlowClient(nodes: Node[], edges: Edge[]): FlowIssue[] {
     }
     for (const node of nodes) {
       const d = (node.data || {}) as Record<string, any>
-      if (!(node.type === 'actionNode' && d.triggerKeywords) && !reached.has(node.id)) {
+      if (!(node.type === 'actionNode' && (d.triggerKeywords || d.eventTrigger)) && !reached.has(node.id)) {
         issues.push({ nodeId: node.id, level: 'warning', message: 'Bu adım karşılama adımından sonra hiçbir yola bağlı değil.' })
       }
     }
@@ -2628,6 +2658,18 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <option value="">Bir alan seçin...</option>
                           <option value="kayitli">👤 Hasta Sistemde Kayıtlı mı? (kayitli)</option>
                           <option value="user_intent">🎯 Özel Niyet / İstek Algılama (user_intent)</option>
+                          <optgroup label="⚙️ Sistem Değişkenleri">
+                            <option value="caller.isKnownPatient">Kayıtlı Hasta mı? (caller.isKnownPatient)</option>
+                            <option value="caller.isVip">VIP Arayan mı? (caller.isVip)</option>
+                            <option value="caller.hasUpcomingAppointment">Yaklaşan Randevusu Var mı? (caller.hasUpcomingAppointment)</option>
+                            <option value="clinic.isOpen">Klinik Şu An Açık mı? (clinic.isOpen)</option>
+                            <option value="time.hour">Günün Saati 0-23 (time.hour)</option>
+                            <option value="time.weekday">Haftanın Günü 1-7 (time.weekday)</option>
+                            <option value="call.direction">Arama Yönü (call.direction)</option>
+                            <option value="call.channel">Kanal (call.channel)</option>
+                            <option value="call.silenceCount">Sessizlik Sayısı (call.silenceCount)</option>
+                            <option value="call.durationSec">Görüşme Süresi sn (call.durationSec)</option>
+                          </optgroup>
                           <optgroup label="Hazır Alanlar">
                             {PRESET_FIELDS.map(f => (
                               <option key={f.value} value={f.value}>{f.label} ({f.value})</option>
@@ -2664,13 +2706,24 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <div>
                             <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Karşılaştırma Kuralı</label>
                             <select value={d.operator || 'equals'} onChange={e => updateSelectedNode({ operator: e.target.value as any })} style={inputStyle}>
-                              <option value="equals">Cevap tam olarak şuna eşitse (==)</option>
-                              <option value="contains">Cevap şu kelimeyi içeriyorsa</option>
-                              <option value="notEmpty">Herhangi bir cevap verildiyse (Boş değilse)</option>
+                              <option value="equals">Tam olarak eşitse (==)</option>
+                              <option value="notEquals">Eşit değilse (!=)</option>
+                              <option value="contains">Şu ifadeyi içeriyorsa</option>
+                              <option value="notContains">Şu ifadeyi içermiyorsa</option>
+                              <option value="startsWith">Şununla başlıyorsa</option>
+                              <option value="in">Listedeki değerlerden biriyse (virgüllü)</option>
+                              <option value="gt">Sayısal olarak büyükse (&gt;)</option>
+                              <option value="gte">Sayısal olarak büyük veya eşitse (&gt;=)</option>
+                              <option value="lt">Sayısal olarak küçükse (&lt;)</option>
+                              <option value="lte">Sayısal olarak küçük veya eşitse (&lt;=)</option>
+                              <option value="between">İki sayı arasındaysa (Örn: 9-18)</option>
+                              <option value="regex">Regex deseniyle eşleşiyorsa</option>
+                              <option value="notEmpty">Boş değilse (Cevap verildiyse)</option>
+                              <option value="isEmpty">Boşsa (Cevap verilmediyse)</option>
                             </select>
                           </div>
 
-                          {d.operator !== 'notEmpty' && (
+                          {d.operator !== 'notEmpty' && d.operator !== 'isEmpty' && (
                             <div style={{ padding: 12, borderRadius: 10, background: 'var(--flow-success-bg)', border: '1px solid #16a34a' }}>
                               <label style={{ fontSize: 11, color: '#15803d', display: 'block', marginBottom: 6, fontWeight: 700 }}>
                                 ✓ Hangi Durumda &ldquo;Evet&rdquo; (Yeşil Ok) Yönüne Gidilsin?
@@ -2725,6 +2778,10 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <option value="save_appointment_pending">📝 Randevu Talebi Oluştur (Onay Bekler)</option>
                           <option value="save_patient_note">🗒️ Hastadan Not Al (Bankoya İlet)</option>
                           <option value="webhook">🔗 Dış Sisteme Gönder (Webhook API)</option>
+                          <option value="set_variable">🔧 Değişken Ata (set_variable)</option>
+                          <option value="send_sms">💬 SMS Gönder (send_sms)</option>
+                          <option value="wait_reprompt">⏳ Bekle / Yeniden Sor (wait_reprompt)</option>
+                          <option value="switch_prompt">🔄 Prompt / Mod Değiştir (switch_prompt)</option>
                           {direction === 'whatsapp' ? (
                             <option value="send_wa_message">📱 WhatsApp Mesajı Gönder</option>
                           ) : (
@@ -2739,14 +2796,84 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                         </select>
                       </div>
 
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>
+                          ⚡ Olay Tetikleyici (Opsiyonel)
+                        </label>
+                        <select
+                          value={(d.eventTrigger as string) || ''}
+                          onChange={e => updateSelectedNode({ eventTrigger: e.target.value || undefined })}
+                          style={inputStyle}
+                        >
+                          <option value="">Normal Akış Adımı (Olay Yok)</option>
+                          <option value="on_silence">🤫 Sessizlik Olduğunda (on_silence)</option>
+                          <option value="on_no_match">❓ Cevap Anlaşılamadığında (on_no_match)</option>
+                          <option value="on_transfer_fail">📵 Aktarım Başarısız Olduğunda (on_transfer_fail)</option>
+                          <option value="on_call_end">📴 Görüşme Kapandığında (on_call_end)</option>
+                          <option value="on_whatsapp_message">💬 WhatsApp Mesajı Geldiğinde (on_whatsapp_message)</option>
+                        </select>
+                      </div>
+
                       {d.action === 'webhook' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Webhook URL (HTTP POST)</label>
+                            <input
+                              value={d.webhookUrl || ''}
+                              onChange={e => updateSelectedNode({ webhookUrl: e.target.value })}
+                              placeholder="https://hooks.zapier.com/... veya n8n Webhook URL"
+                              style={inputStyle}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>
+                              JSON Gövde Şablonu (Opsiyonel, {'{{musteri_adi}}'} destekler)
+                            </label>
+                            <textarea
+                              value={(d.webhookBodyTemplate as string) || ''}
+                              onChange={e => updateSelectedNode({ webhookBodyTemplate: e.target.value })}
+                              placeholder={'{"name": "{{musteri_adi}}", "phone": "{{telefon}}"}'}
+                              rows={3}
+                              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {d.action === 'set_variable' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Değişken Adı</label>
+                            <input
+                              value={(d.variableName as string) || ''}
+                              onChange={e => updateSelectedNode({ variableName: e.target.value })}
+                              placeholder="Örn: oncelik, etiket, islem_turu"
+                              style={inputStyle}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Atanacak Değer ({'{{alan}}'} destekler)</label>
+                            <input
+                              value={(d.variableValue as string) || ''}
+                              onChange={e => updateSelectedNode({ variableValue: e.target.value })}
+                              placeholder="Örn: acil_hasta"
+                              style={inputStyle}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {(d.action === 'send_sms' || d.action === 'wait_reprompt' || d.action === 'wait' || d.action === 'switch_prompt') && (
                         <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>Webhook URL (HTTP POST)</label>
-                          <input
-                            value={d.webhookUrl || ''}
-                            onChange={e => updateSelectedNode({ webhookUrl: e.target.value })}
-                            placeholder="https://hooks.zapier.com/... veya Make.com URL"
-                            style={inputStyle}
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 6 }}>
+                            {d.action === 'send_sms' ? 'SMS Şablonu ({{musteri_adi}}, {{tarih}})' : d.action === 'switch_prompt' ? 'Yeni Prompt / Mod Talimatı' : 'Yeniden Sorulacak Mesaj'}
+                          </label>
+                          <textarea
+                            value={(d.promptInstruction as string) || (d.message as string) || ''}
+                            onChange={e => updateSelectedNode({ message: e.target.value, promptInstruction: e.target.value })}
+                            placeholder="Mesaj veya talimat metnini girin..."
+                            rows={3}
+                            style={{ ...inputStyle, resize: 'vertical' }}
                           />
                         </div>
                       )}

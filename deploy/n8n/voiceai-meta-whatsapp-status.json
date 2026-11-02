@@ -1,0 +1,89 @@
+{
+  "name": "VoiceAI — Meta WhatsApp Delivery Status Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meta-whatsapp-status",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "meta-status-webhook",
+      "name": "Meta Status Webhook (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 260],
+      "webhookId": "voiceai-meta-wa-status"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body || $input.first().json;\nconst clinicId = $env.VOICEAI_CLINIC_ID;\nconst secret = $env.VOICEAI_N8N_SECRET;\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst statuses = [];\n\nfor (const entry of entries) {\n  for (const change of (entry.changes || [])) {\n    for (const st of (change.value?.statuses || [])) {\n      if (st.id && st.status) {\n        statuses.push({ providerMessageId: st.id, status: st.status });\n      }\n    }\n  }\n}\n\nif (statuses.length === 0) return [];\n\nconst rawBody = JSON.stringify({ statuses });\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst signature = 'sha256=' + crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');\n\nreturn [{ json: { clinicId, rawBody, timestamp, signature } }];"
+      },
+      "id": "sign-status-update",
+      "name": "Extract & Sign Statuses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VOICEAI_BASE_URL + '/api/whatsapp/n8n/' + $json.clinicId + '/status' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-VoiceAI-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-VoiceAI-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.rawBody }}",
+        "options": {}
+      },
+      "id": "forward-status-voiceai",
+      "name": "Forward Status to VoiceAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 260]
+    }
+  ],
+  "connections": {
+    "Meta Status Webhook (POST)": {
+      "main": [
+        [
+          {
+            "node": "Extract & Sign Statuses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Sign Statuses": {
+      "main": [
+        [
+          {
+            "node": "Forward Status to VoiceAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
+
