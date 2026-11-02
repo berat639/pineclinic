@@ -659,7 +659,7 @@ export async function createLiveSession(
   const toolDeclarations = prepareLiveToolDeclarations(options.model, (await buildToolDeclarations(options.direction))
     .filter(tool => flowEngine || tool.name !== 'akisBilgisiGuncelle')
   )
-  const fallbackVoiceInstruction = 'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.'
+  const fallbackVoiceInstruction = 'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor. Karşı taraf öksürür, hapşırır, boğaz temizler veya ortam gürültüsü gelirse bunu kapsam dışı bir istek sanma ve ASLA "Bu konuda yardımcı olamıyorum" deme; öksürük/hapşırıkta kısaca "Çok geçmiş olsun" deyip kaldığın yerden devam et.'
   const fallbackFlowRuntimeInstruction = 'AKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.'
   const [voiceTpl, flowRuntimeTpl] = await Promise.all([
     getPromptTemplate('prompt.voice_identity_rules', options.clinicId).catch(() => ''),

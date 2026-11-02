@@ -106,5 +106,14 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     }
   } catch {}
 
+  if (direction !== 'whatsapp') {
+    const joined = parts.join('\n\n')
+    if (!joined.includes('ÖKSÜRÜK') && !joined.includes('öksür')) {
+      parts.push(
+        'KONUŞMA DIŞI SESLER (ÖKSÜRÜK / HAPŞIRIK / GÜRÜLTÜ): Karşı tarafın öksürmesi, hapşırması, boğaz temizlemesi, nefes sesi veya ortam gürültüsü kapsam dışı bir istek DEĞİLDİR; böyle seslerde ASLA "Bu konuda yardımcı olamıyorum" deme. Öksürük veya hapşırıkta kısaca "Çok geçmiş olsun" deyip kaldığın yerden devam et.',
+      )
+    }
+  }
+
   return parts.join('\n\n')
 }

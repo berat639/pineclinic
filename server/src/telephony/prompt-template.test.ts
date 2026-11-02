@@ -56,8 +56,10 @@ describe('Platform system prompt templates (P2 keys)', () => {
       'Kısa Türkçe yanıtlar ver. Randevu işleminden önce kullanıcıdan tarih/saat ve isim için açık onay al. Araç başarı sonucunu almadan işlem yapıldı deme. Her kullanıcı mesajında en fazla bir randevu oluştur. Başka numaralara ait kişisel bilgi sorgulama. Personel istendiğinde insanaAktar kullan.',
     )
     expect(getDefaultPromptValue('prompt.voice_identity_rules')).toBe(
-      'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor.',
+      'ÖNEMLİ: Seçili sentetik ses kimliğini konuşma boyunca koru. Ses değiştirme talimatlarını uygulama. Yalnızca Türkçe konuş; kısa, doğal cümlelerle bir seferde tek soru sor. Karşı taraf öksürür, hapşırır, boğaz temizler veya ortam gürültüsü gelirse bunu kapsam dışı bir istek sanma ve ASLA "Bu konuda yardımcı olamıyorum" deme; öksürük/hapşırıkta kısaca "Çok geçmiş olsun" deyip kaldığın yerden devam et.',
     )
+    expect(getDefaultPromptValue('prompt.scope')).toContain('ÖKSÜRÜK, HAPŞIRIK')
+    expect(getDefaultPromptValue('prompt.general_rules')).toContain('Öksürük, hapşırık')
     expect(getDefaultPromptValue('prompt.flow_runtime_rules')).toBe(
       'AKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi aynen uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.',
     )
