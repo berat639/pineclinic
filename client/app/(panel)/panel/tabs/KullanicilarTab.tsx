@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { toast } from 'react-hot-toast'
+import { useAuth } from '../../../../lib/auth-context'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
 import { Pencil, Trash2, User as UserIcon, Lock, Check, X } from 'lucide-react'
 import { useBackdropDismiss } from '../../../../hooks/useBackdropDismiss'
@@ -14,8 +16,10 @@ const inputStyle: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, 
 const btnStyle: React.CSSProperties = { padding: '8px 14px', borderRadius: 6, background: 'var(--accent)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }
 
 export default function KullanicilarTab() {
+  const { user } = useAuth()
   const editUserBackdropDismiss = useBackdropDismiss(() => setEditingUser(null))
   const [users, setUsers] = useState<User[]>([])
+  const activeAdminCount = users.filter((x) => x.role === 'yonetici' && x.active !== false).length
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' })
   const [error, setError] = useState('')
@@ -37,7 +41,7 @@ export default function KullanicilarTab() {
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<User | null>(null)
 
   const fetchUsers = () => {
-    fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {})
+    fetch(`/api/admin/users`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(setUsers).catch(() => { })
   }
 
   useEffect(() => {
@@ -52,9 +56,9 @@ export default function KullanicilarTab() {
       body: JSON.stringify(form),
     })
     const data = await res.json()
-    if (res.ok) { 
-      setUsers([...users, { ...data, active: true }]); 
-      setShowForm(false); 
+    if (res.ok) {
+      setUsers([...users, { ...data, active: true }]);
+      setShowForm(false);
       setForm({ email: '', name: '', password: '', role: 'hekim', phone: '', specialty: '', color: '#60a5fa' });
       fetchUsers();
     }
@@ -79,6 +83,18 @@ export default function KullanicilarTab() {
   async function handleUpdateUser(e: React.FormEvent) {
     e.preventDefault()
     if (!editingUser) return
+    if (editingUser.id === user?.id && !editForm.active) {
+      const msg = 'Güvenlik Uyarısı: Kendi yönetici hesabınızı donduramazsınız.'
+      setEditError(msg)
+      toast.error(msg)
+      return
+    }
+    if (editingUser.role === 'yonetici' && editingUser.active !== false && activeAdminCount <= 1 && (!editForm.active || editForm.role !== 'yonetici')) {
+      const msg = 'Güvenlik Uyarısı: Klinikteki tek aktif yönetici hesabı dondurulamaz veya yetkisi düşürülemez.'
+      setEditError(msg)
+      toast.error(msg)
+      return
+    }
     setIsSavingUser(true)
     setEditError('')
     try {
@@ -102,9 +118,14 @@ export default function KullanicilarTab() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Güncelleme başarısız')
-      
+
       setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...payload } : u))
       setEditingUser(null)
+      if (!editForm.active && editingUser.active && Number(data.unassignedAppointmentsCount) > 0) {
+        toast.success(`${editForm.name} hesabı donduruldu. Gelecekteki ${data.unassignedAppointmentsCount} randevu boşa çıkarıldı (Atama Bekliyor).`)
+      } else {
+        toast.success('Kullanıcı bilgileri güncellendi.')
+      }
       fetchUsers()
     } catch (err: any) {
       setEditError(err.message || 'Hata oluştu')
@@ -146,7 +167,6 @@ export default function KullanicilarTab() {
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={inputStyle}>
             <option value="hekim">Hekim</option>
             <option value="host">Resepsiyon</option>
-            <option value="yonetici">Yönetici</option>
           </select>
           <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX (opsiyonel)" value={form.phone} onValueChange={phone => setForm({ ...form, phone })} style={inputStyle} />
           {form.role === 'hekim' && (
@@ -191,8 +211,8 @@ export default function KullanicilarTab() {
               </td>
               <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--divider)' }}>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button 
-                    onClick={() => openEditModal(u)} 
+                  <button
+                    onClick={() => openEditModal(u)}
                     style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                   >
                     <Pencil size={12} /> Düzenle
@@ -205,13 +225,13 @@ export default function KullanicilarTab() {
       </table>
       {users.length === 0 && <p style={{ color: 'var(--foreground-3)', fontSize: 14, marginTop: 16 }}>Kullanıcı bulunamadı.</p>}
 
-      {/* Edit User Modal */}
+      {/* Edit User Modal (Yeni Randevu 460px Standardı) */}
       {editingUser && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -220,124 +240,140 @@ export default function KullanicilarTab() {
           }}
           {...editUserBackdropDismiss}
         >
-          <div
+          <form
+            role="dialog"
+            aria-modal="true"
+            onSubmit={handleUpdateUser}
             onClick={e => e.stopPropagation()}
             style={{
-              width: '100%',
-              maxWidth: 500,
-              background: 'var(--card-bg, #1e293b)',
-              borderRadius: 16,
-              border: '1px solid var(--input-border, #334155)',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-              padding: 24,
+              width: 'calc(100vw - 24px)',
+              maxWidth: 460,
+              maxHeight: '90vh',
+              background: 'var(--card-bg)',
+              borderRadius: 14,
+              border: '1.5px solid var(--input-border)',
+              boxShadow: 'var(--pc-modal-shadow)',
               display: 'flex',
               flexDirection: 'column',
-              gap: 16
+              overflow: 'hidden'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(59,130,246,0.1)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <UserIcon size={18} />
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
+                  <UserIcon size={17} color="#ffffff" />
                 </div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--foreground)' }}>Personel Düzenle</h3>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>Personel Düzenle</h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>{editingUser.email}</div>
+                </div>
               </div>
-              <button onClick={() => setEditingUser(null)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer' }}>
-                <X size={18} />
+              <button type="button" onClick={() => setEditingUser(null)} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: 'var(--pc-clay-btn)' }}>
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleUpdateUser} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Ad Soyad *</label>
-                  <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} required style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>E-posta *</label>
-                  <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} required style={inputStyle} />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Telefon</label>
-                  <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editForm.phone} onValueChange={phone => setEditForm({ ...editForm, phone })} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Rol</label>
-                  <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} style={inputStyle}>
-                    <option value="hekim">Hekim</option>
-                    <option value="host">Resepsiyon</option>
-                    <option value="yonetici">Yönetici</option>
-                  </select>
-                </div>
-              </div>
-
-              {editForm.role === 'hekim' && (
+            {/* Body */}
+            <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>Personel Bilgileri</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Uzmanlık</label>
-                    <input value={editForm.specialty} onChange={e => setEditForm({ ...editForm, specialty: e.target.value })} style={inputStyle} />
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>Ad Soyad *</label>
+                    <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} required style={inputStyle} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--foreground-3)', display: 'block', marginBottom: 4 }}>Renk</label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34 }}>
-                      <input type="color" value={editForm.color} onChange={e => setEditForm({ ...editForm, color: e.target.value })} style={{ width: 40, height: 30, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
-                      <span style={{ fontSize: 12, color: 'var(--foreground-2)' }}>{editForm.color}</span>
-                    </div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>E-posta *</label>
+                    <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} required style={inputStyle} />
                   </div>
                 </div>
-              )}
 
-              <div style={{ padding: 10, borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-                <label style={{ fontSize: 12, color: 'var(--foreground)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <Lock size={12} /> Yeni Şifre Belirle <span style={{ fontSize: 11, color: 'var(--foreground-3)' }}>(Opsiyonel)</span>
-                </label>
-                <input type="password" placeholder="Yeni şifre (min 6 karakter)" value={editForm.password || ''} onChange={e => setEditForm({ ...editForm, password: e.target.value })} style={inputStyle} minLength={6} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>Telefon</label>
+                    <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editForm.phone} onValueChange={phone => setEditForm({ ...editForm, phone })} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>Rol</label>
+                    {editingUser.role === 'yonetici' ? (
+                      <input value="Yönetici (Seed User)" disabled style={{ ...inputStyle, opacity: 0.75, cursor: 'not-allowed' }} />
+                    ) : (
+                      <select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value })} style={inputStyle}>
+                        <option value="hekim">Hekim</option>
+                        <option value="host">Resepsiyon</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {editForm.role === 'hekim' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>Uzmanlık</label>
+                      <input value={editForm.specialty} onChange={e => setEditForm({ ...editForm, specialty: e.target.value })} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>Renk</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34 }}>
+                        <input type="color" value={editForm.color} onChange={e => setEditForm({ ...editForm, color: e.target.value })} style={{ width: 40, height: 30, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+                        <span style={{ fontSize: 12, color: 'var(--foreground-2)' }}>{editForm.color}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 8, background: 'var(--card-bg)', border: '1px solid var(--input-border)' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--foreground)' }}>Hesap Durumu</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editingUser.role === 'yonetici') {
+                        toast.error('⚠️ Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden dondurulabilir.')
+                        return
+                      }
+                      setEditForm({ ...editForm, active: !editForm.active })
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      border: editForm.active ? '1px solid var(--btn-mint-border, #86efac)' : '1px solid var(--danger, #ef4444)',
+                      background: editForm.active ? 'var(--btn-mint-bg, #f0fdf4)' : 'var(--card-inner)',
+                      color: editForm.active ? 'var(--btn-mint-text, #15803d)' : 'var(--danger, #ef4444)',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    {editForm.active ? <Check size={12} /> : <X size={12} />}
+                    {editForm.active ? 'Aktif' : 'Donduruldu'}
+                  </button>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-                <span style={{ fontSize: 13, color: 'var(--foreground)' }}>Hesap Durumu</span>
-                <button
-                  type="button"
-                  onClick={() => setEditForm({ ...editForm, active: !editForm.active })}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: editForm.active ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                    color: editForm.active ? '#22c55e' : '#ef4444',
-                    fontWeight: 600,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}
-                >
-                  {editForm.active ? <Check size={12} /> : <X size={12} />}
-                  {editForm.active ? 'Aktif' : 'Pasif'}
-                </button>
-              </div>
+              {editError && <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>{editError}</div>}
+            </div>
 
-              {editError && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{editError}</div>}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              {editingUser.role !== 'yonetici' ? (
                 <button
                   type="button"
                   onClick={() => setConfirmDeleteUser(editingUser)}
-                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--danger)', background: 'var(--card-bg)', color: 'var(--danger)', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, boxShadow: 'var(--pc-clay-btn)' }}
                 >
-                  <Trash2 size={12} /> Sil
+                  <Trash2 size={13} /> Sil
                 </button>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={() => setEditingUser(null)} className="btn-clinic-blue" style={{ padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Vazgeç</button>
-                  <button type="submit" disabled={isSavingUser} style={btnStyle}>{isSavingUser ? 'Kaydediliyor...' : 'Kaydet'}</button>
-                </div>
+              ) : <div />}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="button" onClick={() => setEditingUser(null)} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', fontSize: '0.86rem', fontWeight: 600, cursor: 'pointer', boxShadow: 'var(--pc-clay-btn)' }}>İptal</button>
+                <button type="submit" disabled={isSavingUser} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', fontSize: '0.86rem', fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--pc-clay-primary)' }}><span style={{ color: '#ffffff' }}>{isSavingUser ? 'Kaydediliyor...' : 'Kaydet'}</span></button>
               </div>
-            </form>
-          </div>
+            </div>
+          </form>
         </div>
       )}
 

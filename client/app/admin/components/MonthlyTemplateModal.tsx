@@ -86,7 +86,7 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -95,59 +95,63 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
       }}
       {...backdropDismiss}
     >
-      <div
+      <form
+        role="dialog"
+        aria-modal="true"
+        onSubmit={handleSubmit}
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%',
-          maxWidth: 580,
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          background: 'var(--card-bg, #1e293b)',
-          borderRadius: 16,
-          border: '1px solid var(--input-border, #334155)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-          padding: 24,
+          width: 'calc(100vw - 24px)',
+          maxWidth: 460,
+          maxHeight: '90vh',
+          background: 'var(--card-bg)',
+          borderRadius: 14,
+          border: '1.5px solid var(--input-border)',
+          boxShadow: 'var(--pc-modal-shadow)',
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          gap: 16
+          overflow: 'hidden'
         }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: 'rgba(168, 85, 247, 0.15)',
-              border: '1px solid rgba(168, 85, 247, 0.3)',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: '#2563eb',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#a855f7'
+              color: '#ffffff',
+              boxShadow: 'var(--pc-clay-primary)',
+              flexShrink: 0
             }}>
-              <CalendarDays size={20} />
+              <CalendarDays size={17} color="#ffffff" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                {template ? 'Aylık Şablonu Düzenle' : 'Yeni Aylık Vardiya Şablonu'}
+              <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                {template ? 'Aylık Planı Düzenle' : 'Yeni Aylık Vardiya Planı'}
               </h3>
-              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
                 Tüm ay için rotasyon veya çalışma kuralları belirleyin
               </div>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 4 }}
+            aria-label="Kapat"
+            style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}
           >
-            <X size={20} />
+            <X size={16} />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Body */}
+        <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', display: 'block', marginBottom: 4 }}>
               Şablon Adı *
@@ -430,40 +434,45 @@ export default function MonthlyTemplateModal({ isOpen, template, weeklyTemplates
             </div>
           )}
 
-          {/* Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-clinic-blue"
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: '0.8rem',
-                cursor: 'pointer'
-              }}
-            >
-              Vazgeç
-            </button>
-            <button
-              type="submit"
-              className="btn-clinic-primary"
-              style={{
-                padding: '8px 20px',
-                borderRadius: 8,
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              {template ? 'Değişiklikleri Kaydet' : 'Aylık Şablonu Oluştur'}
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '9px 18px',
+              borderRadius: 8,
+              border: '1px solid var(--input-border)',
+              background: 'var(--card-bg)',
+              color: 'var(--foreground)',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: 'var(--pc-clay-btn)',
+            }}
+          >
+            İptal
+          </button>
+          <button
+            type="submit"
+            style={{
+              padding: '9px 24px',
+              borderRadius: 8,
+              border: 'none',
+              background: '#2563eb',
+              color: '#ffffff',
+              fontSize: '0.86rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: 'var(--pc-clay-primary)',
+            }}
+          >
+            <span style={{ color: '#ffffff' }}>Kaydet</span>
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

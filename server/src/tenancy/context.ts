@@ -9,6 +9,7 @@ export { hostnameFromRequest, normalizeHostname } from './hostname'
 export interface TenantContext {
   clinicId: string
   hostname: string
+  isActive?: boolean
 }
 
 const storage = new AsyncLocalStorage<TenantContext>()
@@ -28,17 +29,16 @@ export async function findTenantByHostname(hostnameValue: string): Promise<Tenan
   const cached = cache.get(hostname)
   if (cached && cached.expiresAt > Date.now()) return cached.value
 
-  const [row] = await db.select({ clinicId: clinicDomains.clinicId })
+  const [row] = await db.select({ clinicId: clinicDomains.clinicId, isActive: clinics.isActive })
     .from(clinicDomains)
     .innerJoin(clinics, eq(clinicDomains.clinicId, clinics.id))
     .where(and(
       eq(clinicDomains.hostname, hostname),
       eq(clinicDomains.isActive, true),
-      eq(clinics.isActive, true),
     ))
     .limit(1)
 
-  const value = row ? { clinicId: row.clinicId, hostname } : null
+  const value = row ? { clinicId: row.clinicId, hostname, isActive: row.isActive } : null
   cache.set(hostname, { value, expiresAt: Date.now() + CACHE_TTL_MS })
   return value
 }
@@ -49,9 +49,11 @@ export async function resolveTenantFromRequest(request: Request): Promise<Tenant
   if (tenant) return tenant
 
   if (process.env.NODE_ENV !== 'production' && isLocalHostname(hostname)) {
-    const [clinic] = await db.select({ id: clinics.id }).from(clinics)
+    const [activeClinic] = await db.select({ id: clinics.id, isActive: clinics.isActive }).from(clinics)
       .where(eq(clinics.isActive, true)).limit(1)
-    return clinic ? { clinicId: clinic.id, hostname } : null
+    if (activeClinic) return { clinicId: activeClinic.id, hostname, isActive: activeClinic.isActive }
+    const [anyClinic] = await db.select({ id: clinics.id, isActive: clinics.isActive }).from(clinics).limit(1)
+    return anyClinic ? { clinicId: anyClinic.id, hostname, isActive: anyClinic.isActive } : null
   }
 
   return null

@@ -22,8 +22,16 @@ export default function PlanDialog({ title, children, onClose }: { title: string
     else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus() }
   }}>
     <div className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={ref}>
-      <div className={styles.dialogHead}><h3 id={titleId}>{title}</h3><button type="button" className={styles.button} aria-label={`${title} kapat`} onClick={onClose}><X size={16} /></button></div>
-      {children}
+      <div className={styles.dialogHead}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>🦷</div>
+          <h3 id={titleId} style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)' }}>{title}</h3>
+        </div>
+        <button type="button" aria-label={`${title} kapat`} onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: 'var(--pc-clay-btn)' }}><X size={16} /></button>
+      </div>
+      <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)' }}>
+        {children}
+      </div>
     </div>
   </div>
 }

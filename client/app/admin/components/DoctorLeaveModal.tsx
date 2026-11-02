@@ -1,8 +1,18 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
-import { CalendarOff, X, Trash2, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  CalendarOff,
+  X,
+  Trash2,
+  Calendar as CalendarIcon,
+  Clock,
+  AlertTriangle,
+  UserCheck,
+  UserX,
+  Check,
+} from 'lucide-react'
 import { DayPicker } from 'react-day-picker'
 import { tr } from 'date-fns/locale'
 import 'react-day-picker/dist/style.css'
@@ -13,6 +23,8 @@ export interface DoctorLeaveItem {
   doctorId: string
   doctorName?: string
   doctorColor?: string
+  substituteDoctorId?: string | null
+  substituteDoctorName?: string | null
   date: string
   startTime: string
   endTime: string
@@ -26,6 +38,8 @@ interface DoctorLeaveModalProps {
   isOpen: boolean
   onClose: () => void
   doctors: { id: string; name: string; specialty?: string; color?: string }[]
+  events?: any[]
+  shifts?: any[]
   initialDoctorId?: string
   initialDate?: string
   initialStartTime?: string
@@ -56,13 +70,22 @@ function toYmd(d: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function getLocalYmdFromIso(isoOrStr: string): string {
+  if (!isoOrStr) return ''
+  try {
+    return new Date(isoOrStr).toLocaleDateString('sv')
+  } catch {
+    return String(isoOrStr).slice(0, 10)
+  }
+}
+
 function toMins(t: string): number {
   const [h, m] = (t || '09:00').split(':').map(Number)
   return (h || 0) * 60 + (m || 0)
 }
 
 function fromMins(m: number): string {
-  const clamped = Math.max(0, Math.min(23 * 60 + 30, m))
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, m))
   const hh = String(Math.floor(clamped / 60)).padStart(2, '0')
   const mm = String(clamped % 60).padStart(2, '0')
   return `${hh}:${mm}`
@@ -72,6 +95,8 @@ export default function DoctorLeaveModal({
   isOpen,
   onClose,
   doctors,
+  events = [],
+  shifts = [],
   initialDoctorId,
   initialDate,
   initialStartTime,
@@ -90,8 +115,21 @@ export default function DoctorLeaveModal({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Conflicting appointments management states
+  const [fetchedDayAppointments, setFetchedDayAppointments] = useState<any[]>([])
+  const [substituteDoctorId, setSubstituteDoctorId] = useState<string>('')
+  const [unassignAppointments, setUnassignAppointments] = useState<boolean>(false)
+
   const [showDatePopover, setShowDatePopover] = useState(false)
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => parseYmd(initialDate || new Date().toISOString().slice(0, 10)))
+  const [datePopoverCoords, setDatePopoverCoords] = useState<{ top: number; left: number }>({
+    top: 160,
+    left: 160,
+  })
+  const dateTriggerRef = useRef<HTMLButtonElement>(null)
+  const datePopoverRef = useRef<HTMLDivElement>(null)
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() =>
+    parseYmd(initialDate || new Date().toISOString().slice(0, 10))
+  )
   const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
   const trackRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +143,51 @@ export default function DoctorLeaveModal({
     }
     if (initialStartTime) setStartTime(initialStartTime)
     if (initialEndTime) setEndTime(initialEndTime)
+    setShowDatePopover(false)
   }, [initialDoctorId, initialDate, initialStartTime, initialEndTime, isOpen])
+
+  useEffect(() => {
+    setSubstituteDoctorId('')
+    setUnassignAppointments(false)
+  }, [selectedDoctorId, isOpen])
+
+  useEffect(() => {
+    if (!showDatePopover) return
+    const updatePosition = () => {
+      const rect = dateTriggerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const popW = 284
+      const popH = 335
+      let left = rect.left
+      if (left + popW > window.innerWidth - 12) {
+        left = Math.max(12, window.innerWidth - popW - 12)
+      }
+      let top = rect.bottom + 6
+      if (top + popH > window.innerHeight - 12) {
+        top = Math.max(12, rect.top - popH - 6)
+      }
+      setDatePopoverCoords({ top, left })
+    }
+    updatePosition()
+
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        datePopoverRef.current &&
+        !datePopoverRef.current.contains(target) &&
+        dateTriggerRef.current &&
+        !dateTriggerRef.current.contains(target)
+      ) {
+        setShowDatePopover(false)
+      }
+    }
+    window.addEventListener('mousedown', handleOutsideClick)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick)
+      window.removeEventListener('resize', updatePosition)
+    }
+  }, [showDatePopover])
 
   const fetchLeaves = async () => {
     if (!selectedDoctorId) {
@@ -129,6 +211,60 @@ export default function DoctorLeaveModal({
     }
   }, [isOpen, selectedDoctorId])
 
+  useEffect(() => {
+    if (!isOpen || !date) return
+    let cancelled = false
+    fetch(`/api/dental/appointments?date=${encodeURIComponent(date)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        if (!cancelled) {
+          setFetchedDayAppointments(Array.isArray(list) ? list : [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedDayAppointments([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, date])
+
+  const conflictingAppointments = useMemo(() => {
+    if (!selectedDoctorId || !date) return []
+    const map = new Map<string, any>()
+    for (const ev of events || []) {
+      if (ev?.id) map.set(ev.id, ev)
+    }
+    for (const ev of fetchedDayAppointments || []) {
+      if (ev?.id) map.set(ev.id, ev)
+    }
+    const all = Array.from(map.values())
+    const leaveStartMin = isFullDay ? 0 : toMins(startTime)
+    const leaveEndMin = isFullDay ? 1440 : toMins(endTime)
+
+    return all
+      .filter((ev) => {
+        if (!ev || ev.doctorId !== selectedDoctorId) return false
+        if (
+          ev.status === 'cancelled' ||
+          ev.status === 'completed' ||
+          ev.patientResponseStatus === 'cancelled'
+        ) {
+          return false
+        }
+        const evDate = getLocalYmdFromIso(ev.startTime)
+        if (evDate !== date) return false
+        if (isFullDay) return true
+        const sDt = new Date(ev.startTime)
+        const eDt = ev.endTime ? new Date(ev.endTime) : new Date(sDt.getTime() + 30 * 60000)
+        const evStart = sDt.getHours() * 60 + sDt.getMinutes()
+        const rawEnd = eDt.getHours() * 60 + eDt.getMinutes()
+        const evEnd = rawEnd > evStart ? rawEnd : evStart + 30
+        return evStart < leaveEndMin && evEnd > leaveStartMin
+      })
+      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+  }, [selectedDoctorId, date, events, fetchedDayAppointments, isFullDay, startTime, endTime])
+
   if (!isOpen) return null
 
   const startPct = (toMins(startTime) / (24 * 60)) * 100
@@ -143,7 +279,10 @@ export default function DoctorLeaveModal({
       const nextStart = Math.min(toMins(endTime) - 30, Math.max(0, snapped))
       setStartTime(fromMins(nextStart))
     } else {
-      const nextEnd = Math.max(toMins(startTime) + 30, Math.min(23 * 60 + 30, snapped))
+      const nextEnd = Math.max(
+        toMins(startTime) + 30,
+        Math.min(23 * 60 + 59, snapped >= 24 * 60 ? 23 * 60 + 59 : snapped)
+      )
       setEndTime(fromMins(nextEnd))
     }
   }
@@ -190,6 +329,9 @@ export default function DoctorLeaveModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           doctorId: selectedDoctorId,
+          substituteDoctorId: substituteDoctorId || null,
+          unassignAppointments: Boolean(unassignAppointments && !substituteDoctorId),
+          appointmentIds: conflictingAppointments.map((a) => a.id),
           date,
           startTime: finalStartTime,
           endTime: finalEndTime,
@@ -200,13 +342,26 @@ export default function DoctorLeaveModal({
       })
 
       if (res.ok) {
-        toast.success('Hekim izni başarıyla kaydedildi')
+        if (substituteDoctorId && conflictingAppointments.length > 0) {
+          const subDoc = doctors.find((d) => d.id === substituteDoctorId)
+          toast.success(
+            `Hekim izni kaydedildi ve ${conflictingAppointments.length} randevu ${subDoc?.name || 'vekil hekime'} devredildi`
+          )
+        } else if (unassignAppointments && conflictingAppointments.length > 0) {
+          toast.success(
+            `Hekim izni kaydedildi ve ${conflictingAppointments.length} randevu Atama Bekleyenlere aktarıldı`
+          )
+        } else {
+          toast.success('Hekim izni başarıyla kaydedildi')
+        }
         if (onSaved) onSaved()
         if (onSuccess) onSuccess()
         fetchLeaves()
         setReason('Yıllık İzin')
         setCustomReason('')
         setNotes('')
+        setSubstituteDoctorId('')
+        setUnassignAppointments(false)
         onClose()
       } else {
         const err = await res.json().catch(() => ({}))
@@ -282,14 +437,135 @@ export default function DoctorLeaveModal({
     year: 'numeric',
   })
 
+  const substituteCandidateDoctors = doctors.filter((d) => d.id !== selectedDoctorId)
+
   return (
     <>
+      <style>{`
+        .clinic-rdp .rdp {
+          --rdp-cell-size: 32px;
+          --rdp-accent-color: #2563eb;
+          --rdp-background-color: var(--badge-clinic-bg, #e0f2fe);
+          margin: 0 !important;
+          width: 100%;
+        }
+        .clinic-rdp .rdp-months,
+        .clinic-rdp .rdp-month,
+        .clinic-rdp .rdp-table {
+          width: 100%;
+          max-width: 100%;
+          table-layout: fixed;
+        }
+        .clinic-rdp .rdp-caption_label {
+          font-size: 0.82rem;
+          font-weight: 800;
+          color: var(--foreground);
+          text-transform: capitalize;
+        }
+        .clinic-rdp .rdp-nav_button {
+          width: 26px;
+          height: 26px;
+          border-radius: 7px;
+          background: var(--card-bg);
+          border: 1px solid var(--input-border);
+          box-shadow: var(--pc-clay-btn);
+          color: var(--foreground);
+        }
+        .clinic-rdp .rdp-head_cell {
+          font-size: 0.67rem;
+          font-weight: 700;
+          color: var(--foreground-3);
+          text-transform: uppercase;
+        }
+        .clinic-rdp .rdp-day {
+          width: 32px;
+          height: 32px;
+          font-size: 0.77rem;
+          border-radius: 8px;
+          color: var(--foreground);
+          font-weight: 600;
+          margin: 0 auto;
+        }
+        .clinic-rdp .rdp-day_selected {
+          background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+          color: #ffffff !important;
+          box-shadow: var(--pc-clay-primary);
+          font-weight: 800;
+        }
+        .clinic-rdp .rdp-day_today:not(.rdp-day_selected) {
+          border: 1.5px solid #2563eb;
+          color: var(--badge-clinic-text, #1d4ed8);
+          font-weight: 800;
+        }
+        .dlm-help-wrap {
+          position: static;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          cursor: help;
+          outline: none;
+        }
+        .dlm-help-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: var(--badge-clinic-bg, #e0f2fe);
+          border: 1px solid var(--badge-clinic-border, #93c5fd);
+          color: var(--badge-clinic-text, #0369a1);
+          font-size: 0.68rem;
+          font-weight: 800;
+          line-height: 1;
+          user-select: none;
+          box-shadow: var(--pc-clay-btn);
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .dlm-help-wrap:hover .dlm-help-icon,
+        .dlm-help-wrap:focus-visible .dlm-help-icon,
+        .dlm-help-wrap:focus-within .dlm-help-icon {
+          background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+          border-color: #1d4ed8;
+          color: #ffffff !important;
+        }
+        .dlm-help-popup {
+          position: absolute;
+          top: calc(100% + 5px);
+          left: 0;
+          z-index: 60;
+          width: 280px;
+          max-width: 100%;
+          padding: 8px 11px;
+          border-radius: 9px;
+          background: var(--card-bg);
+          border: 1.5px solid var(--badge-clinic-border, #93c5fd);
+          color: var(--foreground);
+          font-size: 0.72rem;
+          font-weight: 600;
+          line-height: 1.45;
+          text-align: left;
+          white-space: normal;
+          box-shadow: var(--pc-modal-shadow);
+          opacity: 0;
+          visibility: hidden;
+          pointer-events: none;
+          transition: opacity 0.15s ease, visibility 0.15s ease;
+        }
+        .dlm-help-wrap:hover .dlm-help-popup,
+        .dlm-help-wrap:focus-visible .dlm-help-popup,
+        .dlm-help-wrap:focus-within .dlm-help-popup {
+          opacity: 1;
+          visibility: visible;
+        }
+      `}</style>
       <div
         style={{
           position: 'fixed',
           inset: 0,
           zIndex: 100020,
-          background: 'rgba(15, 23, 42, 0.6)',
+          background: 'var(--modal-overlay, rgba(15, 23, 42, 0.6))',
         }}
         {...backdropDismiss}
       />
@@ -303,7 +579,7 @@ export default function DoctorLeaveModal({
           left: '50%',
           top: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 'calc(100vw - 24px)',
+          width: 'min(460px, calc(100vw - 24px))',
           maxWidth: '460px',
           background: cardBg,
           border: `1.5px solid ${borderCol}`,
@@ -373,7 +649,7 @@ export default function DoctorLeaveModal({
             style={{
               background: inputBg,
               border: `1px solid ${borderCol}`,
-              borderRadius: '8px',
+              borderRadius: '6px',
               width: '28px',
               height: '28px',
               cursor: 'pointer',
@@ -487,6 +763,268 @@ export default function DoctorLeaveModal({
               </select>
             </div>
 
+            {/* Hekim Seçimi Altında Çakışan Randevu Yönetimi (Opsiyonel) */}
+            {selectedDoctorId && conflictingAppointments.length > 0 && (
+              <div
+                style={{
+                  padding: '12px',
+                  borderRadius: '11px',
+                  background: cardBg,
+                  border: `1.5px solid var(--badge-clinic-border, #93c5fd)`,
+                  boxShadow: 'var(--pc-neo-subcard)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      color: textCol,
+                    }}
+                  >
+                    <AlertTriangle size={14} color="#d97706" />
+                    <span>Randevu Çakışma Yönetimi (Opsiyonel)</span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      background: 'var(--badge-clinic-bg, #e0f2fe)',
+                      border: '1px solid var(--badge-clinic-border, #bae6fd)',
+                      color: 'var(--badge-clinic-text, #0369a1)',
+                    }}
+                  >
+                    {conflictingAppointments.length} Randevu Mevcut
+                  </span>
+                </div>
+
+                {/* Çakışan Randevuların Özeti */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    maxHeight: 96,
+                    overflowY: 'auto',
+                    padding: '6px 8px',
+                    borderRadius: 8,
+                    background: subCardBg,
+                    border: `1px solid ${borderCol}`,
+                    boxShadow: 'var(--pc-neo-inset)',
+                  }}
+                >
+                  {conflictingAppointments.map((appt) => {
+                    const sStr = new Date(appt.startTime).toLocaleTimeString('tr-TR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                    const eStr = appt.endTime
+                      ? new Date(appt.endTime).toLocaleTimeString('tr-TR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : ''
+                    return (
+                      <div
+                        key={appt.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          fontSize: '0.72rem',
+                          fontWeight: 650,
+                          color: textCol,
+                        }}
+                      >
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            flex: 1,
+                          }}
+                        >
+                          {appt.title || 'Randevu'}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '0.69rem',
+                            fontWeight: 750,
+                            color: 'var(--badge-clinic-text, #1d4ed8)',
+                            flexShrink: 0,
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {sStr}
+                          {eStr ? ` – ${eStr}` : ''}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* 1. Opsiyonel Input: Yerine Bakacak Hekim Seçimi */}
+                <div>
+                  <div
+                    style={{
+                      ...labelStyle,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      marginBottom: 5,
+                    }}
+                  >
+                    <UserCheck size={13} color={brandBlue} />
+                    <span>Yerine Bakacak Hekim Seçimi</span>
+                    <span
+                      className="dlm-help-wrap"
+                      tabIndex={0}
+                      role="button"
+                      aria-label="Yerine bakacak hekim seçimi açıklaması"
+                    >
+                      <span className="dlm-help-icon" aria-hidden="true">
+                        ?
+                      </span>
+                      <span className="dlm-help-popup" role="tooltip">
+                        Randevuları Devret: İzin saatlerindeki {conflictingAppointments.length} randevu
+                        ve ilişkili tedavi planları seçilen vekil hekime devredilir.
+                      </span>
+                    </span>
+                  </div>
+                  <select
+                    value={substituteDoctorId}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSubstituteDoctorId(val)
+                      if (val) setUnassignAppointments(false)
+                    }}
+                    style={inputStyle}
+                  >
+                    <option value="" style={selectOptionStyle}>
+                      Hekim Seçiniz (Devretme Yok)...
+                    </option>
+                    {substituteCandidateDoctors.map((d) => {
+                      const docShift = (shifts || []).find(
+                        (s: any) => s.userId === d.id && s.date === date
+                      )
+                      return (
+                        <option key={d.id} value={d.id} style={selectOptionStyle}>
+                          {d.name}
+                          {d.specialty ? ` (${d.specialty})` : ''}
+                          {docShift
+                            ? ` · Vardiya: ${docShift.startTime}-${docShift.endTime}`
+                            : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+
+                {/* 2. Opsiyonel Input: Atanan Randevulardan Çıkma Durumu */}
+                <div>
+                  <div
+                    style={{
+                      ...labelStyle,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      marginBottom: 5,
+                    }}
+                  >
+                    <UserX size={13} color="#d97706" />
+                    <span>Atanan Randevulardan Çıkma Durumu</span>
+                    <span
+                      className="dlm-help-wrap"
+                      tabIndex={0}
+                      role="button"
+                      aria-label="Atanan randevulardan çıkma açıklaması"
+                    >
+                      <span className="dlm-help-icon" aria-hidden="true">
+                        ?
+                      </span>
+                      <span className="dlm-help-popup" role="tooltip">
+                        İzin saatlerindeki {conflictingAppointments.length} randevudan hekim ataması
+                        kaldırılır ve takvimde &quot;Atama Bekliyor&quot; durumuna geçirilir.
+                      </span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !unassignAppointments
+                      setUnassignAppointments(next)
+                      if (next) setSubstituteDoctorId('')
+                    }}
+                    className={unassignAppointments ? 'btn-clinic-primary' : ''}
+                    style={{
+                      width: '100%',
+                      padding: '9px 11px',
+                      borderRadius: 10,
+                      border: unassignAppointments
+                        ? `1.5px solid ${brandBlueBorder}`
+                        : `1.5px solid ${borderCol}`,
+                      background: unassignAppointments ? brandBlueGradient : inputBg,
+                      color: unassignAppointments ? '#ffffff' : textCol,
+                      boxShadow: unassignAppointments
+                        ? 'var(--pc-clay-primary)'
+                        : 'var(--pc-clay-btn)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 5,
+                        border: unassignAppointments
+                          ? '1.5px solid #ffffff'
+                          : `1.5px solid ${borderCol}`,
+                        background: unassignAppointments ? '#ffffff' : cardBg,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {unassignAppointments && <Check size={12} color={brandBlue} strokeWidth={3} />}
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 750,
+                        color: unassignAppointments ? '#ffffff' : textCol,
+                      }}
+                    >
+                      Atanan Randevulardan Çık (Atama Bekleyenlere Aktar)
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Tarih (Özel DatePicker Popover) & İzin Nedeni */}
             <div
               style={{
@@ -498,6 +1036,7 @@ export default function DoctorLeaveModal({
               <div style={{ position: 'relative' }}>
                 <label style={labelStyle}>Tarih</label>
                 <button
+                  ref={dateTriggerRef}
                   type="button"
                   onClick={() => setShowDatePopover((prev) => !prev)}
                   style={{
@@ -514,11 +1053,12 @@ export default function DoctorLeaveModal({
                 </button>
                 {showDatePopover && (
                   <div
+                    ref={datePopoverRef}
                     style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      zIndex: 100050,
+                      position: 'fixed',
+                      top: datePopoverCoords.top,
+                      left: datePopoverCoords.left,
+                      zIndex: 100060,
                       width: 280,
                       padding: 12,
                       borderRadius: 14,
@@ -543,6 +1083,56 @@ export default function DoctorLeaveModal({
                         }}
                         showOutsideDays
                       />
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginTop: 8,
+                        paddingTop: 8,
+                        borderTop: `1px solid ${borderCol}`,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const todayStr = toYmd(new Date())
+                          setDate(todayStr)
+                          setCalendarMonth(parseYmd(todayStr))
+                          setShowDatePopover(false)
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 7,
+                          fontSize: '0.72rem',
+                          fontWeight: 750,
+                          border: '1px solid var(--btn-clinic-outline-border, #93c5fd)',
+                          background: 'var(--btn-clinic-outline-bg, #eff6ff)',
+                          color: 'var(--btn-clinic-outline-text, #1d4ed8)',
+                          boxShadow: 'var(--pc-clay-btn)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Bugün
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDatePopover(false)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 7,
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          border: `1px solid ${borderCol}`,
+                          background: subCardBg,
+                          color: textCol,
+                          boxShadow: 'var(--pc-clay-btn)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Kapat
+                      </button>
                     </div>
                   </div>
                 )}
@@ -595,6 +1185,44 @@ export default function DoctorLeaveModal({
                   >
                     {startTime} – {endTime}
                   </span>
+                </div>
+
+                {/* Başlangıç / Bitiş Doğrudan Saat Inputları */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontSize: '0.67rem', fontWeight: 700, color: mutedCol }}>Başlangıç</span>
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v) setStartTime(v)
+                      }}
+                      style={{
+                        ...inputStyle,
+                        padding: '6px 9px',
+                        fontSize: '0.79rem',
+                        fontWeight: 750,
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontSize: '0.67rem', fontWeight: 700, color: mutedCol }}>Bitiş</span>
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v) setEndTime(v)
+                      }}
+                      style={{
+                        ...inputStyle,
+                        padding: '6px 9px',
+                        fontSize: '0.79rem',
+                        fontWeight: 750,
+                      }}
+                    />
+                  </label>
                 </div>
 
                 {/* Dual-Thumb Slider */}
@@ -771,9 +1399,12 @@ export default function DoctorLeaveModal({
                       <div style={{ fontWeight: 700, color: textCol }}>
                         {l.date} · {l.isFullDay ? 'Tüm Gün' : `${l.startTime}–${l.endTime}`}
                       </div>
-                      {l.reason && (
+                      {(l.reason || l.substituteDoctorName || l.notes) && (
                         <div style={{ fontSize: '0.7rem', color: mutedCol }}>
-                          {l.reason}
+                          {l.reason || ''}
+                          {l.substituteDoctorName
+                            ? `${l.reason ? ' · ' : ''}Yerine: ${l.substituteDoctorName}`
+                            : ''}
                           {l.notes ? ` (${l.notes})` : ''}
                         </div>
                       )}
@@ -818,17 +1449,16 @@ export default function DoctorLeaveModal({
           <button
             type="button"
             onClick={onClose}
-            className="btn-clinic-outline"
             style={{
               padding: '9px 18px',
-              borderRadius: '9px',
-              border: '1px solid var(--btn-clinic-outline-border, #93c5fd)',
-              background: 'var(--btn-clinic-outline-bg, #eff6ff)',
-              color: 'var(--btn-clinic-outline-text, #1d4ed8)',
+              borderRadius: '8px',
+              border: `1px solid ${borderCol}`,
+              background: cardBg,
+              color: textCol,
               boxShadow: 'var(--pc-clay-btn)',
               cursor: 'pointer',
-              fontSize: '0.84rem',
-              fontWeight: 700,
+              fontSize: '0.86rem',
+              fontWeight: 600,
             }}
           >
             İptal
@@ -840,14 +1470,14 @@ export default function DoctorLeaveModal({
             className="btn-clinic-primary"
             style={{
               padding: '9px 24px',
-              borderRadius: '9px',
+              borderRadius: '8px',
               background: brandBlueGradient,
               color: '#ffffff',
               border: `1px solid ${brandBlueBorder}`,
               boxShadow: 'var(--pc-clay-primary)',
               cursor: saving || !selectedDoctorId ? 'not-allowed' : 'pointer',
-              fontWeight: 750,
-              fontSize: '0.84rem',
+              fontWeight: 700,
+              fontSize: '0.86rem',
               opacity: saving || !selectedDoctorId ? 0.5 : 1,
             }}
           >

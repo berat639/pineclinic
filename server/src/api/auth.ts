@@ -23,6 +23,10 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
       set.status = 404
       return { error: 'Bu domain için aktif klinik bulunamadı. Klinikler platform panelinden oluşturulmalıdır.' }
     }
+    if (tenant.isActive === false && !user.isPlatformAdmin) {
+      set.status = 403
+      return { error: 'Bu klinik şu anda dondurulmuştur (askıya alınmıştır). Giriş yapılamaz.' }
+    }
 
     const existingMembership = await getActiveMembership(user.id, tenant.clinicId)
     const membership = existingMembership ?? (user.isPlatformAdmin
@@ -77,6 +81,11 @@ export const authPlugin = new Elysia({ prefix: '/api/auth' })
   .get('/me', async ({ cookie, set, request }) => {
     const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined), request)
     if (!user) { set.status = 401; return { error: 'Oturum geçersiz' } }
+    const tenant = await resolveTenantFromRequest(request)
+    if (tenant?.isActive === false && !user.isPlatformAdmin) {
+      set.status = 403
+      return { error: 'Bu klinik şu anda dondurulmuştur (askıya alınmıştır).' }
+    }
     return user
   })
 

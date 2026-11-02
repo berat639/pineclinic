@@ -1,21 +1,31 @@
 import React from 'react'
 import PatientConsentPanel from './PatientConsentPanel'
+import PatientRecordsTimeline from './PatientRecordsTimeline'
+import { getTreatmentColorTheme } from './FastScheduleModal'
+import { getReadOnlyTreatmentStatusBadge } from './PatientTreatmentHistory'
 
 interface PatientProfileCardProps {
   profile: any
+  doctors?: any[]
   onEdit?: (patient: any) => void
   calendarHistoryMode?: boolean
   onConsentChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void
 }
 
-export default function PatientProfileCard({ profile, onEdit, calendarHistoryMode = false, onConsentChange }: PatientProfileCardProps) {
+export default function PatientProfileCard({
+  profile,
+  doctors = [],
+  onEdit,
+  calendarHistoryMode = false,
+  onConsentChange,
+}: PatientProfileCardProps) {
   if (!profile) return (
     <div style={{ padding: 24, textAlign: 'center', color: 'var(--foreground-3)' }}>
       Yükleniyor...
     </div>
   )
 
-  const { patient, appointments, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
+  const { patient, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
 
   const cardStyle = {
     background: 'var(--card-bg, #1e293b)',
@@ -25,7 +35,7 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
     marginBottom: 12,
     boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
   }
-  
+
   const headerStyle = {
     fontSize: '0.75rem',
     fontWeight: 700,
@@ -39,12 +49,31 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
   const formatDate = (iso: string) => {
     if (!iso) return '-'
     const d = new Date(iso)
+    if (isNaN(d.getTime())) return '-'
     return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  }
+
+  const resolveDoctorName = (t: any): string => {
+    if (t.doctorName) return t.doctorName
+    if (t.doctor_name) return t.doctor_name
+    const ids: string[] = Array.isArray(t.doctorIds)
+      ? t.doctorIds
+      : Array.isArray(t.metadata?.doctorIds)
+        ? t.metadata.doctorIds
+        : t.doctorId
+          ? [t.doctorId]
+          : t.doctor_id
+            ? [t.doctor_id]
+            : []
+    const names = ids
+      .map(id => doctors.find((d: any) => d.id === id)?.name)
+      .filter(Boolean)
+    return names.join(', ')
   }
 
   return (
     <div style={{ padding: '16px', background: 'var(--card-bg, #1e293b)', fontSize: '0.85rem', color: 'var(--foreground)' }}>
-      
+
       {/* Demografik */}
       <div style={cardStyle}>
         <div style={{ ...headerStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -53,9 +82,9 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
             <button
               onClick={() => onEdit(patient)}
               style={{
-                background: 'rgba(59,130,246,0.15)',
-                border: '1px solid rgba(59,130,246,0.3)',
-                color: '#60a5fa',
+                background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+                border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                color: 'var(--btn-clinic-secondary-text, #0284c7)',
                 borderRadius: 6,
                 padding: '2px 8px',
                 fontSize: '0.72rem',
@@ -176,37 +205,122 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
         </div>
       )}
 
-      {/* Randevular */}
-      {!calendarHistoryMode && appointments && appointments.length > 0 && (
+      {/* Salt-Okunur (Read-Only) Tedavi Planı Kartlığı */}
+      {!calendarHistoryMode && treatments && treatments.length > 0 && (
         <div style={cardStyle}>
-          <div style={headerStyle}>📅 Ziyaret Tarihleri ({appointments.length})</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {appointments.map((a: any) => (
-              <span key={a.id} style={{ background: 'var(--input-bg)', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem', border: '1px solid var(--input-border)' }}>
-                {formatDate(a.startTime)}
-              </span>
-            ))}
+          <div style={headerStyle}>🦷 Tedavi Planları ({treatments.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {treatments.map((t: any, idx: number) => {
+              const badge = getReadOnlyTreatmentStatusBadge(t.status)
+              const tTheme = getTreatmentColorTheme(t.color || t.metadata?.color || t.procedureName, idx)
+              const costVal = Number(t.cost ?? t.price ?? 0)
+              const docName = resolveDoctorName(t)
+              const sessionDate = t.sessions?.[0]?.startTime || t.plannedDate || t.createdAt
+
+              return (
+                <div
+                  key={t.id || idx}
+                  style={{
+                    padding: '9px 11px',
+                    borderRadius: 8,
+                    background: 'var(--input-bg, #ffffff)',
+                    border: badge.isCompleted
+                      ? '1px solid var(--btn-clinic-mint-border, #86efac)'
+                      : '1px solid var(--input-border, #cbd5e1)',
+                    borderLeft: badge.isCompleted ? '4px solid #10b981' : `4px solid ${tTheme.accent}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: badge.isCompleted ? '#10b981' : tTheme.accent,
+                          flexShrink: 0,
+                        }}
+                      />
+                      {t.toothNumber && (
+                        <span
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 5,
+                            background: badge.isCompleted ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : tTheme.badgeBg,
+                            border: badge.isCompleted
+                              ? '1px solid var(--btn-clinic-mint-border, #86efac)'
+                              : `1px solid ${tTheme.softBorder}`,
+                            color: badge.isCompleted ? 'var(--btn-clinic-mint-text, #15803d)' : tTheme.badgeText,
+                            fontWeight: 800,
+                            fontSize: '0.71rem',
+                            flexShrink: 0,
+                          }}
+                        >
+                          #{t.toothNumber}
+                        </span>
+                      )}
+                      <span style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--foreground)' }}>
+                        {t.procedureName}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {costVal > 0 && (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
+                          {costVal.toLocaleString('tr-TR')} ₺
+                        </span>
+                      )}
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          background: badge.bg,
+                          border: badge.border,
+                          color: badge.color,
+                        }}
+                      >
+                        {badge.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      fontSize: '0.71rem',
+                      color: 'var(--foreground-2)',
+                    }}
+                  >
+                    <span>
+                      👨‍⚕️ İlgili Doktor: <strong style={{ color: 'var(--foreground)' }}>{docName || 'Belirtilmedi'}</strong>
+                    </span>
+                    {sessionDate && (
+                      <span style={{ color: 'var(--foreground-3)', fontWeight: 600 }}>
+                        📅 {formatDate(sessionDate)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* Tedavi Planları */}
-      {!calendarHistoryMode && treatments && treatments.length > 0 && (
-        <div style={cardStyle}>
-          <div style={headerStyle}>🦷 Tedavi Planları ({treatments.length})</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {treatments.slice(0, 5).map((t: any) => (
-              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--glass-border)', paddingBottom: 2 }}>
-                <span>{t.toothNumber ? `#${t.toothNumber}` : ''} {t.procedureName}</span>
-                <span style={{ color: t.status === 'completed' || t.status === 'yapıldı' || t.status === '✓ Tamamlandı' ? '#10b981' : '#f59e0b' }}>
-                  {t.status}
-                </span>
-              </div>
-            ))}
-            {treatments.length > 5 && <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', textAlign: 'center', marginTop: 4 }}>...ve {treatments.length - 5} daha</div>}
-          </div>
-        </div>
-      )}
+      {/* Tüm Kayıtlar & İşlem Geçmişi */}
+      <div style={cardStyle}>
+        <div style={headerStyle}>📋 Tüm Kayıtlar & İşlem Geçmişi</div>
+        <PatientRecordsTimeline profile={profile} doctors={doctors} compact />
+      </div>
 
       {/* Ödemeler */}
       {payments && payments.length > 0 && (
@@ -238,7 +352,7 @@ export default function PatientProfileCard({ profile, onEdit, calendarHistoryMod
           </div>
         </div>
       )}
-      
+
     </div>
   )
 }

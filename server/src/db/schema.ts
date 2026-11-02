@@ -259,6 +259,7 @@ export const doctorLeaves = pgTable('doctor_leaves', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   clinicId: uuid('clinic_id').references(() => clinics.id, { onDelete: 'cascade' }),
   doctorId: uuid('doctor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  substituteDoctorId: uuid('substitute_doctor_id').references(() => users.id),
   date: text('date').notNull(), // 'YYYY-MM-DD'
   startTime: text('start_time').notNull(), // 'HH:mm'
   endTime: text('end_time').notNull(), // 'HH:mm'

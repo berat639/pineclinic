@@ -6,7 +6,7 @@ import { ensureTreatmentPlanningSchema } from '../db/treatment-planning-schema'
 import { getSetting, setSetting } from '../db/repositories/settings'
 import { credentialsFor } from '../db/repositories/whatsapp'
 import type { Config } from '../integrations/managed/model'
-import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
+import { activeConfig, decrypt, ensureIntegrations, getRow } from '../integrations/managed/store'
 import { normalizePhone, sendWhatsAppText } from '../integrations/whatsapp'
 import { sendEmail } from './email'
 import { sendSMS } from './netgsm'
@@ -15,9 +15,111 @@ import { TreatmentPlanError } from './treatment-planning'
 export const CONSENT_CHANNELS = ['sms', 'whatsapp', 'email', 'assistant_call'] as const
 export type ConsentChannel = typeof CONSENT_CHANNELS[number]
 export type DeliveryChannel = Exclude<ConsentChannel, 'assistant_call'>
+export type ChannelIntegrationStatus = 'active' | 'unconfigured' | 'error'
+export type ChannelIntegrations = Record<ConsentChannel, { status: ChannelIntegrationStatus; message?: string }>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const textKey = 'patient_consent.form_text'
+
+export async function getConsentChannelStatuses(clinicId: string): Promise<ChannelIntegrations> {
+  await ensureIntegrations()
+  const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
+  const rows = await db.execute(sql`SELECT service, enabled, active, legacy, health, checked_at, revision FROM managed_integrations WHERE clinic_id = ${clinicId}`)
+  const tests = await db.execute(sql`
+    SELECT DISTINCT ON (service) service, status, message, revision
+    FROM integration_tests
+    WHERE clinic_id = ${clinicId}
+    ORDER BY service, created_at DESC
+  `)
+  const rowByService = new Map<string, any>(rows.map((r: any) => [String(r.service), r]))
+  const testByService = new Map<string, any>(tests.map((t: any) => [String(t.service), t]))
+
+  // 1. SMS
+  const smsRow = rowByService.get('sms')
+  const smsTest = testByService.get('sms')
+  const hasLegacySms = Boolean(clinic?.netgsmUsercode && clinic?.netgsmPassword && clinic?.smsSenderId)
+  let smsStatus: { status: ChannelIntegrationStatus; message?: string }
+  if (!smsRow) {
+    smsStatus = hasLegacySms
+      ? { status: 'active' }
+      : { status: 'unconfigured', message: 'Klinikler ekranından SMS entegrasyonu yapılmadı' }
+  } else if (smsRow.enabled && smsRow.active && smsTest?.status !== 'failed') {
+    smsStatus = { status: 'active' }
+  } else {
+    smsStatus = {
+      status: 'error',
+      message: smsTest?.status === 'failed'
+        ? (String(smsTest.message || '') || 'Son SMS bağlantı testi başarısız')
+        : 'SMS entegrasyonu etkinleştirilmedi veya bağlantı hatası var',
+    }
+  }
+
+  // 2. Email (SMTP)
+  const smtpRow = rowByService.get('smtp')
+  const smtpTest = testByService.get('smtp')
+  let emailStatus: { status: ChannelIntegrationStatus; message?: string }
+  if (!smtpRow) {
+    emailStatus = { status: 'unconfigured', message: 'Klinikler ekranından E-posta (SMTP) entegrasyonu yapılmadı' }
+  } else if (smtpRow.enabled && smtpRow.active && smtpTest?.status !== 'failed') {
+    emailStatus = { status: 'active' }
+  } else {
+    emailStatus = {
+      status: 'error',
+      message: smtpTest?.status === 'failed'
+        ? (String(smtpTest.message || '') || 'Son E-posta (SMTP) bağlantı testi başarısız')
+        : 'E-posta (SMTP) entegrasyonu etkinleştirilmedi veya bağlantı hatası var',
+    }
+  }
+
+  // 3. Assistant Call (Phone / SIP)
+  const phoneRow = rowByService.get('phone')
+  const phoneTest = testByService.get('phone')
+  let phoneStatus: { status: ChannelIntegrationStatus; message?: string }
+  const isUnverifiedLegacyPhone = Boolean(phoneRow?.legacy && phoneRow?.health !== 'registered' && phoneRow?.health !== 'unregistered' && !phoneTest)
+  if (!phoneRow || isUnverifiedLegacyPhone) {
+    phoneStatus = { status: 'unconfigured', message: 'Klinikler ekranından Sesli Asistan (Telefon/SIP) entegrasyonu yapılmadı' }
+  } else if (phoneRow.enabled && phoneRow.active && phoneRow.health === 'registered' && phoneTest?.status !== 'failed') {
+    phoneStatus = { status: 'active' }
+  } else {
+    phoneStatus = {
+      status: 'error',
+      message: phoneRow.health === 'unregistered'
+        ? 'SIP telefon bağlantısı koptu (Unregistered)'
+        : phoneTest?.status === 'failed'
+          ? (String(phoneTest.message || '') || 'Son telefon bağlantı testi başarısız')
+          : 'Telefon entegrasyonu etkinleştirilmedi veya SIP kaydı doğrulanmadı',
+    }
+  }
+
+  // 4. WhatsApp
+  const waConfigured = Boolean(
+    clinic?.whatsappExpectedPhone ||
+    (clinic?.whatsappSetupStatus && clinic.whatsappSetupStatus !== 'not_started') ||
+    clinic?.whatsappEnabled
+  )
+  let whatsappStatus: { status: ChannelIntegrationStatus; message?: string }
+  if (!waConfigured) {
+    whatsappStatus = { status: 'unconfigured', message: 'Klinikler ekranından WhatsApp entegrasyonu yapılmadı' }
+  } else if (clinic?.whatsappEnabled && clinic?.evolutionConnectionState === 'open' && clinic?.whatsappSetupStatus !== 'phone_mismatch') {
+    whatsappStatus = { status: 'active' }
+  } else {
+    whatsappStatus = {
+      status: 'error',
+      message: clinic?.whatsappSetupStatus === 'phone_mismatch'
+        ? 'WhatsApp numarası klinik numarasıyla eşleşmiyor'
+        : clinic?.evolutionConnectionState !== 'open'
+          ? 'WhatsApp bağlantısı kesildi veya açık değil'
+          : 'WhatsApp gönderimleri etkinleştirilmedi',
+    }
+  }
+
+  return {
+    sms: smsStatus,
+    whatsapp: whatsappStatus,
+    email: emailStatus,
+    assistant_call: phoneStatus,
+  }
+}
 
 export async function consentSettings(clinicId: string) {
   const text = await getSetting(textKey, clinicId)

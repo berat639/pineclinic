@@ -51,4 +51,23 @@ trigger: always_on
   - **Cohesive Deep Clinical Blue**: All primary buttons, active tabs, and selected pills must use the same deep clinical blue (`linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)`, border `#1d4ed8`, text `#ffffff`).
   - **Custom DatePicker & Interactive Slider HourPicker**: Avoid raw browser-native `<input type="date">` and long `<select>` hour dropdowns; use custom `DayPicker` popovers and dual-thumb 24-hour range sliders + hour grid popovers (`InteractiveTimeRangePicker`).
 
+## 7. Treatment Planning, Odontogram, Session Scheduling & Context Menu Standards (Anti-Regression Rules)
+- **Procedure Color Picker & Cross-View Color Synchronization**:
+  - When adding or editing a procedure in the Treatment Planning modal (`InlineCatalogForm.tsx` / `PineTreatmentPlanView.tsx`), a **Clinical Procedure Color Picker** must always be present; the redundant `Diş / Çene / Tüm ağız` (`catalogScope`) select box must NOT be included there.
+  - The selected procedure color must be rendered with identical color identity across the Treatments catalog, Treatment Plan table, the top indicator bar/dots of Odontogram teeth, the right-panel Treatment Plan cards (`CalendarTab.tsx`), and the Daily Calendar Session Scheduling modal (`FastScheduleModal.tsx`).
+- **Odontogram Assigned Tooth Appearance (Round Color Dots), Completed Procedure Edit Warning & Right-Click Context Menu**:
+  - In the Odontogram, tooth background color must reflect ONLY selection state (`var(--card-bg)` when unselected, `var(--pc-blue)` when selected); unselected teeth with assigned procedures must NOT be painted dark navy (`#1e293b` / `#1e3a5f`).
+  - Assigned procedures on a tooth must be displayed as **round colored dots (`8px × 8px`, `border-radius: 50%`)** at the top of the tooth (never a full-width bar) so multiple procedures on the same tooth appear side by side clearly.
+  - In Edit (`Düzenle`) mode, previously **completed (`completed`)** procedures must remain editable and deletable (both in the table and in the right-click context menu), triggering a warning toast on change/delete and a confirmation modal (`ConfirmModal`) before saving.
+  - The right-click context menu on a tooth (`PlanToothTools.tsx`) must cleanly provide only individual deletion of assigned procedures (**"Atanan İşlemler (Sil)"**) and adding procedures/indications (**"İşlem Ekle" / "Endikasyon Ekle"**).
+- **Context Menu Viewport Locking (No Drift on Page Scroll)**:
+  - All right-click context menus across the application (`PlanToothContextMenu`, `ShiftContextMenu`, `eventContextMenu`, etc.) must use a full-screen fixed capture backdrop (`position: fixed; inset: 0`) and lock background scrolling (`wheel` prevention) while open, strictly preventing the context menu from detaching and drifting away from its target element when the page or modal scrolls.
+- **Long Descriptions in Dropdowns & Forms Inside Info Tooltips (`ⓘ`)**:
+  - In popovers/dropdowns such as treatment reminder notifications (TDB checkup intervals, etc.), long explanatory texts and recommendation rationales must not be stacked directly inside the box; instead, they must be displayed inside an opaque, high-contrast **tooltip** triggered by an `ⓘ` info icon next to the title.
+- **Session Scheduling (`FastScheduleModal.tsx`) 1-Minute Granularity, Pastel Colors & Conflict Rules**:
+  - Treatment time scheduling must not be forced into rigid 15/30-minute steps; it must support smooth dragging and resizing at **1-minute flexible resolution** with high FPS (`pointermove`).
+  - The selection box must never be dark blue with black text; it must use soft clinical pastel tones matching other appointment cards and synchronized with the procedure color.
+  - A doctor cannot treat **two different patients** at the same time (dragging/dropping onto another patient's appointment is locked); however, multiple procedures for the **same patient** can be grouped into a single session or merged by dragging onto an existing session of that patient.
+
+
 

@@ -1,4 +1,4 @@
-import React, { useId, useRef, useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { maskTlPrice, tlPriceToMinor } from '@/lib/tl-price-input'
 import styles from './PineTreatmentPlan.module.css'
@@ -11,6 +11,8 @@ export type CreatedCatalogEntry = {
 export type EditingCatalogItem = {
   id: string; name: string; scope?: 'tooth' | 'jaw' | 'mouth'; price?: number; color?: string; defaultMaterials?: any[]
 }
+
+const CLINICAL_COLOR_SWATCHES = ['#0284c7', '#8b5cf6', '#ef4444', '#0d9488', '#d97706', '#16a34a', '#ec4899', '#6366f1'] as const
 
 function formatPriceFromTl(tl?: number): string {
   if (!tl || !Number.isFinite(tl) || tl <= 0) return '0,00'
@@ -32,11 +34,24 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
   const [name, setName] = useState(editingItem?.name ?? initialName)
   const [price, setPrice] = useState(() => formatPriceFromTl(editingItem?.price))
   const [scope, setScope] = useState<'tooth' | 'jaw' | 'mouth'>(editingItem?.scope || 'tooth')
+  const [color, setColor] = useState(editingItem?.color || '#0284c7')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   const isProcedure = kind === 'procedure'
   const isEditing = !!editingItem?.id
+
+  useEffect(() => {
+    if (editingItem) {
+      setName(editingItem.name)
+      setPrice(formatPriceFromTl(editingItem.price))
+      setScope(editingItem.scope || 'tooth')
+      setColor(editingItem.color || '#0284c7')
+    } else {
+      setScope('tooth')
+      setColor('#0284c7')
+    }
+  }, [editingItem, kind])
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -54,14 +69,17 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
           name: name.trim(),
           scope: isProcedure ? scope : 'tooth',
           priceMinor,
-          color: editingItem?.color,
+          color: isProcedure ? color : undefined,
           materials: editingItem?.defaultMaterials ?? [],
         }),
       })
       const result = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(result.error || 'Kayıt kaydedilemedi. Yazdığınız bilgiler korunuyor.')
       if (!result.id || !result.name) throw new Error('Kayıt sonucu doğrulanamadı.')
-      onCreated(result)
+      onCreated({
+        ...result,
+        color: isProcedure ? (result.color || color) : result.color,
+      })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Kayıt kaydedilemedi.')
     } finally { pending.current = false; setBusy(false) }
@@ -107,7 +125,64 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
             }} />
             <span aria-hidden="true">TL</span>
           </div>
-          <select id={`${id}-scope`} className={`${styles.select} ${styles.catalogScope}`} aria-label="Kapsam" value={scope} onChange={event => setScope(event.target.value as 'tooth' | 'jaw' | 'mouth')}><option value="tooth">Diş</option><option value="jaw">Çene</option><option value="mouth">Tüm ağız</option></select>
+          <div
+            role="group"
+            aria-label="Tedavi rengi"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 8px',
+              borderRadius: 8,
+              background: 'var(--input-bg)',
+              border: '1px solid var(--input-border)',
+              boxShadow: 'var(--pc-neo-inset)',
+            }}
+          >
+            {CLINICAL_COLOR_SWATCHES.map(swatch => {
+              const isSelected = color.toLowerCase() === swatch.toLowerCase()
+              return (
+                <button
+                  key={swatch}
+                  type="button"
+                  aria-label={`Renk ${swatch}`}
+                  aria-pressed={isSelected}
+                  title={`Renk seç: ${swatch}`}
+                  onClick={() => setColor(swatch)}
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: swatch,
+                    border: isSelected ? '2px solid var(--foreground)' : '1.5px solid var(--input-border)',
+                    padding: 0,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    transform: isSelected ? 'scale(1.12)' : 'scale(1)',
+                    transition: 'transform 0.12s ease, border-color 0.12s ease',
+                  }}
+                />
+              )
+            })}
+            <input
+              id={`${id}-color`}
+              type="color"
+              aria-label="Özel tedavi rengi"
+              title="Özel renk seç"
+              value={color}
+              onChange={event => setColor(event.target.value)}
+              style={{
+                width: 22,
+                height: 22,
+                padding: 0,
+                border: '1px solid var(--input-border)',
+                borderRadius: 6,
+                background: 'var(--input-bg)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            />
+          </div>
         </>}
         <button type="submit" className={`${styles.button} ${styles.primary} ${styles.small}`} disabled={!name.trim()} title={isProcedure && replacingMaterials ? 'Yeni tedavi seçildiğinde önceki malzeme seçimi temizlenir.' : undefined}>{isEditing ? (busy ? 'Kaydediliyor…' : 'Kaydet') : (busy ? 'Ekleniyor…' : 'Ekle')}</button>
       </div>

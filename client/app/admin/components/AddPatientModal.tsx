@@ -136,7 +136,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
       >
         <div className="reference-modal-header">
           <div className="reference-modal-heading">
-            <span className="reference-modal-icon"><UserRoundPlus size={26} /></span>
+            <span className="reference-modal-icon"><UserRoundPlus size={17} color="#ffffff" /></span>
             <div>
               <h3>Yeni Hasta Ekle</h3>
               <p>Hasta bilgilerini kaydedin</p>
@@ -148,7 +148,7 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             className="reference-modal-close"
             aria-label="Modalı kapat"
           >
-            <X size={24} />
+            <X size={16} />
           </button>
         </div>
 
@@ -349,8 +349,17 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="btn-clinic-blue"
-            style={{ cursor: 'pointer' }}
+            style={{
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: '1px solid var(--input-border)',
+              background: 'var(--card-bg)',
+              color: 'var(--foreground)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              boxShadow: 'var(--pc-clay-btn)',
+            }}
           >
             İptal
           </button>
@@ -358,10 +367,20 @@ export default function AddPatientModal({ isOpen, onClose, onSuccess }: AddPatie
             type="button"
             onClick={handleAddPatient}
             disabled={loading}
-            className="btn-clinic-primary"
-            style={{ cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}
+            style={{
+              padding: '9px 24px',
+              borderRadius: '8px',
+              background: '#2563eb',
+              color: '#ffffff',
+              border: 'none',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontSize: '0.86rem',
+              fontWeight: 700,
+              boxShadow: 'var(--pc-clay-primary)',
+              opacity: loading ? 0.6 : 1,
+            }}
           >
-            {loading ? 'Kaydediliyor...' : 'Kaydet'}
+            <span style={{ color: '#ffffff' }}>{loading ? 'Kaydediliyor...' : 'Kaydet'}</span>
           </button>
         </div>
       </div>

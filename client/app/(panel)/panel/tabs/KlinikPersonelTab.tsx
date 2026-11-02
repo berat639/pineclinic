@@ -17,8 +17,6 @@ import {
   Pencil,
   Trash2,
   CalendarOff,
-  Clock,
-  Plus,
   ShieldAlert,
   Copy,
   Send,
@@ -196,17 +194,20 @@ export default function KlinikPersonelTab() {
   const [editError, setEditError] = useState('')
   const [isSavingUser, setIsSavingUser] = useState(false)
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<User | null>(null)
+  const [confirmFreezeUser, setConfirmFreezeUser] = useState<User | null>(null)
+
+  const activeAdminCount = users.filter((x) => x.role === 'yonetici' && x.active !== false).length
 
   const fetchData = useCallback(() => {
     fetch('/api/admin/users', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => setUsers(Array.isArray(list) ? list : []))
-      .catch(() => {})
+      .catch(() => { })
 
     fetch('/api/shifts', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => setShifts(Array.isArray(list) ? list : []))
-      .catch(() => {})
+      .catch(() => { })
 
     fetch('/api/dental/staff-permissions', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
@@ -221,7 +222,7 @@ export default function KlinikPersonelTab() {
           setSmtpStatus(data.smtpStatus)
         }
       })
-      .catch(() => {})
+      .catch(() => { })
 
     fetch('/api/yonetici/users/invitations', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
@@ -233,7 +234,7 @@ export default function KlinikPersonelTab() {
           setSmtpStatus(data.smtpStatus)
         }
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [])
 
   useEffect(() => {
@@ -310,6 +311,18 @@ export default function KlinikPersonelTab() {
   async function handleUpdateUser(e: React.FormEvent) {
     e.preventDefault()
     if (!editingUser) return
+    if (editingUser.id === user?.id && !editForm.active) {
+      const msg = 'Güvenlik Uyarısı: Kendi yönetici hesabınızı donduramazsınız.'
+      setEditError(msg)
+      toast.error(msg)
+      return
+    }
+    if (editingUser.role === 'yonetici' && editingUser.active !== false && activeAdminCount <= 1 && (!editForm.active || editForm.role !== 'yonetici')) {
+      const msg = 'Güvenlik Uyarısı: Klinikteki tek aktif yönetici hesabı dondurulamaz veya yetkisi düşürülemez. Önce başka bir yönetici tanımlayın.'
+      setEditError(msg)
+      toast.error(msg)
+      return
+    }
     setIsSavingUser(true)
     setEditError('')
     try {
@@ -332,7 +345,11 @@ export default function KlinikPersonelTab() {
       if (!res.ok) throw new Error(data.error || 'Güncelleme başarısız')
 
       setEditingUser(null)
-      toast.success('Personel bilgileri güncellendi.')
+      if (!editForm.active && editingUser.active && Number(data.unassignedAppointmentsCount) > 0) {
+        toast.success(`${editForm.name} hesabı donduruldu. Gelecekteki ${data.unassignedAppointmentsCount} randevu boşa çıkarıldı (Atama Bekliyor).`)
+      } else {
+        toast.success('Personel bilgileri güncellendi.')
+      }
       fetchData()
     } catch (err: any) {
       setEditError(err.message || 'Hata oluştu')
@@ -342,11 +359,8 @@ export default function KlinikPersonelTab() {
     }
   }
 
-  async function handleToggleFreezeUser(u: User, e?: React.MouseEvent) {
-    if (e) e.stopPropagation()
-    if (!canManageStaff) return
+  async function executeFreezeToggle(u: User, nextActive: boolean) {
     try {
-      const nextActive = !u.active
       const res = await fetch(`/api/yonetici/users/${u.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -355,11 +369,31 @@ export default function KlinikPersonelTab() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Hesap durumu güncellenemedi')
-      toast.success(nextActive ? `${u.name} hesabı yeniden aktifleştirildi.` : `${u.name} hesabı donduruldu ve aktif oturumları kapatıldı.`)
+      setConfirmFreezeUser(null)
+      if (!nextActive && Number(data.unassignedAppointmentsCount) > 0) {
+        toast.success(`${u.name} hesabı donduruldu. Gelecekteki ${data.unassignedAppointmentsCount} randevu boşa çıkarıldı (Atama Bekliyor).`)
+      } else {
+        toast.success(nextActive ? `${u.name} hesabı yeniden aktifleştirildi.` : `${u.name} hesabı donduruldu ve aktif oturumları kapatıldı.`)
+      }
       fetchData()
     } catch (err: any) {
       toast.error(err.message || 'İşlem başarısız')
     }
+  }
+
+  async function handleToggleFreezeUser(u: User, e?: React.MouseEvent) {
+    if (e) e.stopPropagation()
+    if (!canManageStaff) return
+    if (u.role === 'yonetici') {
+      toast.error('⚠️ Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında dondurulabilir.')
+      return
+    }
+    const nextActive = !u.active
+    if (!nextActive) {
+      setConfirmFreezeUser(u)
+      return
+    }
+    await executeFreezeToggle(u, true)
   }
 
   async function handleDeleteUser(u: User) {
@@ -734,20 +768,37 @@ export default function KlinikPersonelTab() {
 
                     {canManageStaff && (
                       <div style={{ display: 'flex', gap: 5 }}>
-                        <button
-                          type="button"
-                          onClick={(e) => handleToggleFreezeUser(u, e)}
-                          style={{
-                            ...clayOutlineBtnStyle,
-                            padding: '4px 8px',
-                            fontSize: '0.68rem',
-                            borderRadius: 7,
-                          }}
-                          title={u.active ? 'Hesabı Dondur' : 'Hesabı Aktifleştir'}
-                        >
-                          {u.active ? <Snowflake size={11} /> : <Play size={11} />}
-                          {u.active ? 'Dondur' : 'Aktifleştir'}
-                        </button>
+                        {u.role === 'yonetici' ? (
+                          <span
+                            style={{
+                              fontSize: '0.64rem',
+                              padding: '4px 8px',
+                              borderRadius: 7,
+                              background: 'var(--card-bg)',
+                              border: '1px solid var(--input-border)',
+                              color: 'var(--foreground-3)',
+                              fontWeight: 700,
+                            }}
+                            title="Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden dondurulabilir"
+                          >
+                            Satış Ekibi (Klinikler)
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleFreezeUser(u, e)}
+                            style={{
+                              ...clayOutlineBtnStyle,
+                              padding: '4px 8px',
+                              fontSize: '0.68rem',
+                              borderRadius: 7,
+                            }}
+                            title={u.active ? 'Hesabı Dondur' : 'Hesabı Aktifleştir'}
+                          >
+                            {u.active ? <Snowflake size={11} /> : <Play size={11} />}
+                            {u.active ? 'Dondur' : 'Aktifleştir'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -760,7 +811,7 @@ export default function KlinikPersonelTab() {
                             fontSize: '0.68rem',
                             borderRadius: 7,
                           }}
-                          title="Düzenle / KVKK Kaldır"
+                          title="Düzenle"
                         >
                           <Pencil size={11} />
                         </button>
@@ -789,91 +840,130 @@ export default function KlinikPersonelTab() {
           }}
           {...inviteBackdropDismiss}
         >
-          <div
+          <form
             role="dialog"
             aria-modal="true"
             aria-label="E-Posta ile Personel Davet Et"
+            onSubmit={handleInviteSubmit}
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: '100%',
+              width: 'calc(100vw - 24px)',
               maxWidth: 460,
               maxHeight: '90vh',
-              overflowY: 'auto',
               background: 'var(--card-bg)',
               borderRadius: 14,
               border: '1.5px solid var(--input-border)',
               boxShadow: 'var(--pc-modal-shadow)',
-              padding: 20,
               boxSizing: 'border-box',
               color: 'var(--foreground)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            {/* Header (Yeni Randevu Standardı) */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '15px 20px',
+                borderBottom: '1px solid var(--input-border)',
+                background: 'var(--card-inner)',
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: '#2563eb',
                     boxShadow: 'var(--pc-clay-primary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                 >
                   <Mail size={17} color="#ffffff" />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--foreground)' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
                     Personel Davet Et (KVKK Uyumlu)
                   </h3>
-                  <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)' }}>
-                    Şifreyi ve KVKK açık rızasını personel kendi e-postasından belirler
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
+                    Şifreyi personel kendi e-postasından belirler
                   </div>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowInviteModal(false)}
+                aria-label="Kapat"
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
                   border: '1px solid var(--input-border)',
-                  background: 'var(--card-inner)',
-                  color: 'var(--foreground-2)',
-                  display: 'inline-flex',
+                  background: 'var(--input-bg)',
+                  color: 'var(--foreground)',
+                  display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: 'pointer',
+                  boxShadow: 'var(--pc-clay-btn)',
                 }}
               >
-                <X size={15} />
+                <X size={16} />
               </button>
             </div>
 
-            {!smtpStatus.ready && (
+            {/* Body */}
+            <div
+              style={{
+                padding: '18px 20px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'var(--card-bg)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              {!smtpStatus.ready && (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: 'var(--card-inner)',
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠️ {smtpStatus.message || 'E-Posta (SMTP) entegrasyonu aktif değil. Davet göndermeden önce SMTP ayarlarını tamamlayın.'}
+                </div>
+              )}
+
               <div
                 style={{
-                  padding: '10px 12px',
-                  borderRadius: 10,
                   background: 'var(--card-inner)',
-                  border: '1px solid var(--danger)',
-                  color: 'var(--danger)',
-                  fontSize: '0.76rem',
-                  fontWeight: 700,
-                  marginBottom: 12,
+                  padding: 14,
+                  borderRadius: 10,
+                  border: '1px solid var(--input-border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
                 }}
               >
-                ⚠️ {smtpStatus.message || 'E-Posta (SMTP) entegrasyonu aktif değil. Davet göndermeden önce SMTP ayarlarını tamamlayın.'}
-              </div>
-            )}
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>
+                  Personel Bilgileri
+                </div>
 
-            <form onSubmit={handleInviteSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ ...neoSubCardStyle, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
-                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                     Ad Soyad *
                   </label>
                   <input
@@ -886,7 +976,7 @@ export default function KlinikPersonelTab() {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                     Kurumsal / Kişisel E-Posta *
                   </label>
                   <input
@@ -901,7 +991,7 @@ export default function KlinikPersonelTab() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       Rol *
                     </label>
                     <select
@@ -911,11 +1001,10 @@ export default function KlinikPersonelTab() {
                     >
                       <option value="hekim">Hekim</option>
                       <option value="host">Kayıt / Resepsiyon</option>
-                      <option value="yonetici">Yönetici</option>
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       Telefon (Opsiyonel)
                     </label>
                     <PhoneMaskedInput
@@ -930,7 +1019,7 @@ export default function KlinikPersonelTab() {
                 {inviteForm.role === 'hekim' && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                         Uzmanlık Alanı
                       </label>
                       <input
@@ -941,7 +1030,7 @@ export default function KlinikPersonelTab() {
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                         Takvim Rengi
                       </label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
@@ -973,28 +1062,62 @@ export default function KlinikPersonelTab() {
                   ⚠️ {inviteError}
                 </div>
               )}
+            </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button type="button" onClick={() => setShowInviteModal(false)} style={clayOutlineBtnStyle}>
-                  Vazgeç
-                </button>
-                <button
-                  type="submit"
-                  disabled={sendingInvite || !smtpStatus.ready}
-                  className="btn-clinic-primary"
-                  style={{
-                    ...clayPrimaryBtnStyle,
-                    opacity: sendingInvite || !smtpStatus.ready ? 0.6 : 1,
-                  }}
-                >
-                  <Send size={14} color="#ffffff" />
-                  <span style={{ color: '#ffffff' }}>
-                    {sendingInvite ? 'Gönderiliyor…' : 'Davet E-Postası Gönder'}
-                  </span>
-                </button>
-              </div>
-            </form>
-          </div>
+            {/* Footer */}
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: '1px solid var(--input-border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                background: 'var(--card-inner)',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: 8,
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--foreground)',
+                  cursor: 'pointer',
+                  fontSize: '0.86rem',
+                  fontWeight: 600,
+                  boxShadow: 'var(--pc-clay-btn)',
+                }}
+              >
+                İptal
+              </button>
+              <button
+                type="submit"
+                disabled={sendingInvite || !smtpStatus.ready}
+                style={{
+                  padding: '9px 24px',
+                  borderRadius: 8,
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: sendingInvite || !smtpStatus.ready ? 'not-allowed' : 'pointer',
+                  fontSize: '0.86rem',
+                  fontWeight: 700,
+                  boxShadow: 'var(--pc-clay-primary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: sendingInvite || !smtpStatus.ready ? 0.6 : 1,
+                }}
+              >
+                <Send size={14} color="#ffffff" />
+                <span style={{ color: '#ffffff' }}>
+                  {sendingInvite ? 'Gönderiliyor…' : 'Kaydet'}
+                </span>
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -1013,74 +1136,113 @@ export default function KlinikPersonelTab() {
           }}
           {...editUserBackdropDismiss}
         >
-          <div
+          <form
             role="dialog"
             aria-modal="true"
             aria-label="Personel Düzenle"
+            onSubmit={handleUpdateUser}
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: '100%',
+              width: 'calc(100vw - 24px)',
               maxWidth: 460,
               maxHeight: '90vh',
-              overflowY: 'auto',
               background: 'var(--card-bg)',
               borderRadius: 14,
               border: '1.5px solid var(--input-border)',
               boxShadow: 'var(--pc-modal-shadow)',
-              padding: 20,
               boxSizing: 'border-box',
               color: 'var(--foreground)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            {/* Header (Yeni Randevu Standardı) */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '15px 20px',
+                borderBottom: '1px solid var(--input-border)',
+                background: 'var(--card-inner)',
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    background: editForm.color || '#2563eb',
-                    boxShadow: 'var(--pc-clay-btn)',
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: '#2563eb',
+                    boxShadow: 'var(--pc-clay-primary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: '#ffffff',
+                    flexShrink: 0,
                   }}
                 >
                   <UserIcon size={17} color="#ffffff" />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--foreground)' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
                     Personel Bilgileri & Yetki
                   </h3>
-                  <div style={{ fontSize: '0.73rem', color: 'var(--foreground-2)' }}>{editingUser.email}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>{editingUser.email}</div>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setEditingUser(null)}
+                aria-label="Kapat"
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
                   border: '1px solid var(--input-border)',
-                  background: 'var(--card-inner)',
-                  color: 'var(--foreground-2)',
-                  display: 'inline-flex',
+                  background: 'var(--input-bg)',
+                  color: 'var(--foreground)',
+                  display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: 'pointer',
+                  boxShadow: 'var(--pc-clay-btn)',
                 }}
               >
-                <X size={15} />
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleUpdateUser} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ ...neoSubCardStyle, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Body */}
+            <div
+              style={{
+                padding: '18px 20px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'var(--card-bg)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <div
+                style={{
+                  background: 'var(--card-inner)',
+                  padding: 14,
+                  borderRadius: 10,
+                  border: '1px solid var(--input-border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>
+                  Kişisel Bilgiler
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       Ad Soyad *
                     </label>
                     <input
@@ -1091,7 +1253,7 @@ export default function KlinikPersonelTab() {
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       E-Posta *
                     </label>
                     <input
@@ -1106,7 +1268,7 @@ export default function KlinikPersonelTab() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       Telefon
                     </label>
                     <PhoneMaskedInput
@@ -1117,25 +1279,32 @@ export default function KlinikPersonelTab() {
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                       Rol
                     </label>
-                    <select
-                      value={editForm.role}
-                      onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                      style={{ ...inputStyle, cursor: 'pointer' }}
-                    >
-                      <option value="hekim">Hekim</option>
-                      <option value="host">Kayıt / Resepsiyon</option>
-                      <option value="yonetici">Yönetici</option>
-                    </select>
+                    {editingUser.role === 'yonetici' ? (
+                      <input
+                        value="Yönetici (Seed User)"
+                        disabled
+                        style={{ ...inputStyle, opacity: 0.75, cursor: 'not-allowed' }}
+                      />
+                    ) : (
+                      <select
+                        value={editForm.role}
+                        onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                        style={{ ...inputStyle, cursor: 'pointer' }}
+                      >
+                        <option value="hekim">Hekim</option>
+                        <option value="host">Kayıt / Resepsiyon</option>
+                      </select>
+                    )}
                   </div>
                 </div>
 
                 {editForm.role === 'hekim' && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                         Uzmanlık
                       </label>
                       <input
@@ -1146,7 +1315,7 @@ export default function KlinikPersonelTab() {
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
                         Takvim Rengi
                       </label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38 }}>
@@ -1164,40 +1333,96 @@ export default function KlinikPersonelTab() {
               </div>
 
               {/* Hesap Dondurma / Aktifleştirme Kartı */}
-              <div
-                style={{
-                  ...neoSubCardStyle,
-                  padding: '10px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 750, color: 'var(--foreground)' }}>
-                    Hesap Durumu ({editForm.active ? 'Aktif' : 'Donduruldu'})
+              {(() => {
+                const isTargetAdmin = editingUser.role === 'yonetici'
+                const freezeLocked = isTargetAdmin
+                return (
+                  <div
+                    style={{
+                      background: 'var(--card-inner)',
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      border: '1px solid var(--input-border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--foreground)' }}>
+                          Hesap Durumu ({editForm.active ? 'Aktif' : 'Donduruldu'})
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>
+                          Dondurulan personel sisteme giriş yapamaz, geçmiş tıbbi kayıtları korunur.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (freezeLocked) {
+                            toast.error(
+                              '⚠️ Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında dondurulabilir.'
+                            )
+                            return
+                          }
+                          setEditForm({ ...editForm, active: !editForm.active })
+                        }}
+                        style={{
+                          ...clayOutlineBtnStyle,
+                          padding: '6px 12px',
+                          fontSize: '0.75rem',
+                          borderRadius: 8,
+                          border: editForm.active ? '1px solid var(--btn-mint-border, #86efac)' : '1px solid var(--danger, #ef4444)',
+                          background: editForm.active ? 'var(--btn-mint-bg, #f0fdf4)' : 'var(--card-bg)',
+                          color: editForm.active ? 'var(--btn-mint-text, #15803d)' : 'var(--danger, #ef4444)',
+                          opacity: freezeLocked ? 0.65 : 1,
+                        }}
+                      >
+                        {editForm.active ? <Check size={13} /> : <Snowflake size={13} />}
+                        {editForm.active ? 'Aktif' : 'Donduruldu'}
+                      </button>
+                    </div>
+                    {freezeLocked && (
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          background: 'var(--card-bg)',
+                          border: '1px solid #f59e0b',
+                          color: '#d97706',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <ShieldAlert size={14} style={{ flexShrink: 0 }} />
+                        <span>
+                          Yönetici (Seed User) hesabı yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında dondurulabilir.
+                        </span>
+                      </div>
+                    )}
+                    {!editForm.active && editingUser.active && editForm.role === 'hekim' && (
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          background: 'var(--calendar-unassigned-bg, #ffedd5)',
+                          border: '1px solid var(--calendar-unassigned-border, #f97316)',
+                          color: 'var(--calendar-unassigned-text, #9a3412)',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        ⚠️ Hekim hesabı dondurulduğunda, gelecekteki aktif randevuları boşa çıkarılır ve ana takvimde turuncu renkli &quot;Doktor ayrıldı, atama bekliyor&quot; uyarısıyla gösterilir.
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--foreground-2)' }}>
-                    Dondurulan personel sisteme giriş yapamaz, geçmiş tıbbi kayıtları korunur.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditForm({ ...editForm, active: !editForm.active })}
-                  style={{
-                    ...clayOutlineBtnStyle,
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
-                    border: editForm.active ? '1px solid var(--btn-mint-border, #86efac)' : '1px solid var(--danger, #ef4444)',
-                    background: editForm.active ? 'var(--btn-mint-bg, #f0fdf4)' : 'var(--card-bg)',
-                    color: editForm.active ? 'var(--btn-mint-text, #15803d)' : 'var(--danger, #ef4444)',
-                  }}
-                >
-                  {editForm.active ? <Check size={13} /> : <Snowflake size={13} />}
-                  {editForm.active ? 'Aktif' : 'Donduruldu'}
-                </button>
-              </div>
+                )
+              })()}
 
               {editError && (
                 <div
@@ -1214,34 +1439,97 @@ export default function KlinikPersonelTab() {
                   ⚠️ {editError}
                 </div>
               )}
+            </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
+            {/* Footer */}
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: '1px solid var(--input-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                background: 'var(--card-inner)',
+              }}
+            >
+              {editingUser.role !== 'yonetici' ? (
                 <button
                   type="button"
                   onClick={() => setConfirmDeleteUser(editingUser)}
                   style={{
                     ...clayOutlineBtnStyle,
                     border: '1px solid var(--danger)',
+                    background: 'var(--card-bg)',
                     color: 'var(--danger)',
-                    padding: '8px 12px',
-                    fontSize: '0.76rem',
+                    padding: '9px 12px',
+                    borderRadius: 8,
+                    fontSize: '0.78rem',
                   }}
                 >
-                  <Trash2 size={14} /> KVKK Uyumlu Kaldır
+                  <Trash2 size={14} /> KVKK Kaldır
                 </button>
+              ) : (
+                <div />
+              )}
 
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={() => setEditingUser(null)} style={clayOutlineBtnStyle}>
-                    Vazgeç
-                  </button>
-                  <button type="submit" disabled={isSavingUser} className="btn-clinic-primary" style={clayPrimaryBtnStyle}>
-                    <span style={{ color: '#ffffff' }}>{isSavingUser ? 'Kaydediliyor…' : 'Kaydet'}</span>
-                  </button>
-                </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: 8,
+                    border: '1px solid var(--input-border)',
+                    background: 'var(--card-bg)',
+                    color: 'var(--foreground)',
+                    cursor: 'pointer',
+                    fontSize: '0.86rem',
+                    fontWeight: 600,
+                    boxShadow: 'var(--pc-clay-btn)',
+                  }}
+                >
+                  İptal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingUser}
+                  style={{
+                    padding: '9px 24px',
+                    borderRadius: 8,
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: isSavingUser ? 'not-allowed' : 'pointer',
+                    fontSize: '0.86rem',
+                    fontWeight: 700,
+                    boxShadow: 'var(--pc-clay-primary)',
+                  }}
+                >
+                  <span style={{ color: '#ffffff' }}>{isSavingUser ? 'Kaydediliyor…' : 'Kaydet'}</span>
+                </button>
               </div>
-            </form>
-          </div>
+            </div>
+          </form>
         </div>
+      )}
+
+      {/* Hesap Dondurma Onay Modalı */}
+      {confirmFreezeUser && (
+        <ConfirmModal
+          isOpen={true}
+          title={confirmFreezeUser.role === 'hekim' ? 'Hekim Hesabını Dondur' : 'Personel Hesabını Dondur'}
+          message={
+            confirmFreezeUser.role === 'hekim'
+              ? `"${confirmFreezeUser.name}" adlı hekimin hesabını dondurmak istediğinize emin misiniz? Hekimin aktif oturumları kapatılır ve gelecekteki tüm aktif randevuları boşa çıkarılarak ana takvimde turuncu renkli "Doktor ayrıldı, atama bekliyor" uyarısıyla gösterilir.`
+              : `"${confirmFreezeUser.name}" adlı personelin hesabını dondurmak istediğinize emin misiniz? Dondurulan personel sisteme giriş yapamaz, geçmiş kayıtları korunur.`
+          }
+          confirmText="Evet, Hesabı Dondur"
+          cancelText="Vazgeç"
+          variant="warning"
+          onConfirm={() => executeFreezeToggle(confirmFreezeUser, false)}
+          onClose={() => setConfirmFreezeUser(null)}
+        />
       )}
 
       {/* KVKK Uyumlu Kaldırma Onay Modalı */}
@@ -1271,10 +1559,10 @@ export default function KlinikPersonelTab() {
           onOpenLeaveModal={
             canManageLeaves
               ? (docId, dt) => {
-                  setLeaveDoctorId(docId)
-                  setLeaveDate(dt)
-                  setIsLeaveModalOpen(true)
-                }
+                setLeaveDoctorId(docId)
+                setLeaveDate(dt)
+                setIsLeaveModalOpen(true)
+              }
               : undefined
           }
           onSave={async (shift) => {
@@ -1295,6 +1583,7 @@ export default function KlinikPersonelTab() {
         isOpen={isLeaveModalOpen}
         onClose={() => setIsLeaveModalOpen(false)}
         doctors={users.map((u) => ({ id: u.id, name: u.name, specialty: u.specialty, color: u.color }))}
+        shifts={shifts}
         initialDoctorId={leaveDoctorId}
         initialDate={leaveDate || new Date().toISOString().split('T')[0]}
         onSuccess={() => fetchData()}

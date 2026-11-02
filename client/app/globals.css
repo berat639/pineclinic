@@ -60,8 +60,10 @@
   --calendar-leave-border: #475569;
   --calendar-leave-fg: #cbd5e1;
   --calendar-leave-stripe: #0f172a;
-  --calendar-unassigned-bg: #3b2a11;
-  --calendar-unassigned-border: #f59e0b;
+  --calendar-unassigned-bg: #431407;
+  --calendar-unassigned-border: #f97316;
+  --calendar-unassigned-text: #ffedd5;
+  --calendar-unassigned-subtext: #fdba74;
 
   /* ── Clinical Health Design System (Dark) ────────────────────────── */
   --btn-clinic-primary-bg: #2563eb;
@@ -159,8 +161,10 @@
   --calendar-leave-border: #94a3b8;
   --calendar-leave-fg: #334155;
   --calendar-leave-stripe: #cbd5e1;
-  --calendar-unassigned-bg: #fff3d6;
-  --calendar-unassigned-border: #b45309;
+  --calendar-unassigned-bg: #ffedd5;
+  --calendar-unassigned-border: #ea580c;
+  --calendar-unassigned-text: #9a3412;
+  --calendar-unassigned-subtext: #c2410c;
 
   /* ── Clinical Health Design System (Light) ───────────────────────── */
   --btn-clinic-primary-bg: #1d4ed8;
@@ -199,7 +203,7 @@
   --pc-modal-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.24), 0 6px 16px -4px rgba(15, 23, 42, 0.10);
 }
 
-/* ── Appointment-reference modal layout ─────────────────────────────────── */
+/* ── Appointment-reference modal layout (Yeni Randevu 460px Standard) ────── */
 .reference-modal-overlay {
   position: fixed;
   inset: 0;
@@ -208,52 +212,61 @@
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: var(--modal-overlay);
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .reference-modal {
-  width: 560px;
-  max-width: 96vw;
-  max-height: 92vh;
+  width: calc(100vw - 24px);
+  max-width: 460px;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
   background: var(--card-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 22px;
-  box-shadow: 0 20px 40px var(--modal-shadow);
+  border: 1.5px solid var(--input-border);
+  border-radius: 14px;
+  box-shadow: var(--pc-modal-shadow);
 }
 
-.reference-modal--patient { width: 520px; }
+.reference-modal--patient {
+  width: calc(100vw - 24px);
+  max-width: 460px;
+}
 
 .reference-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 26px 30px;
-  background: var(--modal-header-bg);
+  gap: 10px;
+  padding: 15px 20px;
+  background: var(--card-inner);
   border-bottom: 1px solid var(--input-border);
 }
 
 .reference-modal-heading {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   min-width: 0;
 }
 
 .reference-modal-icon {
-  width: 52px;
-  height: 52px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--btn-clinic-primary-fg);
-  background: var(--btn-clinic-primary-bg);
-  border-radius: 14px;
+  color: #ffffff !important;
+  background: #2563eb;
+  border-radius: 8px;
+  box-shadow: var(--pc-clay-primary);
+}
+
+.reference-modal-icon svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
 }
 
 .reference-modal-heading h3,
@@ -264,20 +277,20 @@
 
 .reference-modal-heading h3 {
   color: var(--foreground);
-  font-size: 1.35rem;
+  font-size: 1.02rem;
   line-height: 1.2;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .reference-modal-heading p {
-  margin-top: 5px;
-  color: var(--foreground-2);
-  font-size: 0.82rem;
+  margin-top: 2px;
+  color: var(--foreground-3);
+  font-size: 0.75rem;
 }
 
 .reference-modal-close {
-  width: 42px;
-  height: 42px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -287,7 +300,8 @@
   color: var(--foreground);
   background: var(--input-bg);
   border: 1px solid var(--input-border);
-  border-radius: 10px;
+  border-radius: 6px;
+  box-shadow: var(--pc-clay-btn);
 }
 
 .reference-modal-close:hover { background: var(--card-inner); }
@@ -295,127 +309,130 @@
 .reference-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 30px;
+  padding: 18px 20px;
   background: var(--card-bg);
-}
-
-.reference-modal-section {
-  padding: 22px;
-  background: var(--modal-section-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 16px;
-}
-
-.reference-section-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.reference-section-title > span {
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--btn-clinic-primary-fg);
-  background: var(--btn-clinic-primary-bg);
-  border-radius: 50%;
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
-.reference-section-title h4 {
-  color: var(--foreground);
-  font-size: 1.05rem;
-  font-weight: 800;
-}
-
-.reference-modal-fields {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
+.reference-modal-section {
+  padding: 14px;
+  background: var(--card-inner);
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reference-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.reference-section-title > span {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: #2563eb;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.reference-section-title h4 {
+  color: var(--foreground);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.reference-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .reference-modal .reference-modal-fields label {
   color: var(--foreground-2) !important;
-  font-size: 0.8rem !important;
+  font-size: 0.75rem !important;
   font-weight: 600 !important;
 }
 
 .reference-modal .reference-modal-fields input:not([type="checkbox"]),
 .reference-modal .reference-modal-fields select {
-  min-height: 44px;
-  padding: 10px 12px !important;
+  padding: 9px 12px !important;
   color: var(--foreground) !important;
   background: var(--input-bg) !important;
   border: 1px solid var(--input-border) !important;
-  border-radius: 10px !important;
-  font-size: 0.9rem !important;
+  border-radius: 8px !important;
+  font-size: 0.85rem !important;
+  box-shadow: var(--pc-neo-inset);
 }
 
 .reference-modal .reference-modal-fields input[type="checkbox"] {
-  width: 17px !important;
-  height: 17px !important;
-  accent-color: var(--btn-clinic-primary-bg) !important;
+  width: 16px !important;
+  height: 16px !important;
+  accent-color: #2563eb !important;
 }
 
 .reference-modal .reference-modal-fields input:focus,
 .reference-modal .reference-modal-fields select:focus {
-  outline: 2px solid var(--accent) !important;
+  outline: 2px solid #2563eb !important;
   outline-offset: 1px;
 }
 
 .reference-consent-card {
-  padding: 16px !important;
+  padding: 12px !important;
   background: var(--card-bg) !important;
   border: 1px solid var(--input-border) !important;
-  border-radius: 12px !important;
+  border-radius: 8px !important;
 }
 
 .reference-modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  padding: 20px 30px;
-  background: var(--modal-header-bg);
+  gap: 10px;
+  padding: 14px 20px;
+  background: var(--card-inner);
   border-top: 1px solid var(--input-border);
 }
 
 .reference-modal-footer--inside {
-  margin: 8px -22px -22px;
-  padding: 18px 22px 0;
+  margin: 8px -14px -14px;
+  padding: 14px 14px 0;
   background: transparent;
   border-top: 1px solid var(--input-border);
 }
 
 .reference-modal-footer .btn-clinic-primary,
 .reference-modal-footer .btn-clinic-blue {
-  min-height: 46px;
-  padding: 10px 22px !important;
-  border-radius: 11px !important;
-  font-size: 0.9rem !important;
-  font-weight: 800 !important;
+  padding: 9px 18px !important;
+  border-radius: 8px !important;
+  font-size: 0.86rem !important;
+  font-weight: 700 !important;
 }
 
 .reference-leave-history {
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 .reference-leave-history h4 {
   color: var(--foreground) !important;
-  font-size: 0.9rem !important;
+  font-size: 0.84rem !important;
 }
 
 @media (max-width: 560px) {
   .reference-modal-overlay { padding: 12px; }
-  .reference-modal-header { padding: 20px; }
-  .reference-modal-body { padding: 16px; }
-  .reference-modal-section { padding: 16px; }
-  .reference-modal-footer { padding: 16px 20px; }
-  .reference-modal-heading h3 { font-size: 1.12rem; }
-  .reference-modal-heading p { font-size: 0.75rem; }
+  .reference-modal-header { padding: 14px 16px; }
+  .reference-modal-body { padding: 14px 16px; }
+  .reference-modal-section { padding: 12px; }
+  .reference-modal-footer { padding: 12px 16px; }
 }
 
 /* ── React Flow Controls ────────────────────────────────────────────────────── */
@@ -464,15 +481,24 @@
   gap: 4px;
   max-width: 100%;
   padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--calendar-unassigned-border);
-  color: #ffffff;
-  font-size: 0.6rem;
+  border-radius: 5px;
+  background: #ea580c;
+  color: #ffffff !important;
+  font-size: 0.62rem;
   font-weight: 800;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.25px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.rc-unassigned-badge *,
+.rc-unassigned-warning-icon,
+.rc-unassigned-warning-icon *,
+[data-theme="light"] .admin-content .rc-unassigned-badge,
+[data-theme="light"] .admin-content .rc-unassigned-badge *,
+[data-theme="light"] .admin-content .rc-unassigned-warning-icon,
+[data-theme="light"] .admin-content .rc-unassigned-warning-icon * {
+  color: #ffffff !important;
 }
 .rc-ev-title { display: block; font-size: 0.78rem; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-ev-time { display: block; font-size: 0.68rem; color: var(--foreground-2); font-weight: 500; }
@@ -802,6 +828,20 @@ button[class*="primary"] *,
 [data-theme="light"] .admin-content [style*="background: #1d4ed8"] *,
 [data-theme="light"] .admin-content [style*="background: rgb(29, 78, 216)"],
 [data-theme="light"] .admin-content [style*="background: rgb(29, 78, 216)"] *,
+[data-theme="light"] .admin-content [style*="background: #1e40af"],
+[data-theme="light"] .admin-content [style*="background: #1e40af"] *,
+[data-theme="light"] .admin-content [style*="background: rgb(30, 64, 175)"],
+[data-theme="light"] .admin-content [style*="background: rgb(30, 64, 175)"] *,
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="37, 99, 235"],
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="37, 99, 235"] *,
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="#2563eb"],
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="#2563eb"] *,
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="29, 78, 216"],
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="29, 78, 216"] *,
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="#1d4ed8"],
+[data-theme="light"] .admin-content [style*="linear-gradient"][style*="#1d4ed8"] *,
+[data-theme="light"] .admin-content .fs-selected-slot,
+[data-theme="light"] .admin-content .fs-selected-slot *,
 [data-theme="light"] .admin-content [style*="background: var(--btn-clinic-primary-bg"],
 [data-theme="light"] .admin-content [style*="background: var(--btn-clinic-primary-bg"] *,
 [data-theme="light"] .admin-content [style*="background: var(--accent"],
@@ -1672,6 +1712,133 @@ button[class*="primary"] *,
   .dc-mode-desc {
     margin-bottom: 1.5rem;
   }
+}
+
+/* ── Global Clinical DatePicker (.clinic-rdp, .simple-picker, .mini-cal-wrap) ── */
+.clinic-rdp {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.clinic-rdp .rdp {
+  --rdp-cell-size: 33px !important;
+  --rdp-accent-color: #2563eb !important;
+  --rdp-background-color: var(--card-inner, #eff6ff) !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  color: var(--foreground);
+  font-size: 12.5px;
+}
+
+.clinic-rdp .rdp-months,
+.clinic-rdp .rdp-month,
+.clinic-rdp .rdp-table,
+.simple-picker .rdp-months,
+.simple-picker .rdp-month,
+.simple-picker .rdp-table {
+  width: 100% !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+}
+
+.clinic-rdp .rdp-caption {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 0 2px 8px !important;
+}
+
+.clinic-rdp .rdp-caption_label {
+  font-size: 0.84rem !important;
+  font-weight: 800 !important;
+  color: var(--foreground) !important;
+  text-transform: capitalize;
+}
+
+.clinic-rdp .rdp-nav {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.clinic-rdp .rdp-nav_button {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--input-border) !important;
+  background: var(--input-bg) !important;
+  color: var(--foreground) !important;
+  box-shadow: var(--pc-clay-btn);
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+
+.clinic-rdp .rdp-head_cell {
+  font-size: 0.68rem !important;
+  font-weight: 700 !important;
+  color: var(--foreground-2) !important;
+  text-transform: uppercase;
+  padding-bottom: 4px !important;
+  text-align: center !important;
+}
+
+.clinic-rdp .rdp-cell {
+  padding: 1px !important;
+  text-align: center !important;
+}
+
+.clinic-rdp .rdp-day {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  font-size: 0.78rem !important;
+  font-weight: 650 !important;
+  color: var(--foreground) !important;
+  margin: 0 auto !important;
+  transition: all 0.12s ease;
+}
+
+.clinic-rdp .rdp-day_outside {
+  color: var(--foreground-3) !important;
+  opacity: 0.45 !important;
+}
+
+.clinic-rdp .rdp-day_today:not(.rdp-day_selected) {
+  background: var(--badge-clinic-bg, #e0f2fe) !important;
+  border: 1.5px solid var(--accent, #0284c7) !important;
+  color: var(--badge-clinic-fg, #0369a1) !important;
+  font-weight: 800 !important;
+  box-shadow: var(--pc-clay-pale) !important;
+}
+
+.clinic-rdp .rdp-day_selected,
+.clinic-rdp .rdp-day_selected:hover,
+.clinic-rdp .rdp-day_selected:focus-visible {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+  border: 1px solid #1d4ed8 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  box-shadow: var(--pc-clay-primary) !important;
+}
+
+.clinic-rdp .rdp-day_selected *,
+[data-theme="light"] .admin-content .clinic-rdp .rdp-day_selected,
+[data-theme="light"] .admin-content .clinic-rdp .rdp-day_selected *,
+[data-theme="light"] .admin-content .simple-picker .rdp-day_selected,
+[data-theme="light"] .admin-content .simple-picker .rdp-day_selected *,
+[data-theme="light"] .admin-content .mini-cal-wrap .rdp-day_selected,
+[data-theme="light"] .admin-content .mini-cal-wrap .rdp-day_selected * {
+  color: #ffffff !important;
+}
+
+.clinic-rdp .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background: var(--card-inner, #eff6ff) !important;
+  border-color: var(--input-border, #93c5fd) !important;
+  color: var(--accent, #0284c7) !important;
 }
 
 /* ── React Hot Toast Highest Z-Index Guarantee ── */

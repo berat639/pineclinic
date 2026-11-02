@@ -52,6 +52,8 @@ describe.skipIf(!testUrl)('plan attachment uploads', () => {
 
   test('file types, limits and contents are checked server-side', async () => {
     await expect(attachments.createPlanAttachment(clinicId, patientId, { kind: 'photo', files: [{ name: 'bad.exe', size: 10 }], requestKey: crypto.randomUUID() })).rejects.toThrow('türü')
+    await expect(attachments.createPlanAttachment(clinicId, patientId, { kind: 'radiology', files: [{ name: 'panoramik.jpg', size: 10 }], requestKey: crypto.randomUUID() })).rejects.toThrow('türü')
+    await expect(attachments.createPlanAttachment(clinicId, patientId, { kind: 'radiology', files: [{ name: 'panoramik.png', size: 10 }], requestKey: crypto.randomUUID() })).rejects.toThrow('türü')
     await expect(attachments.createPlanAttachment(clinicId, patientId, { kind: 'photo', files: [{ name: 'big.png', size: 20 * 1024 * 1024 + 1 }], requestKey: crypto.randomUUID() })).rejects.toThrow('boyutu')
     const bad = await attachments.createPlanAttachment(clinicId, patientId, { kind: 'photo', files: [{ name: 'bad.png', size: 8 }], requestKey: crypto.randomUUID() })
     created.push(bad.id)

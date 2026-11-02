@@ -272,7 +272,8 @@ const app = new Elysia()
     ]
     if (!protectedPrefixes.some(prefix => pathname.startsWith(prefix))) return
     if (pathname === '/api/admin/settings/calendar/callback') return
-    if (!currentTenant()) {
+    const tenant = currentTenant()
+    if (!tenant) {
       set.status = 404
       return { error: 'Bu domain için aktif klinik bulunamadı' }
     }
@@ -280,6 +281,10 @@ const app = new Elysia()
     if (!user) {
       set.status = 401
       return { error: 'Oturum geçersiz' }
+    }
+    if (tenant.isActive === false && !user.isPlatformAdmin && !pathname.startsWith('/api/platform')) {
+      set.status = 403
+      return { error: 'Bu klinik şu anda dondurulmuştur (askıya alınmıştır). Lütfen satış ekibi ile iletişime geçiniz.' }
     }
   })
   .use(cors({ origin: corsOrigins }))
@@ -327,7 +332,7 @@ const app = new Elysia()
           mkdirSync(resolve(PUBLIC_DIR, 'uploads'), { recursive: true })
           const { writeFileSync } = await import('fs')
           writeFileSync(filePath, buf)
-        } catch {}
+        } catch { }
         set.headers['content-type'] = mime
         set.headers['cache-control'] = 'public, max-age=86400'
         return new Response(buf)
@@ -394,7 +399,7 @@ const app = new Elysia()
       const { db } = await import('./db/client')
       const { patients } = await import('./db/schema')
       const { eq, and } = await import('drizzle-orm')
-      
+
       const patientId = params.id
       const patient = await db.query.patients.findFirst({
         where: and(eq(patients.id, patientId), eq(patients.clinicId, requireClinicId()))
@@ -403,11 +408,11 @@ const app = new Elysia()
         set.status = 404
         return { error: 'Hasta bulunamadı' }
       }
-      return { 
+      return {
         id: patient.id,
         smsOptOut: patient.smsOptOut,
         emailOptOut: patient.emailOptOut,
-        whatsappOptOut: patient.whatsappOptOut 
+        whatsappOptOut: patient.whatsappOptOut
       }
     } catch (e: any) {
       set.status = 500
@@ -419,10 +424,10 @@ const app = new Elysia()
       const { db } = await import('./db/client')
       const { patients } = await import('./db/schema')
       const { eq, and } = await import('drizzle-orm')
-      
+
       const patientId = params.id
       const b = body as any
-      
+
       const update: { smsOptOut?: boolean; emailOptOut?: boolean; whatsappOptOut?: boolean } = {}
       if (b.smsOptOut === true) update.smsOptOut = true
       if (b.emailOptOut === true) update.emailOptOut = true
@@ -437,7 +442,7 @@ const app = new Elysia()
         const { revokePatientConsent } = await import('./services/patient-consent')
         await revokePatientConsent(requireClinicId(), patientId, channels)
       }
-      
+
       return { success: true }
     } catch (e: any) {
       set.status = 500
@@ -540,6 +545,9 @@ const app = new Elysia()
     }
     return await createDoctorLeave({
       doctorId: b.doctorId,
+      substituteDoctorId: b.substituteDoctorId || null,
+      unassignAppointments: Boolean(b.unassignAppointments),
+      appointmentIds: Array.isArray(b.appointmentIds) ? b.appointmentIds : undefined,
       date: b.date,
       startTime: b.startTime,
       endTime: b.endTime,
@@ -559,7 +567,11 @@ const app = new Elysia()
     const { listDentalAppointments } = await import('./db/repositories/dental')
     return await listDentalAppointments(query.date as string | undefined)
   })
-  .post('/api/dental/appointments', async ({ body, set }) => {
+  .post('/api/dental/appointments', async ({ body, set, cookie }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined).catch(() => null)
+    const actor = user
+      ? { actorType: user.role === 'hekim' ? 'doctor' : user.role === 'yonetici' ? 'admin' : 'desk', actorName: user.name }
+      : undefined
     const { createDentalAppointment } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.patientId || !b.title || !b.startTime || !b.endTime) {
@@ -570,7 +582,7 @@ const app = new Elysia()
         patientId: b.patientId, doctorId: b.doctorId || null, title: b.title,
         startTime: new Date(b.startTime), endTime: new Date(b.endTime),
         status: b.status, type: b.type, notes: b.notes,
-      })
+      }, actor)
     } catch (err: any) {
       set.status = 400; return { error: err.message || 'Randevu oluşturulamadı' }
     }
@@ -581,7 +593,11 @@ const app = new Elysia()
     if (!ok) { set.status = 404; return { error: 'Not found' } }
     return { success: true }
   })
-  .put('/api/dental/appointments/:id', async ({ params, body, set }) => {
+  .put('/api/dental/appointments/:id', async ({ params, body, set, cookie }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined).catch(() => null)
+    const actor = user
+      ? { actorType: user.role === 'hekim' ? 'doctor' : user.role === 'yonetici' ? 'admin' : 'desk', actorName: user.name }
+      : undefined
     const { updateDentalAppointment } = await import('./db/repositories/dental')
     const b = body as Record<string, unknown>
     try {
@@ -594,7 +610,7 @@ const app = new Elysia()
         type: b.type as string | undefined,
         complaint: b.complaint as string | undefined,
         notes: b.notes as string | undefined,
-      })
+      }, actor)
       if (!updated) { set.status = 404; return { error: 'Not found' } }
       return updated
     } catch (err: any) {
@@ -716,15 +732,15 @@ const app = new Elysia()
       set.status = 400
       return { error: 'Geçersiz doğum yılı' }
     }
-    return await createPatient({ 
-      name: b.name, 
-      phone: b.phone, 
+    return await createPatient({
+      name: b.name,
+      phone: b.phone,
       email: b.email,
       tcIdentity: b.tcIdentity,
       gender: b.gender,
       birthDate: b.birthDate,
       birthYear,
-      balance: b.balance 
+      balance: b.balance
     })
   })
   .post("/api/dental/patients/bulk", async ({ body, set }) => {
@@ -770,9 +786,9 @@ const app = new Elysia()
     if (b.whatsappOptOut !== undefined) updateData.whatsappOptOut = Boolean(b.whatsappOptOut)
     if (b.smsOptOut !== undefined) updateData.smsOptOut = Boolean(b.smsOptOut)
     if (b.emailOptOut !== undefined) updateData.emailOptOut = Boolean(b.emailOptOut)
-    
+
     if (Object.keys(updateData).length === 0) return { success: true }
-    
+
     const [patient] = await db.update(patients).set(updateData).where(and(eq(patients.id, params.id), eq(patients.clinicId, requireClinicId()))).returning({ id: patients.id })
     if (!patient) { set.status = 404; return { error: 'Hasta bulunamadı' } }
     const revoked: ('sms' | 'email' | 'whatsapp')[] = []
@@ -852,10 +868,16 @@ const app = new Elysia()
     return listTreatmentCatalog(requireClinicId())
   })
   .get('/api/dental/consent-settings', async ({ cookie, request }) => {
-    const { consentSettings } = await import('./services/patient-consent')
+    const { consentSettings, getConsentChannelStatuses } = await import('./services/patient-consent')
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+    const clinicId = requireClinicId()
+    const [settings, integrations] = await Promise.all([
+      consentSettings(clinicId),
+      getConsentChannelStatuses(clinicId),
+    ])
     return {
-      ...(await consentSettings(requireClinicId())),
+      ...settings,
+      integrations,
       canEdit: !!user && ['yonetici', 'moderator'].includes(user.role),
       canManageConsent: !!user && ['yonetici', 'moderator', 'hekim', 'host'].includes(user.role),
     }
@@ -863,9 +885,14 @@ const app = new Elysia()
   .put('/api/dental/consent-settings', async ({ body, set, cookie, request }) => {
     const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
     if (!user || !['yonetici', 'moderator'].includes(user.role)) { set.status = 403; return { error: 'Onam metnini düzenleme yetkisi yok' } }
-    const { saveConsentSettings } = await import('./services/patient-consent')
+    const { saveConsentSettings, getConsentChannelStatuses } = await import('./services/patient-consent')
     const { TreatmentPlanError } = await import('./services/treatment-planning')
-    try { return await saveConsentSettings(requireClinicId(), (body as any)?.text) }
+    try {
+      const clinicId = requireClinicId()
+      const settings = await saveConsentSettings(clinicId, (body as any)?.text)
+      const integrations = await getConsentChannelStatuses(clinicId)
+      return { ...settings, integrations }
+    }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
   .get('/api/dental/patients/:id/consent', async ({ params, set }) => {
@@ -1026,6 +1053,12 @@ const app = new Elysia()
     try { return await saveAttachmentLimits(requireClinicId(), body) }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
+  .get('/api/dental/patients/:id/attachments', async ({ params, set }) => {
+    const { listPatientAttachments } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await listPatientAttachments(requireClinicId(), params.id) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
   .post('/api/dental/patients/:id/attachments', async ({ params, body, set }) => {
     const { createPlanAttachment } = await import('./services/plan-attachments')
     const { TreatmentPlanError } = await import('./services/treatment-planning')
@@ -1038,6 +1071,12 @@ const app = new Elysia()
     try { return await getPlanAttachment(requireClinicId(), params.id, params.attachmentId) }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
+  .delete('/api/dental/patients/:id/attachments/:attachmentId', async ({ params, set }) => {
+    const { deletePlanAttachment } = await import('./services/plan-attachments')
+    const { TreatmentPlanError } = await import('./services/treatment-planning')
+    try { return await deletePlanAttachment(requireClinicId(), params.id, params.attachmentId) }
+    catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
+  })
   .put('/api/dental/patients/:id/attachments/:attachmentId/files/:fileIndex', async ({ params, query, request, set }) => {
     const { uploadPlanChunk, readLimitedChunk } = await import('./services/plan-attachments')
     const { TreatmentPlanError } = await import('./services/treatment-planning')
@@ -1047,10 +1086,10 @@ const app = new Elysia()
       return await uploadPlanChunk(requireClinicId(), params.id, params.attachmentId, Number(params.fileIndex), Number(query.offset), chunk)
     } catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
-  .post('/api/dental/patients/:id/attachments/:attachmentId/finish', async ({ params, set }) => {
+  .post('/api/dental/patients/:id/attachments/:attachmentId/finish', async ({ params, body, set }) => {
     const { finishPlanAttachment } = await import('./services/plan-attachments')
     const { TreatmentPlanError } = await import('./services/treatment-planning')
-    try { return await finishPlanAttachment(requireClinicId(), params.id, params.attachmentId) }
+    try { return await finishPlanAttachment(requireClinicId(), params.id, params.attachmentId, (body as any)?.groupId) }
     catch (error) { if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }; throw error }
   })
   .get('/api/dental/patients/:id/attachments/:attachmentId/files/:fileIndex', async ({ params, set }) => {
@@ -1113,17 +1152,17 @@ const app = new Elysia()
       set.status = 413;
       return { error: `Dosya boyutu çok büyük (maks ${MAX_DCM_SIZE / 1024 / 1024} MB)` };
     }
-    
+
     const uuid = crypto.randomUUID();
     const fileName = `${uuid}_${file.name}.gz`;
     const clinicDirectory = resolve(PUBLIC_DIR, 'uploads/dcm', requireClinicId());
     mkdirSync(clinicDirectory, { recursive: true });
     const filePath = resolve(clinicDirectory, fileName);
-    
+
     const raw = new Uint8Array(await file.arrayBuffer());
     const compressed = Bun.gzipSync(raw);
     await Bun.write(filePath, compressed);
-    
+
     const savedKB = ((raw.byteLength - compressed.byteLength) / 1024).toFixed(0);
     return { url: `/api/dental/dcm/${fileName}`, originalSize: raw.byteLength, compressedSize: compressed.byteLength, savedKB };
   })
@@ -1146,49 +1185,51 @@ const app = new Elysia()
     set.headers['content-disposition'] = `inline; filename="${safeName.replace('.gz', '')}"`;
     return new Response(raw);
   })
-  .put('/api/dental/treatments/:id', async ({ params, body, set }) => {
+  .put('/api/dental/treatments/:id', async ({ params, body, set, cookie }) => {
+    const user = await authenticateRequest(cookie.token?.value as string | undefined).catch(() => null)
+    const actor = user
+      ? { actorType: user.role === 'hekim' ? 'doctor' : user.role === 'yonetici' ? 'admin' : 'desk', actorName: user.name }
+      : undefined
     const { completeTreatmentItem, TreatmentPlanError } = await import('./services/treatment-planning')
+    const { logPatientActivity } = await import('./db/repositories/dental')
     const { db } = await import('./db/client')
-    const { appointmentTreatments, dentalAppointments, shifts } = await import('./db/schema')
+    const { treatmentPlans } = await import('./db/schema')
     const { eq, and } = await import('drizzle-orm')
     const b = body as any
+    const clinicId = requireClinicId()
 
-    const doctorIdsToCheck: string[] = Array.isArray(b.doctorIds)
-      ? b.doctorIds.filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
-      : (b.doctorId ? [b.doctorId] : [])
-
-    if (doctorIdsToCheck.length > 0) {
-      // Check if this treatment has linked appointments and validate doctor shift
-      const linkedAppts = await db
-        .select({
-          id: dentalAppointments.id,
-          startTime: dentalAppointments.startTime,
-          endTime: dentalAppointments.endTime
-        })
-        .from(appointmentTreatments)
-        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-        .where(and(eq(appointmentTreatments.treatmentPlanId, params.id), eq(dentalAppointments.clinicId, requireClinicId())))
-
-      for (const appt of linkedAppts) {
-        if (appt.startTime) {
-          const apptDateStr = new Date(appt.startTime).toISOString().split('T')[0]
-          for (const docId of doctorIdsToCheck) {
-            const docShifts = await db
-              .select()
-              .from(shifts)
-              .where(and(eq(shifts.clinicId, requireClinicId()), eq(shifts.userId, docId), eq(shifts.date, apptDateStr)))
-
-            if (docShifts.length === 0) {
-              set.status = 400
-              return { error: `Seçilen hekimin bu randevu tarihinde (${apptDateStr}) vardiyası bulunmuyor` }
-            }
-          }
-        }
-      }
-    }
+    const [existingPlan] = await db
+      .select({
+        id: treatmentPlans.id,
+        patientId: treatmentPlans.patientId,
+        procedureName: treatmentPlans.procedureName,
+        toothNumber: treatmentPlans.toothNumber,
+        status: treatmentPlans.status,
+      })
+      .from(treatmentPlans)
+      .where(and(eq(treatmentPlans.id, params.id), eq(treatmentPlans.clinicId, clinicId)))
+      .limit(1)
 
     try {
-      return await completeTreatmentItem(params.id, requireClinicId(), { status: b.status, groupId: b.groupId, doctorId: b.doctorId, doctorIds: b.doctorIds })
+      const updated = await completeTreatmentItem(params.id, clinicId, { status: b.status, groupId: b.groupId, doctorId: b.doctorId, doctorIds: b.doctorIds })
+      if (updated && b.status !== undefined && existingPlan && existingPlan.status !== b.status && existingPlan.patientId) {
+        const toothPrefix = existingPlan.toothNumber && /^[1-4][1-8]$/.test(existingPlan.toothNumber)
+          ? `#${existingPlan.toothNumber} `
+          : ''
+        void logPatientActivity({
+          clinicId,
+          patientId: existingPlan.patientId,
+          treatmentId: existingPlan.id,
+          category: 'treatment',
+          event_type: 'treatment_status_changed',
+          title: `${toothPrefix}${existingPlan.procedureName}`,
+          old_value: existingPlan.status,
+          new_value: b.status,
+          actor_type: actor?.actorType || 'desk',
+          actor_name: actor?.actorName || null,
+        })
+      }
+      return updated
     } catch (error) {
       if (error instanceof TreatmentPlanError) { set.status = error.status; return { error: error.message } }
       throw error
@@ -1213,19 +1254,19 @@ const app = new Elysia()
     const { createPayment } = await import('./db/repositories/dental')
     const b = body as any
     const numAmount = Number(b.amount)
-    if (!b.date || isNaN(numAmount) || numAmount <= 0) { 
+    if (!b.date || isNaN(numAmount) || numAmount <= 0) {
       set.status = 400
-      return { error: 'Geçerli bir ödeme tarihi ve tutar girilmelidir.' } 
+      return { error: 'Geçerli bir ödeme tarihi ve tutar girilmelidir.' }
     }
-    return await createPayment({ 
-      patientId: params.id, 
-      date: b.date, 
-      amount: Math.round(numAmount), 
-      method: b.method || 'Nakit', 
-      notes: b.notes || null, 
-      status: b.status || 'completed', 
-      dueDate: b.dueDate || null, 
-      treatmentPlanId: b.treatmentPlanId || null 
+    return await createPayment({
+      patientId: params.id,
+      date: b.date,
+      amount: Math.round(numAmount),
+      method: b.method || 'Nakit',
+      notes: b.notes || null,
+      status: b.status || 'completed',
+      dueDate: b.dueDate || null,
+      treatmentPlanId: b.treatmentPlanId || null
     })
   })
   .get('/api/dental/patients/:id/works', async ({ params }) => {
@@ -1246,8 +1287,8 @@ const app = new Elysia()
     const { createConsultation } = await import('./db/repositories/dental')
     const b = body as any
     if (!b.consultationNote && !b.diseaseNote) { set.status = 400; return { error: 'Missing fields' } }
-    return await createConsultation({ 
-      patientId: params.id, 
+    return await createConsultation({
+      patientId: params.id,
       doctorId: b.doctorId || undefined,
       clinicId: requireClinicId(),
       consultationNote: b.consultationNote || "",
@@ -1322,8 +1363,8 @@ const app = new Elysia()
   // ── /api/admin/* aliases ─────────────────────────────────────────────────
   .get('/api/admin/stats', async () => ({
     concurrent: { active: sessions.size },
-    accounts:   { active: 1 },
-    tokens:     { today: 0 },
+    accounts: { active: 1 },
+    tokens: { today: 0 },
     appointments: (await readAppointments()).length,
     recordings: (await listRecordings()).length,
   }))
@@ -1497,14 +1538,14 @@ const app = new Elysia()
     return { success: true }
   })
 
-  .get('/api/telephony/transfer-result', async ({query,set}) => {
-    const {verifyCallSignature} = await import('./integrations/managed/routing')
-    if (!verifyCallSignature(query)) {set.status=403;return {ok:false}}
-    if(query.did==='ANSWER') {
-      const {recordCallConnected}=await import('./integrations/managed/routing')
-      await recordCallConnected(String(query.channel || ''),String(query.clinicId || ''),true)
+  .get('/api/telephony/transfer-result', async ({ query, set }) => {
+    const { verifyCallSignature } = await import('./integrations/managed/routing')
+    if (!verifyCallSignature(query)) { set.status = 403; return { ok: false } }
+    if (query.did === 'ANSWER') {
+      const { recordCallConnected } = await import('./integrations/managed/routing')
+      await recordCallConnected(String(query.channel || ''), String(query.clinicId || ''), true)
     }
-    return {ok:true}
+    return { ok: true }
   })
 
   .get('/api/telephony/register', async ({ query, set }) => {
@@ -1513,18 +1554,18 @@ const app = new Elysia()
     try { resolved = await resolveCall(query) }
     catch (err) {
       console.error('[Telephony] /api/telephony/register reddedildi:', err instanceof Error ? err.message : err, { caller: query.caller, did: query.did, direction: query.direction, endpoint: query.endpoint })
-      set.status=403
-      return {ok:false,error:'Çağrı yetkilendirilemedi'}
+      set.status = 403
+      return { ok: false, error: 'Çağrı yetkilendirilemedi' }
     }
     const uuid = String(query.uuid)
     const caller = resolved.caller
     const channel = String(query.channel || '')
     const direction = query.direction === 'outbound' ? 'outbound' : 'inbound'
-    const tenant = {clinicId:resolved.clinicId,hostname:resolved.hostname}
+    const tenant = { clinicId: resolved.clinicId, hostname: resolved.hostname }
     if (resolved.testId) {
       const { db } = await import('./db/client')
       const { sql } = await import('drizzle-orm')
-      await db.execute(sql`UPDATE integration_tests SET evidence=evidence || ${JSON.stringify({channel})}::jsonb WHERE id=${resolved.testId}`)
+      await db.execute(sql`UPDATE integration_tests SET evidence=evidence || ${JSON.stringify({ channel })}::jsonb WHERE id=${resolved.testId}`)
     }
     let maxActiveCalls = 3
     let queueGroup = 'clinic_default'
@@ -1589,7 +1630,7 @@ const app = new Elysia()
         const hb = setInterval(() => {
           try { send(`: ping\n\n`) } catch { clearInterval(hb); sseClients.delete(client) }
         }, 20000)
-        ;(client as any).hb = hb
+          ; (client as any).hb = hb
       },
       cancel() {
         for (const c of sseClients) {
@@ -1613,11 +1654,11 @@ const app = new Elysia()
     return new ReadableStream({
       start(controller) {
         const enc = new TextEncoder()
-        const send = (data: string) => { try { controller.enqueue(enc.encode(data)) } catch {} }
+        const send = (data: string) => { try { controller.enqueue(enc.encode(data)) } catch { } }
         const unregister = registerSSEClient(user.id, send)
         send(`: connected\n\n`)
         const hb = setInterval(() => send(`: ping\n\n`), 25000)
-        ;(controller as any).__cleanup = () => { clearInterval(hb); unregister() }
+          ; (controller as any).__cleanup = () => { clearInterval(hb); unregister() }
       },
       cancel(controller: any) {
         controller?.__cleanup?.()
@@ -1731,7 +1772,7 @@ const app = new Elysia()
     // Kullanıcının geldiği orijini state'e koy (token alındıktan sonra dönüş için)
     const referer = request.headers.get('referer') || request.headers.get('origin') || ''
     let returnOrigin = process.env.CLIENT_APP_URL || 'http://localhost:3000'
-    try { if (referer) returnOrigin = new URL(referer).origin } catch {}
+    try { if (referer) returnOrigin = new URL(referer).origin } catch { }
     const tenant = currentTenant()!
     const state = signOAuthState({ clinicId: tenant.clinicId, hostname: tenant.hostname, returnOrigin })
 
@@ -1793,7 +1834,7 @@ const app = new Elysia()
         })
         const userInfo = await userRes.json() as { email?: string }
         if (userInfo.email) patch.email = userInfo.email
-      } catch {}
+      } catch { }
       await runWithTenantContext({ clinicId: oauthState.clinicId, hostname: oauthState.hostname }, () => setCalendarSettings(patch))
       console.log('[Calendar] OAuth bağlantısı kuruldu:', patch.email)
       return redirect(`${clientUrl}/admin?calendar=connected`)
@@ -1981,17 +2022,17 @@ const app = new Elysia()
     const clinicDirectory = resolve(PUBLIC_DIR, 'tenant-assets', clinicId, 'branding')
     mkdirSync(clinicDirectory, { recursive: true })
     const dest = resolve(clinicDirectory, fileName)
-    
+
     const arrayBuffer = await file.arrayBuffer()
     const buf = Buffer.from(arrayBuffer)
     writeFileSync(dest, buf)
-    
+
     const base64Data = `data:${file.type};base64,${buf.toString('base64')}`
     const logoUrl = `/api/branding/logo/${fileName}`
     await setBranding({ logoUrl })
     const { setSetting } = await import('./db/repositories/settings')
     await setSetting('branding.logo_data', base64Data)
-    
+
     return { success: true, logoUrl }
   })
 
@@ -2127,15 +2168,15 @@ const app = new Elysia()
       googleSearchGrounding: (await getSetting('ai.google_search_grounding')) === 'true',
       codeExecution: (await getSetting('ai.code_execution')) === 'true',
       urlContext: (await getSetting('ai.url_context')) === 'true',
-      
+
       startWaitSeconds: Number(await getSetting('ai.start_wait_seconds')) || 0.4,
       startOnPunctuationSeconds: Number(await getSetting('ai.start_punctuation_seconds')) || 0.1,
       startNoPunctuationSeconds: Number(await getSetting('ai.start_no_punctuation_seconds')) || 1.5,
-      
+
       stopNumWords: Number(await getSetting('ai.stop_num_words')) || 0,
       stopVoiceSeconds: Number(await getSetting('ai.stop_voice_seconds')) || 0.2,
       stopBackoffSeconds: Number(await getSetting('ai.stop_backoff_seconds')) || 0.2,
-      
+
       callSilenceTimeout: Number(await getSetting('ai.call_silence_timeout')) || 30,
       callSilenceCloseTimeout: Number(await getSetting('ai.call_silence_close_timeout')) || 15,
       callMaxDuration: Number(await getSetting('ai.call_max_duration')) || 600,
@@ -2183,15 +2224,15 @@ const app = new Elysia()
     if (config.googleSearchGrounding !== undefined) await setSetting('ai.google_search_grounding', String(config.googleSearchGrounding))
     if (config.codeExecution !== undefined) await setSetting('ai.code_execution', String(config.codeExecution))
     if (config.urlContext !== undefined) await setSetting('ai.url_context', String(config.urlContext))
-    
+
     if (config.startWaitSeconds !== undefined) await setSetting('ai.start_wait_seconds', String(config.startWaitSeconds))
     if (config.startOnPunctuationSeconds !== undefined) await setSetting('ai.start_punctuation_seconds', String(config.startOnPunctuationSeconds))
     if (config.startNoPunctuationSeconds !== undefined) await setSetting('ai.start_no_punctuation_seconds', String(config.startNoPunctuationSeconds))
-    
+
     if (config.stopNumWords !== undefined) await setSetting('ai.stop_num_words', String(config.stopNumWords))
     if (config.stopVoiceSeconds !== undefined) await setSetting('ai.stop_voice_seconds', String(config.stopVoiceSeconds))
     if (config.stopBackoffSeconds !== undefined) await setSetting('ai.stop_backoff_seconds', String(config.stopBackoffSeconds))
-    
+
     if (config.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(config.callSilenceTimeout))
     if (config.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(config.callSilenceCloseTimeout))
     if (config.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(config.callMaxDuration))
@@ -2200,7 +2241,7 @@ const app = new Elysia()
       await setSetting('ai.max_active_phone_calls', String(maxActive))
     }
     if (config.voiceName !== undefined) await setSetting('ai.voice_name', String(config.voiceName))
-    
+
     return { success: true }
   })
 
@@ -2209,7 +2250,7 @@ const app = new Elysia()
     let permsStr = await getSetting('role_tab_permissions')
     let perms = {}
     if (permsStr) {
-      try { perms = JSON.parse(permsStr) } catch (e) {}
+      try { perms = JSON.parse(permsStr) } catch (e) { }
     } else {
       // Default permissions if none exist
       perms = {
@@ -2269,23 +2310,23 @@ const app = new Elysia()
     const effective =
       role === 'yonetici' || role === 'moderator'
         ? {
-            viewShiftPlanner: true,
-            editShifts: true,
-            manageLeaves: true,
-            editClinicWorkingHours: true,
-            manageStaff: true,
-          }
+          viewShiftPlanner: true,
+          editShifts: true,
+          manageLeaves: true,
+          editClinicWorkingHours: true,
+          manageStaff: true,
+        }
         : role === 'hekim'
           ? config.hekim
           : role === 'host'
             ? config.host
             : {
-                viewShiftPlanner: true,
-                editShifts: false,
-                manageLeaves: false,
-                editClinicWorkingHours: false,
-                manageStaff: false,
-              }
+              viewShiftPlanner: true,
+              editShifts: false,
+              manageLeaves: false,
+              editClinicWorkingHours: false,
+              manageStaff: false,
+            }
     return { role, config, effective }
   })
   .get('/api/admin/settings/staff-permissions', async () => {
@@ -2586,177 +2627,177 @@ const app = new Elysia()
   })
 
 // ── Web session koruma sabitleri ──────────────────────────────────────────────
-const WS_IDLE_TIMEOUT_MS  = 5 * 60_000   // 5 dk ses yoksa kapat
-const WS_MAX_SESSION_MS   = 30 * 60_000  // 30 dk max session ömrü
+const WS_IDLE_TIMEOUT_MS = 5 * 60_000   // 5 dk ses yoksa kapat
+const WS_MAX_SESSION_MS = 30 * 60_000  // 30 dk max session ömrü
 const WS_PING_INTERVAL_MS = 30_000       // 30s ping
 
 // ── WebSocket: Voice streaming ──────────────────────────────────────────────
 app.ws('/ws', {
-    idleTimeout: 120, // Elysia seviyesi idle (saniye) — ek güvenlik ağı
+  idleTimeout: 120, // Elysia seviyesi idle (saniye) — ek güvenlik ağı
 
-    async open(ws) {
-      const tenant = currentTenant()
-      if (!tenant) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Bu domain için klinik tanımlanmamış.' }))
+  async open(ws) {
+    const tenant = currentTenant()
+    if (!tenant) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Bu domain için klinik tanımlanmamış.' }))
+      ws.close()
+      return
+    }
+    const shortId = randomUUID().slice(0, 8)
+    console.log(`[${shortId}] Client connected`)
+    const startedAt = new Date()
+    const startedAtMs = Date.now()
+    const info: SessionInfo = {
+      session: null as any,
+      startedAt,
+      startedAtMs,
+      audioChunks: [],
+      userAudioChunks: [],
+      shortId,
+      clinicId: tenant.clinicId,
+      hostname: tenant.hostname,
+    }
+    // ── Idle + max session timer'ları ──
+    let lastActivityAt = Date.now()
+    const idleTimer = setInterval(() => {
+      const idleMs = Date.now() - lastActivityAt
+      const totalMs = Date.now() - startedAtMs
+      if (totalMs > WS_MAX_SESSION_MS) {
+        console.log(`[${shortId}] Max session süresi aşıldı (${Math.round(totalMs / 60_000)}dk) — kapatılıyor`)
+        ws.send(JSON.stringify({ type: 'error', message: 'Maksimum oturum süresi doldu.' }))
         ws.close()
         return
       }
-      const shortId = randomUUID().slice(0, 8)
-      console.log(`[${shortId}] Client connected`)
-      const startedAt = new Date()
-      const startedAtMs = Date.now()
-      const info: SessionInfo = {
-        session: null as any,
-        startedAt,
-        startedAtMs,
-        audioChunks: [],
-        userAudioChunks: [],
-        shortId,
-        clinicId: tenant.clinicId,
-        hostname: tenant.hostname,
-      }
-      // ── Idle + max session timer'ları ──
-      let lastActivityAt = Date.now()
-      const idleTimer = setInterval(() => {
-        const idleMs = Date.now() - lastActivityAt
-        const totalMs = Date.now() - startedAtMs
-        if (totalMs > WS_MAX_SESSION_MS) {
-          console.log(`[${shortId}] Max session süresi aşıldı (${Math.round(totalMs / 60_000)}dk) — kapatılıyor`)
-          ws.send(JSON.stringify({ type: 'error', message: 'Maksimum oturum süresi doldu.' }))
-          ws.close()
-          return
-        }
-        if (idleMs > WS_IDLE_TIMEOUT_MS) {
-          console.log(`[${shortId}] WS idle timeout (${Math.round(idleMs / 60_000)}dk ses yok) — kapatılıyor`)
-          ws.send(JSON.stringify({ type: 'error', message: 'Uzun süredir ses alınamadı, oturum kapatıldı.' }))
-          ws.close()
-        }
-      }, 30_000)
-      ;(ws.data as any).idleTimer = idleTimer
-      ;(ws.data as any).touchActivity = () => { lastActivityAt = Date.now() }
-
-      // Heartbeat — ölü bağlantıları tespit et
-      const pingTimer = setInterval(() => {
-        try { ws.send(JSON.stringify({ type: 'ping' })) } catch {}
-      }, WS_PING_INTERVAL_MS)
-      ;(ws.data as any).pingTimer = pingTimer
-
-      try {
-        // RAG pre-warm
-        let ragContext = ''
-        try {
-          const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
-          const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
-          if (topDocs.length > 0) {
-            ragContext = await buildRagPrompt(topDocs)
-            console.log(`[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map(d => d.title).join(', ')}`)
-          }
-        } catch (e) { console.error(`[${shortId}] RAG hatası:`, e) }
-
-        const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
-        const greeting = await getGreeting() ?? DEFAULT_GREETING
-        const systemPrompt = dateHeader + await buildSystemPrompt(greeting) + ragContext
-        const model = await resolveLiveModel()
-        const { getSetting } = await import('./db/repositories/settings')
-        const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
-        console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
-
-        const session = await createLiveSession(getAI(), {
-          onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
-          onAudio: (pcm) => {
-            ws.send(pcm)
-            info.audioChunks.push({ buffer: pcm, offsetMs: Date.now() - startedAtMs })
-          },
-          onTranscript: (role, text) => {
-            const trimmed = text.trim()
-            if (trimmed) {
-              const label = role === 'user' ? 'USER' : 'AI'
-              console.log(`[${shortId}] ${label}: ${trimmed}`)
-            }
-            ws.send(JSON.stringify({ type: 'transcript', role, text }))
-          },
-          onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
-          onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
-          onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
-          onClose: () => {
-            console.log(`[${shortId}] Gemini session closed`)
-            sessions.delete(shortId)
-            notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
-          },
-        }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'inbound', appointmentSource: 'web_ai' })
-
-        info.session = session
-        ;(ws.data as any).sessionId = shortId
-        sessions.set(shortId, info)
-        notifyAdmins('session_start', { id: shortId, activeSessions: sessions.size })
-
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: 'Sistem bildirimi: Müşteri sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)' }] }],
-          turnComplete: true,
-        })
-      } catch (err) {
-        console.error(`[${shortId}] Session başlatılamadı:`, err)
-        ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))
+      if (idleMs > WS_IDLE_TIMEOUT_MS) {
+        console.log(`[${shortId}] WS idle timeout (${Math.round(idleMs / 60_000)}dk ses yok) — kapatılıyor`)
+        ws.send(JSON.stringify({ type: 'error', message: 'Uzun süredir ses alınamadı, oturum kapatıldı.' }))
         ws.close()
       }
-    },
+    }, 30_000)
+      ; (ws.data as any).idleTimer = idleTimer
+      ; (ws.data as any).touchActivity = () => { lastActivityAt = Date.now() }
 
-    message(ws, message) {
-      const shortId = (ws.data as any).sessionId as string
-      const info = sessions.get(shortId)
-      if (!info) return
-      // Pong — client heartbeat cevabı (activity sayılmaz)
-      if (typeof message === 'string') {
-        try { if (JSON.parse(message as string).type === 'pong') return } catch {}
-      }
-      if (message instanceof Buffer || message instanceof Uint8Array) {
-        const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
-        info.session.sendRealtimeInput({
-          media: {
-            mimeType: 'audio/pcm;rate=16000',
-            data: buf.toString('base64'),
-          }
-        } as any)
-        info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
-        // Ses geldi — idle timer'ı sıfırla
-        ;(ws.data as any).touchActivity?.()
-      }
-    },
+    // Heartbeat — ölü bağlantıları tespit et
+    const pingTimer = setInterval(() => {
+      try { ws.send(JSON.stringify({ type: 'ping' })) } catch { }
+    }, WS_PING_INTERVAL_MS)
+      ; (ws.data as any).pingTimer = pingTimer
 
-    async close(ws) {
-      // Timer'ları temizle
-      clearInterval((ws.data as any).idleTimer)
-      clearInterval((ws.data as any).pingTimer)
-      const shortId = (ws.data as any).sessionId as string
-      const info = sessions.get(shortId)
-      if (info) await runWithTenantContext({ clinicId: info.clinicId, hostname: info.hostname }, async () => {
-        const hasAudio = info.audioChunks.length > 0 || info.userAudioChunks.length > 0
-        if (hasAudio) {
-          const endedAt = new Date()
-          const durationMs = endedAt.getTime() - info.startedAt.getTime()
-          const ts = info.startedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-          const filename = `session_${shortId}_${ts}.wav`
-          const filePath = resolve(RECORDINGS_DIR, filename)
-          try {
-            const wavBuf = buildStereoWav(info.audioChunks, info.userAudioChunks, durationMs)
-            writeFileSync(filePath, wavBuf)
-            await saveRecording({
-              clinicId: info.clinicId,
-              filename,
-              startedAt: info.startedAt.toISOString(),
-              endedAt: endedAt.toISOString(),
-              durationMs,
-              sizeBytes: wavBuf.length,
-            })
-            console.log(`[${shortId}] Recording: ${filename}`)
-          } catch (e) { console.error(`[${shortId}] Recording hatası:`, e) }
+    try {
+      // RAG pre-warm
+      let ragContext = ''
+      try {
+        const preWarmEmbedding = await embedText(PRE_WARM_QUERY)
+        const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
+        if (topDocs.length > 0) {
+          ragContext = await buildRagPrompt(topDocs)
+          console.log(`[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map(d => d.title).join(', ')}`)
         }
-        try { info.session?.close() } catch {}
-        sessions.delete(shortId)
+      } catch (e) { console.error(`[${shortId}] RAG hatası:`, e) }
+
+      const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
+      const greeting = await getGreeting() ?? DEFAULT_GREETING
+      const systemPrompt = dateHeader + await buildSystemPrompt(greeting) + ragContext
+      const model = await resolveLiveModel()
+      const { getSetting } = await import('./db/repositories/settings')
+      const voiceName = (await getSetting('ai.voice_name')) || 'Aoede'
+      console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
+
+      const session = await createLiveSession(getAI(), {
+        onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
+        onAudio: (pcm) => {
+          ws.send(pcm)
+          info.audioChunks.push({ buffer: pcm, offsetMs: Date.now() - startedAtMs })
+        },
+        onTranscript: (role, text) => {
+          const trimmed = text.trim()
+          if (trimmed) {
+            const label = role === 'user' ? 'USER' : 'AI'
+            console.log(`[${shortId}] ${label}: ${trimmed}`)
+          }
+          ws.send(JSON.stringify({ type: 'transcript', role, text }))
+        },
+        onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
+        onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
+        onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
+        onClose: () => {
+          console.log(`[${shortId}] Gemini session closed`)
+          sessions.delete(shortId)
+          notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
+        },
+      }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'inbound', appointmentSource: 'web_ai' })
+
+      info.session = session
+        ; (ws.data as any).sessionId = shortId
+      sessions.set(shortId, info)
+      notifyAdmins('session_start', { id: shortId, activeSessions: sessions.size })
+
+      session.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text: 'Sistem bildirimi: Müşteri sesli görüşmeye bağlandı. (Bu satır müşteri adı veya talebi değildir; randevuya yazma.)' }] }],
+        turnComplete: true,
       })
-      console.log(`[${shortId}] Disconnected`)
-    },
-  })
+    } catch (err) {
+      console.error(`[${shortId}] Session başlatılamadı:`, err)
+      ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))
+      ws.close()
+    }
+  },
+
+  message(ws, message) {
+    const shortId = (ws.data as any).sessionId as string
+    const info = sessions.get(shortId)
+    if (!info) return
+    // Pong — client heartbeat cevabı (activity sayılmaz)
+    if (typeof message === 'string') {
+      try { if (JSON.parse(message as string).type === 'pong') return } catch { }
+    }
+    if (message instanceof Buffer || message instanceof Uint8Array) {
+      const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
+      info.session.sendRealtimeInput({
+        media: {
+          mimeType: 'audio/pcm;rate=16000',
+          data: buf.toString('base64'),
+        }
+      } as any)
+      info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
+        // Ses geldi — idle timer'ı sıfırla
+        ; (ws.data as any).touchActivity?.()
+    }
+  },
+
+  async close(ws) {
+    // Timer'ları temizle
+    clearInterval((ws.data as any).idleTimer)
+    clearInterval((ws.data as any).pingTimer)
+    const shortId = (ws.data as any).sessionId as string
+    const info = sessions.get(shortId)
+    if (info) await runWithTenantContext({ clinicId: info.clinicId, hostname: info.hostname }, async () => {
+      const hasAudio = info.audioChunks.length > 0 || info.userAudioChunks.length > 0
+      if (hasAudio) {
+        const endedAt = new Date()
+        const durationMs = endedAt.getTime() - info.startedAt.getTime()
+        const ts = info.startedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        const filename = `session_${shortId}_${ts}.wav`
+        const filePath = resolve(RECORDINGS_DIR, filename)
+        try {
+          const wavBuf = buildStereoWav(info.audioChunks, info.userAudioChunks, durationMs)
+          writeFileSync(filePath, wavBuf)
+          await saveRecording({
+            clinicId: info.clinicId,
+            filename,
+            startedAt: info.startedAt.toISOString(),
+            endedAt: endedAt.toISOString(),
+            durationMs,
+            sizeBytes: wavBuf.length,
+          })
+          console.log(`[${shortId}] Recording: ${filename}`)
+        } catch (e) { console.error(`[${shortId}] Recording hatası:`, e) }
+      }
+      try { info.session?.close() } catch { }
+      sessions.delete(shortId)
+    })
+    console.log(`[${shortId}] Disconnected`)
+  },
+})
 
   .listen(PORT, async () => {
     console.log(`\n Voice AI Server`)
@@ -2816,7 +2857,7 @@ app.ws('/ws', {
         const ageMs = now - info.startedAtMs
         if (ageMs > 30 * 60_000) {
           console.log(`[Cleanup] Stale session temizlendi: ${id} (${Math.round(ageMs / 60_000)}dk)`)
-          try { info.session?.close() } catch {}
+          try { info.session?.close() } catch { }
           sessions.delete(id)
         }
       }
@@ -2846,7 +2887,7 @@ app.ws('/ws', {
       console.log(`   Telephony: kapalı (TELEPHONY_ENABLED=1 ile aç)`)
     }
     console.log('')
-    
+
     if (process.env.VOICEAI_BACKGROUND_JOBS_ENABLED !== '0') {
       try {
         const { importLegacyIntegrations } = await import('./integrations/managed/legacy')

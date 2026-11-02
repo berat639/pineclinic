@@ -16,7 +16,6 @@ import {
   Repeat,
   RotateCcw,
   Search,
-  SlidersHorizontal,
   Trash2,
   Users,
   X,
@@ -172,16 +171,34 @@ const clayPrimaryButton: CSSProperties = {
 }
 
 const CALENDAR_POPOVER_CSS = `
+  .clinic-rdp {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
   .clinic-rdp .rdp {
-    --rdp-cell-size: 34px;
-    --rdp-accent-color: #1d4ed8;
+    --rdp-cell-size: 33px !important;
+    --rdp-accent-color: #2563eb !important;
     --rdp-background-color: var(--card-inner);
-    margin: 0;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
     color: var(--foreground);
     font-size: 12.5px;
   }
-  .clinic-rdp .rdp-months {
+  .clinic-rdp .rdp-months,
+  .clinic-rdp .rdp-month,
+  .clinic-rdp .rdp-table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
     justify-content: center;
+  }
+  .clinic-rdp .rdp-caption {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 0 2px 8px !important;
   }
   .clinic-rdp .rdp-caption_label {
     font-size: 13.5px;
@@ -189,37 +206,67 @@ const CALENDAR_POPOVER_CSS = `
     color: var(--foreground);
     text-transform: capitalize;
   }
+  .clinic-rdp .rdp-nav {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+  }
   .clinic-rdp .rdp-nav_button {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 8px !important;
     border: 1px solid var(--input-border) !important;
     background: var(--input-bg) !important;
     color: var(--foreground) !important;
+    box-shadow: var(--pc-clay-btn);
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
   }
   .clinic-rdp .rdp-head_cell {
     font-size: 11px;
     font-weight: 700;
     color: var(--foreground-2);
     text-transform: uppercase;
+    padding-bottom: 4px;
+    text-align: center;
+  }
+  .clinic-rdp .rdp-cell {
+    padding: 1px;
+    text-align: center;
   }
   .clinic-rdp .rdp-day {
+    width: 32px !important;
+    height: 32px !important;
     color: var(--foreground);
-    border-radius: 9px;
+    border-radius: 8px;
+    font-size: 0.78rem;
     font-weight: 650;
+    margin: 0 auto;
     transition: all 0.12s ease;
   }
+  .clinic-rdp .rdp-day_outside {
+    color: var(--foreground-3) !important;
+    opacity: 0.45 !important;
+  }
   .clinic-rdp .rdp-day_today:not(.rdp-day_selected) {
-    border: 1.5px solid #2563eb !important;
-    color: #2563eb !important;
-    font-weight: 800;
+    background: var(--badge-clinic-bg, #e0f2fe) !important;
+    border: 1.5px solid var(--accent, #0284c7) !important;
+    color: var(--badge-clinic-fg, #0369a1) !important;
+    font-weight: 800 !important;
+    box-shadow: var(--pc-clay-pale) !important;
   }
   .clinic-rdp .rdp-day_selected:not([disabled]),
   .clinic-rdp .rdp-day_selected:hover:not([disabled]) {
     background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+    border: 1px solid #1d4ed8 !important;
     color: #ffffff !important;
     font-weight: 800;
     box-shadow: var(--pc-clay-primary);
+  }
+  .clinic-rdp .rdp-day_selected * {
+    color: #ffffff !important;
   }
   .clinic-rdp .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
     background: var(--card-inner) !important;
@@ -289,13 +336,15 @@ function ClinicDatePickerButton({
             borderRadius: 14,
             padding: 12,
             boxShadow: 'var(--pc-modal-shadow)',
-            minWidth: 276,
+            minWidth: 284,
           }}
         >
           <div className="clinic-rdp">
             <DayPicker
               mode="single"
               locale={tr}
+              weekStartsOn={1}
+              showOutsideDays
               selected={localDate(value)}
               onSelect={(d) => {
                 if (d) {

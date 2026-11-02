@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../client'
 import {
   auditLog,
@@ -7,9 +7,13 @@ import {
   clinicSettings,
   clinics,
   knowledgeCategories,
+  staffInvitations,
+  users,
 } from '../schema'
 import { DEFAULT_CATEGORIES } from './categories'
 import { invalidateTenantCache, isLocalHostname, normalizeHostname } from '../../tenancy/context'
+import { deleteAllUserSessions } from './users'
+import { ensureStaffInvitationsSchema, getClinicSmtpStatus } from '../../services/staff-invitations'
 
 const DEFAULT_ROLE_PERMISSIONS = {
   hekim: ['calendar', 'patients', 'knowledge'],
@@ -177,4 +181,308 @@ export async function createPlatformClinic(
     isActive: created.isActive,
     createdAt: created.createdAt?.toISOString() || '',
   }
+}
+
+export interface PlatformClinicAdminRow {
+  id: string
+  email: string
+  name: string
+  phone: string | null
+  role: string
+  active: boolean
+  isPlatformAdmin: boolean
+  createdAt: string
+}
+
+export async function setPlatformClinicActive(
+  clinicId: string,
+  isActive: boolean,
+  actorUserId: string,
+): Promise<PlatformClinicRow> {
+  const [existing] = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
+  if (!existing) {
+    throw new ClinicProvisioningError('Klinik bulunamadı.', 404)
+  }
+
+  const [updated] = await db
+    .update(clinics)
+    .set({ isActive })
+    .where(eq(clinics.id, clinicId))
+    .returning()
+
+  if (!isActive) {
+    const memberRows = await db
+      .select({ userId: clinicMemberships.userId, isPlatformAdmin: users.isPlatformAdmin })
+      .from(clinicMemberships)
+      .innerJoin(users, eq(clinicMemberships.userId, users.id))
+      .where(eq(clinicMemberships.clinicId, clinicId))
+
+    for (const member of memberRows) {
+      if (!member.isPlatformAdmin && member.userId !== actorUserId) {
+        await deleteAllUserSessions(member.userId)
+      }
+    }
+  }
+
+  await db.insert(auditLog).values({
+    clinicId,
+    userId: actorUserId,
+    action: isActive ? 'platform.clinic.unfreeze' : 'platform.clinic.freeze',
+    targetType: 'clinic',
+    targetId: clinicId,
+    metadata: { isActive },
+  })
+
+  invalidateTenantCache()
+
+  const [domainRow] = await db
+    .select({ hostname: clinicDomains.hostname })
+    .from(clinicDomains)
+    .where(and(eq(clinicDomains.clinicId, clinicId), eq(clinicDomains.isPrimary, true)))
+    .limit(1)
+
+  return {
+    id: updated!.id,
+    name: updated!.name,
+    hostname: domainRow?.hostname || '',
+    isActive: updated!.isActive,
+    createdAt: updated!.createdAt?.toISOString() || '',
+  }
+}
+
+export async function listPlatformClinicAdmins(clinicId: string) {
+  await ensureStaffInvitationsSchema()
+
+  const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
+  if (!clinic) {
+    throw new ClinicProvisioningError('Klinik bulunamadı.', 404)
+  }
+
+  const [domainRow] = await db
+    .select({ hostname: clinicDomains.hostname })
+    .from(clinicDomains)
+    .where(and(eq(clinicDomains.clinicId, clinicId), eq(clinicDomains.isPrimary, true)))
+    .limit(1)
+
+  const adminRows = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      phone: users.phone,
+      role: clinicMemberships.role,
+      userActive: users.active,
+      membershipActive: clinicMemberships.active,
+      isPlatformAdmin: users.isPlatformAdmin,
+      createdAt: users.createdAt,
+    })
+    .from(clinicMemberships)
+    .innerJoin(users, eq(clinicMemberships.userId, users.id))
+    .where(and(eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'yonetici')))
+    .orderBy(asc(users.isPlatformAdmin), desc(users.createdAt))
+
+  const admins: PlatformClinicAdminRow[] = adminRows.map(row => ({
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    phone: row.phone ?? null,
+    role: row.role,
+    active: Boolean(row.userActive && row.membershipActive),
+    isPlatformAdmin: Boolean(row.isPlatformAdmin),
+    createdAt: row.createdAt?.toISOString() || '',
+  }))
+
+  const invitations = await db
+    .select({
+      id: staffInvitations.id,
+      email: staffInvitations.email,
+      name: staffInvitations.name,
+      role: staffInvitations.role,
+      status: staffInvitations.status,
+      expiresAt: staffInvitations.expiresAt,
+      createdAt: staffInvitations.createdAt,
+    })
+    .from(staffInvitations)
+    .where(and(eq(staffInvitations.clinicId, clinicId), eq(staffInvitations.role, 'yonetici')))
+    .orderBy(desc(staffInvitations.createdAt))
+    .limit(30)
+
+  const smtpStatus = await getClinicSmtpStatus(clinicId)
+
+  return {
+    clinicId,
+    clinicName: clinic.name,
+    clinicIsActive: clinic.isActive,
+    primaryHostname: domainRow?.hostname || '',
+    admins,
+    invitations: invitations.map(inv => ({
+      ...inv,
+      expiresAt: inv.expiresAt?.toISOString() || '',
+      createdAt: inv.createdAt?.toISOString() || '',
+    })),
+    smtpStatus,
+  }
+}
+
+export async function assignPlatformClinicSeedAdmin(
+  clinicId: string,
+  input: { name: string; email: string; password: string; phone?: string },
+  actorUserId: string,
+): Promise<PlatformClinicAdminRow> {
+  const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1)
+  if (!clinic) {
+    throw new ClinicProvisioningError('Klinik bulunamadı.', 404)
+  }
+
+  const name = (input.name || '').trim()
+  const email = (input.email || '').toLowerCase().trim()
+  const password = input.password || ''
+  const phone = input.phone?.trim() || null
+
+  if (name.length < 2) {
+    throw new ClinicProvisioningError('Yönetici adı en az 2 karakter olmalıdır.', 400)
+  }
+  if (!email || !email.includes('@')) {
+    throw new ClinicProvisioningError('Geçerli bir e-posta adresi girin.', 400)
+  }
+  if (password.length < 6) {
+    throw new ClinicProvisioningError('Şifre en az 6 karakter olmalıdır.', 400)
+  }
+
+  const passwordHash = await Bun.password.hash(password)
+
+  const [existingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+  let targetUser = existingUser
+
+  if (existingUser) {
+    if (existingUser.isPlatformAdmin) {
+      throw new ClinicProvisioningError(
+        'Bu e-posta adresi satışçı / platform yöneticisi hesabına aittir. Klinik Seed Yöneticisi için ayrı bir e-posta kullanın.',
+        400,
+      )
+    }
+    const [updated] = await db
+      .update(users)
+      .set({
+        name,
+        passwordHash,
+        phone,
+        role: 'yonetici',
+        active: true,
+      })
+      .where(eq(users.id, existingUser.id))
+      .returning()
+    targetUser = updated
+  } else {
+    const [created] = await db
+      .insert(users)
+      .values({
+        email,
+        passwordHash,
+        name,
+        phone,
+        role: 'yonetici',
+        active: true,
+        isPlatformAdmin: false,
+      })
+      .returning()
+    targetUser = created
+  }
+
+  if (!targetUser) {
+    throw new ClinicProvisioningError('Seed yönetici oluşturulamadı.', 500)
+  }
+
+  await db
+    .insert(clinicMemberships)
+    .values({
+      clinicId,
+      userId: targetUser.id,
+      role: 'yonetici',
+      active: true,
+    })
+    .onConflictDoUpdate({
+      target: [clinicMemberships.clinicId, clinicMemberships.userId],
+      set: { role: 'yonetici', active: true },
+    })
+
+  await db.insert(auditLog).values({
+    clinicId,
+    userId: actorUserId,
+    action: 'platform.clinic.seed_admin.assign',
+    targetType: 'user',
+    targetId: targetUser.id,
+    metadata: { email: targetUser.email, name: targetUser.name },
+  })
+
+  return {
+    id: targetUser.id,
+    email: targetUser.email,
+    name: targetUser.name,
+    phone: targetUser.phone ?? null,
+    role: 'yonetici',
+    active: true,
+    isPlatformAdmin: Boolean(targetUser.isPlatformAdmin),
+    createdAt: targetUser.createdAt?.toISOString() || '',
+  }
+}
+
+export async function setPlatformClinicAdminActive(
+  clinicId: string,
+  targetUserId: string,
+  active: boolean,
+  actorUserId: string,
+): Promise<{ id: string; active: boolean }> {
+  const [membership] = await db
+    .select()
+    .from(clinicMemberships)
+    .where(
+      and(
+        eq(clinicMemberships.clinicId, clinicId),
+        eq(clinicMemberships.userId, targetUserId),
+        eq(clinicMemberships.role, 'yonetici'),
+      ),
+    )
+    .limit(1)
+
+  if (!membership) {
+    throw new ClinicProvisioningError('Bu klinikte belirtilen yönetici kaydı bulunamadı.', 404)
+  }
+
+  const [targetUser] = await db.select().from(users).where(eq(users.id, targetUserId)).limit(1)
+  if (!targetUser) {
+    throw new ClinicProvisioningError('Kullanıcı bulunamadı.', 404)
+  }
+
+  if (!active && (targetUser.id === actorUserId || targetUser.isPlatformAdmin)) {
+    throw new ClinicProvisioningError(
+      'Satışçı / Platform yöneticisi hesabı dondurulamaz. Yalnızca kliniğe atanan Seed User (Yönetici) hesapları dondurulabilir.',
+      400,
+    )
+  }
+
+  await db
+    .update(clinicMemberships)
+    .set({ active })
+    .where(and(eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, targetUserId)))
+
+  await db
+    .update(users)
+    .set({ active })
+    .where(eq(users.id, targetUserId))
+
+  if (!active) {
+    await deleteAllUserSessions(targetUserId)
+  }
+
+  await db.insert(auditLog).values({
+    clinicId,
+    userId: actorUserId,
+    action: active ? 'platform.clinic.admin.unfreeze' : 'platform.clinic.admin.freeze',
+    targetType: 'user',
+    targetId: targetUserId,
+    metadata: { active },
+  })
+
+  return { id: targetUserId, active }
 }

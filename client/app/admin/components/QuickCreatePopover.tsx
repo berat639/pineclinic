@@ -18,6 +18,8 @@ interface Props {
   patients: any[];
   doctors: any[];
   events?: any[];
+  shifts?: any[];
+  doctorLeaves?: any[];
   isCentered?: boolean;
 }
 
@@ -33,6 +35,8 @@ export default function QuickCreatePopover({
   patients,
   doctors,
   events = [],
+  shifts = [],
+  doctorLeaves = [],
   isCentered = false,
 }: Props) {
   const backdropDismiss = useBackdropDismiss(onClose);
@@ -62,6 +66,7 @@ export default function QuickCreatePopover({
 
   // Appointment info
   const [selectedDoctorId, setSelectedDoctorId] = useState(doctorId || '');
+  const [hasUserChangedTime, setHasUserChangedTime] = useState(false);
 
   const timeToNumber = (t: string) => {
     if (!t) return 9;
@@ -78,6 +83,18 @@ export default function QuickCreatePopover({
     timeToNumber(defaultStartTime) || 9,
     timeToNumber(defaultEndTime) || 9.5,
   ]);
+
+  useEffect(() => {
+    setSelectedDoctorId(doctorId || '');
+  }, [doctorId]);
+
+  useEffect(() => {
+    setTimeRange([
+      timeToNumber(defaultStartTime) || 9,
+      timeToNumber(defaultEndTime) || 9.5,
+    ]);
+    setHasUserChangedTime(false);
+  }, [defaultStartTime, defaultEndTime, defaultDate]);
 
   // Deduplicate and filter patients
   const uniquePatients = useMemo(() => {
@@ -109,29 +126,171 @@ export default function QuickCreatePopover({
     if (patientMode === 'select' && selectedPatientId) {
       const p = uniquePatients.find((item) => item.id === selectedPatientId);
       if (p) setTitle(p.name);
-
-      // Smart doctor selection
-      if (events && events.length > 0 && !doctorId) {
-        const patientEvents = events.filter(
-          (e: any) => e.patientId === selectedPatientId && e.doctorId
-        );
-        if (patientEvents.length > 0) {
-          patientEvents.sort(
-            (a, b) =>
-              new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-          );
-          const lastDoctorId = patientEvents[0].doctorId;
-          if (lastDoctorId) {
-            setSelectedDoctorId(lastDoctorId);
-          }
-        }
-      }
     } else if (patientMode === 'create') {
       setTitle(fullName || '');
     } else if (patientMode === 'select' && !selectedPatientId) {
       setTitle('');
     }
-  }, [patientMode, selectedPatientId, fullName, uniquePatients, events, doctorId]);
+  }, [patientMode, selectedPatientId, fullName, uniquePatients]);
+
+  // Smart doctor selection when a patient is newly selected (only if no initial doctorId was passed)
+  useEffect(() => {
+    if (patientMode === 'select' && selectedPatientId && !doctorId && events && events.length > 0) {
+      const patientEvents = events.filter(
+        (e: any) => e.patientId === selectedPatientId && e.doctorId
+      );
+      if (patientEvents.length > 0) {
+        patientEvents.sort(
+          (a, b) =>
+            new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+        );
+        const lastDoctorId = patientEvents[0].doctorId;
+        if (lastDoctorId) {
+          setSelectedDoctorId(lastDoctorId);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPatientId]);
+
+  const selectedDoctorObj = useMemo(() => {
+    if (!selectedDoctorId) return null;
+    return doctors.find((d) => d.id === selectedDoctorId) || null;
+  }, [doctors, selectedDoctorId]);
+
+  const targetDate = String(defaultDate || '').slice(0, 10);
+
+  const dayShifts = useMemo(() => {
+    return (shifts || []).filter(
+      (s: any) => String(s.date || '').slice(0, 10) === targetDate
+    );
+  }, [shifts, targetDate]);
+
+  const selectedDoctorShifts = useMemo(() => {
+    if (!selectedDoctorId) return [];
+    return dayShifts.filter((s: any) => s.userId === selectedDoctorId);
+  }, [dayShifts, selectedDoctorId]);
+
+  // When opened via "Randevu Ekle" button (isCentered),
+  // if the initial default time is outside the shift and user hasn't touched the slider yet,
+  // snap the time range into the shift start.
+  useEffect(() => {
+    if (!isCentered || hasUserChangedTime) {
+      return;
+    }
+    const relevantShifts = selectedDoctorId ? selectedDoctorShifts : dayShifts;
+    if (relevantShifts.length === 0) {
+      return;
+    }
+    const startMin = Math.round(timeRange[0] * 60);
+    const endMin = Math.round(timeRange[1] * 60);
+    const isCovered = relevantShifts.some((shift: any) => {
+      const [sH, sM] = String(shift.startTime || '00:00').split(':').map(Number);
+      const [eH, eM] = String(shift.endTime || '23:59').split(':').map(Number);
+      const shiftStartMin = (sH || 0) * 60 + (sM || 0);
+      let shiftEndMin = (eH || 0) * 60 + (eM || 0);
+      if (shiftEndMin <= shiftStartMin) shiftEndMin += 1440;
+      return startMin >= shiftStartMin && endMin <= shiftEndMin;
+    });
+    if (!isCovered) {
+      const firstShift = relevantShifts[0];
+      const sVal = timeToNumber(firstShift.startTime || '09:00');
+      const eLimit = timeToNumber(firstShift.endTime || '18:00');
+      const nextStart = Math.max(6, Math.min(23.5, sVal));
+      const nextEnd = Math.min(24, Math.max(nextStart + 0.5, Math.min(eLimit, nextStart + 0.5)));
+      setTimeRange([nextStart, nextEnd]);
+    }
+  }, [isCentered, hasUserChangedTime, selectedDoctorId, selectedDoctorShifts, dayShifts, timeRange]);
+
+  const shiftValidationError = useMemo(() => {
+    const startMin = Math.round(timeRange[0] * 60);
+    const endMin = Math.round(timeRange[1] * 60);
+
+    const isShiftCoveringRange = (shift: any) => {
+      const [sH, sM] = String(shift.startTime || '00:00').split(':').map(Number);
+      const [eH, eM] = String(shift.endTime || '23:59').split(':').map(Number);
+      const shiftStartMin = (sH || 0) * 60 + (sM || 0);
+      let shiftEndMin = (eH || 0) * 60 + (eM || 0);
+      if (shiftEndMin <= shiftStartMin) shiftEndMin += 1440;
+      let evStart = startMin;
+      let evEnd = endMin;
+      if (evEnd <= evStart) evEnd += 1440;
+      if (shiftEndMin > 1440 && evStart < shiftStartMin) {
+        evStart += 1440;
+        evEnd += 1440;
+      }
+      return evStart >= shiftStartMin && evEnd <= shiftEndMin;
+    };
+
+    const findDoctorLeaveConflict = (docId: string) => {
+      return (doctorLeaves || []).find((l: any) => {
+        if (
+          l.doctorId !== docId ||
+          String(l.date || '').slice(0, 10) !== targetDate
+        ) {
+          return false;
+        }
+        if (l.isFullDay) return true;
+        const [sH, sM] = String(l.startTime || '00:00').split(':').map(Number);
+        const [eH, eM] = String(l.endTime || '23:59').split(':').map(Number);
+        const lStart = (sH || 0) * 60 + (sM || 0);
+        const lEnd = (eH || 0) * 60 + (eM || 0);
+        return startMin < lEnd && endMin > lStart;
+      });
+    };
+
+    if (!selectedDoctorId) {
+      if (dayShifts.length === 0) {
+        return `Bu tarihte (${defaultDate}) tanımlı vardiya bulunmamaktadır. Vardiya olmadan randevu eklenemez!`;
+      }
+      const coveringShifts = dayShifts.filter(isShiftCoveringRange);
+      if (coveringShifts.length === 0) {
+        const shiftRanges = Array.from(
+          new Set(dayShifts.map((s: any) => `${s.startTime}-${s.endTime}`))
+        ).join(', ');
+        return `Seçilen randevu saati (${formatNumberTime(timeRange[0])} - ${formatNumberTime(timeRange[1])}), bu tarihteki vardiya saatleri (${shiftRanges}) dışındadır. Randevu eklenemez!`;
+      }
+      const hasAvailableShiftDoctor = coveringShifts.some(
+        (s: any) => !s.userId || !findDoctorLeaveConflict(s.userId)
+      );
+      if (!hasAvailableShiftDoctor) {
+        return `Seçilen saat aralığında (${formatNumberTime(timeRange[0])} - ${formatNumberTime(timeRange[1])}) vardiyası olan hekim(ler) izinlidir. Randevu eklenemez!`;
+      }
+      return null;
+    }
+
+    const docName = selectedDoctorObj?.name ? `Dr. ${selectedDoctorObj.name}` : 'Seçilen hekim';
+    if (selectedDoctorShifts.length === 0) {
+      return `${docName} için bu tarihte (${defaultDate}) tanımlı vardiya bulunmamaktadır. Randevu eklenemez!`;
+    }
+
+    const isCovered = selectedDoctorShifts.some(isShiftCoveringRange);
+    if (!isCovered) {
+      const shiftRanges = selectedDoctorShifts
+        .map((s: any) => `${s.startTime}-${s.endTime}`)
+        .join(', ');
+      return `Seçilen randevu saati (${formatNumberTime(timeRange[0])} - ${formatNumberTime(timeRange[1])}), ${docName} vardiya saatleri (${shiftRanges}) dışındadır. Randevu eklenemez!`;
+    }
+
+    const conflictLeave = findDoctorLeaveConflict(selectedDoctorId);
+    if (conflictLeave) {
+      const rangeText = conflictLeave.isFullDay
+        ? 'Tüm gün'
+        : `${conflictLeave.startTime} - ${conflictLeave.endTime}`;
+      return `${docName} bu saatlerde (${rangeText}) izinlidir. Randevu eklenemez!`;
+    }
+
+    return null;
+  }, [
+    selectedDoctorId,
+    selectedDoctorObj,
+    selectedDoctorShifts,
+    dayShifts,
+    targetDate,
+    defaultDate,
+    timeRange,
+    doctorLeaves,
+  ]);
 
   const popoverRef = React.useRef<HTMLDivElement>(null);
   const [computedLeft, setComputedLeft] = useState(x);
@@ -204,7 +363,7 @@ export default function QuickCreatePopover({
           gender,
           birthDate,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
       return createdPatientId;
     }
     const res = await fetch('/api/dental/patients', {
@@ -235,6 +394,10 @@ export default function QuickCreatePopover({
   };
 
   const handleSave = () => {
+    if (shiftValidationError) {
+      toast.error(`⚠️ ${shiftValidationError}`);
+      return;
+    }
     if (patientMode === 'select' && !selectedPatientId) {
       toast.error('Lütfen listeden bir hasta seçin veya Yeni Hasta Ekle sekmesine geçin.');
       return;
@@ -463,7 +626,7 @@ export default function QuickCreatePopover({
               transition: 'all 0.15s ease',
             }}
           >
-            Hasta Randevu
+            Kayıtlı Hasta Randevu
           </button>
           <button
             type="button"
@@ -493,7 +656,7 @@ export default function QuickCreatePopover({
               size={15}
               color={patientMode === 'create' ? '#ffffff' : 'currentColor'}
             />
-            <span>Yeni Hasta Ekle</span>
+            <span>Yeni Hasta Randevu</span>
           </button>
         </div>
 
@@ -898,35 +1061,59 @@ export default function QuickCreatePopover({
             </div>
 
             {/* DOCTOR SELECTION */}
-            {(selectedPatientId || patientMode === 'create') && (
+            <div
+              style={{
+                background: subCardBg,
+                padding: '14px',
+                borderRadius: '10px',
+                border: shiftValidationError
+                  ? '1.5px solid var(--danger, #ef4444)'
+                  : `1px solid ${borderCol}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                boxShadow: 'var(--pc-neo-subcard)',
+              }}
+            >
               <div
                 style={{
-                  background: subCardBg,
-                  padding: '14px',
-                  borderRadius: '10px',
-                  border: `1px solid ${borderCol}`,
                   display: 'flex',
-                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                   gap: '8px',
                 }}
               >
-                <div
+                <label
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
+                    fontSize: '0.86rem',
+                    fontWeight: 700,
+                    color: textCol,
                   }}
                 >
-                  <label
-                    style={{
-                      fontSize: '0.86rem',
-                      fontWeight: 700,
-                      color: textCol,
-                    }}
-                  >
-                    Doktor Ataması
-                  </label>
-                  {!selectedDoctorId && (
+                  İlgili Doktor (Opsiyonel)
+                </label>
+                {!selectedDoctorId ? (
+                  dayShifts.length === 0 ? (
+                    <span
+                      style={{
+                        fontSize: '0.73rem',
+                        color: 'var(--danger, #ef4444)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⛔ Vardiya Yok
+                    </span>
+                  ) : shiftValidationError ? (
+                    <span
+                      style={{
+                        fontSize: '0.73rem',
+                        color: 'var(--danger, #ef4444)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⛔ Vardiya / İzin Uyuşmazlığı
+                    </span>
+                  ) : (
                     <span
                       style={{
                         fontSize: '0.75rem',
@@ -936,140 +1123,238 @@ export default function QuickCreatePopover({
                     >
                       ⚠️ Atanmadı
                     </span>
-                  )}
-                </div>
-                <select
-                  value={selectedDoctorId}
-                  onChange={(e) => setSelectedDoctorId(e.target.value)}
-                  style={{
-                    ...inputStyle,
-                    border: !selectedDoctorId
-                      ? '1.5px solid #f59e0b'
-                      : `1px solid ${inputBorder}`,
-                    color: !selectedDoctorId ? '#f59e0b' : textCol,
-                    fontWeight: !selectedDoctorId ? 600 : 400,
-                  }}
-                >
-                  <option value="" style={selectOptionStyle}>
-                    ⚠️ Doktor Seçiniz (Atama Bekliyor)
-                  </option>
-                  {doctors.map((d) => (
-                    <option key={d.id} value={d.id} style={selectOptionStyle}>
-                      Dr. {d.name}
-                    </option>
-                  ))}
-                </select>
-                {!selectedDoctorId && (
-                  <div
-                    style={{
-                      fontSize: '0.74rem',
-                      color: '#f59e0b',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <span>
-                      ℹ️ Doktor seçilmezse randevu &ldquo;Doktor Atanmadı&rdquo; uyarısıyla açılır.
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TIME SELECTION */}
-            {(selectedPatientId || patientMode === 'create') && (
-              <div
-                style={{
-                  background: subCardBg,
-                  padding: '14px',
-                  borderRadius: '10px',
-                  border: `1px solid ${borderCol}`,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <label
-                    style={{
-                      fontSize: '0.86rem',
-                      fontWeight: 700,
-                      color: textCol,
-                    }}
-                  >
-                    Randevu Saati
-                  </label>
+                  )
+                ) : selectedDoctorShifts.length === 0 ? (
                   <span
                     style={{
-                      fontSize: '0.8rem',
-                      color: brandBlue,
+                      fontSize: '0.73rem',
+                      color: 'var(--danger, #ef4444)',
                       fontWeight: 700,
                     }}
                   >
-                    {defaultDate}
+                    ⛔ Vardiya Yok
+                  </span>
+                ) : shiftValidationError ? (
+                  <span
+                    style={{
+                      fontSize: '0.73rem',
+                      color: 'var(--danger, #ef4444)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    ⛔ Vardiya / İzin Uyuşmazlığı
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '0.73rem',
+                      color: 'var(--btn-clinic-mint-text, #15803d)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    ✓ Vardiya: {selectedDoctorShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')}
+                  </span>
+                )}
+              </div>
+              <select
+                value={selectedDoctorId}
+                onChange={(e) => setSelectedDoctorId(e.target.value)}
+                style={{
+                  ...inputStyle,
+                  border: shiftValidationError
+                    ? '1.5px solid var(--danger, #ef4444)'
+                    : !selectedDoctorId
+                      ? '1.5px solid #f59e0b'
+                      : `1px solid ${inputBorder}`,
+                  color: shiftValidationError
+                    ? 'var(--danger, #ef4444)'
+                    : !selectedDoctorId
+                      ? '#f59e0b'
+                      : textCol,
+                  fontWeight: !selectedDoctorId || shiftValidationError ? 600 : 400,
+                }}
+              >
+                <option value="" style={selectOptionStyle}>
+                  ⚠️ Doktor Seçiniz (Atama Bekliyor)
+                </option>
+                {doctors.map((d) => {
+                  const targetDate = String(defaultDate || '').slice(0, 10);
+                  const docShifts = (shifts || []).filter(
+                    (s: any) =>
+                      s.userId === d.id &&
+                      String(s.date || '').slice(0, 10) === targetDate
+                  );
+                  const shiftSuffix =
+                    docShifts.length > 0
+                      ? ` (${docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')})`
+                      : ' (Vardiya Yok)';
+                  return (
+                    <option key={d.id} value={d.id} style={selectOptionStyle}>
+                      Dr. {d.name}{shiftSuffix}
+                    </option>
+                  );
+                })}
+              </select>
+              {!selectedDoctorId && (
+                <div
+                  style={{
+                    fontSize: '0.74rem',
+                    color: '#f59e0b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <span>
+                    ℹ️ Doktor seçilmezse randevu &ldquo;Doktor Atanmadı&rdquo; uyarısıyla açılır.
                   </span>
                 </div>
-                <FancyHourPicker range={timeRange} onChange={setTimeRange} />
+              )}
+              {shiftValidationError && (
+                <div
+                  style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--danger, #ef4444)',
+                    background: inputBg,
+                    border: '1px solid var(--danger, #ef4444)',
+                    borderRadius: '7px',
+                    padding: '8px 10px',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 6,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>⚠️</span>
+                  <span>{shiftValidationError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* TIME SELECTION */}
+            <div
+              style={{
+                background: subCardBg,
+                padding: '14px',
+                borderRadius: '10px',
+                border: `1px solid ${borderCol}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                boxShadow: 'var(--pc-neo-subcard)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: '0.86rem',
+                    fontWeight: 700,
+                    color: textCol,
+                  }}
+                >
+                  Randevu Saati
+                </label>
+                <span
+                  style={{
+                    fontSize: '0.8rem',
+                    color: brandBlue,
+                    fontWeight: 700,
+                  }}
+                >
+                  {defaultDate}
+                </span>
               </div>
-            )}
+              <FancyHourPicker
+                range={timeRange}
+                onChange={(val) => {
+                  setHasUserChangedTime(true);
+                  setTimeRange(val);
+                }}
+              />
+            </div>
           </div>
         </div>
 
         {/* Footer */}
         <div
           style={{
-            padding: '14px 20px',
             borderTop: `1px solid ${borderCol}`,
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: '10px',
             background: subCardBg,
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          <button
-            type="button"
-            onClick={onClose}
+          {shiftValidationError && (
+            <div
+              style={{
+                padding: '9px 20px',
+                borderBottom: `1px solid ${borderCol}`,
+                background: inputBg,
+                color: 'var(--danger, #ef4444)',
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                lineHeight: 1.3,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>⛔</span>
+              <span>{shiftValidationError}</span>
+            </div>
+          )}
+          <div
             style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: `1px solid ${borderCol}`,
-              background: cardBg,
-              color: textCol,
-              cursor: 'pointer',
-              fontSize: '0.86rem',
-              fontWeight: 600,
-              boxShadow: 'var(--pc-clay-btn)',
+              padding: '14px 20px',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px',
             }}
           >
-            İptal
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaveDisabled}
-            style={{
-              padding: '9px 24px',
-              borderRadius: '8px',
-              background: brandBlue,
-              color: '#ffffff',
-              border: 'none',
-              cursor: isSaveDisabled ? 'not-allowed' : 'pointer',
-              fontWeight: 700,
-              fontSize: '0.86rem',
-              opacity: isSaveDisabled ? 0.5 : 1,
-              boxShadow: isSaveDisabled ? 'none' : 'var(--pc-clay-primary)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            Kaydet
-          </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '9px 18px',
+                borderRadius: '8px',
+                border: `1px solid ${borderCol}`,
+                background: cardBg,
+                color: textCol,
+                cursor: 'pointer',
+                fontSize: '0.86rem',
+                fontWeight: 600,
+                boxShadow: 'var(--pc-clay-btn)',
+              }}
+            >
+              İptal
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{
+                padding: '9px 24px',
+                borderRadius: '8px',
+                background: brandBlue,
+                color: '#ffffff',
+                border: 'none',
+                cursor: isSaveDisabled || Boolean(shiftValidationError) ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                fontSize: '0.86rem',
+                opacity: isSaveDisabled || Boolean(shiftValidationError) ? 0.55 : 1,
+                boxShadow: isSaveDisabled || Boolean(shiftValidationError) ? 'none' : 'var(--pc-clay-primary)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Kaydet
+            </button>
+          </div>
         </div>
       </div>
     </>

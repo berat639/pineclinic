@@ -365,9 +365,10 @@ export default function VipAssistantTab() {
         )}
       </div>
 
-      {/* Modal - Strict Flat Architecture (No Glassmorphism) */}
+      {/* Modal - Yeni Randevu 460px Standardı */}
       {showModal && (
         <div
+          onClick={() => setShowModal(false)}
           style={{
             position: 'fixed',
             inset: 0,
@@ -375,215 +376,253 @@ export default function VipAssistantTab() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.75)',
+            background: 'rgba(15, 23, 42, 0.6)',
             padding: 16,
           }}
         >
-          <div
+          <form
+            role="dialog"
+            aria-modal="true"
+            onSubmit={handleSave}
+            onClick={(e) => e.stopPropagation()}
             style={{
-              width: '100%',
-              maxWidth: 540,
-              background: 'var(--card-bg, #1e293b)',
-              border: '1px solid var(--input-border, #334155)',
-              borderRadius: 12,
-              padding: 24,
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
-              color: 'var(--foreground, #ffffff)',
+              width: 'calc(100vw - 24px)',
+              maxWidth: 460,
+              maxHeight: '90vh',
+              background: 'var(--card-bg)',
+              border: '1.5px solid var(--input-border)',
+              borderRadius: 14,
+              boxShadow: 'var(--pc-modal-shadow)',
+              color: 'var(--foreground)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground, #ffffff)' }}>
-                {editingItem ? 'VIP Numarayı Düzenle' : 'Yeni VIP Numara Ekle'}
-              </h3>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
+                  📞
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                    {editingItem ? 'VIP Numarayı Düzenle' : 'Yeni VIP Numara Ekle'}
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
+                    Özel karşılama ve canlı web arama ayarları
+                  </div>
+                </div>
+              </div>
               <button
+                type="button"
                 onClick={() => setShowModal(false)}
+                aria-label="Kapat"
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#94a3b8',
-                  fontSize: '1.2rem',
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)',
+                  color: 'var(--foreground)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   cursor: 'pointer',
+                  boxShadow: 'var(--pc-clay-btn)',
                 }}
               >
                 ✕
               </button>
             </div>
 
-            {error && (
-              <div
+            {/* Body */}
+            <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {error && (
+                <div
+                  style={{
+                    padding: '9px 12px',
+                    background: 'var(--card-inner)',
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
+                    borderRadius: 8,
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
+              <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>Numara ve Asistan Bilgileri</div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, fontWeight: 600 }}>
+                    Telefon Numarası *
+                  </label>
+                  <PhoneMaskedInput
+                    placeholder="0 (505) 639 73 51"
+                    value={phone}
+                    onValueChange={setPhone}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 8,
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
+                      color: 'var(--foreground)',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                      boxShadow: 'var(--pc-neo-inset)',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, fontWeight: 600 }}>
+                    Kişi Adı / Açıklama
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Örn: Berat Bey Özel Hat"
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 8,
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
+                      color: 'var(--foreground)',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                      boxShadow: 'var(--pc-neo-inset)',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, fontWeight: 600 }}>
+                    İlk Karşılama Cümlesi *
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 8,
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
+                      color: 'var(--foreground)',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                      resize: 'vertical',
+                      boxShadow: 'var(--pc-neo-inset)',
+                    }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--foreground-3)' }}>
+                    Telefon açıldığında asistanın söyleyeceği ilk cümle.
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, fontWeight: 600 }}>
+                    Özel Kişisel Asistan Promptu (Opsiyonel)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Boş bırakılırsa varsayılan neşeli, kahkaha atabilen, klinikten bağımsız Berat Bey asistanı promptu kullanılır."
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 8,
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
+                      color: 'var(--foreground)',
+                      fontSize: '0.84rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                      resize: 'vertical',
+                      boxShadow: 'var(--pc-neo-inset)',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={groundingEnabled}
+                      onChange={(e) => setGroundingEnabled(e.target.checked)}
+                      style={{ width: 16, height: 16, accentColor: '#2563eb' }}
+                    />
+                    <span style={{ fontSize: '0.82rem', color: 'var(--foreground)', fontWeight: 600 }}>
+                      🔍 Google Grounding (Canlı Web Arama) Açık
+                    </span>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={(e) => setActive(e.target.checked)}
+                      style={{ width: 16, height: 16, accentColor: '#2563eb' }}
+                    />
+                    <span style={{ fontSize: '0.82rem', color: 'var(--foreground)', fontWeight: 600 }}>
+                      Bu numara için VIP Asistan Aktif
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
                 style={{
-                  padding: '8px 12px',
-                  background: '#7f1d1d',
-                  color: '#fca5a5',
-                  borderRadius: 6,
-                  fontSize: '0.8rem',
-                  marginBottom: 16,
+                  padding: '9px 18px',
+                  borderRadius: 8,
+                  background: 'var(--card-bg)',
+                  color: 'var(--foreground)',
+                  border: '1px solid var(--input-border)',
+                  fontSize: '0.86rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--pc-clay-btn)',
                 }}
               >
-                {error}
-              </div>
-            )}
-
-            <form onSubmit={handleSave}>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
-                  Telefon Numarası *
-                </label>
-                <PhoneMaskedInput
-                  placeholder="0 (505) 639 73 51"
-                  value={phone}
-                  onValueChange={setPhone}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'var(--input-bg, #0f172a)',
-                    border: '1px solid var(--input-border, #334155)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.88rem',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
-                  Kişi Adı / Açıklama
-                </label>
-                <input
-                  type="text"
-                  placeholder="Örn: Berat Bey Özel Hat"
-                  value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'var(--input-bg, #0f172a)',
-                    border: '1px solid var(--input-border, #334155)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.88rem',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
-                  İlk Karşılama Cümlesi *
-                </label>
-                <textarea
-                  rows={2}
-                  value={greeting}
-                  onChange={(e) => setGreeting(e.target.value)}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'var(--input-bg, #0f172a)',
-                    border: '1px solid var(--input-border, #334155)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.85rem',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                    resize: 'vertical',
-                  }}
-                />
-                <span style={{ fontSize: '0.72rem', color: 'var(--foreground-3, #64748b)' }}>
-                  Telefon açıldığında asistanın söyleyeceği ilk cümle.
-                </span>
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--foreground-2, #94a3b8)', marginBottom: 6, fontWeight: 500 }}>
-                  Özel Kişisel Asistan Promptu (Opsiyonel)
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Boş bırakılırsa varsayılan neşeli, kahkaha atabilen, klinikten bağımsız Berat Bey asistanı promptu kullanılır."
-                  value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'var(--input-bg, #0f172a)',
-                    border: '1px solid var(--input-border, #334155)',
-                    color: 'var(--foreground, #ffffff)',
-                    fontSize: '0.82rem',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                    resize: 'vertical',
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={groundingEnabled}
-                    onChange={(e) => setGroundingEnabled(e.target.checked)}
-                    style={{ width: 18, height: 18, accentColor: '#2563eb' }}
-                  />
-                  <span style={{ fontSize: '0.84rem', color: '#e2e8f0', fontWeight: 500 }}>
-                    🔍 Google Grounding (Canlı Web Arama) Açık
-                  </span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={active}
-                    onChange={(e) => setActive(e.target.checked)}
-                    style={{ width: 18, height: 18, accentColor: '#2563eb' }}
-                  />
-                  <span style={{ fontSize: '0.84rem', color: '#e2e8f0' }}>
-                    Bu numara için VIP Asistan Aktif
-                  </span>
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  style={{
-                    padding: '9px 16px',
-                    borderRadius: 8,
-                    background: '#334155',
-                    color: '#e2e8f0',
-                    border: 'none',
-                    fontSize: '0.84rem',
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                  }}
-                >
-                  İptal
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  style={{
-                    padding: '9px 20px',
-                    borderRadius: 8,
-                    background: '#2563eb',
-                    color: '#ffffff',
-                    border: 'none',
-                    fontSize: '0.84rem',
-                    fontWeight: 600,
-                    cursor: saving ? 'wait' : 'pointer',
-                  }}
-                >
-                  {saving ? 'Kaydediliyor...' : 'Kaydet'}
-                </button>
-              </div>
-            </form>
-          </div>
+                İptal
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                style={{
+                  padding: '9px 24px',
+                  borderRadius: 8,
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '0.86rem',
+                  fontWeight: 700,
+                  cursor: saving ? 'wait' : 'pointer',
+                  boxShadow: 'var(--pc-clay-primary)',
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor...' : 'Kaydet'}</span>
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

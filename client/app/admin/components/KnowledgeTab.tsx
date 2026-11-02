@@ -72,132 +72,152 @@ function DocModal({ doc, onClose, onSave, saving, categories }: ModalProps) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.65)',
+      background: 'rgba(15, 23, 42, 0.6)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '1rem',
+      padding: '16px',
     }} {...backdropDismiss}>
-      <div style={{
-        background: 'var(--card-bg, #1e293b)', border: '1px solid var(--input-border, #334155)',
-        borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 800,
-        animation: 'fadeIn 0.2s ease',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-            {isEdit ? '✏️ Belge Düzenle' : '+ Yeni Belge'}
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-          {/* Kategori */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-              Kategori
-            </label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {categories.map(cat => (
-                <button key={cat.slug} type="button" onClick={() => setCategory(cat.slug)} style={{
-                  padding: '5px 12px', borderRadius: 20, border: '1px solid', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 500, transition: 'all 0.15s',
-                  background: category === cat.slug ? `rgba(${hexToRgb(cat.color)}, 0.2)` : 'rgba(255,255,255,0.04)',
-                  borderColor: category === cat.slug ? cat.color : 'rgba(255,255,255,0.08)',
-                  color: category === cat.slug ? cat.color : '#94a3b8',
-                }}>
-                  {cat.icon} {cat.label}
-                </button>
-              ))}
+      <form
+        role="dialog"
+        aria-modal="true"
+        onSubmit={handleSubmit}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--card-bg)', border: '1.5px solid var(--input-border)',
+          borderRadius: 14, width: 'calc(100vw - 24px)', maxWidth: 460, maxHeight: '90vh',
+          boxShadow: 'var(--pc-modal-shadow)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+      >
+        {/* Header (Yeni Randevu Standardı) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
+              {isEdit ? '✏️' : '📄'}
+            </div>
+            <div>
+              <h2 style={{ fontSize: '1.02rem', fontWeight: 700, margin: 0, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                {isEdit ? 'Belge Düzenle' : 'Yeni Belge Ekle'}
+              </h2>
+              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
+                Bilgi bankası içeriğini kaydedin
+              </div>
             </div>
           </div>
+          <button type="button" onClick={onClose} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}>✕</button>
+        </div>
 
-          {/* Başlık */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-              Başlık
-            </label>
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="Örn: Mayıs 2026 Kampanyası"
-              required
-              style={{
-                width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
-                fontSize: '0.875rem', outline: 'none',
-              }}
-            />
-          </div>
+        {/* Body */}
+        <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Kategori */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 6 }}>
+                Kategori
+              </label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {categories.map(cat => (
+                  <button key={cat.slug} type="button" onClick={() => setCategory(cat.slug)} style={{
+                    padding: '5px 11px', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700,
+                    background: category === cat.slug ? '#2563eb' : 'var(--card-bg)',
+                    borderColor: category === cat.slug ? '#2563eb' : 'var(--input-border)',
+                    color: category === cat.slug ? '#ffffff' : 'var(--foreground)',
+                    boxShadow: category === cat.slug ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                  }}>
+                    <span style={{ color: category === cat.slug ? '#ffffff' : 'inherit' }}>{cat.icon} {cat.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          {/* İçerik */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-              İçerik <span style={{ color: '#475569', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(AI bu metni okuyacak)</span>
-            </label>
-            <textarea
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın..."
-              required
-              rows={7}
-              style={{
-                width: '100%', padding: '9px 12px', background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--foreground)',
-                fontSize: '0.875rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
-                lineHeight: 1.6,
-              }}
-            />
-          </div>
+            {/* Başlık */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                Başlık
+              </label>
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="Örn: Mayıs 2026 Kampanyası"
+                required
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
+                  fontSize: '0.85rem', outline: 'none', boxShadow: 'var(--pc-neo-inset)',
+                }}
+              />
+            </div>
 
-          {/* Yön (Arama Yönü) Seçimi */}
-          {/* Kullanım Yeri Seçimi (Gelişmiş değil, sadece sadeleştirildi) */}
-          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
-            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-2)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
-              🔀 Kullanım Yeri
-            </label>
-            <select
-              value={callDirection}
-              onChange={e => setCallDirection(e.target.value as any)}
-              style={{
-                width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: 'var(--foreground)',
-                fontSize: '0.85rem', outline: 'none', cursor: 'pointer', appearance: 'none'
-              }}
-            >
-              <option value="both">Tüm Aramalar (Varsayılan)</option>
-              <option value="inbound">Sadece Bizi Aradıklarında (Gelen Arama)</option>
-              <option value="outbound">Sadece Biz Aradığımızda (Giden Arama)</option>
-            </select>
-          </div>
+            {/* İçerik */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                İçerik <span style={{ color: 'var(--foreground-3)', fontWeight: 500 }}>(AI bu metni okuyacak)</span>
+              </label>
+              <textarea
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın..."
+                required
+                rows={5}
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
+                  fontSize: '0.85rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit',
+                  lineHeight: 1.5, boxShadow: 'var(--pc-neo-inset)',
+                }}
+              />
+            </div>
 
-          {/* Aktif toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              type="button"
-              onClick={() => setActive(!active)}
-              style={{
-                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', transition: 'all 0.2s', position: 'relative',
-                background: active ? '#22c55e' : 'rgba(255,255,255,0.1)',
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: 3, left: active ? 23 : 3, width: 18, height: 18,
-                borderRadius: '50%', background: 'white', transition: 'left 0.2s',
-              }} />
-            </button>
-            <span style={{ fontSize: '0.875rem', color: active ? '#22c55e' : '#64748b' }}>
-              {active ? 'Aktif — AI bu belgeyi kullanır' : 'Pasif — AI bu belgeyi kullanmaz'}
-            </span>
-          </div>
+            {/* Kullanım Yeri */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                🔀 Kullanım Yeri
+              </label>
+              <select
+                value={callDirection}
+                onChange={e => setCallDirection(e.target.value as any)}
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
+                  fontSize: '0.85rem', outline: 'none', cursor: 'pointer', boxShadow: 'var(--pc-neo-inset)',
+                }}
+              >
+                <option value="both">Tüm Aramalar (Varsayılan)</option>
+                <option value="inbound">Sadece Bizi Aradıklarında (Gelen Arama)</option>
+                <option value="outbound">Sadece Biz Aradığımızda (Giden Arama)</option>
+              </select>
+            </div>
 
-          {/* Butonlar */}
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-            <button type="button" onClick={onClose} className="btn btn-ghost" style={{ fontSize: '0.875rem' }} disabled={saving}>
-              İptal
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving || !title.trim() || !content.trim()} style={{ fontSize: '0.875rem', minWidth: 140 }}>
-              {saving ? '⏳ Embedding…' : isEdit ? '💾 Güncelle' : '✨ Kaydet & Göm'}
-            </button>
+            {/* Aktif toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setActive(!active)}
+                style={{
+                  width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', transition: 'all 0.2s', position: 'relative',
+                  background: active ? '#2563eb' : 'var(--input-border)',
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: 3, left: active ? 23 : 3, width: 18, height: 18,
+                  borderRadius: '50%', background: '#ffffff', transition: 'left 0.2s',
+                }} />
+              </button>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--foreground)' }}>
+                {active ? 'Aktif — AI bu belgeyi kullanır' : 'Pasif — AI bu belgeyi kullanmaz'}
+              </span>
+            </div>
           </div>
-        </form>
-      </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+          <button type="button" onClick={onClose} disabled={saving} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
+            İptal
+          </button>
+          <button type="submit" disabled={saving || !title.trim() || !content.trim()} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: saving || !title.trim() || !content.trim() ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: saving || !title.trim() || !content.trim() ? 0.6 : 1 }}>
+            <span style={{ color: '#ffffff' }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</span>
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -1022,58 +1042,78 @@ export default function KnowledgeTab() {
         />
       )}
 
-      {/* Outbound Call Modal */}
+      {/* Outbound Call Modal (Yeni Randevu 460px Standardı) */}
       {callModalOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
-          background: 'rgba(0,0,0,0.65)',
+          background: 'rgba(15, 23, 42, 0.6)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '1rem',
+          padding: '16px',
         }} {...callModalBackdropDismiss}>
-          <div style={{
-            background: 'var(--card-bg, #1e293b)', border: '1px solid var(--input-border, #334155)',
-            borderRadius: 20, padding: '2rem', width: '100%', maxWidth: 420,
-            animation: 'fadeIn 0.2s ease',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>📞 Yapay Zeka ile Ara (Dış Arama)</h2>
-              <button onClick={() => setCallModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+          <form
+            role="dialog"
+            aria-modal="true"
+            onSubmit={handleOutboundCall}
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--card-bg)', border: '1.5px solid var(--input-border)',
+              borderRadius: 14, width: 'calc(100vw - 24px)', maxWidth: 460, maxHeight: '90vh',
+              boxShadow: 'var(--pc-modal-shadow)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
+                  📞
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1.02rem', fontWeight: 700, margin: 0, color: 'var(--foreground)', lineHeight: 1.2 }}>Yapay Zeka ile Ara</h2>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>Giden arama akışı ile dış arama başlatın</div>
+                </div>
+              </div>
+              <button type="button" onClick={() => setCallModalOpen(false)} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}>✕</button>
             </div>
-            <form onSubmit={handleOutboundCall} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--foreground-3)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-                  Hedef Telefon Numarası
-                </label>
-                <PhoneMaskedInput
-                  value={callPhone}
-                  onValueChange={setCallPhone}
-                  placeholder="Örn: 0 (5XX) XXX XX XX"
-                  required
-                  style={{
-                    width: '100%', padding: '9px 12px', background: 'var(--input-bg, #0f172a)',
-                    border: '1px solid var(--input-border, #334155)', borderRadius: 10, color: 'var(--foreground)',
-                    fontSize: '0.875rem', outline: 'none',
-                  }}
-                />
-              </div>
 
-              <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 8, padding: '10px 12px', fontSize: '0.76rem', color: '#6ee7b7' }}>
-                <div style={{ fontWeight: 600, marginBottom: 2 }}>ℹ️ Arama Parametreleri:</div>
-                <div>• Çıkış Numarası: <strong>{outboundCallerId}</strong></div>
-                <div>• Akış: <strong>Giden Arama Akışı (Anket/Takip)</strong></div>
-                <div>• Açılış: <strong>Giden Karşılama Mesajı</strong></div>
-              </div>
+            {/* Body */}
+            <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)', marginBottom: 4 }}>
+                    Hedef Telefon Numarası
+                  </label>
+                  <PhoneMaskedInput
+                    value={callPhone}
+                    onValueChange={setCallPhone}
+                    placeholder="Örn: 0 (5XX) XXX XX XX"
+                    required
+                    style={{
+                      width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)', borderRadius: 8, color: 'var(--foreground)',
+                      fontSize: '0.85rem', outline: 'none', boxShadow: 'var(--pc-neo-inset)',
+                    }}
+                  />
+                </div>
 
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" onClick={() => setCallModalOpen(false)} className="btn btn-ghost" style={{ fontSize: '0.875rem' }} disabled={calling}>
-                  İptal
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={calling || !callPhone.trim()} style={{ fontSize: '0.875rem', minWidth: 100, background: '#ec4899', borderColor: '#ec4899' }}>
-                  {calling ? '⏳ Aranıyor...' : '📞 Hemen Ara'}
-                </button>
+                <div style={{ background: 'var(--card-bg)', border: '1px solid var(--input-border)', borderRadius: 8, padding: '10px 12px', fontSize: '0.76rem', color: 'var(--foreground-2)' }}>
+                  <div style={{ fontWeight: 700, color: 'var(--foreground)', marginBottom: 4 }}>ℹ️ Arama Parametreleri:</div>
+                  <div>• Çıkış Numarası: <strong>{outboundCallerId}</strong></div>
+                  <div>• Akış: <strong>Giden Arama Akışı (Anket/Takip)</strong></div>
+                  <div>• Açılış: <strong>Giden Karşılama Mesajı</strong></div>
+                </div>
               </div>
-            </form>
-          </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <button type="button" onClick={() => setCallModalOpen(false)} disabled={calling} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
+                İptal
+              </button>
+              <button type="submit" disabled={calling || !callPhone.trim()} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#ffffff', cursor: calling || !callPhone.trim() ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', opacity: calling || !callPhone.trim() ? 0.6 : 1 }}>
+                <span style={{ color: '#ffffff' }}>{calling ? 'Aranıyor...' : 'Hemen Ara'}</span>
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

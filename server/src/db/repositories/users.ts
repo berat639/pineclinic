@@ -1,6 +1,14 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gte, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '../client'
-import { clinicMemberships, users, userSessions } from '../schema'
+import {
+  appointmentTreatments,
+  clinicMemberships,
+  dentalAppointments,
+  treatmentPlanDetails,
+  treatmentPlans,
+  users,
+  userSessions,
+} from '../schema'
 import { currentClinicId } from '../../tenancy/context'
 
 export async function createUser(data: {
@@ -59,6 +67,148 @@ export async function listUsers() {
     .where(and(eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.active, true)))
 }
 
+export async function countActiveClinicAdmins(clinicId?: string | null, excludeUserId?: string): Promise<number> {
+  const targetClinicId = clinicId ?? currentClinicId()
+  if (targetClinicId) {
+    const rows = await db
+      .select({ id: users.id })
+      .from(users)
+      .innerJoin(clinicMemberships, eq(clinicMemberships.userId, users.id))
+      .where(
+        and(
+          eq(clinicMemberships.clinicId, targetClinicId),
+          eq(clinicMemberships.role, 'yonetici'),
+          eq(clinicMemberships.active, true),
+          eq(users.active, true),
+          excludeUserId ? ne(users.id, excludeUserId) : undefined,
+        ),
+      )
+    return rows.length
+  }
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.role, 'yonetici'),
+        eq(users.active, true),
+        excludeUserId ? ne(users.id, excludeUserId) : undefined,
+      ),
+    )
+  return rows.length
+}
+
+/**
+ * Hekim dondurulduğunda veya kaldırıldığında gelecekteki (ve bugünkü tamamlanmamış)
+ * aktif randevularını ve bağlı tedavilerini boşa çıkarır (doctorId = null, status = 'pending_assignment').
+ */
+export async function unassignDoctorFutureAppointments(userId: string, clinicId?: string | null): Promise<number> {
+  try {
+    const targetClinicId = clinicId ?? currentClinicId()
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+
+    const conditions = [
+      eq(dentalAppointments.doctorId, userId),
+      eq(dentalAppointments.isActive, true),
+      gte(dentalAppointments.startTime, startOfToday),
+      sql`${dentalAppointments.status} NOT IN ('cancelled', 'completed', 'no_show')`,
+    ]
+    if (targetClinicId) {
+      conditions.push(eq(dentalAppointments.clinicId, targetClinicId))
+    }
+
+    const futureAppts = await db
+      .select({
+        id: dentalAppointments.id,
+        patientId: dentalAppointments.patientId,
+        clinicId: dentalAppointments.clinicId,
+        title: dentalAppointments.title,
+      })
+      .from(dentalAppointments)
+      .where(and(...conditions))
+
+    const targetApptIds = futureAppts.map((a) => a.id)
+
+    if (targetApptIds.length > 0) {
+      await db
+        .update(dentalAppointments)
+        .set({
+          doctorId: null,
+          status: 'pending_assignment',
+          updatedAt: new Date(),
+        })
+        .where(inArray(dentalAppointments.id, targetApptIds))
+    }
+
+    // Tamamlanmamış tedavilerde de bu hekimin atamasını boşa çıkar
+    const tpConditions = [
+      eq(treatmentPlans.doctorId, userId),
+      sql`${treatmentPlans.status} <> 'completed'`,
+    ]
+    if (targetClinicId) {
+      tpConditions.push(eq(treatmentPlans.clinicId, targetClinicId))
+    }
+    await db
+      .update(treatmentPlans)
+      .set({ doctorId: null })
+      .where(and(...tpConditions))
+
+    // treatment_plan_details metadata.doctorIds içerisinden dondurulan hekimi temizle
+    const detailRows = await db
+      .select({
+        treatmentId: treatmentPlanDetails.treatmentId,
+        clinicId: treatmentPlanDetails.clinicId,
+        metadata: treatmentPlanDetails.metadata,
+        status: treatmentPlans.status,
+      })
+      .from(treatmentPlanDetails)
+      .innerJoin(treatmentPlans, eq(treatmentPlans.id, treatmentPlanDetails.treatmentId))
+      .where(
+        and(
+          targetClinicId ? eq(treatmentPlanDetails.clinicId, targetClinicId) : undefined,
+          sql`${treatmentPlans.status} <> 'completed'`,
+        ),
+      )
+
+    for (const detail of detailRows) {
+      const meta =
+        detail.metadata && typeof detail.metadata === 'object'
+          ? { ...(detail.metadata as Record<string, any>) }
+          : {}
+      if (Array.isArray(meta.doctorIds) && meta.doctorIds.includes(userId)) {
+        meta.doctorIds = meta.doctorIds.filter((id: string) => id !== userId)
+        await db
+          .update(treatmentPlanDetails)
+          .set({ metadata: meta })
+          .where(
+            and(
+              eq(treatmentPlanDetails.treatmentId, detail.treatmentId),
+              detail.clinicId ? eq(treatmentPlanDetails.clinicId, detail.clinicId) : undefined,
+            ),
+          )
+      }
+    }
+
+    if (targetApptIds.length > 0) {
+      import('../../events')
+        .then(({ broadcastSSE }) => {
+          broadcastSSE('appointment_updated', {
+            action: 'doctor_frozen',
+            doctorId: userId,
+            unassignedAppointmentIds: targetApptIds,
+          })
+        })
+        .catch(() => {})
+    }
+
+    return targetApptIds.length
+  } catch (err) {
+    console.error('[UsersRepo] Error unassigning doctor future appointments:', err)
+    return 0
+  }
+}
+
 export async function updateUser(id: string, data: Partial<{
   email: string
   phone: string
@@ -87,10 +237,12 @@ export async function updateUser(id: string, data: Partial<{
       eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),
     ))
   }
+  let unassignedAppointmentsCount = 0
   if (updated && data.active === false) {
     await deleteAllUserSessions(id)
+    unassignedAppointmentsCount = await unassignDoctorFutureAppointments(id, clinicId)
   }
-  return updated ?? null
+  return updated ? { ...updated, unassignedAppointmentsCount } : null
 }
 
 export async function createSession(data: {
@@ -120,6 +272,7 @@ export async function deleteAllUserSessions(userId: string) {
 export async function deleteUser(id: string) {
   const clinicId = currentClinicId()
   await deleteAllUserSessions(id)
+  await unassignDoctorFutureAppointments(id, clinicId)
   if (clinicId) {
     const rows = await db.delete(clinicMemberships).where(and(
       eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.userId, id),

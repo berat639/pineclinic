@@ -1126,109 +1126,162 @@ export default function PatientsTab() {
         onSuccess={() => loadPatients()}
       />
 
-      {/* ── Hasta Düzenle Modalı (Ad ve Soyad Ayrı) ─────────────────────────── */}
+      {/* ── Hasta Düzenle Modalı (Yeni Randevu 460px Standardı) ─────────────── */}
       {editingPatient && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--card-bg, #1e293b)', padding: '1.5rem', borderRadius: 14, border: '1px solid var(--input-border, #334155)', width: 520, maxWidth: '94vw', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, color: 'var(--foreground, #ffffff)', fontSize: '1.1rem', fontWeight: 700 }}>Hasta Bilgilerini Düzenle</h3>
+        <div
+          className="reference-modal-overlay"
+          onClick={() => setEditingPatient(null)}
+        >
+          <div
+            className="reference-modal reference-modal--patient"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="reference-modal-header">
+              <div className="reference-modal-heading">
+                <span className="reference-modal-icon">✏️</span>
+                <div>
+                  <h3>Hasta Bilgilerini Düzenle</h3>
+                  <p>{editingPatient.name || 'Kayıtlı hasta bilgilerini güncelleyin'}</p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setEditingPatient(null)}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.1rem' }}
+                className="reference-modal-close"
+                aria-label="Kapat"
               >
                 ✕
               </button>
             </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
-                    Ad <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ad"
-                    value={editFormData.firstName}
-                    onChange={e => setEditFormData({...editFormData, firstName: e.target.value})}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}
-                  />
+
+            <div className="reference-modal-body">
+              <section className="reference-modal-section">
+                <div className="reference-section-title">
+                  <h4>Hasta Bilgileri</h4>
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>
-                    Soyad <span style={{ color: '#ef4444' }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Soyad"
-                    value={editFormData.lastName}
-                    onChange={e => setEditFormData({...editFormData, lastName: e.target.value})}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}
-                  />
+                <div className="reference-modal-fields">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>
+                        Ad <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ad"
+                        value={editFormData.firstName}
+                        onChange={e => setEditFormData({...editFormData, firstName: e.target.value})}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>
+                        Soyad <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Soyad"
+                        value={editFormData.lastName}
+                        onChange={e => setEditFormData({...editFormData, lastName: e.target.value})}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Telefon</label>
+                    <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editFormData.phone} onValueChange={phone => setEditFormData({...editFormData, phone})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }} />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>TC Kimlik No</label>
+                    <input type="text" placeholder="TC Kimlik No" value={editFormData.tcIdentity} onChange={e => setEditFormData({...editFormData, tcIdentity: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }} />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>E-posta</label>
+                    <input type="email" placeholder="ornek@email.com" value={editFormData.email} onChange={e => setEditFormData({...editFormData, email: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }} />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Cinsiyet</label>
+                    <select value={editFormData.gender} onChange={e => setEditFormData({...editFormData, gender: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }}>
+                      <option value="">Belirtilmedi</option>
+                      <option value="Erkek">Erkek</option>
+                      <option value="Kadın">Kadın</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-2)', marginBottom: 4, display: 'block', fontWeight: 600 }}>Doğum Tarihi</label>
+                    <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.85rem', boxShadow: 'var(--pc-neo-inset)' }} />
+                  </div>
+
+                  <div style={{ marginTop: 4 }}>
+                    <PatientConsentPanel
+                      patientId={editingPatient.id}
+                      unsavedContact={{
+                        phone: editFormData.phone,
+                        email: editFormData.email,
+                        smsOptOut: editFormData.smsOptOut,
+                        emailOptOut: editFormData.emailOptOut,
+                        whatsappOptOut: editFormData.whatsappOptOut,
+                      }}
+                      onContactChange={(contact) => {
+                        setEditFormData(prev => ({
+                          ...prev,
+                          phone: contact.phone ?? prev.phone,
+                          email: contact.email ?? prev.email,
+                        }))
+                        loadPatients()
+                      }}
+                      onConsentChange={(nextOptOuts) => {
+                        setEditFormData(prev => ({
+                          ...prev,
+                          ...nextOptOuts,
+                        }))
+                        loadPatients()
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-              
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Telefon</label>
-                <PhoneMaskedInput placeholder="0 (5XX) XXX XX XX" value={editFormData.phone} onValueChange={phone => setEditFormData({...editFormData, phone})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>TC Kimlik No</label>
-                <input type="text" placeholder="TC Kimlik No" value={editFormData.tcIdentity} onChange={e => setEditFormData({...editFormData, tcIdentity: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>E-posta</label>
-                <input type="email" placeholder="ornek@email.com" value={editFormData.email} onChange={e => setEditFormData({...editFormData, email: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Cinsiyet</label>
-                <select value={editFormData.gender} onChange={e => setEditFormData({...editFormData, gender: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }}>
-                  <option value="">Belirtilmedi</option>
-                  <option value="Erkek">Erkek</option>
-                  <option value="Kadın">Kadın</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--foreground-3, #94a3b8)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Doğum Tarihi</label>
-                <input type="date" value={editFormData.birthDate} onChange={e => setEditFormData({...editFormData, birthDate: e.target.value})} style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--input-border, #334155)', background: 'var(--input-bg, #0f172a)', color: 'var(--foreground, #ffffff)', fontSize: '0.85rem' }} />
-              </div>
-              
-              <div style={{ marginTop: 4 }}>
-                <PatientConsentPanel
-                  patientId={editingPatient.id}
-                  unsavedContact={{
-                    phone: editFormData.phone,
-                    email: editFormData.email,
-                    smsOptOut: editFormData.smsOptOut,
-                    emailOptOut: editFormData.emailOptOut,
-                    whatsappOptOut: editFormData.whatsappOptOut,
-                  }}
-                  onContactChange={(contact) => {
-                    setEditFormData(prev => ({
-                      ...prev,
-                      phone: contact.phone ?? prev.phone,
-                      email: contact.email ?? prev.email,
-                    }))
-                    loadPatients()
-                  }}
-                  onConsentChange={(nextOptOuts) => {
-                    setEditFormData(prev => ({
-                      ...prev,
-                      ...nextOptOuts,
-                    }))
-                    loadPatients()
-                  }}
-                />
-              </div>
+              </section>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button onClick={() => setEditingPatient(null)} className="btn-clinic-blue" style={{ padding: '9px 16px', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}>İptal</button>
-              <button onClick={handleSaveEditPatient} className="btn-clinic-primary" style={{ padding: '9px 18px', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>Değişiklikleri Kaydet</button>
+
+            <div className="reference-modal-footer">
+              <button
+                type="button"
+                onClick={() => setEditingPatient(null)}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--foreground)',
+                  cursor: 'pointer',
+                  fontSize: '0.86rem',
+                  fontWeight: 600,
+                  boxShadow: 'var(--pc-clay-btn)',
+                }}
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditPatient}
+                style={{
+                  padding: '9px 24px',
+                  borderRadius: '8px',
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.86rem',
+                  fontWeight: 700,
+                  boxShadow: 'var(--pc-clay-primary)',
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>Kaydet</span>
+              </button>
             </div>
           </div>
         </div>

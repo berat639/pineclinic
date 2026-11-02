@@ -2,7 +2,7 @@ import { mkdir, open, rm, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { and, eq, isNull, lt, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { patients, planAttachmentFiles, planAttachments } from '../db/schema'
+import { patients, planAttachmentFiles, planAttachments, treatmentGroups } from '../db/schema'
 import { ensureTreatmentPlanningSchema } from '../db/treatment-planning-schema'
 import { getSetting, setSetting } from '../db/repositories/settings'
 import { TreatmentPlanError } from './treatment-planning'
@@ -51,7 +51,7 @@ function fileType(name: string): 'image/jpeg' | 'image/png' | 'application/dicom
   return extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'png' ? 'image/png' : extension === 'dcm' || extension === 'dicom' ? 'application/dicom' : null
 }
 
-export async function createPlanAttachment(clinicId: string, patientId: string, input: { kind: AttachmentKind; files: FileInput[]; requestKey: string }) {
+export async function createPlanAttachment(clinicId: string, patientId: string, input: { kind: AttachmentKind; files: FileInput[]; requestKey: string; groupId?: string | null }) {
   await ensureTreatmentPlanningSchema()
   if (!UUID.test(patientId) || !input || !['photo', 'radiology', 'cbct'].includes(input.kind) || !Array.isArray(input.files) ||
     !input.requestKey || input.requestKey.length > 128) throw new TreatmentPlanError('Dosya isteği geçersiz')
@@ -63,7 +63,13 @@ export async function createPlanAttachment(clinicId: string, patientId: string, 
     if (!file || typeof file.name !== 'string' || !file.name || file.name.length > 255 || !Number.isSafeInteger(file.size) || file.size < 1)
       throw new TreatmentPlanError('Dosya bilgisi geçersiz')
     const type = fileType(file.name)
-    if (!type || (input.kind === 'photo' && type === 'application/dicom') || (input.kind === 'cbct' && type !== 'application/dicom'))
+    const isStrictDcm = file.name.toLocaleLowerCase('en-US').endsWith('.dcm')
+    if (
+      !type ||
+      (input.kind === 'photo' && type === 'application/dicom') ||
+      (input.kind === 'cbct' && type !== 'application/dicom') ||
+      (input.kind === 'radiology' && (type !== 'application/dicom' || !isStrictDcm))
+    )
       throw new TreatmentPlanError('Dosya türü desteklenmiyor')
     if (file.size > (type === 'application/dicom' ? limits.dicomBytes : limits.imageBytes)) throw new TreatmentPlanError('Dosya boyutu sınırı aşıldı')
     total += file.size
@@ -74,6 +80,11 @@ export async function createPlanAttachment(clinicId: string, patientId: string, 
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`attachment:${clinicId}:${input.requestKey}`}, 0))`)
     const [patient] = await tx.select({ id: patients.id }).from(patients).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId))).limit(1)
     if (!patient) throw new TreatmentPlanError('Hasta bulunamadı', 404)
+    let validGroupId: string | null = null
+    if (input.groupId && UUID.test(input.groupId)) {
+      const [grp] = await tx.select({ id: treatmentGroups.id }).from(treatmentGroups).where(and(eq(treatmentGroups.id, input.groupId), eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId))).limit(1)
+      if (grp) validGroupId = grp.id
+    }
     const [previous] = await tx.select().from(planAttachments).where(and(eq(planAttachments.clinicId, clinicId), eq(planAttachments.requestKey, input.requestKey))).limit(1)
     if (previous) {
       const oldFiles = await tx.select().from(planAttachmentFiles).where(eq(planAttachmentFiles.attachmentId, previous.id)).orderBy(planAttachmentFiles.fileIndex)
@@ -81,7 +92,7 @@ export async function createPlanAttachment(clinicId: string, patientId: string, 
         oldFiles.some((file, i) => file.name !== files[i].name || file.sizeBytes !== files[i].sizeBytes)) throw new TreatmentPlanError('İstek anahtarı başka bir dosya için kullanıldı', 409)
       return { ...previous, files: oldFiles }
     }
-    const [attachment] = await tx.insert(planAttachments).values({ clinicId, patientId, kind: input.kind, requestKey: input.requestKey, totalBytes: total }).returning()
+    const [attachment] = await tx.insert(planAttachments).values({ clinicId, patientId, groupId: validGroupId, kind: input.kind, requestKey: input.requestKey, totalBytes: total }).returning()
     for (let start = 0; start < files.length; start += 500) {
       await tx.insert(planAttachmentFiles).values(files.slice(start, start + 500).map(file => ({ ...file, attachmentId: attachment.id })))
     }
@@ -106,7 +117,7 @@ export async function readLimitedChunk(request: Request) {
   const parts: Uint8Array[] = []
   let size = 0
   try {
-    for (;;) {
+    for (; ;) {
       const result = await reader.read()
       if (result.done) break
       size += result.value.byteLength
@@ -168,13 +179,24 @@ async function validateHeader(path: string, contentType: string) {
   } finally { await handle.close() }
 }
 
-export async function finishPlanAttachment(clinicId: string, patientId: string, id: string) {
+export async function finishPlanAttachment(clinicId: string, patientId: string, id: string, groupId?: string | null) {
   await ensureTreatmentPlanningSchema()
   if (!UUID.test(patientId) || !UUID.test(id)) throw new TreatmentPlanError('Dosya kimliği geçersiz')
   return db.transaction(async tx => {
     const [attachment] = await tx.select().from(planAttachments).where(and(eq(planAttachments.id, id), eq(planAttachments.clinicId, clinicId), eq(planAttachments.patientId, patientId))).for('update')
     if (!attachment) throw new TreatmentPlanError('Dosya bulunamadı', 404)
-    if (attachment.status === 'complete') return attachment
+    let resolvedGroupId = attachment.groupId
+    if (!resolvedGroupId && groupId && UUID.test(groupId)) {
+      const [grp] = await tx.select({ id: treatmentGroups.id }).from(treatmentGroups).where(and(eq(treatmentGroups.id, groupId), eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId))).limit(1)
+      if (grp) resolvedGroupId = grp.id
+    }
+    if (attachment.status === 'complete') {
+      if (resolvedGroupId && resolvedGroupId !== attachment.groupId) {
+        const [updated] = await tx.update(planAttachments).set({ groupId: resolvedGroupId, updatedAt: new Date() }).where(eq(planAttachments.id, id)).returning()
+        return updated
+      }
+      return attachment
+    }
     if (attachment.status !== 'pending') throw new TreatmentPlanError('Yükleme kapatılmış', 409)
     const files = await tx.select().from(planAttachmentFiles).where(eq(planAttachmentFiles.attachmentId, id)).orderBy(planAttachmentFiles.fileIndex)
     for (const file of files) {
@@ -184,9 +206,33 @@ export async function finishPlanAttachment(clinicId: string, patientId: string, 
       try { size = (await stat(path)).size } catch { throw new TreatmentPlanError('Dosya eksik; yüklemeyi yeniden başlatın', 409) }
       if (size !== file.sizeBytes || !await validateHeader(path, file.contentType)) throw new TreatmentPlanError('Dosya içeriği geçersiz')
     }
-    const [saved] = await tx.update(planAttachments).set({ status: 'complete', updatedAt: new Date() }).where(eq(planAttachments.id, id)).returning()
+    const [saved] = await tx.update(planAttachments).set({ status: 'complete', groupId: resolvedGroupId, updatedAt: new Date() }).where(eq(planAttachments.id, id)).returning()
     return saved
   })
+}
+
+export async function listPatientAttachments(clinicId: string, patientId: string) {
+  await ensureTreatmentPlanningSchema()
+  if (!UUID.test(patientId)) throw new TreatmentPlanError('Hasta kimliği geçersiz')
+  return db.select().from(planAttachments).where(and(
+    eq(planAttachments.clinicId, clinicId),
+    eq(planAttachments.patientId, patientId),
+    eq(planAttachments.status, 'complete')
+  )).orderBy(planAttachments.createdAt)
+}
+
+export async function deletePlanAttachment(clinicId: string, patientId: string, id: string) {
+  await ensureTreatmentPlanningSchema()
+  if (!UUID.test(patientId) || !UUID.test(id)) throw new TreatmentPlanError('Dosya kimliği geçersiz')
+  const deleted = await db.delete(planAttachments).where(and(
+    eq(planAttachments.id, id),
+    eq(planAttachments.clinicId, clinicId),
+    eq(planAttachments.patientId, patientId)
+  )).returning({ id: planAttachments.id })
+  if (deleted.length) {
+    await rm(pathFor(clinicId, id), { recursive: true, force: true }).catch(() => { })
+  }
+  return { ok: true }
 }
 
 export async function getPlanAttachmentFile(clinicId: string, patientId: string, id: string, index: number) {
@@ -202,9 +248,9 @@ export async function getPlanAttachmentFile(clinicId: string, patientId: string,
 export async function cleanupPlanAttachments() {
   await ensureTreatmentPlanningSchema()
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
-  const stale = await db.select().from(planAttachments).where(and(isNull(planAttachments.groupId), lt(planAttachments.updatedAt, cutoff)))
+  const stale = await db.select().from(planAttachments).where(and(eq(planAttachments.status, 'pending'), isNull(planAttachments.groupId), lt(planAttachments.updatedAt, cutoff)))
   for (const item of stale) {
-    const deleted = await db.delete(planAttachments).where(and(eq(planAttachments.id, item.id), isNull(planAttachments.groupId), lt(planAttachments.updatedAt, cutoff))).returning({ id: planAttachments.id })
+    const deleted = await db.delete(planAttachments).where(and(eq(planAttachments.id, item.id), eq(planAttachments.status, 'pending'), isNull(planAttachments.groupId), lt(planAttachments.updatedAt, cutoff))).returning({ id: planAttachments.id })
     if (deleted.length) await rm(pathFor(item.clinicId, item.id), { recursive: true, force: true })
   }
 }

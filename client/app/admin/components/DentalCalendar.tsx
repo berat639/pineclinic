@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react'
 import { toast } from 'react-hot-toast'
+import { AlertTriangle } from 'lucide-react'
 import type { DoctorLeaveItem } from './DoctorLeaveModal'
 
 interface Doctor {
@@ -66,7 +67,7 @@ const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
   in_progress: { bg: 'rgba(245,158,11,0.18)', border: '#f59e0b' },
   completed: { bg: 'rgba(99,102,241,0.12)', border: '#6366f1' },
   cancelled: { bg: 'rgba(239,68,68,0.1)', border: '#ef4444' },
-  pending_assignment: { bg: 'rgba(156,163,175,0.18)', border: '#9ca3af' },
+  pending_assignment: { bg: 'var(--calendar-unassigned-bg, #ffedd5)', border: '#ea580c' },
   pending_review: { bg: 'var(--card-inner)', border: 'var(--accent)' },
 }
 
@@ -181,7 +182,9 @@ function calculateEventLayout(events: CalendarEvent[]) {
     const sA = new Date(a.startTime).getTime();
     const sB = new Date(b.startTime).getTime();
     if (sA !== sB) return sA - sB;
-    return new Date(b.endTime).getTime() - new Date(a.endTime).getTime();
+    const eDiff = new Date(b.endTime).getTime() - new Date(a.endTime).getTime();
+    if (eDiff !== 0) return eDiff;
+    return String(a.id).localeCompare(String(b.id));
   });
 
   let currentGroup: CalendarEvent[] = [];
@@ -253,16 +256,12 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     active: boolean;
   } | null>(null);
   
-  // Calculate displayDoctors at the top so handleMouseUp can use it
+  // Calculate displayDoctors at the top so handleMouseUp and Day View use the exact same column list
   const dayShifts = shifts?.filter(s => s.date === currentDate) || [];
   const dayDoctorLeaves = useMemo(() => {
     return (doctorLeaves || []).filter(l => l.date === currentDate);
   }, [doctorLeaves, currentDate]);
-  let displayDoctors = doctors;
-  if (view === 'day' && dayShifts.length > 0) {
-    const doctorsWithShift = dayShifts.map(s => s.userId);
-    displayDoctors = doctors.filter(d => doctorsWithShift.includes(d.id));
-  }
+  const displayDoctors = doctors;
 
   
   const dragRef = useRef<{
@@ -285,13 +284,14 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     originalTop: '', originalHeight: '', originalLeft: '', originalZIndex: '', originalOpacity: ''
   });
   const hasDraggedRef = useRef(false);
+  const draftActiveRef = useRef(false);
   const [isUnassignedDrag, setIsUnassignedDrag] = useState(false)
 
   const startInteraction = (evt: React.MouseEvent, e: CalendarEvent, type: 'move' | 'resize-top' | 'resize-bottom', initialColIdx: number) => {
     if (evt.button !== 0) return;
     evt.stopPropagation();
     hasDraggedRef.current = false;
-    setIsUnassignedDrag(!e.doctorId && type === 'move')
+    if (!e.doctorId && type === 'move') setIsUnassignedDrag(true);
     
     const element = (evt.currentTarget as HTMLElement).closest('.rc-event') as HTMLElement;
     if (!element) return;
@@ -306,8 +306,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     };
 
     element.style.zIndex = '50';
-    element.style.opacity = '0.8';
+    element.style.opacity = '0.88';
     element.style.transition = 'none';
+    element.style.willChange = 'transform, top, height';
     document.body.style.userSelect = 'none';
   };
 
@@ -324,7 +325,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
         }
 
         if (state.type === 'move') {
-          state.element.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+          state.element.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0)`;
         } else if (state.type === 'resize-bottom') {
           state.element.style.height = `calc(${state.originalHeight} + ${deltaY}px)`;
         } else if (state.type === 'resize-top') {
@@ -333,6 +334,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
         }
         return;
       }
+
+      if (!draftActiveRef.current) return;
 
       // Draft selection logic for empty slot
       setDraftSelection(prev => {
@@ -352,53 +355,56 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
 
     const handleMouseUp = (e: MouseEvent) => {
       // Draft selection logic
-      setDraftSelection(prev => {
-        if (prev && prev.active && gridRef.current) {
-          // convert top & height to time
-          const startMins = slotStartHour * 60 + Math.round(prev.top / 48 * 30);
-          const endMins = startMins + Math.round(prev.height / 48 * 30);
-          
-          let doctorId: string | null = null;
-          let dateStr = currentDate;
-          
-          if (view === 'day') {
-            doctorId = displayDoctors[prev.colIdx]?.id || null;
-          } else if (view === 'week') {
-            const weekDays = getWeekDays(currentDate);
-            dateStr = weekDays[prev.colIdx]?.date || dateStr;
-          }
-
-          const formatTime = (mins: number) => {
-            const norm = ((mins % 1440) + 1440) % 1440;
-            const h = Math.floor(norm / 60);
-            const m = norm % 60;
-            return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
-          };
-
-          if (doctorId) {
-            const conflictLeave = (doctorLeaves || []).find(l => {
-              if (l.doctorId !== doctorId || l.date !== dateStr) return false;
-              if (l.isFullDay) return true;
-              const [sH, sM] = (l.startTime || '00:00').split(':').map(Number);
-              const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
-              const lStart = (sH || 0) * 60 + (sM || 0);
-              const lEnd = (eH || 0) * 60 + (eM || 0);
-              return startMins < lEnd && endMins > lStart;
-            });
-            if (conflictLeave) {
-              const docObj = doctors.find(d => d.id === doctorId);
-              toast.error(`⚠️ Dr. ${docObj?.name || 'Hekim'} bu saatlerde (${conflictLeave.startTime} - ${conflictLeave.endTime}) izinlidir. Randevu eklenemez!`);
-              return null;
+      if (draftActiveRef.current) {
+        draftActiveRef.current = false;
+        setDraftSelection(prev => {
+          if (prev && prev.active && gridRef.current) {
+            // convert top & height to time
+            const startMins = slotStartHour * 60 + Math.round(prev.top / 48 * 30);
+            const endMins = startMins + Math.round(prev.height / 48 * 30);
+            
+            let doctorId: string | null = null;
+            let dateStr = currentDate;
+            
+            if (view === 'day') {
+              doctorId = displayDoctors[prev.colIdx]?.id || null;
+            } else if (view === 'week') {
+              const weekDays = getWeekDays(currentDate);
+              dateStr = weekDays[prev.colIdx]?.date || dateStr;
             }
-          }
 
-          if (onEmptySlotSelect) {
-            onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.clientX, e.clientY);
+            const formatTime = (mins: number) => {
+              const norm = ((mins % 1440) + 1440) % 1440;
+              const h = Math.floor(norm / 60);
+              const m = norm % 60;
+              return `${dateStr}T${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:00+03:00`;
+            };
+
+            if (doctorId) {
+              const conflictLeave = (doctorLeaves || []).find(l => {
+                if (l.doctorId !== doctorId || l.date !== dateStr) return false;
+                if (l.isFullDay) return true;
+                const [sH, sM] = (l.startTime || '00:00').split(':').map(Number);
+                const [eH, eM] = (l.endTime || '23:59').split(':').map(Number);
+                const lStart = (sH || 0) * 60 + (sM || 0);
+                const lEnd = (eH || 0) * 60 + (eM || 0);
+                return startMins < lEnd && endMins > lStart;
+              });
+              if (conflictLeave) {
+                const docObj = doctors.find(d => d.id === doctorId);
+                toast.error(`⚠️ Dr. ${docObj?.name || 'Hekim'} bu saatlerde (${conflictLeave.startTime} - ${conflictLeave.endTime}) izinlidir. Randevu eklenemez!`);
+                return null;
+              }
+            }
+
+            if (onEmptySlotSelect) {
+              onEmptySlotSelect(formatTime(startMins), formatTime(endMins), doctorId, e.clientX, e.clientY);
+            }
+            return { ...prev, active: false }; // keep it rendered but not active
           }
-          return { ...prev, active: false }; // keep it rendered but not active
-        }
-        return prev;
-      });
+          return prev;
+        });
+      }
 
       // Existing event drag logic
       const state = dragRef.current;
@@ -425,32 +431,43 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
         const gridRect = gridRef.current.getBoundingClientRect();
         const availableWidth = gridRect.width - 56;
         const mouseXRelative = e.clientX - (gridRect.left + 56);
+        const horizontalDelta = Math.abs(e.clientX - state.startX);
         
         if (mouseXRelative < -10 || mouseXRelative > availableWidth + 10 || e.clientY < gridRect.top - 10 || e.clientY > gridRect.bottom + 10) {
           newDoctorId = null; // Unassign if dropped outside
         } else {
           if (view === 'day' && !keepUnassigned) {
-            const numCols = displayDoctors.length || 1;
-            const colWidthPx = availableWidth / numCols;
-            const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
-            newDoctorId = displayDoctors[dropCol]?.id || null;
+            // Sadece dikey sürüklemede (yatay hareket < 20px) mevcut hekim sütununu koru
+            if (targetEvent?.doctorId && horizontalDelta < 20) {
+              newDoctorId = targetEvent.doctorId;
+            } else {
+              const numCols = displayDoctors.length || 1;
+              const colWidthPx = availableWidth / numCols;
+              const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
+              newDoctorId = displayDoctors[dropCol]?.id || null;
+            }
           } else if (view === 'week') {
-            const numCols = 7;
-            const colWidthPx = availableWidth / numCols;
-            const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
-            const weekDays = getWeekDays(currentDate);
-            newDate = weekDays[dropCol]?.date || newDate;
+            if (horizontalDelta >= 20) {
+              const numCols = 7;
+              const colWidthPx = availableWidth / numCols;
+              const dropCol = Math.max(0, Math.min(numCols - 1, Math.floor(mouseXRelative / colWidthPx)));
+              const weekDays = getWeekDays(currentDate);
+              newDate = weekDays[dropCol]?.date || newDate;
+            }
           }
         }
       }
 
       // Cleanup DOM
       state.element.style.transform = '';
-      state.element.style.height = state.originalHeight;
-      state.element.style.top = state.originalTop;
+      if (state.type === 'resize-top' || state.type === 'resize-bottom') {
+        state.element.style.height = state.originalHeight;
+        state.element.style.top = state.originalTop;
+      }
       state.element.style.zIndex = state.originalZIndex;
       state.element.style.opacity = state.originalOpacity;
       state.element.style.transition = '';
+      state.element.style.willChange = '';
       document.body.style.userSelect = '';
       setIsUnassignedDrag(false)
       
@@ -551,6 +568,25 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               toast.error(`⚠️ ${docName} bu saatlerde (${conflictLeave.startTime}-${conflictLeave.endTime}) izinlidir. Randevu taşınamaz!`);
               return;
             }
+
+            // Çakışma Kontrolü: Hedef hekimin aynı saatte başka aktif randevusu var mı?
+            const newStartMs = newStartTime.getTime();
+            const newEndMs = newEndTime.getTime();
+            const conflictEvent = events.find(ev => {
+              if (!ev || ev.id === targetEvent.id) return false;
+              if (ev.doctorId !== newDoctorId) return false;
+              if (ev.status === 'cancelled' || ev.patientResponseStatus === 'cancelled') return false;
+              const evStartMs = new Date(ev.startTime).getTime();
+              const evEndMs = new Date(ev.endTime).getTime();
+              return newStartMs < evEndMs && newEndMs > evStartMs;
+            });
+
+            if (conflictEvent) {
+              const cStart = new Date(conflictEvent.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+              const cEnd = new Date(conflictEvent.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+              toast.error(`⚠️ ${docName} için ${cStart}-${cEnd} saatinde başka bir randevu (${conflictEvent.title}) bulunuyor!`);
+              return;
+            }
           }
 
           onEventUpdate({
@@ -572,7 +608,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [events, onEventUpdate, view, doctors, currentDate, onEmptySlotSelect, slotStartHour, slotEndHour]);
+  }, [events, shifts, doctorLeaves, onEventUpdate, view, doctors, currentDate, onEmptySlotSelect, slotStartHour, slotEndHour]);
 
   // Expose method to clear draft
   useEffect(() => {
@@ -609,7 +645,56 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
 
   const slots = generateTimeSlots(slotStartHour, slotEndHour)
 
-  const globalUnassigned = events.filter(e => !e.doctorId)
+  const [warningTooltip, setWarningTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
+  const UNASSIGNED_TOOLTIP_TEXT = 'Doktor ayrıldı, atama bekliyor'
+
+  const showWarningTooltip = (evt: React.MouseEvent<HTMLElement>) => {
+    const rect = evt.currentTarget.getBoundingClientRect()
+    setWarningTooltip({
+      x: rect.left,
+      y: rect.top,
+      text: UNASSIGNED_TOOLTIP_TEXT,
+    })
+  }
+
+  const hideWarningTooltip = () => {
+    setWarningTooltip(null)
+  }
+
+  const renderWarningTooltip = () =>
+    warningTooltip ? (
+      <div
+        role="tooltip"
+        className="rc-unassigned-tooltip"
+        style={{
+          position: 'fixed',
+          left: Math.min(Math.max(12, warningTooltip.x), typeof window !== 'undefined' ? window.innerWidth - 240 : warningTooltip.x),
+          top: Math.max(12, warningTooltip.y - 38),
+          zIndex: 9999999,
+          background: 'var(--card-bg, #0f172a)',
+          color: 'var(--foreground, #ffffff)',
+          border: '1.5px solid #ea580c',
+          borderRadius: 8,
+          padding: '6px 10px',
+          fontSize: '0.74rem',
+          fontWeight: 700,
+          boxShadow: 'var(--pc-modal-shadow)',
+          pointerEvents: 'none',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <AlertTriangle size={13} color="#ea580c" style={{ flexShrink: 0 }} />
+        <span>{warningTooltip.text}</span>
+      </div>
+    ) : null
+
+  const isEventUnassigned = (e: CalendarEvent) =>
+    !e.doctorId || e.status === 'pending_assignment' || !doctors.some((d) => d.id === e.doctorId)
+
+  const globalUnassigned = events.filter((e) => isEventUnassigned(e))
 
   // ── DAY VIEW ──
   if (view === 'day') {
@@ -617,12 +702,13 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     let displayDoctors = doctors;
 
     const dayEvents = events.filter(e => getLocalYMD(e.startTime) === currentDate);
-    const unassigned = dayEvents.filter(e => !e.doctorId)
+    const unassigned = dayEvents.filter(e => isEventUnassigned(e))
     const hasUnassigned = globalUnassigned.length > 0 || unassigned.length > 0
     const cols = displayDoctors.length || 1
     const minDayWidth = cols <= 1 ? '100%' : `${cols * 220 + 56}px`
     return (
       <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
+        {renderWarningTooltip()}
         <div className="rc-wrap" style={{ minWidth: minDayWidth, width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" />
@@ -832,22 +918,23 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                       onClick={(evt) => {
                         evt.stopPropagation();
                         evt.preventDefault();
-                        toast.error(`Dr. ${d.name} bu saatlerde izinlidir (${l.startTime} - ${l.endTime})${l.reason ? `: ${l.reason}` : ''}. Randevu eklenemez!`);
+                        toast.error(`Dr. ${d.name} bu saatlerde izinlidir (${l.startTime} - ${l.endTime})${l.reason ? `: ${l.reason}` : ''}${l.substituteDoctorName ? ` · Yerine: ${l.substituteDoctorName}` : ''}. Randevu eklenemez!`);
                       }}
                       onDoubleClick={(evt) => {
                         evt.stopPropagation();
                         evt.preventDefault();
                         toast.error(`Dr. ${d.name} bu saatlerde izinlidir. Randevu eklenemez!`);
                       }}
-                      title={`Dr. ${d.name} İzinli: ${l.startTime} - ${l.endTime}${l.reason ? ` (${l.reason})` : ''}`}
+                      title={`Dr. ${d.name} İzinli: ${l.startTime} - ${l.endTime}${l.reason ? ` (${l.reason})` : ''}${l.substituteDoctorName ? ` · Yerine: ${l.substituteDoctorName}` : ''}`}
                     >
                       <div style={{ fontWeight: 700, fontSize: '0.72rem', color: 'var(--foreground-2)', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                         <span>Kapalı · İzinli</span>
                         <span style={{ fontSize: '0.68rem', color: 'var(--foreground-3)', fontWeight: 600 }}>({l.isFullDay ? 'Tüm gün' : `${l.startTime} - ${l.endTime}`})</span>
                       </div>
-                      {l.reason && (
-                        <div style={{ fontSize: '0.68rem', color: 'var(--foreground-2, #94a3b8)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
-                          {l.reason}
+                      {(l.reason || l.substituteDoctorName) && (
+                        <div style={{ fontSize: '0.68rem', color: 'var(--foreground-2, #94a3b8)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                          {l.reason || ''}
+                          {l.substituteDoctorName ? `${l.reason ? ' · ' : ''}Yerine: ${l.substituteDoctorName}` : ''}
                         </div>
                       )}
                     </div>
@@ -863,10 +950,10 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             const { top, height } = eventPosition(e.startTime, e.endTime, slotStartHour, slotEndHour);
             
             return (
-              <div id={`cal-event-${e.id}`} key={e.id} className="rc-event rc-event-unassigned" style={{ top, height, left, width, maxWidth: `calc(100% - 56px - 4px - ((100% - 56px - 4px) / ${maxCol}) * ${col})`, minWidth: 0, background: 'rgba(245, 158, 11, 0.16)', border: '1.5px dashed #f59e0b', borderLeft: '4px solid #f59e0b', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)' }}
+              <div id={`cal-event-${e.id}`} key={e.id} className="rc-event rc-event-unassigned" style={{ top, height, left, width, maxWidth: `calc(100% - 56px - 4px - ((100% - 56px - 4px) / ${maxCol}) * ${col})`, minWidth: 0, background: 'var(--calendar-unassigned-bg, #ffedd5)', border: '1.5px solid var(--calendar-unassigned-border, #ea580c)', borderLeft: '4px solid #ea580c', boxShadow: '0 2px 10px rgba(234, 88, 12, 0.22)' }}
                    onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                    onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                   title={`${e.title} — Doktor Atanmadı`}
+                   title={`${e.title} — ${UNASSIGNED_TOOLTIP_TEXT}`}
                    onMouseDown={(evt) => {
                      let initialColIdx = 0;
                      if (gridRef.current) {
@@ -878,13 +965,40 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                    }}
               >
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', 0)} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, minWidth: 0, overflow: 'hidden' }}>
-                  <span className="rc-unassigned-badge">
-                    ⠿ ATAMA BEKLİYOR
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, minWidth: 0, overflow: 'hidden' }}>
+                  <span
+                    className="rc-unassigned-warning-icon"
+                    title={UNASSIGNED_TOOLTIP_TEXT}
+                    onMouseEnter={showWarningTooltip}
+                    onMouseLeave={hideWarningTooltip}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 18,
+                      height: 18,
+                      borderRadius: 5,
+                      background: '#ea580c',
+                      color: '#ffffff',
+                      flexShrink: 0,
+                      pointerEvents: 'auto',
+                      cursor: 'help',
+                    }}
+                  >
+                    <AlertTriangle size={12} color="#ffffff" />
+                  </span>
+                  <span
+                    className="rc-unassigned-badge"
+                    title={UNASSIGNED_TOOLTIP_TEXT}
+                    onMouseEnter={showWarningTooltip}
+                    onMouseLeave={hideWarningTooltip}
+                    style={{ pointerEvents: 'auto', cursor: 'help' }}
+                  >
+                    ATAMA BEKLİYOR
                   </span>
                 </div>
-                <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--foreground)' }}>{e.title}</span>
-                {height > 44 && <span className="rc-ev-time" style={{ pointerEvents: 'none', color: 'var(--foreground-2)' }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--calendar-unassigned-text, #9a3412)' }}>{e.title}</span>
+                {height > 44 && <span className="rc-ev-time" style={{ pointerEvents: 'none', color: 'var(--calendar-unassigned-subtext, #c2410c)', fontWeight: 600 }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', 0)} />
               </div>
             )
@@ -901,12 +1015,16 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     const cols = weekDays.length
     return (
       <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
+        {renderWarningTooltip()}
         <div className="rc-wrap" style={{ minWidth: '840px', width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
           <div className="rc-corner" style={{ position: 'relative' }}>
             {globalUnassigned.length > 0 && (
               <div 
-                style={{ position: 'absolute', top: 4, left: 4, right: 4, background: 'var(--accent)', color: '#fff', fontSize: '0.65rem', padding: '4px', borderRadius: 4, textAlign: 'center', cursor: 'pointer', fontWeight: 600, zIndex: 10 }}
+                style={{ position: 'absolute', top: 4, left: 4, right: 4, background: '#ea580c', color: '#fff', fontSize: '0.65rem', padding: '4px', borderRadius: 4, textAlign: 'center', cursor: 'pointer', fontWeight: 700, zIndex: 10 }}
+                title={UNASSIGNED_TOOLTIP_TEXT}
+                onMouseEnter={showWarningTooltip}
+                onMouseLeave={hideWarningTooltip}
                 onContextMenu={(e) => { e.preventDefault(); if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
                 onClick={(e) => { if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
               >
@@ -1010,9 +1128,9 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 : eventPosition(start, end, slotStartHour, slotEndHour)
               const left = `calc(56px + (100% - 56px) * ${colIdx} / ${cols} + 2px)`
               const width = `calc((100% - 56px) / ${cols} - 4px)`
-              return <div key={`week-leave-${l.id}`} className="rc-doctor-leave" style={{ position: 'absolute', top, height, left, width, zIndex: 3, padding: '5px 7px', overflow: 'hidden', cursor: 'not-allowed' }} title={`Dr. ${l.doctorName || 'Hekim'} izinli: ${l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}`}>
+              return <div key={`week-leave-${l.id}`} className="rc-doctor-leave" style={{ position: 'absolute', top, height, left, width, zIndex: 3, padding: '5px 7px', overflow: 'hidden', cursor: 'not-allowed' }} title={`Dr. ${l.doctorName || 'Hekim'} izinli: ${l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}${l.substituteDoctorName ? ` · Yerine: ${l.substituteDoctorName}` : ''}`}>
                 <span className="rc-ev-title">Kapalı · {l.doctorName || 'Hekim'}</span>
-                <span className="rc-ev-time">{l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}</span>
+                <span className="rc-ev-time">{l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}{l.substituteDoctorName ? ` · Yerine: ${l.substituteDoctorName}` : ''}</span>
               </div>
             })
             const eventBlocks = layout.map(({ event: e, col, maxCol }) => {
@@ -1020,18 +1138,18 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               const doc = doctors.find(d => d.id === e.doctorId)
               const docColor = doc?.color || '#3b82f6'
               const isTimeWarning = e.timeConfirmed === false
-              const isUnassigned = !e.doctorId
+              const isUnassigned = isEventUnassigned(e)
               const patientVisual = getPatientStatusVisual(e)
 
-              let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
-              let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
-              let borderStyle = isUnassigned ? 'dashed' : 'solid'
+              let bg = isUnassigned ? 'var(--calendar-unassigned-bg, #ffedd5)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
+              let borderLeftColor = isUnassigned ? '#ea580c' : docColor
+              let borderStyle = 'solid'
               
-              if (isTimeWarning) {
+              if (!isUnassigned && isTimeWarning) {
                 bg = TIME_WARNING_STYLE.bg
                 borderLeftColor = TIME_WARNING_STYLE.border
               }
-              if (patientVisual) {
+              if (!isUnassigned && patientVisual) {
                 borderLeftColor = patientVisual.borderLeftColor
                 borderStyle = patientVisual.borderStyle
                 if (patientVisual.bgOverride) bg = patientVisual.bgOverride
@@ -1042,17 +1160,48 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               const width = `calc((${colWidth} - 2px) / ${maxCol})`
 
               return (
-                <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle, border: isUnassigned ? '1.5px dashed #f59e0b' : undefined, borderLeft: isUnassigned ? '4px solid #f59e0b' : undefined }} 
+                <div id={`cal-event-${e.id}`} key={e.id} className="rc-event" style={{ top, height, left, width, background: bg, borderLeftColor: borderLeftColor, borderStyle, border: isUnassigned ? '1.5px solid var(--calendar-unassigned-border, #ea580c)' : undefined, borderLeft: isUnassigned ? '4px solid #ea580c' : undefined }} 
                      onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                      onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                     title={`${patientVisual ? `[${patientVisual.badge}] ` : ''}${e.title}${isUnassigned ? ' — Doktor Atanmadı' : ''}`}
+                     title={`${patientVisual ? `[${patientVisual.badge}] ` : ''}${e.title}${isUnassigned ? ` — ${UNASSIGNED_TOOLTIP_TEXT}` : ''}`}
                      onMouseDown={(evt) => startInteraction(evt, e, 'move', colIdx)}
                 >
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-top', colIdx)} />
                   {isUnassigned ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, pointerEvents: 'none' }}>
-                      <span style={{ fontSize: '0.58rem', color: '#f59e0b', fontWeight: 800 }}>⚠️ DOKTOR ATANMADI</span>
-                      <span className="rc-ev-title" style={{ fontWeight: 600, textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ''}{e.title}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span
+                          className="rc-unassigned-warning-icon"
+                          title={UNASSIGNED_TOOLTIP_TEXT}
+                          onMouseEnter={showWarningTooltip}
+                          onMouseLeave={hideWarningTooltip}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 16,
+                            height: 16,
+                            borderRadius: 4,
+                            background: '#ea580c',
+                            color: '#ffffff',
+                            flexShrink: 0,
+                            pointerEvents: 'auto',
+                            cursor: 'help',
+                          }}
+                        >
+                          <AlertTriangle size={11} color="#ffffff" />
+                        </span>
+                        <span
+                          className="rc-unassigned-badge"
+                          title={UNASSIGNED_TOOLTIP_TEXT}
+                          onMouseEnter={showWarningTooltip}
+                          onMouseLeave={hideWarningTooltip}
+                          style={{ fontSize: '0.56rem', padding: '1px 5px', pointerEvents: 'auto', cursor: 'help' }}
+                        >
+                          ATAMA BEKLİYOR
+                        </span>
+                      </div>
+                      <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--calendar-unassigned-text, #9a3412)', textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ''}{e.title}</span>
                     </div>
                   ) : (
                     <span className="rc-ev-title" style={{ pointerEvents: 'none', textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || (isTimeWarning ? '⚠️ ' : '')}{e.title}</span>
@@ -1073,10 +1222,14 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
   const weeks = getMonthWeeks(currentDate)
   return (
     <div className="rc-scroll-container">
+      {renderWarningTooltip()}
       <div className="rc-wrap rc-month" style={{ minWidth: '700px', width: '100%', position: 'relative' }}>
       {globalUnassigned.length > 0 && (
         <div 
-          style={{ position: 'absolute', top: 12, right: 16, background: 'var(--accent)', color: '#fff', fontSize: '0.7rem', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontWeight: 600, zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
+          style={{ position: 'absolute', top: 12, right: 16, background: '#ea580c', color: '#fff', fontSize: '0.7rem', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontWeight: 700, zIndex: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
+          title={UNASSIGNED_TOOLTIP_TEXT}
+          onMouseEnter={showWarningTooltip}
+          onMouseLeave={hideWarningTooltip}
           onContextMenu={(e) => { e.preventDefault(); if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
           onClick={(e) => { if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
         >
@@ -1091,8 +1244,8 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             <div className="rc-week-events">
               {weekEvents.length === 0 && (!shifts || shifts.filter(s => s.date >= week.startDate && s.date <= week.endDate).length === 0) && <span className="rc-empty">Randevu/Vardiya/İzin yok</span>}
               {(doctorLeaves || []).filter(l => l.date >= week.startDate && l.date <= week.endDate).map(l => (
-                <div key={`month-leave-${l.id}`} className="rc-month-ev rc-doctor-leave" title="İzinli / kapalı saat">
-                  <span className="rc-ev-title">⛔ İzinli: {l.doctorName || 'Hekim'}</span>
+                <div key={`month-leave-${l.id}`} className="rc-month-ev rc-doctor-leave" title={`İzinli / kapalı saat${l.substituteDoctorName ? ` · Yerine: ${l.substituteDoctorName}` : ''}`}>
+                  <span className="rc-ev-title">⛔ İzinli: {l.doctorName || 'Hekim'}{l.substituteDoctorName ? ` (Yerine: ${l.substituteDoctorName})` : ''}</span>
                   <span className="rc-ev-time">{new Date(`${l.date}T00:00:00`).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} · {l.isFullDay ? 'Tüm gün' : `${l.startTime}-${l.endTime}`}</span>
                 </div>
               ))}
@@ -1106,27 +1259,51 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                 const doc = doctors.find(d => d.id === e.doctorId)
                 const docColor = doc?.color || '#3b82f6'
                 const isTimeWarning = e.timeConfirmed === false
-                const isUnassigned = !e.doctorId
+                const isUnassigned = isEventUnassigned(e)
                 const patientVisual = getPatientStatusVisual(e)
 
-                let bg = isUnassigned ? 'rgba(245, 158, 11, 0.16)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
-                let borderLeftColor = isUnassigned ? '#f59e0b' : docColor
-                let borderStyle = isUnassigned ? 'dashed' : 'solid'
+                let bg = isUnassigned ? 'var(--calendar-unassigned-bg, #ffedd5)' : (doc?.color ? (doc.color.startsWith('#') ? `${doc.color}22` : doc.color) : 'rgba(59,130,246,0.15)')
+                let borderLeftColor = isUnassigned ? '#ea580c' : docColor
+                let borderStyle = 'solid'
                 
-                if (isTimeWarning) {
+                if (!isUnassigned && isTimeWarning) {
                   bg = TIME_WARNING_STYLE.bg
                   borderLeftColor = TIME_WARNING_STYLE.border
                 }
-                if (patientVisual) {
+                if (!isUnassigned && patientVisual) {
                   borderLeftColor = patientVisual.borderLeftColor
                   borderStyle = patientVisual.borderStyle
                   if (patientVisual.bgOverride) bg = patientVisual.bgOverride
                 }
 
                 return (
-                  <div id={`cal-event-${e.id}`} key={e.id} className="rc-month-ev" style={{ background: bg, borderLeftColor: borderLeftColor, borderStyle }} onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }}>
-                    <span className="rc-ev-title" style={{ textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ((isUnassigned || isTimeWarning) ? '⚠️ ' : '')}{e.title}</span>
-                    <span className="rc-ev-time">{new Date(e.startTime).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <div id={`cal-event-${e.id}`} key={e.id} className="rc-month-ev" style={{ background: bg, borderLeftColor: borderLeftColor, borderStyle, border: isUnassigned ? '1px solid var(--calendar-unassigned-border, #ea580c)' : undefined, borderLeft: isUnassigned ? '4px solid #ea580c' : undefined }} title={isUnassigned ? `${e.title} — ${UNASSIGNED_TOOLTIP_TEXT}` : e.title} onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0) return; onEventClick(e.id, e); }}>
+                    <span className="rc-ev-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: isUnassigned ? 'var(--calendar-unassigned-text, #9a3412)' : undefined, fontWeight: isUnassigned ? 700 : undefined, textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>
+                      {isUnassigned && (
+                        <span
+                          className="rc-unassigned-warning-icon"
+                          title={UNASSIGNED_TOOLTIP_TEXT}
+                          onMouseEnter={showWarningTooltip}
+                          onMouseLeave={hideWarningTooltip}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 16,
+                            height: 16,
+                            borderRadius: 4,
+                            background: '#ea580c',
+                            color: '#ffffff',
+                            flexShrink: 0,
+                            cursor: 'help',
+                          }}
+                        >
+                          <AlertTriangle size={11} color="#ffffff" />
+                        </span>
+                      )}
+                      <span>{patientVisual?.prefix || (!isUnassigned && isTimeWarning ? '⚠️ ' : '')}{e.title}</span>
+                    </span>
+                    <span className="rc-ev-time" style={{ color: isUnassigned ? 'var(--calendar-unassigned-subtext, #c2410c)' : undefined }}>{new Date(e.startTime).toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric' })} {new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 )
               })}

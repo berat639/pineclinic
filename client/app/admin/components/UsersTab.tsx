@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { toast } from 'react-hot-toast'
+import { useAuth } from '../../../lib/auth-context'
+import ConfirmModal from './ConfirmModal'
 import { PhoneMaskedInput } from '@/lib/phone-mask'
 import { Mail, ShieldAlert, Snowflake, Play, Trash2, Pencil, X, Send } from 'lucide-react'
 
@@ -88,6 +90,7 @@ const ROLE_META: Record<string, { label: string; color: string; bg: string }> = 
 }
 
 export default function UsersTab() {
+  const { user } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [smtpStatus, setSmtpStatus] = useState<SmtpStatus>({
     configured: true,
@@ -102,19 +105,22 @@ export default function UsersTab() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmFreezeUser, setConfirmFreezeUser] = useState<User | null>(null)
+
+  const activeAdminCount = users.filter((x) => x.role === 'yonetici' && x.active !== false).length
 
   const loadData = useCallback(() => {
     fetch('/api/admin/users', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => setUsers(Array.isArray(list) ? list : []))
-      .catch(() => {})
+      .catch(() => { })
 
     fetch('/api/yonetici/users/invitations', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.smtpStatus) setSmtpStatus(data.smtpStatus)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [])
 
   useEffect(() => {
@@ -187,17 +193,39 @@ export default function UsersTab() {
     setError('')
   }
 
-  async function toggleActive(u: User) {
+  async function executeFreezeToggle(u: User, nextActive: boolean) {
     const res = await fetch(`/api/yonetici/users/${u.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ active: !u.active }),
+      body: JSON.stringify({ active: nextActive }),
     })
+    const data = await res.json().catch(() => ({}))
     if (res.ok) {
-      setUsers(users.map((x) => (x.id === u.id ? { ...x, active: !u.active } : x)))
-      toast.success(!u.active ? 'Hesap yeniden aktifleştirildi' : 'Hesap donduruldu')
+      setConfirmFreezeUser(null)
+      setUsers(users.map((x) => (x.id === u.id ? { ...x, active: nextActive } : x)))
+      if (!nextActive && Number(data.unassignedAppointmentsCount) > 0) {
+        toast.success(`${u.name} hesabı donduruldu. Gelecekteki ${data.unassignedAppointmentsCount} randevu boşa çıkarıldı (Atama Bekliyor).`)
+      } else {
+        toast.success(nextActive ? 'Hesap yeniden aktifleştirildi' : 'Hesap donduruldu')
+      }
+      loadData()
+    } else {
+      toast.error(data.error || 'İşlem başarısız')
     }
+  }
+
+  async function toggleActive(u: User) {
+    if (u.role === 'yonetici') {
+      toast.error('⚠️ Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında dondurulabilir.')
+      return
+    }
+    const nextActive = !u.active
+    if (!nextActive) {
+      setConfirmFreezeUser(u)
+      return
+    }
+    await executeFreezeToggle(u, true)
   }
 
   async function removeUserKvkk(u: User) {
@@ -294,56 +322,79 @@ export default function UsersTab() {
           }}
         >
           <form
+            role="dialog"
+            aria-modal="true"
             onSubmit={submitForm}
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: '100%',
+              width: 'calc(100vw - 24px)',
               maxWidth: 460,
               maxHeight: '90vh',
-              overflowY: 'auto',
               background: 'var(--card-bg)',
               borderRadius: 14,
               border: '1.5px solid var(--input-border)',
               boxShadow: 'var(--pc-modal-shadow)',
-              padding: 20,
               display: 'flex',
               flexDirection: 'column',
-              gap: 12,
+              overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '0.96rem', fontWeight: 800, color: 'var(--foreground)' }}>
-                {editingUserId ? 'Personel Düzenle' : 'KVKK Uyumlu Personel Daveti'}
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>
+                  <Mail size={17} color="#ffffff" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                    {editingUserId ? 'Personel Düzenle' : 'KVKK Uyumlu Personel Daveti'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
+                    {editingUserId ? 'Personel bilgilerini güncelleyin' : 'Şifreyi personel e-posta davetiyle belirler'}
+                  </div>
+                </div>
               </div>
-              <button type="button" onClick={() => setShowModal(false)} style={{ ...outlineBtnStyle, padding: 6 }}>
-                <X size={15} />
+              <button type="button" onClick={() => setShowModal(false)} aria-label="Kapat" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: 'var(--pc-clay-btn)' }}>
+                <X size={16} />
               </button>
             </div>
-            <input placeholder="Ad Soyad *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required style={inputStyle} />
-            <input placeholder="E-posta *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required style={inputStyle} />
-            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ ...inputStyle, cursor: 'pointer' }}>
-              <option value="hekim">Hekim</option>
-              <option value="host">Kayıt / Resepsiyon</option>
-              <option value="yonetici">Yönetici</option>
-            </select>
-            <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX" value={form.phone} onValueChange={(phone) => setForm({ ...form, phone })} style={inputStyle} />
-            {form.role === 'hekim' && (
-              <>
-                <input placeholder="Uzmanlık (ör. Ortodonti)" value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} style={inputStyle} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground-2)' }}>Takvim Rengi:</span>
-                  <input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} style={{ width: 38, height: 32, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }} />
-                </div>
-              </>
-            )}
-            {error && <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--danger)' }}>⚠️ {error}</div>}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" onClick={() => setShowModal(false)} style={outlineBtnStyle}>
-                Vazgeç
+
+            {/* Body */}
+            <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>Personel Bilgileri</div>
+                <input placeholder="Ad Soyad *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required style={inputStyle} />
+                <input placeholder="E-posta *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required style={inputStyle} />
+                {form.role === 'yonetici' && editingUserId ? (
+                  <input value="Yönetici (Seed User)" disabled style={{ ...inputStyle, opacity: 0.75, cursor: 'not-allowed' }} />
+                ) : (
+                  <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ ...inputStyle, cursor: 'pointer' }}>
+                    <option value="hekim">Hekim</option>
+                    <option value="host">Kayıt / Resepsiyon</option>
+                  </select>
+                )}
+                <PhoneMaskedInput placeholder="Telefon — 0 (5XX) XXX XX XX" value={form.phone} onValueChange={(phone) => setForm({ ...form, phone })} style={inputStyle} />
+                {form.role === 'hekim' && (
+                  <>
+                    <input placeholder="Uzmanlık (ör. Ortodonti)" value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} style={inputStyle} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--foreground-2)' }}>Takvim Rengi:</span>
+                      <input type="color" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} style={{ width: 38, height: 32, border: 'none', borderRadius: 6, cursor: 'pointer', background: 'transparent' }} />
+                    </div>
+                  </>
+                )}
+              </div>
+              {error && <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--danger)' }}>⚠️ {error}</div>}
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
+              <button type="button" onClick={() => setShowModal(false)} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--input-border)', background: 'var(--card-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, boxShadow: 'var(--pc-clay-btn)' }}>
+                İptal
               </button>
-              <button type="submit" disabled={saving} className="btn-clinic-primary" style={btnStyle}>
+              <button type="submit" disabled={saving} style={{ padding: '9px 24px', borderRadius: 8, background: '#2563eb', color: '#ffffff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.86rem', fontWeight: 700, boxShadow: 'var(--pc-clay-primary)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Send size={14} color="#ffffff" />
-                <span style={{ color: '#ffffff' }}>{editingUserId ? 'Güncelle' : 'Davet Gönder'}</span>
+                <span style={{ color: '#ffffff' }}>{editingUserId ? 'Kaydet' : 'Davet Gönder'}</span>
               </button>
             </div>
           </form>
@@ -397,20 +448,39 @@ export default function UsersTab() {
                   </td>
                   <td style={tdStyle}>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <button onClick={() => toggleActive(u)} style={{ ...outlineBtnStyle, padding: '4px 8px', fontSize: '0.68rem' }}>
-                        {u.active ? <Snowflake size={12} /> : <Play size={12} />}
-                        {u.active ? 'Dondur' : 'Aktifleştir'}
-                      </button>
+                      {u.role === 'yonetici' ? (
+                        <span
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            fontSize: '0.66rem',
+                            fontWeight: 700,
+                            background: 'var(--card-inner)',
+                            border: '1px solid var(--input-border)',
+                            color: 'var(--foreground-3)',
+                          }}
+                          title="Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden dondurulabilir"
+                        >
+                          Satış Ekibi (Klinikler)
+                        </span>
+                      ) : (
+                        <button onClick={() => toggleActive(u)} style={{ ...outlineBtnStyle, padding: '4px 8px', fontSize: '0.68rem' }}>
+                          {u.active ? <Snowflake size={12} /> : <Play size={12} />}
+                          {u.active ? 'Dondur' : 'Aktifleştir'}
+                        </button>
+                      )}
                       <button onClick={() => handleEditClick(u)} style={{ ...outlineBtnStyle, padding: '4px 8px', fontSize: '0.68rem' }}>
                         <Pencil size={12} />
                       </button>
-                      <button
-                        onClick={() => removeUserKvkk(u)}
-                        style={{ ...outlineBtnStyle, padding: '4px 8px', fontSize: '0.68rem', border: '1px solid var(--danger)', color: 'var(--danger)' }}
-                        title="KVKK Uyumlu Kaldır"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      {u.role !== 'yonetici' && (
+                        <button
+                          onClick={() => removeUserKvkk(u)}
+                          style={{ ...outlineBtnStyle, padding: '4px 8px', fontSize: '0.68rem', border: '1px solid var(--danger)', color: 'var(--danger)' }}
+                          title="KVKK Uyumlu Kaldır"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -426,6 +496,23 @@ export default function UsersTab() {
           </tbody>
         </table>
       </div>
+
+      {confirmFreezeUser && (
+        <ConfirmModal
+          isOpen={true}
+          title={confirmFreezeUser.role === 'hekim' ? 'Hekim Hesabını Dondur' : 'Personel Hesabını Dondur'}
+          message={
+            confirmFreezeUser.role === 'hekim'
+              ? `"${confirmFreezeUser.name}" adlı hekimin hesabını dondurmak istediğinize emin misiniz? Hekimin aktif oturumları kapatılır ve gelecekteki tüm aktif randevuları boşa çıkarılarak ana takvimde turuncu renkli "Doktor ayrıldı, atama bekliyor" uyarısıyla gösterilir.`
+              : `"${confirmFreezeUser.name}" adlı personelin hesabını dondurmak istediğinize emin misiniz?`
+          }
+          confirmText="Evet, Hesabı Dondur"
+          cancelText="Vazgeç"
+          variant="warning"
+          onConfirm={() => executeFreezeToggle(confirmFreezeUser, false)}
+          onClose={() => setConfirmFreezeUser(null)}
+        />
+      )}
     </div>
   )
 }

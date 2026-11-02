@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { toast } from 'react-hot-toast'
 import { CalendarOff, Clock, Repeat, Trash2, Edit3, X } from 'lucide-react'
 
@@ -55,11 +55,43 @@ export default function ShiftContextMenu({
   onOpenEditModal,
   onOpenLeaveModal,
 }: ShiftContextMenuProps) {
-  const [selectedDoctorId, setSelectedDoctorId] = useState(doctorId || '')
+  const [selectedDoctorId, setSelectedDoctorId] = useState(doctorId || (users?.[0]?.id ?? ''))
   const [startTime, setStartTime] = useState(initialStartTime || '09:00')
   const [endTime, setEndTime] = useState(initialEndTime || '19:00')
   const [dragging, setDragging] = useState<'start' | 'end' | null>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setSelectedDoctorId(doctorId || (users?.[0]?.id ?? ''))
+  }, [doctorId, users])
+
+  useEffect(() => {
+    if (initialStartTime) setStartTime(initialStartTime)
+    if (initialEndTime) setEndTime(initialEndTime)
+  }, [initialStartTime, initialEndTime])
+
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const handleTouchMove = (e: TouchEvent) => {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return
+      e.preventDefault()
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+    window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('wheel', handleWheel, { capture: true } as any)
+      window.removeEventListener('touchmove', handleTouchMove, { capture: true } as any)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onClose])
 
   const safeLeft = typeof window !== 'undefined' ? Math.min(x, Math.max(12, window.innerWidth - 296)) : x
   const safeTop = typeof window !== 'undefined' ? Math.min(y, Math.max(12, window.innerHeight - 390)) : y
@@ -114,25 +146,42 @@ export default function ShiftContextMenu({
 
   return (
     <div
-      onClick={(e) => e.stopPropagation()}
+      onClick={onClose}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
       style={{
         position: 'fixed',
-        top: safeTop,
-        left: safeLeft,
-        zIndex: 100005,
-        background: 'var(--card-bg, #ffffff)',
-        border: '1.5px solid var(--input-border, #cbd5e1)',
-        borderRadius: 14,
-        padding: 14,
-        boxShadow: 'var(--pc-modal-shadow)',
-        width: 280,
-        color: 'var(--foreground)',
+        inset: 0,
+        zIndex: 100004,
       }}
     >
+      <div
+        ref={menuRef}
+        onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        style={{
+          position: 'fixed',
+          top: safeTop,
+          left: safeLeft,
+          zIndex: 100005,
+          background: 'var(--card-bg, #ffffff)',
+          border: '1.5px solid var(--input-border, #cbd5e1)',
+          borderRadius: 14,
+          padding: 14,
+          boxShadow: 'var(--pc-modal-shadow)',
+          width: 280,
+          color: 'var(--foreground)',
+        }}
+      >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--foreground)' }}>
-            {doctorName || 'Mesai & İzin İşlemleri'}
+            {doctorName || users?.find((u) => u.id === selectedDoctorId)?.name || 'Mesai & İzin İşlemleri'}
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--foreground-3)', fontWeight: 600 }}>
             {new Date(`${date}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', weekday: 'short' })}
@@ -517,6 +566,7 @@ export default function ShiftContextMenu({
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -9,7 +9,7 @@ const PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || 'Admin123!'
 async function seed() {
   const existing = await getUserByEmail(EMAIL)
   if (existing) {
-    await db.update(users).set({ isPlatformAdmin: true }).where(eq(users.id, existing.id))
+    await db.update(users).set({ isPlatformAdmin: true, active: true }).where(eq(users.id, existing.id))
     console.log(`[Seed] Kullanıcı zaten mevcut: ${EMAIL} (role: ${existing.role})`)
     process.exit(0)
   }

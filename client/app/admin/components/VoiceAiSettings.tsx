@@ -51,12 +51,12 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
     } finally { setSaving(false) }
   }
 
-  const tabs: Array<[Tab, string]> = [['model', 'Model'], ['voice', 'Ses ve Türkçe'], ['conversation', 'Konuşma'], ['telephony', 'Telephony']]
+  const tabs: Array<[Tab, string]> = [['model', 'Model'], ['voice', 'Ses ve Türkçe'], ['conversation', 'Konuşma'], ['telephony', 'Telefon ve Çağrı']]
   if (loading) return <div className="glass-card" style={{ padding: 20, color: 'var(--foreground-3)' }}>Sesli AI ayarları yükleniyor…</div>
 
   return <div className="glass-card" style={{ padding: 20 }}>
     <div style={{ borderBottom: '1px solid var(--input-border)', paddingBottom: 12, marginBottom: 14 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>⚙️ Gelişmiş Sesli AI &amp; Telephony</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>⚙️ Gelişmiş Sesli AI ve Çağrı Ayarları</div>
       <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '3px 0 0' }}>Tüm değişiklikler yeni web ve telefon görüşmelerinde uygulanır.</p>
     </div>
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -95,13 +95,21 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
     </div>}
 
     {tab === 'telephony' && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Sessizlik uyarısı
-        <input type="number" min="5" max="120" value={settings.callSilenceTimeout} onChange={event => patch({ callSilenceTimeout: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }} />
+      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Sessizlik uyarısı (saniye)
+        <div style={{ position: 'relative', marginTop: 6 }}>
+          <input type="number" min="5" max="120" value={settings.callSilenceTimeout} onChange={event => patch({ callSilenceTimeout: Number(event.target.value) })} style={{ ...inputStyle, paddingRight: 38 }} />
+          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 700, color: 'var(--foreground-3)', pointerEvents: 'none' }}>sn</span>
+        </div>
+        <span style={{ display: 'block', marginTop: 4, fontSize: 10, color: 'var(--foreground-3)' }}>5 – 120 saniye arası (varsayılan: 30 sn)</span>
       </label>
-      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Uyarı sonrası kapanış
-        <input type="number" min="5" max="120" value={settings.callSilenceCloseTimeout} onChange={event => patch({ callSilenceCloseTimeout: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }} />
+      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Uyarı sonrası kapanış (saniye)
+        <div style={{ position: 'relative', marginTop: 6 }}>
+          <input type="number" min="5" max="120" value={settings.callSilenceCloseTimeout} onChange={event => patch({ callSilenceCloseTimeout: Number(event.target.value) })} style={{ ...inputStyle, paddingRight: 38 }} />
+          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 700, color: 'var(--foreground-3)', pointerEvents: 'none' }}>sn</span>
+        </div>
+        <span style={{ display: 'block', marginTop: 4, fontSize: 10, color: 'var(--foreground-3)' }}>5 – 120 saniye arası (varsayılan: 15 sn)</span>
       </label>
-      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Maksimum görüşme
+      <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Maksimum görüşme süresi
         <select value={settings.callMaxDuration} onChange={event => patch({ callMaxDuration: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{Array.from({ length: 13 }, (_, i) => i + 3).map(minutes => <option key={minutes} value={minutes * 60}>{minutes} dakika</option>)}</select>
       </label>
       <label style={{ fontSize: 12, color: 'var(--foreground-2)' }}>Telefon AI kapasitesi

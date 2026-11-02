@@ -1,15 +1,19 @@
 'use client'
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Circle, Eraser, Hand, Layers, MoveUpRight, Pencil, RotateCcw, Ruler, SlidersHorizontal, Square, SunMedium, Triangle, ZoomIn, FileUp, FolderUp, Trash2 } from 'lucide-react'
+import { Circle, Eraser, Hand, Info, Layers, MoveUpRight, Pencil, RotateCcw, Ruler, SlidersHorizontal, Square, SunMedium, Triangle, ZoomIn, FileUp, Trash2, CheckCircle2, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { readDicomMetadata, type DicomMetadata } from './dicom/dicomMetadata'
 import { getCornerstoneRuntime } from './dicom/cornerstoneRuntime'
-import DentalCprViewerModal from './cbct/DentalCprViewerModal'
 
 interface DicomViewerProps {
   dcmUrl?: string | null
   file?: File | null
+  fileName?: string | null
+  uploading?: boolean
+  uploadProgress?: number
+  saved?: boolean
+  defaultPresentationMode?: boolean
   onFileChange?: (file: File | null) => void
   onFileClear?: () => void
   onClose?: () => void
@@ -31,7 +35,26 @@ const toolIcons = {
 
 function ViewerToolButton({ tool, selected, presentation, onClick }: { tool: ActiveTool; selected: boolean; presentation: boolean; onClick: () => void }) {
   const Icon = toolIcons[tool]
-  return <button type="button" title={toolLabels[tool]} aria-label={toolLabels[tool]} onClick={onClick} style={{ ...toolButtonStyle(selected), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexDirection: presentation ? 'column' : 'row', gap: presentation ? 3 : 5, minHeight: presentation ? 52 : undefined }}><Icon size={presentation ? 17 : 15} strokeWidth={2} /><span>{toolLabels[tool]}</span></button>
+  return (
+    <button
+      type="button"
+      title={toolLabels[tool]}
+      aria-label={toolLabels[tool]}
+      onClick={onClick}
+      style={{
+        ...toolButtonStyle(selected),
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: presentation ? 'column' : 'row',
+        gap: presentation ? 3 : 5,
+        minHeight: presentation ? 52 : undefined,
+      }}
+    >
+      <Icon size={presentation ? 17 : 15} strokeWidth={2} />
+      <span>{toolLabels[tool]}</span>
+    </button>
+  )
 }
 
 function describeDicomError(error: unknown): string {
@@ -40,12 +63,6 @@ function describeDicomError(error: unknown): string {
   if (/transfer syntax|decode|codec|jpeg/i.test(message)) return 'Bu DICOM sıkıştırma biçimi tarayıcıda çözümlenemedi.'
   if (/fetch|yüklenemedi|network/i.test(message)) return 'DICOM dosyası indirilemedi veya oturum yetkisi doğrulanamadı.'
   return message || 'DICOM görüntüsü açılırken beklenmeyen bir hata oluştu.'
-}
-
-function themedViewportBackground(element: HTMLElement): [number, number, number] {
-  const match = getComputedStyle(element).backgroundColor.match(/\d+/g)
-  if (!match || match.length < 3) return [255, 255, 255]
-  return [Number(match[0]), Number(match[1]), Number(match[2])]
 }
 
 function safeUnit(unit: unknown, fallback: string) {
@@ -65,7 +82,23 @@ function roiTextLines(data: any, target: string | string[]) {
   return [`Alan: ${Math.round(stats.area * 100) / 100} ${safeUnit(stats.areaUnit, 'px²')}`]
 }
 
-export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFileClear, onClose, isModal = false }: DicomViewerProps) {
+export function isValidDcmFileName(name: string): boolean {
+  return typeof name === 'string' && name.toLocaleLowerCase('en-US').endsWith('.dcm')
+}
+
+export default function DicomViewer({
+  dcmUrl,
+  file: propFile,
+  fileName,
+  uploading = false,
+  uploadProgress = 100,
+  saved = false,
+  defaultPresentationMode = true,
+  onFileChange,
+  onFileClear,
+  onClose,
+  isModal = false,
+}: DicomViewerProps) {
   const reactId = useId().replace(/:/g, '')
   const viewportId = `dicom-2d-viewport-${reactId}`
   const renderingEngineId = `dicom-2d-engine-${reactId}`
@@ -79,16 +112,19 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
   const [isActive, setIsActive] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showPresentationTools, setShowPresentationTools] = useState(false)
-  const [isPresentationMode, setIsPresentationMode] = useState(false)
+  const [showPresentationTools, setShowPresentationTools] = useState(true)
+  const [isPresentationMode, setIsPresentationMode] = useState<boolean>(defaultPresentationMode || Boolean(propFile || dcmUrl))
+  const [showMetadataInPresentation, setShowMetadataInPresentation] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [isCbctOpen, setIsCbctOpen] = useState(false)
-  const [pendingCbctFiles, setPendingCbctFiles] = useState<File[] | null>(null)
 
   useEffect(() => {
     if (propFile !== undefined) {
       setFile(propFile)
       setError(null)
+      if (propFile) {
+        setIsPresentationMode(true)
+        setShowPresentationTools(true)
+      }
     }
   }, [propFile])
 
@@ -106,33 +142,60 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
 
   useEffect(() => cleanup, [cleanup])
 
+  const closePresentation = useCallback(() => {
+    if (onClose) {
+      onClose()
+    } else {
+      setIsPresentationMode(false)
+    }
+  }, [onClose])
+
   useEffect(() => {
-    if (!isPresentationMode) return
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setIsPresentationMode(false) }
-    window.addEventListener('keydown', onKeyDown)
-    const resizeTimer = window.setTimeout(() => sessionRef.current?.renderingEngine?.resize(true, true), 0)
+    if (!isPresentationMode || (!file && !isLoading && !error && !dcmUrl)) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        closePresentation()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    const resizeTimer = window.setTimeout(() => {
+      const engine = sessionRef.current?.renderingEngine
+      if (engine) {
+        engine.resize(true, true)
+        engine.getViewport(viewportId)?.resetCamera()
+        engine.getViewport(viewportId)?.render()
+      }
+    }, 0)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, true)
       window.clearTimeout(resizeTimer)
     }
-  }, [isPresentationMode])
+  }, [isPresentationMode, file, isLoading, error, dcmUrl, closePresentation, viewportId])
 
   useEffect(() => {
     if (!dcmUrl) return
     const controller = new AbortController()
     setIsLoading(true)
     setError(null)
+    setIsPresentationMode(true)
+    setShowPresentationTools(true)
     fetch(dcmUrl, { credentials: 'include', signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('Dosya yüklenemedi')
         const blob = await response.blob()
-        return new File([blob], 'görüntü.dcm', { type: 'application/dicom' })
+        const resolvedName = fileName && isValidDcmFileName(fileName) ? fileName : 'görüntü.dcm'
+        return new File([blob], resolvedName, { type: 'application/dicom' })
       })
-      .then((nextFile) => setFile(nextFile))
+      .then((nextFile) => {
+        setFile(nextFile)
+        setIsPresentationMode(true)
+        setShowPresentationTools(true)
+      })
       .catch((fetchError) => { if (fetchError.name !== 'AbortError') setError(describeDicomError(fetchError)) })
       .finally(() => setIsLoading(false))
     return () => controller.abort()
-  }, [dcmUrl])
+  }, [dcmUrl, fileName])
 
   useEffect(() => {
     if (!file || !viewportElementRef.current) return
@@ -149,7 +212,12 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
 
         const { core, tools, dicomImageLoader } = runtime
         const renderingEngine = new core.RenderingEngine(renderingEngineId)
-        renderingEngine.enableElement({ viewportId, type: core.Enums.ViewportType.STACK, element: viewportElementRef.current, defaultOptions: { background: themedViewportBackground(viewportElementRef.current) } })
+        renderingEngine.enableElement({
+          viewportId,
+          type: core.Enums.ViewportType.STACK,
+          element: viewportElementRef.current,
+          defaultOptions: { background: [11, 19, 41] },
+        })
         const toolGroup = tools.ToolGroupManager.createToolGroup(toolGroupId)
         if (!toolGroup) throw new Error('Görüntü araç grubu oluşturulamadı.')
         toolGroup.addViewport(viewportId, renderingEngineId)
@@ -164,9 +232,6 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
         toolGroup.addTool(tools.EllipticalROITool.toolName)
         toolGroup.addTool(tools.PlanarFreehandROITool.toolName)
         toolGroup.addTool(tools.EraserTool.toolName)
-        // Some panoramic devices use private calibration codes that Cornerstone
-        // cannot map to a physical unit. Never expose that implementation detail
-        // as "Unknown" in clinical annotations.
         toolGroup.setToolConfiguration(tools.LengthTool.toolName, { getTextLines: measurementTextLines })
         toolGroup.setToolConfiguration(tools.RectangleROITool.toolName, { getTextLines: roiTextLines })
         toolGroup.setToolConfiguration(tools.EllipticalROITool.toolName, { getTextLines: roiTextLines })
@@ -177,20 +242,21 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
         const fileIndex = Number(imageId.replace('dicomfile:', ''))
         const viewport = renderingEngine.getViewport(viewportId)
         await viewport.setStack([imageId])
+        renderingEngine.resize(true, true)
+        viewport.resetCamera()
         viewport.render()
 
-        const resizeObserver = new ResizeObserver(() => renderingEngine.resize(true, true))
+        const resizeObserver = new ResizeObserver(() => {
+          renderingEngine.resize(true, true)
+          viewport.resetCamera()
+          viewport.render()
+        })
         resizeObserver.observe(viewportElementRef.current)
         sessionRef.current = { renderingEngine, toolGroup, tools, dicomImageLoader, fileIndex, resizeObserver }
 
-        // Metadata is informational: a malformed non-pixel tag must never prevent
-        // Cornerstone from opening an otherwise valid image.
         void readDicomMetadata(buffer)
           .then((parsedMetadata) => {
             if (disposed) return
-            // Dental panoramic files can contain private calibration metadata that
-            // overrides standard Pixel Spacing as "Unknown". The standard DICOM
-            // Pixel Spacing tag is the authoritative scale for linear measurements.
             if (parsedMetadata.pixelSpacingValues) {
               const [rowPixelSpacing, columnPixelSpacing] = parsedMetadata.pixelSpacingValues
               tools.utilities.calibrateImageSpacing(imageId, renderingEngine, {
@@ -217,11 +283,11 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
     const session = sessionRef.current
     if (!session) return
     const { tools, toolGroup } = session
-    ;[
-      tools.WindowLevelTool, tools.PanTool, tools.ZoomTool, tools.StackScrollTool,
-      tools.LengthTool, tools.AngleTool, tools.ArrowAnnotateTool, tools.RectangleROITool,
-      tools.EllipticalROITool, tools.PlanarFreehandROITool, tools.EraserTool,
-    ].forEach((entry: any) => toolGroup.setToolPassive(entry.toolName, { removeAllBindings: true }))
+      ;[
+        tools.WindowLevelTool, tools.PanTool, tools.ZoomTool, tools.StackScrollTool,
+        tools.LengthTool, tools.AngleTool, tools.ArrowAnnotateTool, tools.RectangleROITool,
+        tools.EllipticalROITool, tools.PlanarFreehandROITool, tools.EraserTool,
+      ].forEach((entry: any) => toolGroup.setToolPassive(entry.toolName, { removeAllBindings: true }))
     const selected = {
       windowLevel: tools.WindowLevelTool, pan: tools.PanTool, zoom: tools.ZoomTool, scroll: tools.StackScrollTool,
       length: tools.LengthTool, arrow: tools.ArrowAnnotateTool, angle: tools.AngleTool,
@@ -244,17 +310,23 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
     const session = sessionRef.current
     const element = viewportElementRef.current
     if (!session || !element) return
-    ;[
-      session.tools.LengthTool, session.tools.AngleTool, session.tools.ArrowAnnotateTool,
-      session.tools.RectangleROITool, session.tools.EllipticalROITool, session.tools.PlanarFreehandROITool,
-    ].forEach((tool: any) => session.tools.annotation.state.removeAnnotations(tool.toolName, element))
+      ;[
+        session.tools.LengthTool, session.tools.AngleTool, session.tools.ArrowAnnotateTool,
+        session.tools.RectangleROITool, session.tools.EllipticalROITool, session.tools.PlanarFreehandROITool,
+      ].forEach((tool: any) => session.tools.annotation.state.removeAnnotations(tool.toolName, element))
     session.renderingEngine.getViewport(viewportId)?.render()
   }
 
   const chooseFile = (nextFile: File | undefined | null) => {
     if (!nextFile) return
+    if (!isValidDcmFileName(nextFile.name)) {
+      toast.error('2B DICOM görüntüleme için yalnızca .dcm uzantılı dosya seçebilirsiniz.')
+      return
+    }
     setFile(nextFile)
     setError(null)
+    setIsPresentationMode(true)
+    setShowPresentationTools(true)
     onFileChange?.(nextFile)
   }
 
@@ -266,41 +338,136 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
     if (fileInputRef.current) fileInputRef.current.value = ''
     onFileClear?.()
     onFileChange?.(null)
+    if (onClose) onClose()
   }
 
-  return (
-    <section style={{
-      position: isPresentationMode ? 'fixed' : 'relative',
-      inset: isPresentationMode ? 0 : undefined,
-      zIndex: isPresentationMode ? 100000 : undefined,
-      display: 'grid',
-      gridTemplateColumns: isPresentationMode || !metadata ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(240px, 320px)',
-      gap: 12,
-      padding: isPresentationMode ? 0 : isModal ? 12 : 0,
-      borderRadius: isPresentationMode ? 0 : 8,
-      background: isPresentationMode ? 'var(--background)' : 'var(--card-bg)',
-      border: isPresentationMode || !isModal ? 'none' : '1px solid var(--input-border)',
-      color: 'var(--foreground)'
-    }}>
-      <div style={{ minWidth: 0 }}>
-        <input ref={fileInputRef} type="file" accept=".dcm,application/dicom" style={{ display: 'none' }} onChange={(event) => chooseFile(event.target.files?.[0])} />
+  const activePresentation = isPresentationMode && Boolean(file || isLoading || error || dcmUrl)
 
-        {/* Dosya Seçildiğinde Üst Bilgi ve Araç Çubuğu */}
-        {file && (
-          <div style={isPresentationMode ? { position: 'absolute', top: 20, right: 20, zIndex: 2, display: 'flex', gap: 8 } : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            {!isPresentationMode && (
-              <>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, background: 'var(--badge-clinic-bg)', border: '1px solid var(--badge-clinic-border)', color: 'var(--badge-clinic-fg)', fontSize: 11, fontWeight: 600, maxWidth: 220 }}>
-                  <FileUp size={13} />
+  return (
+    <section
+      role={activePresentation ? 'dialog' : undefined}
+      aria-modal={activePresentation ? 'true' : undefined}
+      aria-label="2B DICOM Sunum Modu"
+      style={{
+        position: activePresentation ? 'fixed' : 'relative',
+        inset: activePresentation ? 0 : undefined,
+        zIndex: activePresentation ? 100005 : undefined,
+        display: 'grid',
+        gridTemplateColumns: activePresentation || !metadata ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(240px, 320px)',
+        gap: 12,
+        padding: activePresentation ? 0 : isModal ? 12 : 0,
+        borderRadius: activePresentation ? 0 : 8,
+        background: activePresentation ? '#0b1329' : 'var(--card-bg)',
+        border: activePresentation || !isModal ? 'none' : '1px solid var(--input-border)',
+        color: 'var(--foreground)',
+      }}
+    >
+      <div style={{ minWidth: 0, position: 'relative', width: '100%', height: activePresentation ? '100vh' : undefined }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".dcm"
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            chooseFile(event.target.files?.[0])
+            event.target.value = ''
+          }}
+        />
+
+        {/* Üst Bilgi ve Araç Çubuğu */}
+        {(file || activePresentation) && (
+          <div
+            style={
+              activePresentation
+                ? {
+                  position: 'absolute',
+                  top: 16,
+                  left: 20,
+                  right: 20,
+                  zIndex: 3,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                  pointerEvents: 'none',
+                }
+                : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }
+            }
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', pointerEvents: 'auto' }}>
+              {file && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    background: 'var(--card-bg)',
+                    border: '1.5px solid var(--input-border)',
+                    color: 'var(--foreground)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    maxWidth: 280,
+                    boxShadow: 'var(--pc-neo-subcard)',
+                  }}
+                >
+                  <FileUp size={14} color="var(--accent)" />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
                 </div>
+              )}
+
+              {uploading && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    background: 'var(--badge-clinic-bg)',
+                    border: '1px solid var(--badge-clinic-border)',
+                    color: 'var(--badge-clinic-fg)',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                  }}
+                >
+                  Kaydediliyor %{uploadProgress}
+                </div>
+              )}
+
+              {!uploading && saved && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    background: 'var(--card-bg)',
+                    border: '1.5px solid var(--success, #16a34a)',
+                    color: 'var(--success, #16a34a)',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                  }}
+                >
+                  <CheckCircle2 size={13} /> Kaydedildi
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginLeft: 'auto', pointerEvents: 'auto' }}>
+              {onFileChange && (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600 }}
                 >
-                  Değiştir
+                  <FileUp size={13} /> Değiştir (.dcm)
                 </button>
+              )}
+              {onFileClear && (
                 <button
                   type="button"
                   onClick={clearFile}
@@ -311,226 +478,256 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
                     alignItems: 'center',
                     gap: 4,
                     color: 'var(--danger)',
-                    borderColor: 'rgba(239,68,68,0.3)',
-                    background: 'rgba(239,68,68,0.06)',
-                  }}
-                >
-                  <Trash2 size={12} /> Kaldır
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingCbctFiles(null)
-                    setIsCbctOpen(true)
-                  }}
-                  style={{
-                    ...secondaryButtonStyle,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    borderColor: 'var(--btn-clinic-blue-border)',
-                    background: 'var(--btn-clinic-blue-bg)',
-                    color: 'var(--btn-clinic-blue-fg)',
+                    borderColor: 'var(--danger)',
                     fontWeight: 600,
                   }}
                 >
-                  <FolderUp size={13} /> 3D CBCT Klasörü Seç
+                  <Trash2 size={13} /> Kaldır
                 </button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={() => { setIsPresentationMode((active) => !active); setShowPresentationTools(true) }}
-              style={{
-                ...toolButtonStyle(isPresentationMode),
-                marginLeft: isPresentationMode ? undefined : 'auto',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                fontWeight: 600,
-              }}
-            >
-              {isPresentationMode ? 'Sunumu kapat' : '🖥️ Sunum modu'}
-            </button>
-            {isModal && onClose && (
-              <button type="button" onClick={onClose} aria-label="Görüntüleyiciyi kapat" style={{ ...secondaryButtonStyle, marginLeft: isPresentationMode ? 0 : 4 }}>
-                Kapat
-              </button>
-            )}
+              )}
+              {activePresentation && metadata && (
+                <button
+                  type="button"
+                  onClick={() => setShowMetadataInPresentation((prev) => !prev)}
+                  style={{
+                    ...toolButtonStyle(showMetadataInPresentation),
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontWeight: 600,
+                  }}
+                >
+                  <Info size={14} /> Hasta ve Görüntü Bilgileri
+                </button>
+              )}
+              {!activePresentation && file && (
+                <button
+                  type="button"
+                  onClick={() => { setIsPresentationMode(true); setShowPresentationTools(true) }}
+                  style={{
+                    ...primaryButtonStyle,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  🖥️ Sunum Modu
+                </button>
+              )}
+              {activePresentation && (
+                <button
+                  type="button"
+                  onClick={closePresentation}
+                  style={{
+                    ...primaryButtonStyle,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <X size={14} /> Sunumu Kapat
+                </button>
+              )}
+              {!activePresentation && isModal && onClose && (
+                <button type="button" onClick={onClose} aria-label="Görüntüleyiciyi kapat" style={secondaryButtonStyle}>
+                  Kapat
+                </button>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Sunum Modu Çizim Araçları */}
-        {file && !error && isPresentationMode && (
-          <div style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', zIndex: 2, width: 188, display: 'grid', gap: 10, padding: 12, borderRadius: 10, background: 'var(--card-bg)', border: '1px solid var(--input-border)' }}>
-            {isPresentationMode && <strong style={{ fontSize: 12, textAlign: 'center' }}>Çizim araçları</strong>}
+        {/* Sunum Modu Sağ Üst Hasta & Görüntü Bilgileri Kartı */}
+        {activePresentation && showMetadataInPresentation && metadata && (
+          <aside
+            style={{
+              position: 'absolute',
+              top: 64,
+              right: 20,
+              zIndex: 3,
+              width: 320,
+              maxWidth: 'calc(100vw - 40px)',
+              maxHeight: 'calc(100vh - 88px)',
+              overflow: 'auto',
+              border: '1.5px solid var(--input-border)',
+              borderRadius: 12,
+              background: 'var(--card-bg)',
+              color: 'var(--foreground)',
+              padding: 14,
+              boxShadow: 'var(--pc-modal-shadow)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>Hasta ve görüntü bilgileri</strong>
+              <button
+                type="button"
+                onClick={() => setShowMetadataInPresentation(false)}
+                aria-label="Bilgileri kapat"
+                style={{ ...secondaryButtonStyle, padding: '2px 6px' }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, .8fr) minmax(0, 1.2fr)', gap: '8px 10px', fontSize: 12, margin: '12px 0 0' }}>
+              {metadata.summary.map((item) => (
+                <div key={item.label} style={{ display: 'contents' }}>
+                  <dt style={{ color: 'var(--foreground-3)' }}>{item.label}</dt>
+                  <dd style={{ margin: 0, overflowWrap: 'anywhere', fontWeight: 600 }}>{item.value}</dd>
+                </div>
+              ))}
+              <div style={{ display: 'contents' }}>
+                <dt style={{ color: 'var(--foreground-3)' }}>Diş ölçüm ölçeği</dt>
+                <dd style={{ margin: 0, overflowWrap: 'anywhere', fontWeight: 600 }}>
+                  {metadata.pixelSpacing ? `${metadata.pixelSpacing} mm / piksel` : 'Dosyada ölçek bilgisi yok'}
+                </dd>
+              </div>
+            </dl>
+            <p style={{ margin: '12px 0 0', paddingTop: 10, borderTop: '1px solid var(--input-border)', fontSize: 11, lineHeight: 1.45, color: 'var(--foreground-2)' }}>
+              {metadata.pixelSpacing
+                ? 'Uzunluk aracı diş ölçülerini bu DICOM kalibrasyonuyla mm olarak hesaplar.'
+                : 'Diş uzunluğunu mm olarak ölçmek için dosyada Pixel Spacing veya Imager Pixel Spacing bilgisi gerekir.'}
+            </p>
+          </aside>
+        )}
+
+        {/* Sunum Modu Çizim ve Ölçüm Araçları */}
+        {file && !error && activePresentation && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 20,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 3,
+              width: 194,
+              display: 'grid',
+              gap: 10,
+              padding: 12,
+              borderRadius: 12,
+              background: 'var(--card-bg)',
+              border: '1.5px solid var(--input-border)',
+              boxShadow: 'var(--pc-modal-shadow)',
+            }}
+          >
+            <strong style={{ fontSize: 12, textAlign: 'center', color: 'var(--foreground)' }}>Sunum &amp; Çizim Araçları</strong>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              {primaryTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}
-              <button type="button" title="Görüntüyü sıfırla" onClick={resetViewport} style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><RotateCcw size={15} />Sıfırla</button>
-              <button type="button" title="Çizim ve ölçüm araçları" onClick={() => setShowPresentationTools((visible) => !visible)} style={{ ...toolButtonStyle(showPresentationTools), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><SlidersHorizontal size={15} />Araçlar</button>
+              {primaryTools.map((tool) => (
+                <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />
+              ))}
+              <button
+                type="button"
+                title="Görüntüyü sıfırla"
+                onClick={resetViewport}
+                style={{ ...secondaryButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
+              >
+                <RotateCcw size={15} />Sıfırla
+              </button>
+              <button
+                type="button"
+                title="Çizim ve ölçüm araçları"
+                onClick={() => setShowPresentationTools((visible) => !visible)}
+                style={{ ...toolButtonStyle(showPresentationTools), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
+              >
+                <SlidersHorizontal size={15} />Araçlar
+              </button>
             </div>
             {showPresentationTools && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, paddingTop: 8, borderTop: '1px solid var(--input-border)' }}>
-                {presentationTools.map((tool) => <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />)}
-                <button type="button" title="Tüm çizimleri temizle" onClick={clearAnnotations} style={{ ...secondaryButtonStyle, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Eraser size={15} />Temizle</button>
+                {presentationTools.map((tool) => (
+                  <ViewerToolButton key={tool} tool={tool} selected={activeTool === tool} presentation={true} onClick={() => activateTool(tool)} />
+                ))}
+                <button
+                  type="button"
+                  title="Tüm çizimleri temizle"
+                  onClick={clearAnnotations}
+                  style={{ ...secondaryButtonStyle, color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
+                >
+                  <Eraser size={15} />Temizle
+                </button>
               </div>
             )}
           </div>
         )}
 
-        {/* Dosya Yokken: Kompakt & Şık İkili Yükleme Kartı */}
+        {/* Dosya Yokken: Sadece 2B .dcm Seçim Kartı */}
         {!file && !isLoading && !error && (
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
             onDragLeave={(e) => { e.preventDefault(); setIsDragging(false) }}
-            onDrop={async (e) => {
+            onDrop={(e) => {
               e.preventDefault()
               setIsDragging(false)
               const droppedFiles = Array.from(e.dataTransfer.files)
-              const entries = Array.from(e.dataTransfer.items ?? [])
-                .map((item) => item.webkitGetAsEntry?.())
-                .filter(Boolean) as FileSystemEntry[]
-              const hasDirectory = entries.some((entry) => entry.isDirectory)
-
-              if (hasDirectory || droppedFiles.length > 1) {
-                const collected: File[] = []
-                const walk = async (entry: FileSystemEntry): Promise<void> => {
-                  if (entry.isFile) {
-                    collected.push(
-                      await new Promise<File>((resolve, reject) =>
-                        (entry as FileSystemFileEntry).file(resolve, reject)
-                      )
-                    )
-                  } else {
-                    const reader = (entry as FileSystemDirectoryEntry).createReader()
-                    for (;;) {
-                      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
-                        reader.readEntries(resolve, reject)
-                      )
-                      if (!batch.length) break
-                      for (const child of batch) await walk(child)
-                    }
-                  }
-                }
-                for (const entry of entries) await walk(entry)
-                const finalFiles = collected.length > 0 ? collected : droppedFiles
-                if (finalFiles.length > 0) {
-                  setPendingCbctFiles(finalFiles)
-                  setIsCbctOpen(true)
-                } else {
-                  toast.error('Bırakılan klasörde DICOM dosyası bulunamadı.')
-                }
-              } else if (droppedFiles.length === 1) {
+              if (droppedFiles.length >= 1) {
                 chooseFile(droppedFiles[0])
               }
             }}
             style={{
               width: '100%',
-              padding: '10px 12px',
-              borderRadius: 8,
-              border: isDragging ? '2px dashed var(--accent)' : '1px dashed var(--input-border)',
-              background: isDragging ? 'var(--flow-info-bg)' : 'var(--input-bg)',
+              padding: '12px 14px',
+              borderRadius: 10,
+              border: isDragging ? '2px dashed var(--accent)' : '1.5px dashed var(--input-border)',
+              background: 'var(--card-bg)',
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
               transition: 'all 0.15s ease',
             }}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
-              {/* 2D DICOM Seç */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--btn-clinic-blue-border)',
+                background: 'var(--btn-clinic-blue-bg)',
+                color: 'var(--btn-clinic-blue-fg)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '8px 12px',
-                  borderRadius: 6,
-                  border: '1px solid var(--btn-clinic-blue-border)',
-                  background: 'var(--btn-clinic-blue-bg)',
-                  color: 'var(--btn-clinic-blue-fg)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <div style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 6,
+                  width: 34,
+                  height: 34,
+                  borderRadius: 8,
                   background: 'var(--badge-clinic-bg)',
                   border: '1px solid var(--badge-clinic-border)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
-                }}>
-                  <FileUp size={16} color="var(--badge-clinic-fg)" />
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)' }}>
-                    2D DICOM Seç
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    .dcm panoramik / periapikal
-                  </div>
-                </div>
-              </button>
-
-              {/* 3D CBCT Seç */}
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingCbctFiles(null)
-                  setIsCbctOpen(true)
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '8px 12px',
-                  borderRadius: 6,
-                  border: '1px solid var(--btn-clinic-blue-border)',
-                  background: 'var(--btn-clinic-blue-bg)',
-                  color: 'var(--btn-clinic-blue-fg)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease',
                 }}
               >
-                <div style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 6,
-                  background: 'var(--badge-clinic-bg)',
-                  border: '1px solid var(--badge-clinic-border)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}>
-                  <FolderUp size={16} color="var(--badge-clinic-fg)" />
+                <FileUp size={17} color="var(--badge-clinic-fg)" />
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--foreground)' }}>
+                  2B DICOM Dosyası Seç (.dcm)
                 </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground)' }}>
-                    3D CBCT Klasörü Seç
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--flow-text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    CBCT serisi · Panoramik, Kesit &amp; 3D VR
-                  </div>
+                <div style={{ fontSize: 11, color: 'var(--foreground-2)', marginTop: 2 }}>
+                  Yalnızca .dcm formatı · Yüklendiğinde doğrudan Sunum Modunda açılır ve kaydedilir
                 </div>
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 10.5, color: 'var(--flow-text-muted)' }}>
-              <span>💡 2D DICOM dosyasını veya 3D CBCT klasörünü bu alana sürükleyip bırakabilirsiniz</span>
-            </div>
+              </div>
+            </button>
           </div>
         )}
 
-        {isLoading && <div style={messageStyle}>DICOM görüntüsü hazırlanıyor…</div>}
-        {error && <div style={{ ...messageStyle, color: 'var(--danger)' }}>⚠️ {error}</div>}
+        {isLoading && (
+          <div style={activePresentation ? presentationMessageStyle : messageStyle}>
+            DICOM görüntüsü Sunum Modunda hazırlanıyor…
+          </div>
+        )}
+        {error && (
+          <div style={{ ...(activePresentation ? presentationMessageStyle : messageStyle), color: 'var(--danger)' }}>
+            ⚠️ {error}
+          </div>
+        )}
         <div
           ref={viewportElementRef}
           tabIndex={0}
@@ -540,18 +737,18 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
           style={{
             display: file && !error ? 'block' : 'none',
             width: '100%',
-            minHeight: isPresentationMode ? 0 : isModal ? 520 : 300,
-            height: isPresentationMode ? '100vh' : isModal ? 'min(70vh, 760px)' : 340,
+            minHeight: activePresentation ? '100vh' : isModal ? 520 : 340,
+            height: activePresentation ? '100vh' : isModal ? 'min(70vh, 760px)' : 380,
             outline: 'none',
-            background: 'var(--background)',
-            borderRadius: isPresentationMode ? 0 : 8,
-            border: isPresentationMode ? 'none' : `2px solid ${isActive ? 'var(--accent)' : 'var(--input-border)'}`,
-            overflow: 'hidden'
+            background: '#0b1329',
+            borderRadius: activePresentation ? 0 : 8,
+            border: activePresentation ? 'none' : `2px solid ${isActive ? 'var(--accent)' : 'var(--input-border)'}`,
+            overflow: 'hidden',
           }}
           aria-label="DICOM görüntü viewportu"
         />
       </div>
-      {!isPresentationMode && metadata && (
+      {!activePresentation && metadata && (
         <aside style={{ minWidth: 0, maxHeight: isModal ? 'min(75vh, 820px)' : 520, overflow: 'auto', border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--card-bg)', padding: 12 }}>
           <strong style={{ fontSize: 13 }}>Hasta ve görüntü bilgileri</strong>
           <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, .8fr) minmax(0, 1.2fr)', gap: '8px 10px', fontSize: 12, margin: '12px 0 0' }}>
@@ -571,19 +768,56 @@ export default function DicomViewer({ dcmUrl, file: propFile, onFileChange, onFi
           </p>
         </aside>
       )}
-      {isCbctOpen && (
-        <DentalCprViewerModal
-          initialFiles={pendingCbctFiles}
-          onClose={() => {
-            setIsCbctOpen(false)
-            setPendingCbctFiles(null)
-          }}
-        />
-      )}
     </section>
   )
 }
 
-const secondaryButtonStyle = { border: '1px solid var(--input-border)', borderRadius: 6, padding: '5px 9px', background: 'var(--input-bg)', color: 'var(--foreground)', cursor: 'pointer', fontSize: 11 } as const
-const toolButtonStyle = (selected: boolean) => ({ ...secondaryButtonStyle, borderColor: selected ? 'var(--accent)' : 'var(--input-border)', color: selected ? 'var(--accent)' : 'var(--foreground-2)', background: selected ? 'var(--card-bg)' : 'var(--input-bg)' })
-const messageStyle = { minHeight: 180, display: 'grid', placeItems: 'center', border: '1px solid var(--input-border)', borderRadius: 8, background: 'var(--input-bg)', color: 'var(--foreground-2)', fontSize: 13 } as const
+const secondaryButtonStyle = {
+  border: '1.5px solid var(--input-border)',
+  borderRadius: 8,
+  padding: '6px 11px',
+  background: 'var(--card-bg)',
+  color: 'var(--foreground)',
+  cursor: 'pointer',
+  fontSize: 11.5,
+} as const
+
+const primaryButtonStyle = {
+  border: '1.5px solid #1d4ed8',
+  borderRadius: 8,
+  padding: '6px 12px',
+  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+  color: '#ffffff',
+  cursor: 'pointer',
+  fontSize: 11.5,
+  fontWeight: 700,
+} as const
+
+const toolButtonStyle = (selected: boolean) => ({
+  ...secondaryButtonStyle,
+  borderColor: selected ? 'var(--accent)' : 'var(--input-border)',
+  color: selected ? 'var(--accent)' : 'var(--foreground-2)',
+  background: selected ? 'var(--btn-clinic-blue-bg, var(--card-bg))' : 'var(--card-bg)',
+  fontWeight: selected ? 700 : 500,
+})
+
+const messageStyle = {
+  minHeight: 180,
+  display: 'grid',
+  placeItems: 'center',
+  border: '1px solid var(--input-border)',
+  borderRadius: 8,
+  background: 'var(--input-bg)',
+  color: 'var(--foreground-2)',
+  fontSize: 13,
+} as const
+
+const presentationMessageStyle = {
+  minHeight: '100vh',
+  display: 'grid',
+  placeItems: 'center',
+  background: '#0b1329',
+  color: '#e2e8f0',
+  fontSize: 14,
+  fontWeight: 600,
+} as const

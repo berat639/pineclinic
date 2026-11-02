@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import dynamic from 'next/dynamic'
 import { useAuth } from '../../../lib/auth-context'
 import { ThemeToggle } from '../../theme-provider'
 
@@ -11,12 +10,11 @@ import PaymentsTab from '../../admin/components/PaymentsTab'
 import StatsBar from '../../admin/components/StatsBar'
 import KnowledgeTab from '../../admin/components/KnowledgeTab'
 import IntegrationsTab from '../../admin/components/IntegrationsTab'
-
-const FinansalTab = dynamic(() => import('./tabs/FinansalTab'), { ssr: false })
-const StokTab = dynamic(() => import('./tabs/StokTab'), { ssr: false })
-const KlinikPersonelTab = dynamic(() => import('./tabs/KlinikPersonelTab'), { ssr: false })
-const VipAssistantTab = dynamic(() => import('./tabs/VipAssistantTab'), { ssr: false })
-const PlatformClinicsTab = dynamic(() => import('./tabs/PlatformClinicsTab'), { ssr: false })
+import FinansalTab from './tabs/FinansalTab'
+import StokTab from './tabs/StokTab'
+import KlinikPersonelTab from './tabs/KlinikPersonelTab'
+import VipAssistantTab from './tabs/VipAssistantTab'
+import PlatformClinicsTab from './tabs/PlatformClinicsTab'
 
 type Tab = 'calendar' | 'patients' | 'payments' | 'stok' | 'knowledge' | 'klinik' | 'integrations' | 'vip' | 'platform-clinics'
 

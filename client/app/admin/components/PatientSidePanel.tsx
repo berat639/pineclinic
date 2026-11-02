@@ -128,7 +128,7 @@ export default function PatientSidePanel({ isOpen, onClose, patients, doctors, s
                 />
                 {expandedPatientId === p.id && (
                   <>
-                    <PatientProfileCard profile={profiles[p.id]} calendarHistoryMode onConsentChange={(field, value) => updateConsent(p.id, field, value)} />
+                    <PatientProfileCard profile={profiles[p.id]} doctors={doctors} calendarHistoryMode onConsentChange={(field, value) => updateConsent(p.id, field, value)} />
                     {profiles[p.id]?.patient && <PatientTreatmentHistory patient={profiles[p.id].patient} doctors={doctors} shifts={shifts} onFocusAppointment={onFocusAppointment} onPlanTreatment={onPlanTreatment} />}
                   </>
                 )}

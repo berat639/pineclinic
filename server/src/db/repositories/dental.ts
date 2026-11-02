@@ -31,6 +31,111 @@ import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
 let aiReviewSchemaPromise: Promise<void> | null = null
 let patientArchiveSchemaPromise: Promise<void> | null = null
+let patientActivityLogsPromise: Promise<void> | null = null
+
+export function ensurePatientActivityLogsTable(): Promise<void> {
+  if (!patientActivityLogsPromise) patientActivityLogsPromise = (async () => {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS patient_activity_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        clinic_id UUID REFERENCES clinics(id) ON DELETE CASCADE,
+        patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
+        appointment_id UUID,
+        treatment_id UUID,
+        category TEXT NOT NULL DEFAULT 'appointment',
+        event_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        actor_type TEXT NOT NULL DEFAULT 'desk',
+        actor_name TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS patient_activity_logs_patient_idx ON patient_activity_logs (clinic_id, patient_id, created_at DESC);
+    `)
+  })().catch(error => {
+    patientActivityLogsPromise = null
+    console.error('[DentalRepo] Error ensuring patient_activity_logs table:', error)
+  })
+  return patientActivityLogsPromise
+}
+
+export interface PatientActivityLogInput {
+  clinicId?: string
+  patientId: string
+  appointmentId?: string | null
+  treatmentId?: string | null
+  category?: 'appointment' | 'treatment' | 'patient_response' | string
+  eventType?: string
+  event_type?: string
+  title: string
+  oldValue?: string | null
+  old_value?: string | null
+  newValue?: string | null
+  new_value?: string | null
+  actorType?: 'patient' | 'doctor' | 'desk' | 'admin' | 'system' | string
+  actor_type?: string
+  actorName?: string | null
+  actor_name?: string | null
+  note?: string | null
+}
+
+export async function logPatientActivity(entry: PatientActivityLogInput): Promise<void> {
+  try {
+    await ensurePatientActivityLogsTable()
+    const clinicId = entry.clinicId || currentClinicId()
+    if (!clinicId || !entry.patientId) return
+    const category = entry.category || 'appointment'
+    const eventType = entry.eventType || entry.event_type || 'status_changed'
+    const oldVal = entry.oldValue !== undefined ? entry.oldValue : (entry.old_value ?? null)
+    const newVal = entry.newValue !== undefined ? entry.newValue : (entry.new_value ?? null)
+    const actorType = entry.actorType || entry.actor_type || 'desk'
+    const actorName = entry.actorName !== undefined ? entry.actorName : (entry.actor_name ?? null)
+    await db.execute(sql`
+      INSERT INTO patient_activity_logs (
+        clinic_id, patient_id, appointment_id, treatment_id,
+        category, event_type, title, old_value, new_value,
+        actor_type, actor_name, note
+      ) VALUES (
+        ${clinicId}, ${entry.patientId}, ${entry.appointmentId ?? null}, ${entry.treatmentId ?? null},
+        ${category}, ${eventType}, ${entry.title}, ${oldVal}, ${newVal},
+        ${actorType}, ${actorName}, ${entry.note ?? null}
+      )
+    `)
+  } catch (err) {
+    console.warn('[DentalRepo] Could not write patient activity log:', err)
+  }
+}
+
+function formatApptDateTimeTR(dt: Date | string | null | undefined, endDt?: Date | string | null): string {
+  if (!dt) return ''
+  const d = dt instanceof Date ? dt : new Date(dt)
+  if (Number.isNaN(d.getTime())) return ''
+  const datePart = d.toLocaleDateString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+  const startPart = d.toLocaleTimeString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  if (endDt) {
+    const ed = endDt instanceof Date ? endDt : new Date(endDt)
+    if (!Number.isNaN(ed.getTime())) {
+      const endPart = ed.toLocaleTimeString('tr-TR', {
+        timeZone: 'Europe/Istanbul',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      return `${datePart} ${startPart} - ${endPart}`
+    }
+  }
+  return `${datePart} ${startPart}`
+}
 
 /** Keeps patient archival safe when a deploy starts before migrations complete. */
 export function ensurePatientArchiveSchema(): Promise<void> {
@@ -75,7 +180,12 @@ export async function listDoctors() {
   const clinicId = requireClinicId()
   return db.select({ id: users.id, name: users.name, specialty: users.specialty, color: users.color, active: users.active })
     .from(users).innerJoin(clinicMemberships, eq(clinicMemberships.userId, users.id))
-    .where(and(eq(clinicMemberships.clinicId, clinicId), eq(clinicMemberships.role, 'hekim'), eq(clinicMemberships.active, true)))
+    .where(and(
+      eq(clinicMemberships.clinicId, clinicId),
+      eq(clinicMemberships.role, 'hekim'),
+      eq(clinicMemberships.active, true),
+      eq(users.active, true),
+    ))
 }
 
 export async function createDoctor(data: { name: string; specialty: string; color?: string }) {
@@ -102,18 +212,20 @@ export async function ensureDoctorLeavesTable() {
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS doctor_leaves (
-        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        clinic_id   UUID REFERENCES clinics(id) ON DELETE CASCADE,
-        doctor_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        date        TEXT NOT NULL,
-        start_time  TEXT NOT NULL,
-        end_time    TEXT NOT NULL,
-        is_full_day BOOLEAN NOT NULL DEFAULT false,
-        reason      TEXT,
-        notes       TEXT,
-        created_by  UUID REFERENCES users(id),
-        created_at  TIMESTAMPTZ DEFAULT now()
+        id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        clinic_id            UUID REFERENCES clinics(id) ON DELETE CASCADE,
+        doctor_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        substitute_doctor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        date                 TEXT NOT NULL,
+        start_time           TEXT NOT NULL,
+        end_time             TEXT NOT NULL,
+        is_full_day          BOOLEAN NOT NULL DEFAULT false,
+        reason               TEXT,
+        notes                TEXT,
+        created_by           UUID REFERENCES users(id),
+        created_at           TIMESTAMPTZ DEFAULT now()
       );
+      ALTER TABLE doctor_leaves ADD COLUMN IF NOT EXISTS substitute_doctor_id UUID REFERENCES users(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS doctor_leaves_clinic_date_idx ON doctor_leaves (clinic_id, date);
       CREATE INDEX IF NOT EXISTS doctor_leaves_doctor_date_idx ON doctor_leaves (doctor_id, date);
     `)
@@ -148,6 +260,7 @@ export async function getDoctorLeaves(filters?: {
       id: doctorLeaves.id,
       clinicId: doctorLeaves.clinicId,
       doctorId: doctorLeaves.doctorId,
+      substituteDoctorId: doctorLeaves.substituteDoctorId,
       doctorName: users.name,
       doctorColor: users.color,
       doctorSpecialty: users.specialty,
@@ -165,11 +278,31 @@ export async function getDoctorLeaves(filters?: {
     .where(and(...conditions))
     .orderBy(doctorLeaves.date, doctorLeaves.startTime)
 
-  return rows
+  const subDocIds = Array.from(
+    new Set(rows.map((r) => r.substituteDoctorId).filter((id): id is string => Boolean(id)))
+  )
+  const subDocMap = new Map<string, string>()
+  if (subDocIds.length > 0) {
+    const subDocs = await db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(inArray(users.id, subDocIds))
+    for (const sd of subDocs) {
+      if (sd.id && sd.name) subDocMap.set(sd.id, sd.name)
+    }
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    substituteDoctorName: r.substituteDoctorId ? subDocMap.get(r.substituteDoctorId) || null : null,
+  }))
 }
 
 export async function createDoctorLeave(data: {
   doctorId: string
+  substituteDoctorId?: string | null
+  unassignAppointments?: boolean
+  appointmentIds?: string[]
   date: string
   startTime: string
   endTime: string
@@ -181,11 +314,17 @@ export async function createDoctorLeave(data: {
   await ensureDoctorLeavesTable()
   const clinicId = requireClinicId()
 
+  const subDocId =
+    typeof data.substituteDoctorId === 'string' && data.substituteDoctorId.trim().length > 0
+      ? data.substituteDoctorId.trim()
+      : null
+
   const [row] = await db
     .insert(doctorLeaves)
     .values({
       clinicId,
       doctorId: data.doctorId,
+      substituteDoctorId: subDocId,
       date: data.date,
       startTime: data.startTime,
       endTime: data.endTime,
@@ -196,7 +335,220 @@ export async function createDoctorLeave(data: {
     })
     .returning()
 
-  return row
+  if (subDocId || data.unassignAppointments) {
+    try {
+      await ensurePatientArchiveSchema()
+      const dayStart = new Date(`${data.date}T00:00:00+03:00`)
+      const dayEnd = new Date(`${data.date}T23:59:59+03:00`)
+      const leaveStartDt = new Date(
+        `${data.date}T${data.isFullDay ? '00:00' : data.startTime}:00+03:00`
+      )
+      const leaveEndDt = new Date(
+        `${data.date}T${data.isFullDay ? '23:59' : data.endTime}:${data.isFullDay ? '59' : '00'}+03:00`
+      )
+
+      const dayAppts = await db
+        .select()
+        .from(dentalAppointments)
+        .where(
+          and(
+            eq(dentalAppointments.clinicId, clinicId),
+            eq(dentalAppointments.doctorId, data.doctorId),
+            eq(dentalAppointments.isActive, true),
+            gte(dentalAppointments.startTime, dayStart),
+            lte(dentalAppointments.startTime, dayEnd)
+          )
+        )
+
+      const targetIdSet = new Set<string>()
+      for (const a of dayAppts) {
+        if (a.status === 'cancelled' || a.status === 'completed') continue
+        if (data.isFullDay) {
+          targetIdSet.add(a.id)
+          continue
+        }
+        const aStart = new Date(a.startTime).getTime()
+        const aEnd = new Date(a.endTime).getTime()
+        if (aStart < leaveEndDt.getTime() && aEnd > leaveStartDt.getTime()) {
+          targetIdSet.add(a.id)
+        }
+      }
+
+      if (Array.isArray(data.appointmentIds) && data.appointmentIds.length > 0) {
+        const explicitIds = data.appointmentIds.filter(
+          (id): id is string => typeof id === 'string' && id.trim().length > 0
+        )
+        if (explicitIds.length > 0) {
+          const explicitAppts = await db
+            .select({ id: dentalAppointments.id, status: dentalAppointments.status })
+            .from(dentalAppointments)
+            .where(
+              and(
+                eq(dentalAppointments.clinicId, clinicId),
+                eq(dentalAppointments.doctorId, data.doctorId),
+                inArray(dentalAppointments.id, explicitIds)
+              )
+            )
+          for (const ea of explicitAppts) {
+            if (ea.status !== 'cancelled' && ea.status !== 'completed') {
+              targetIdSet.add(ea.id)
+            }
+          }
+        }
+      }
+
+      const targetApptIds = Array.from(targetIdSet)
+      if (targetApptIds.length > 0) {
+        const links = await db
+          .select({ treatmentPlanId: appointmentTreatments.treatmentPlanId })
+          .from(appointmentTreatments)
+          .where(inArray(appointmentTreatments.appointmentId, targetApptIds))
+        const linkedTreatmentIds = Array.from(
+          new Set(links.map((l) => l.treatmentPlanId).filter(Boolean))
+        )
+
+        if (subDocId) {
+          // Case 1: Transfer appointments & linked treatments to substitute doctor
+          await db
+            .update(dentalAppointments)
+            .set({
+              doctorId: subDocId,
+              status: 'scheduled',
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(dentalAppointments.clinicId, clinicId),
+                inArray(dentalAppointments.id, targetApptIds)
+              )
+            )
+
+          if (linkedTreatmentIds.length > 0) {
+            await db
+              .update(treatmentPlans)
+              .set({ doctorId: subDocId })
+              .where(
+                and(
+                  eq(treatmentPlans.clinicId, clinicId),
+                  inArray(treatmentPlans.id, linkedTreatmentIds)
+                )
+              )
+
+            const detailRows = await db
+              .select()
+              .from(treatmentPlanDetails)
+              .where(
+                and(
+                  eq(treatmentPlanDetails.clinicId, clinicId),
+                  inArray(treatmentPlanDetails.treatmentId, linkedTreatmentIds)
+                )
+              )
+            for (const detail of detailRows) {
+              const meta =
+                detail.metadata && typeof detail.metadata === 'object'
+                  ? { ...(detail.metadata as Record<string, any>) }
+                  : {}
+              if (Array.isArray(meta.doctorIds) && meta.doctorIds.length > 0) {
+                const nextIds: string[] = Array.from(
+                  new Set<string>(
+                    meta.doctorIds.map((id: string): string =>
+                      id === data.doctorId ? subDocId : id
+                    )
+                  )
+                )
+                if (!nextIds.includes(subDocId)) nextIds.unshift(subDocId)
+                meta.doctorIds = nextIds
+              } else {
+                meta.doctorIds = [subDocId]
+              }
+              await db
+                .update(treatmentPlanDetails)
+                .set({ metadata: meta })
+                .where(
+                  and(
+                    eq(treatmentPlanDetails.clinicId, clinicId),
+                    eq(treatmentPlanDetails.treatmentId, detail.treatmentId)
+                  )
+                )
+            }
+          }
+        } else if (data.unassignAppointments) {
+          // Case 2: Unassign doctor from appointments & linked treatments
+          await db
+            .update(dentalAppointments)
+            .set({
+              doctorId: null,
+              status: 'pending_assignment',
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(dentalAppointments.clinicId, clinicId),
+                inArray(dentalAppointments.id, targetApptIds)
+              )
+            )
+
+          if (linkedTreatmentIds.length > 0) {
+            await db
+              .update(treatmentPlans)
+              .set({ doctorId: null })
+              .where(
+                and(
+                  eq(treatmentPlans.clinicId, clinicId),
+                  eq(treatmentPlans.doctorId, data.doctorId),
+                  inArray(treatmentPlans.id, linkedTreatmentIds)
+                )
+              )
+
+            const detailRows = await db
+              .select()
+              .from(treatmentPlanDetails)
+              .where(
+                and(
+                  eq(treatmentPlanDetails.clinicId, clinicId),
+                  inArray(treatmentPlanDetails.treatmentId, linkedTreatmentIds)
+                )
+              )
+            for (const detail of detailRows) {
+              const meta =
+                detail.metadata && typeof detail.metadata === 'object'
+                  ? { ...(detail.metadata as Record<string, any>) }
+                  : {}
+              if (Array.isArray(meta.doctorIds)) {
+                meta.doctorIds = meta.doctorIds.filter((id: string) => id !== data.doctorId)
+                await db
+                  .update(treatmentPlanDetails)
+                  .set({ metadata: meta })
+                  .where(
+                    and(
+                      eq(treatmentPlanDetails.clinicId, clinicId),
+                      eq(treatmentPlanDetails.treatmentId, detail.treatmentId)
+                    )
+                  )
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[DentalRepo] Error processing conflicting appointments on leave creation:', err)
+    }
+  }
+
+  let substituteDoctorName: string | null = null
+  if (subDocId) {
+    const [sd] = await db
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, subDocId))
+      .limit(1)
+    substituteDoctorName = sd?.name || null
+  }
+
+  return {
+    ...row,
+    substituteDoctorName,
+  }
 }
 
 export async function deleteDoctorLeave(id: string): Promise<boolean> {
@@ -264,29 +616,79 @@ export async function listDentalAppointments(dateStr?: string) {
   }
   
   if (appts.length === 0) return appts;
+
+  // Self-healing: Eğer gelecekteki aktif bir randevunun hekimi dondurulmuş (active = false) ise otomatik boşa çıkar
+  try {
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    const assignedDocIds = Array.from(
+      new Set(appts.map((a: any) => a.doctorId).filter((id): id is string => Boolean(id)))
+    )
+    if (assignedDocIds.length > 0) {
+      const docRows = await db
+        .select({ id: users.id, active: users.active })
+        .from(users)
+        .where(inArray(users.id, assignedDocIds))
+      const inactiveDocIds = new Set(
+        docRows.filter((d) => d.active === false).map((d) => d.id)
+      )
+      if (inactiveDocIds.size > 0) {
+        const toUnassignIds: string[] = []
+        for (const a of appts) {
+          if (
+            a.doctorId &&
+            inactiveDocIds.has(a.doctorId) &&
+            new Date(a.startTime).getTime() >= startOfToday.getTime() &&
+            a.status !== 'completed' &&
+            a.status !== 'cancelled' &&
+            a.status !== 'no_show'
+          ) {
+            toUnassignIds.push(a.id)
+            a.doctorId = null
+            a.status = 'pending_assignment'
+          }
+        }
+        if (toUnassignIds.length > 0) {
+          await db
+            .update(dentalAppointments)
+            .set({
+              doctorId: null,
+              status: 'pending_assignment',
+              updatedAt: new Date(),
+            })
+            .where(inArray(dentalAppointments.id, toUnassignIds))
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DentalRepo] Could not self-heal frozen doctor appointments:', err)
+  }
   
   const { appointmentTreatments } = await import('../schema');
-  const { inArray } = await import('drizzle-orm');
+  const { inArray: inArr } = await import('drizzle-orm');
   
   const apptIds = appts.map((a: any) => a.id);
   const links = await db.select({ appointmentId: appointmentTreatments.appointmentId })
     .from(appointmentTreatments)
-    .where(inArray(appointmentTreatments.appointmentId, apptIds));
+    .where(inArr(appointmentTreatments.appointmentId, apptIds));
     
   const linkedApptIds = new Set(links.map(l => l.appointmentId));
   return appts.map(a => ({ ...a, hasTreatment: linkedApptIds.has(a.id) }));
 }
 
-export async function createDentalAppointment(data: {
-  patientId: string
-  doctorId: string | null
-  title: string
-  startTime: Date
-  endTime: Date
-  status?: string
-  type?: string
-  notes?: string
-}) {
+export async function createDentalAppointment(
+  data: {
+    patientId: string
+    doctorId: string | null
+    title: string
+    startTime: Date
+    endTime: Date
+    status?: string
+    type?: string
+    notes?: string
+  },
+  actor?: { actorType?: string; actorName?: string }
+) {
   const clinicId = requireClinicId()
   if (data.doctorId) {
     const { conflict, leave } = await checkDoctorLeaveConflict(data.doctorId, data.startTime, data.endTime)
@@ -307,6 +709,21 @@ export async function createDentalAppointment(data: {
     notes: data.notes ?? null,
   }).returning()
   if (row) {
+    if (row.patientId) {
+      void logPatientActivity({
+        clinicId,
+        patientId: row.patientId,
+        appointmentId: row.id,
+        category: 'appointment',
+        event_type: 'appointment_created',
+        title: row.title || 'Yeni Randevu Oluşturuldu',
+        old_value: null,
+        new_value: formatApptDateTimeTR(row.startTime, row.endTime),
+        actor_type: actor?.actorType || 'desk',
+        actor_name: actor?.actorName || null,
+        note: row.notes || null,
+      })
+    }
     import('../../services/appointment-notifications')
       .then(({ scheduleAppointmentNotification }) =>
         scheduleAppointmentNotification({ clinicId, appointmentId: row.id, kind: 'appointment_created' }),
@@ -352,13 +769,18 @@ export async function findPatientByPhone(phone: string, explicitClinicId?: strin
 }
 
 export async function getPatientFullProfile(patientId: string) {
+  await ensureAiAppointmentReviewSchema()
+  await ensurePatientArchiveSchema()
+  await ensurePatientActivityLogsTable()
   const clinicId = requireClinicId()
   const {
     patientAnamnesis,
     patientDiseases,
     dentalAppointments,
     treatmentPlans,
+    treatmentPlanDetails,
     treatmentGroups,
+    appointmentTreatments,
     patientPayments,
     completedWorks,
     consultations,
@@ -374,14 +796,15 @@ export async function getPatientFullProfile(patientId: string) {
     anamnesisRes,
     diseasesRes,
     appointmentsRes,
-    treatmentsRes,
+    treatmentsRawRes,
     groupsRes,
     paymentsRes,
     completedRes,
     consultationsRes,
     notesRes,
     toothRecordsRes,
-    materialsRes
+    materialsRes,
+    activityLogsRaw
   ] = await Promise.all([
     // Patient
     db.select().from(patients).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId))).limit(1),
@@ -394,13 +817,26 @@ export async function getPatientFullProfile(patientId: string) {
     db.select({ name: patientDiseases.name, status: patientDiseases.status, notes: patientDiseases.notes })
       .from(patientDiseases).where(and(eq(patientDiseases.clinicId, clinicId), eq(patientDiseases.patientId, patientId))),
 
-    // Appointments (visit dates)
+    // Appointments (full details + doctorName)
     db.select({
         id: dentalAppointments.id,
         startTime: dentalAppointments.startTime,
+        endTime: dentalAppointments.endTime,
         status: dentalAppointments.status,
+        title: dentalAppointments.title,
+        type: dentalAppointments.type,
+        notes: dentalAppointments.notes,
+        complaint: dentalAppointments.complaint,
+        patientResponseStatus: dentalAppointments.patientResponseStatus,
+        patientResponseNote: dentalAppointments.patientResponseNote,
+        patientPreferredDate: dentalAppointments.patientPreferredDate,
+        createdAt: dentalAppointments.createdAt,
+        updatedAt: dentalAppointments.updatedAt,
+        doctorId: dentalAppointments.doctorId,
+        doctorName: users.name,
       })
       .from(dentalAppointments)
+      .leftJoin(users, eq(dentalAppointments.doctorId, users.id))
       .where(and(eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.patientId, patientId)))
       .orderBy(desc(dentalAppointments.startTime)),
 
@@ -409,13 +845,20 @@ export async function getPatientFullProfile(patientId: string) {
       id: treatmentPlans.id,
       procedureName: treatmentPlans.procedureName,
       toothNumber: treatmentPlans.toothNumber,
+      indication: treatmentPlans.indication,
       cost: treatmentPlans.cost,
       status: treatmentPlans.status,
+      groupId: treatmentPlans.groupId,
+      groupName: treatmentGroups.name,
       createdAt: treatmentPlans.createdAt,
-      doctorName: users.name
+      doctorId: treatmentPlans.doctorId,
+      doctorName: users.name,
+      detailMetadata: treatmentPlanDetails.metadata,
     })
     .from(treatmentPlans)
     .leftJoin(users, eq(treatmentPlans.doctorId, users.id))
+    .leftJoin(treatmentGroups, eq(treatmentPlans.groupId, treatmentGroups.id))
+    .leftJoin(treatmentPlanDetails, eq(treatmentPlans.id, treatmentPlanDetails.treatmentId))
     .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId)))
     .orderBy(desc(treatmentPlans.createdAt)),
 
@@ -450,10 +893,100 @@ export async function getPatientFullProfile(patientId: string) {
     db.select({ date: materialUsages.date, quantity: materialUsages.quantity, itemName: inventoryItems.name })
       .from(materialUsages).leftJoin(inventoryItems, eq(materialUsages.inventoryItemId, inventoryItems.id))
       .where(and(eq(materialUsages.clinicId, clinicId), eq(materialUsages.patientId, patientId))).orderBy(desc(materialUsages.date)),
+
+    // Activity Logs
+    db.execute(sql`
+      SELECT id, clinic_id, patient_id, appointment_id, treatment_id,
+             category, event_type, title, old_value, new_value,
+             actor_type, actor_name, note, created_at
+      FROM patient_activity_logs
+      WHERE clinic_id = ${clinicId} AND patient_id = ${patientId}
+      ORDER BY created_at DESC
+      LIMIT 200
+    `).catch(() => []),
   ])
 
   const patient = patientRes[0]
   if (!patient) return null
+
+  const treatmentIds = treatmentsRawRes.map(t => t.id)
+  const sessionsByTreatmentId = new Map<string, Array<{ id: string; appointmentId: string; sessionNumber: number; sessionStatus: string; startTime: Date; endTime: Date }>>()
+  if (treatmentIds.length > 0) {
+    try {
+      const sessionRows = await db.select({
+        id: appointmentTreatments.id,
+        treatmentPlanId: appointmentTreatments.treatmentPlanId,
+        appointmentId: appointmentTreatments.appointmentId,
+        sessionNumber: appointmentTreatments.sessionNumber,
+        sessionStatus: appointmentTreatments.sessionStatus,
+        startTime: dentalAppointments.startTime,
+        endTime: dentalAppointments.endTime,
+      })
+        .from(appointmentTreatments)
+        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+        .where(and(inArray(appointmentTreatments.treatmentPlanId, treatmentIds), ne(dentalAppointments.status, 'cancelled')))
+        .orderBy(desc(dentalAppointments.startTime))
+      for (const s of sessionRows) {
+        const list = sessionsByTreatmentId.get(s.treatmentPlanId) || []
+        list.push({
+          id: s.id,
+          appointmentId: s.appointmentId,
+          sessionNumber: s.sessionNumber,
+          sessionStatus: s.sessionStatus,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        })
+        sessionsByTreatmentId.set(s.treatmentPlanId, list)
+      }
+    } catch {}
+  }
+
+  const treatmentsRes = treatmentsRawRes.map(t => {
+    const meta = (t.detailMetadata && typeof t.detailMetadata === 'object') ? (t.detailMetadata as Record<string, any>) : {}
+    const color = typeof meta.color === 'string' ? meta.color : null
+    const sessions = sessionsByTreatmentId.get(t.id) || []
+    return {
+      id: t.id,
+      procedureName: t.procedureName,
+      toothNumber: t.toothNumber,
+      indication: t.indication,
+      cost: t.cost,
+      status: t.status,
+      groupId: t.groupId,
+      groupName: t.groupName,
+      createdAt: t.createdAt,
+      doctorId: t.doctorId,
+      doctorName: t.doctorName,
+      color,
+      metadata: meta,
+      sessions,
+    }
+  })
+
+  const activityLogs = (Array.isArray(activityLogsRaw) ? activityLogsRaw : []).map((row: any) => ({
+    id: row.id,
+    clinicId: row.clinic_id,
+    patientId: row.patient_id,
+    appointmentId: row.appointment_id,
+    appointment_id: row.appointment_id,
+    treatmentId: row.treatment_id,
+    treatment_id: row.treatment_id,
+    category: row.category,
+    eventType: row.event_type,
+    event_type: row.event_type,
+    title: row.title,
+    oldValue: row.old_value,
+    old_value: row.old_value,
+    newValue: row.new_value,
+    new_value: row.new_value,
+    actorType: row.actor_type,
+    actor_type: row.actor_type,
+    actorName: row.actor_name,
+    actor_name: row.actor_name,
+    note: row.note,
+    createdAt: row.created_at,
+    created_at: row.created_at,
+  }))
 
   const visitDates = appointmentsRes.filter(a => a.status === 'completed' || a.status === 'confirmed').map(a => a.startTime)
   const totalVisits = visitDates.length
@@ -496,6 +1029,7 @@ export async function getPatientFullProfile(patientId: string) {
     doctorNotes: notesRes,
     toothRecords: toothRecordsRes,
     materialUsages: materialsRes,
+    activityLogs,
     stats: {
       totalVisits,
       firstVisit,
@@ -634,7 +1168,8 @@ export async function getPatientTreatmentGroups(patientId: string) {
         endTime: dentalAppointments.endTime
       }).from(appointmentTreatments)
         .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-        .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+        .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
+        .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
       ;(p as any).sessions = sessions
     }
 
@@ -659,7 +1194,8 @@ export async function getPatientTreatmentGroups(patientId: string) {
       endTime: dentalAppointments.endTime
     }).from(appointmentTreatments)
       .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-      .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+      .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
+      .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
     ;(p as any).sessions = sessions
   }
   
@@ -802,7 +1338,8 @@ export async function getPatientTreatments(patientId: string) {
       endTime: dentalAppointments.endTime
     }).from(appointmentTreatments)
       .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-      .where(eq(appointmentTreatments.treatmentPlanId, p.id))
+      .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
+      .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
     ;(p as any).sessions = sessions
   }
 
@@ -847,18 +1384,33 @@ export async function createTreatmentPlan(data: {
   return row
 }
 
-export async function updateTreatmentPlan(id: string, data: { status?: string; groupId?: string | null; doctorId?: string | null }) {
+export async function updateTreatmentPlan(
+  id: string,
+  data: { status?: string; groupId?: string | null; doctorId?: string | null },
+  actor?: { actorType?: string; actorName?: string }
+) {
   const clinicId = requireClinicId()
+  const [existing] = await db
+    .select({
+      id: treatmentPlans.id,
+      patientId: treatmentPlans.patientId,
+      procedureName: treatmentPlans.procedureName,
+      toothNumber: treatmentPlans.toothNumber,
+      status: treatmentPlans.status,
+      isPeriodic: treatmentPlans.isPeriodic,
+      periodDays: treatmentPlans.periodDays,
+      notifyPatient: treatmentPlans.notifyPatient,
+    })
+    .from(treatmentPlans)
+    .where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId)))
+    .limit(1)
+  if (!existing) return null
+
   const values: Record<string, unknown> = {}
   if (data.status !== undefined) {
     values.status = data.status
     if (data.status === 'completed') {
-      const [existing] = await db
-        .select({ isPeriodic: treatmentPlans.isPeriodic, periodDays: treatmentPlans.periodDays, notifyPatient: treatmentPlans.notifyPatient })
-        .from(treatmentPlans)
-        .where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId)))
-        .limit(1)
-      if (existing?.isPeriodic && existing.notifyPatient && existing.periodDays && existing.periodDays > 0) {
+      if (existing.isPeriodic && existing.notifyPatient && existing.periodDays && existing.periodDays > 0) {
         const nextDate = new Date()
         nextDate.setDate(nextDate.getDate() + existing.periodDays)
         values.nextNotificationDate = nextDate.toISOString().slice(0, 10)
@@ -872,6 +1424,23 @@ export async function updateTreatmentPlan(id: string, data: { status?: string; g
     .set(values)
     .where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId)))
     .returning()
+  if (row && data.status !== undefined && existing.status !== data.status && existing.patientId) {
+    const toothPrefix = existing.toothNumber && /^[1-4][1-8]$/.test(existing.toothNumber)
+      ? `#${existing.toothNumber} `
+      : ''
+    void logPatientActivity({
+      clinicId,
+      patientId: existing.patientId,
+      treatmentId: existing.id,
+      category: 'treatment',
+      event_type: 'treatment_status_changed',
+      title: `${toothPrefix}${existing.procedureName}`,
+      old_value: existing.status,
+      new_value: data.status,
+      actor_type: actor?.actorType || 'desk',
+      actor_name: actor?.actorName || null,
+    })
+  }
   return row ?? null
 }
 
@@ -1169,24 +1738,42 @@ export async function getPatientDoctorHistory(phone: string, explicitClinicId?: 
 
 // ── Update Dental Appointment ────────────────────────────────────────────────
 
-export async function updateDentalAppointment(id: string, data: {
-  doctorId?: string | null
-  timeConfirmed?: boolean
-  status?: string
-  startTime?: Date
-  endTime?: Date
-  notes?: string
-  type?: string
-  complaint?: string
-}) {
+export async function updateDentalAppointment(
+  id: string,
+  data: {
+    doctorId?: string | null
+    timeConfirmed?: boolean
+    status?: string
+    startTime?: Date
+    endTime?: Date
+    notes?: string
+    type?: string
+    complaint?: string
+  },
+  actor?: { actorType?: string; actorName?: string }
+) {
+  await ensureAiAppointmentReviewSchema()
   const clinicId = requireClinicId()
-  const [existing] = await db.select({ status: dentalAppointments.status, reviewStatus: dentalAppointments.reviewStatus })
-    .from(dentalAppointments).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).limit(1)
-  if (existing?.status === 'pending_review' && existing.reviewStatus === 'pending' && (data.status !== undefined || data.type !== undefined)) {
-    throw new Error('AI onay bekleyen randevu yalnızca Desk Onay ekranından sonuçlandırılabilir.')
-  }
-  if (data.doctorId && data.startTime && data.endTime) {
-    const { conflict, leave } = await checkDoctorLeaveConflict(data.doctorId, data.startTime, data.endTime)
+  const [existing] = await db.select({
+    patientId: dentalAppointments.patientId,
+    status: dentalAppointments.status,
+    reviewStatus: dentalAppointments.reviewStatus,
+    startTime: dentalAppointments.startTime,
+    endTime: dentalAppointments.endTime,
+    doctorId: dentalAppointments.doctorId,
+    title: dentalAppointments.title,
+  })
+    .from(dentalAppointments)
+    .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId)))
+    .limit(1)
+
+  if (!existing) return null
+
+  const targetDoctorId = data.doctorId !== undefined ? data.doctorId : existing.doctorId
+  const targetStartTime = data.startTime ?? existing.startTime
+  const targetEndTime = data.endTime ?? existing.endTime
+  if (targetDoctorId && (data.doctorId !== undefined || data.startTime !== undefined || data.endTime !== undefined) && targetStartTime && targetEndTime) {
+    const { conflict, leave } = await checkDoctorLeaveConflict(targetDoctorId, targetStartTime, targetEndTime)
     if (conflict) {
       const reasonText = leave?.reason ? ` (${leave.reason})` : ''
       throw new Error(`Hekim belirtilen saatlerde izinlidir: ${leave.startTime}-${leave.endTime}${reasonText}. Randevu taşınamaz.`)
@@ -1195,13 +1782,29 @@ export async function updateDentalAppointment(id: string, data: {
   const values: Record<string, unknown> = {}
   if (data.doctorId !== undefined) values.doctorId = data.doctorId
   if (data.timeConfirmed !== undefined) values.timeConfirmed = data.timeConfirmed
-  if (data.status !== undefined) values.status = data.status
+  if (data.status !== undefined) {
+    values.status = data.status
+    if (existing.status === 'pending_review' && data.status !== 'pending_review') {
+      values.reviewStatus = 'approved'
+    }
+    if (data.status === 'scheduled') {
+      values.patientResponseStatus = null
+    } else if (data.status === 'confirmed') {
+      values.patientResponseStatus = 'confirmed'
+    } else if (data.status === 'postponed') {
+      values.patientResponseStatus = 'postponed'
+    } else if (data.status === 'cancelled') {
+      values.patientResponseStatus = 'cancelled'
+    } else if (data.status === 'arrived_unconfirmed') {
+      values.patientResponseStatus = 'arrived_unconfirmed'
+    }
+  }
   if (data.startTime !== undefined) values.startTime = data.startTime
   if (data.endTime !== undefined) values.endTime = data.endTime
   if (data.notes !== undefined) values.notes = data.notes
   if (data.type !== undefined) values.type = data.type
   if (data.complaint !== undefined) values.complaint = data.complaint
-  if (data.startTime !== undefined && existing?.status === 'postponed' && data.status === undefined) {
+  if (data.startTime !== undefined && existing.status === 'postponed' && data.status === undefined) {
     values.status = 'scheduled'
     values.patientResponseStatus = null
   }
@@ -1211,6 +1814,120 @@ export async function updateDentalAppointment(id: string, data: {
     .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId)))
     .returning()
   if (row) {
+    if (data.doctorId !== undefined && existing.doctorId !== data.doctorId) {
+      try {
+        const links = await db
+          .select({ treatmentPlanId: appointmentTreatments.treatmentPlanId })
+          .from(appointmentTreatments)
+          .where(eq(appointmentTreatments.appointmentId, row.id))
+        const linkedTreatmentIds = Array.from(
+          new Set(links.map((l) => l.treatmentPlanId).filter(Boolean))
+        )
+        if (linkedTreatmentIds.length > 0) {
+          await db
+            .update(treatmentPlans)
+            .set({ doctorId: data.doctorId || null })
+            .where(
+              and(
+                eq(treatmentPlans.clinicId, clinicId),
+                inArray(treatmentPlans.id, linkedTreatmentIds),
+                sql`${treatmentPlans.status} <> 'completed'`
+              )
+            )
+          const detailRows = await db
+            .select()
+            .from(treatmentPlanDetails)
+            .where(
+              and(
+                eq(treatmentPlanDetails.clinicId, clinicId),
+                inArray(treatmentPlanDetails.treatmentId, linkedTreatmentIds)
+              )
+            )
+          for (const detail of detailRows) {
+            const meta =
+              detail.metadata && typeof detail.metadata === 'object'
+                ? { ...(detail.metadata as Record<string, any>) }
+                : {}
+            if (data.doctorId) {
+              const prevIds = Array.isArray(meta.doctorIds) ? meta.doctorIds.filter((x: string) => x !== existing.doctorId) : []
+              meta.doctorIds = Array.from(new Set([data.doctorId, ...prevIds]))
+            } else {
+              meta.doctorIds = Array.isArray(meta.doctorIds)
+                ? meta.doctorIds.filter((x: string) => x !== existing.doctorId)
+                : []
+            }
+            await db
+              .update(treatmentPlanDetails)
+              .set({ metadata: meta })
+              .where(
+                and(
+                  eq(treatmentPlanDetails.clinicId, clinicId),
+                  eq(treatmentPlanDetails.treatmentId, detail.treatmentId)
+                )
+              )
+          }
+        }
+      } catch (err) {
+        console.warn('[DentalRepo] Error syncing linked treatment doctor on appointment update:', err)
+      }
+    }
+    const pId = row.patientId || existing.patientId
+    if (pId) {
+      const nextStatus = (values.status as string | undefined) ?? existing.status
+      if (nextStatus !== existing.status) {
+        void logPatientActivity({
+          clinicId,
+          patientId: pId,
+          appointmentId: row.id,
+          category: 'appointment',
+          event_type: 'status_changed',
+          title: row.title || existing.title || 'Randevu Durumu Güncellendi',
+          old_value: existing.status,
+          new_value: nextStatus,
+          actor_type: actor?.actorType || 'desk',
+          actor_name: actor?.actorName || null,
+        })
+      }
+      const startChanged = data.startTime !== undefined && existing.startTime?.getTime() !== data.startTime.getTime()
+      const endChanged = data.endTime !== undefined && existing.endTime?.getTime() !== data.endTime.getTime()
+      if (startChanged || endChanged) {
+        void logPatientActivity({
+          clinicId,
+          patientId: pId,
+          appointmentId: row.id,
+          category: 'appointment',
+          event_type: 'rescheduled',
+          title: row.title || existing.title || 'Randevu Tarihi/Saati Değiştirildi',
+          old_value: formatApptDateTimeTR(existing.startTime, existing.endTime),
+          new_value: formatApptDateTimeTR(row.startTime, row.endTime),
+          actor_type: actor?.actorType || 'desk',
+          actor_name: actor?.actorName || null,
+        })
+      }
+      if (data.doctorId !== undefined && existing.doctorId !== data.doctorId) {
+        void (async () => {
+          const docIds = [existing.doctorId, data.doctorId].filter((x): x is string => Boolean(x))
+          const docs = docIds.length > 0
+            ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, docIds))
+            : []
+          const docMap = new Map(docs.map(d => [d.id, d.name]))
+          const oldDocName = existing.doctorId ? (docMap.get(existing.doctorId) || 'Hekim') : 'Atanmamış'
+          const newDocName = data.doctorId ? (docMap.get(data.doctorId) || 'Hekim') : 'Atanmamış'
+          await logPatientActivity({
+            clinicId,
+            patientId: pId,
+            appointmentId: row.id,
+            category: 'appointment',
+            event_type: 'doctor_changed',
+            title: row.title || existing.title || 'İlgili Hekim Değiştirildi',
+            old_value: oldDocName,
+            new_value: newDocName,
+            actor_type: actor?.actorType || 'desk',
+            actor_name: actor?.actorName || null,
+          })
+        })().catch(() => {})
+      }
+    }
     import('../../services/appointment-notifications')
       .then(async ({ scheduleAppointmentNotification, cancelAppointmentNotifications }) => {
         if (['cancelled', 'completed', 'no_show'].includes(row.status) || data.status === 'confirmed') {

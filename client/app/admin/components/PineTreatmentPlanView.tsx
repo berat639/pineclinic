@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Bell, CalendarDays, ChevronDown, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarDays, ChevronDown, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import PlanDialog from './PlanDialog'
 import InlineCatalogForm, { type CreatedCatalogEntry, type EditingCatalogItem } from './InlineCatalogForm'
@@ -8,8 +8,12 @@ import PlanToothTools from './PlanToothTools'
 import PatientConsentPanel from './PatientConsentPanel'
 import PlanMediaPanel from './PlanMediaPanel'
 import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
+import TableToothGroupCell, { formatTargetPlainName, groupTreatmentDraftRows, type GroupedToothEntry } from './TableToothGroupCell'
+import { HideableColumnHeader, TreatmentTableColumnBar, useTreatmentTableColumns } from './TreatmentTableColumnManager'
+import OdontogramSelectionBar from './OdontogramSelectionBar'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
 import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
+import { checkDoctorAvailability } from '../../../lib/doctor-availability'
 import styles from './PineTreatmentPlan.module.css'
 
 const money = (minor: number) => `${(minor / 100).toLocaleString('tr-TR', { minimumFractionDigits: minor % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })} ₺`
@@ -24,6 +28,7 @@ export default function PineTreatmentPlanView(p: any) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [reminderOpen, setReminderOpen] = useState(false)
   const [consentDropdownOpen, setConsentDropdownOpen] = useState(false)
+  const [doctorWarning, setDoctorWarning] = useState<string | null>(null)
   const patientDropdownRef = useRef<HTMLDivElement>(null)
   const reminderDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -67,16 +72,121 @@ export default function PineTreatmentPlanView(p: any) {
   const procedureListRef = useRef<HTMLDivElement>(null)
   const indicationAddRef = useRef<HTMLButtonElement>(null)
   const procedureAddRef = useRef<HTMLButtonElement>(null)
-  const [materialRow, setMaterialRow] = useState<{ target: string; id: string } | null>(null)
+  const [materialRow, setMaterialRow] = useState<{ target: string; id: string; entries?: GroupedToothEntry[] } | null>(null)
   const selectedProcedure = p.procedures.find((item: any) => item.id === procedureId)
+  const resolveProcColor = (item: any) =>
+    item?.color ||
+    p.procedures?.find((t: any) => (item?.procedureId && t.id === item.procedureId) || t.name === item?.name)?.color ||
+    p.procTemplates?.find((t: any) => t.name === item?.name)?.color ||
+    '#0284c7'
   const selectedIndicationName = indications.length === 1 ? indications[0] : null
   const selectedIndicationId = selectedIndicationName ? p.indicationIds[selectedIndicationName] : null
   const rows: { target: string; item: any }[] = Object.entries(p.drafts).flatMap(([target, items]) => (items as any[]).map(item => ({ target, item })))
+  const groupedRows = groupTreatmentDraftRows(p.drafts)
+  const columnManager = useTreatmentTableColumns(rows)
+  const { visibleColumns, colWidths, tableStyle } = columnManager
   const tdbSuggestion = getTdbReminderSuggestion(rows.map(row => row.item?.name || ''))
-  const isCustomDays = p.periodic && !REMINDER_PRESETS.some(preset => preset.days === p.periodDays)
+  const [customDayDraft, setCustomDayDraft] = useState('')
+  const selectedDaysList: number[] = p.periodic
+    ? (Array.isArray(p.periodDaysList) && p.periodDaysList.length > 0
+      ? Array.from(new Set<number>(p.periodDaysList.map(Number).filter((n: number) => Number.isFinite(n) && n >= 1))).sort((a, b) => a - b)
+      : [Number(p.periodDays) || 180])
+    : []
+  const customSelectedDays = selectedDaysList.filter(d => !REMINDER_PRESETS.some(preset => preset.days === d))
+  const applyDaysList = (rawList: number[]) => {
+    const cleaned = Array.from(new Set(rawList.map(Number).filter(n => Number.isFinite(n) && n >= 1 && n <= 3650))).sort((a, b) => a - b)
+    if (cleaned.length === 0) {
+      p.setPeriodic(false)
+      p.setPeriodDaysList?.([])
+      return
+    }
+    p.setPeriodic(true)
+    p.setPeriodDays(cleaned[0])
+    p.setPeriodDaysList?.(cleaned)
+  }
+  const toggleReminderDay = (day: number) => {
+    if (!p.periodic) {
+      applyDaysList([day])
+      return
+    }
+    if (selectedDaysList.includes(day)) {
+      applyDaysList(selectedDaysList.filter(d => d !== day))
+    } else {
+      applyDaysList([...selectedDaysList, day])
+    }
+  }
+  const commitCustomDayDraft = () => {
+    const parsed = Number(customDayDraft.trim())
+    if (!Number.isFinite(parsed) || parsed < 1) return
+    const clamped = Math.max(1, Math.min(3650, Math.round(parsed)))
+    applyDaysList([...selectedDaysList, clamped])
+    setCustomDayDraft('')
+  }
+  const suggestionDays = tdbSuggestion?.daysList?.length ? tdbSuggestion.daysList : (tdbSuggestion ? [tdbSuggestion.days] : [])
+  const isSuggestionAlreadyApplied = tdbSuggestion
+    ? (!tdbSuggestion.periodic ? !p.periodic : (p.periodic && suggestionDays.every(d => selectedDaysList.includes(d))))
+    : true
   const patientName = p.patient?.name || p.event?.title?.split(' - ')[0] || 'Hasta'
   const initials = patientName.split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0]).join('').toLocaleUpperCase('tr-TR')
-  const updateRow = (target: string, id: string, update: (item: any) => any) => p.setDrafts((previous: any) => ({ ...previous, [target]: (previous[target] || []).map((item: any) => item.id === id && !item.locked ? update(item) : item) }))
+  const updateRow = (target: string, id: string, update: (item: any) => any) => {
+    const existingItem = (p.drafts?.[target] || []).find((item: any) => item.id === id)
+    if (existingItem && (existingItem.wasCompleted || existingItem.status === 'completed')) {
+      toast('⚠️ Tamamlanmış bir işlemde değişiklik yaptınız. Kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
+    }
+    p.setDrafts((previous: any) => ({
+      ...previous,
+      [target]: (previous[target] || []).map((item: any) => (item.id === id ? update(item) : item)),
+    }))
+  }
+  const updateGroupEntries = (entries: GroupedToothEntry[], update: (item: any) => any) => {
+    const idsByTarget = new Map<string, Set<string>>()
+    let touchesCompleted = false
+    for (const entry of entries) {
+      if (entry.item?.wasCompleted || entry.item?.status === 'completed') {
+        touchesCompleted = true
+      }
+      const set = idsByTarget.get(entry.target) || new Set<string>()
+      set.add(entry.item.id)
+      idsByTarget.set(entry.target, set)
+    }
+    if (touchesCompleted) {
+      toast('⚠️ Tamamlanmış bir işlemde değişiklik yaptınız. Kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
+    }
+    p.setDrafts((previous: any) => {
+      const next = { ...previous }
+      for (const [target, idSet] of idsByTarget.entries()) {
+        if (Array.isArray(next[target])) {
+          next[target] = next[target].map((item: any) => (idSet.has(item.id) ? update(item) : item))
+        }
+      }
+      return next
+    })
+  }
+  const removeSingleToothEntry = (target: string, itemId: string, item?: any) => {
+    if (item?.wasCompleted || item?.status === 'completed') {
+      toast('⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
+    }
+    p.setDrafts((previous: any) => {
+      const next = { ...previous, [target]: (previous[target] || []).filter((row: any) => row.id !== itemId) }
+      if (next[target]?.length === 0) delete next[target]
+      return next
+    })
+  }
+  const removeGroupEntries = (entries: GroupedToothEntry[]) => {
+    if (entries.some(e => e.item?.wasCompleted || e.item?.status === 'completed')) {
+      toast('⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
+    }
+    p.setDrafts((previous: any) => {
+      const next = { ...previous }
+      for (const entry of entries) {
+        if (Array.isArray(next[entry.target])) {
+          next[entry.target] = next[entry.target].filter((row: any) => row.id !== entry.item.id)
+          if (next[entry.target].length === 0) delete next[entry.target]
+        }
+      }
+      return next
+    })
+  }
   const apply = (targets: (number | string)[], proc = selectedProcedure, inds = indications, mats = materials) => {
     if (!proc && !inds.length) { toast.error('Tedavi veya endikasyon seçin.'); return }
     let resolvedTargets: (number | string)[] = targets
@@ -111,7 +221,7 @@ export default function PineTreatmentPlanView(p: any) {
             unitSalePriceMinor: Math.max(0, Number(m.unitSalePriceMinor) || 0),
           })),
         }),
-      }).catch(() => {})
+      }).catch(() => { })
     }
   }
   const addMaterial = () => {
@@ -134,6 +244,14 @@ export default function PineTreatmentPlanView(p: any) {
       const wasEditing = !!editingProcedure
       const procedure = { ...result, price: result.priceMinor / 100, materials: result.materials || editingProcedure?.defaultMaterials || [] }
       p.setProcedures((previous: any[]) => wasEditing ? previous.map(item => item.id === result.id ? procedure : item) : [procedure, ...previous.filter(item => item.id !== result.id)])
+      if (wasEditing) {
+        p.setDrafts((previous: any) => Object.fromEntries(
+          Object.entries(previous).map(([target, items]) => [
+            target,
+            (items as any[]).map(item => !item.locked && (item.procedureId === result.id || item.name === editingProcedure?.name) ? { ...item, name: result.name, color: result.color || item.color } : item),
+          ])
+        ))
+      }
       setProcedureId(result.id); setMaterials(procedure.materials.map((item: any) => ({ ...item }))); setMaterialId(''); setProcedureSearch('')
       if (!wasEditing && procedureListRef.current) procedureListRef.current.scrollTop = 0
       closeCatalogEditor(kind)
@@ -223,7 +341,7 @@ export default function PineTreatmentPlanView(p: any) {
           title="Tedavi hatırlatma bildirimlerini ayarla"
         >
           <Bell size={14} />
-          <span>{formatReminderLabel(p.periodic, p.periodDays)}</span>
+          <span>{formatReminderLabel(p.periodic, selectedDaysList.length ? selectedDaysList : p.periodDays)}</span>
           <ChevronDown size={13} />
         </button>
         {reminderOpen && (
@@ -233,73 +351,105 @@ export default function PineTreatmentPlanView(p: any) {
             aria-label="Tedavi hatırlatma bildirimleri"
           >
             <div className={styles.reminderDropdownHead}>
-              <strong className={styles.dropdownTitle}>Tedavi hatırlatma bildirimleri</strong>
+              <div className={styles.dropdownTitleRow}>
+                <strong className={styles.dropdownTitle}>Tedavi hatırlatma bildirimleri</strong>
+                <span className={styles.infoTooltipWrap} tabIndex={0} role="button" aria-label="Tedavi hatırlatma bilgisi">
+                  <span className={styles.infoTooltipIcon} aria-hidden="true">ⓘ</span>
+                  <span className={styles.infoTooltipPopup} role="tooltip">
+                    Varsayılan olarak 6 ayda bir (180 gün) kontrol seçilidir. Hazır TDB sürelerinden birden fazla seçebilir, özel gün ekleyebilir veya kapatabilirsiniz.
+                  </span>
+                </span>
+              </div>
               <label className={styles.inlineCheck}>
                 <input
                   type="checkbox"
                   checked={p.periodic}
                   onChange={event => {
                     const nextPeriodic = event.target.checked
-                    p.setPeriodic(nextPeriodic)
-                    if (nextPeriodic && (!p.periodDays || p.periodDays < 1)) {
-                      p.setPeriodDays(180)
+                    if (!nextPeriodic) {
+                      p.setPeriodic(false)
+                    } else {
+                      const fallback = selectedDaysList.length > 0 ? selectedDaysList : [p.periodDays && p.periodDays >= 1 ? p.periodDays : 180]
+                      applyDaysList(fallback)
                     }
                   }}
                 />
-                <span>{p.periodic ? 'Açık' : 'Kapalı'}</span>
+                <span>{p.periodic ? `Açık (${selectedDaysList.length} seçim)` : 'Kapalı'}</span>
               </label>
             </div>
-            <p className={styles.dialogDescription} style={{ margin: '2px 0 6px' }}>
-              Varsayılan olarak 6 ayda bir (180 gün) kontrol seçilidir. Hazır TDB sürelerinden seçebilir, özel gün girebilir veya kapatabilirsiniz.
-            </p>
-            {tdbSuggestion && (tdbSuggestion.periodic !== p.periodic || (tdbSuggestion.periodic && tdbSuggestion.days !== p.periodDays)) && (
+            {tdbSuggestion && !isSuggestionAlreadyApplied && (
               <div className={styles.tdbSuggestionBox}>
-                <div>
-                  <strong>💡 TDB Önerisi: {tdbSuggestion.badge}</strong>
-                  <p>{tdbSuggestion.reason}</p>
+                <div className={styles.tdbSuggestionTitleRow}>
+                  <strong>💡 TDB Önerisi: {(tdbSuggestion as any).label || tdbSuggestion.badge}</strong>
+                  {tdbSuggestion.reason && (
+                    <span className={styles.infoTooltipWrap} tabIndex={0} role="button" aria-label="TDB önerisi açıklaması">
+                      <span className={styles.infoTooltipIcon} aria-hidden="true">ⓘ</span>
+                      <span className={styles.infoTooltipPopup} role="tooltip">
+                        {tdbSuggestion.reason}
+                      </span>
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
                   className={`${styles.button} ${styles.pale} ${styles.small}`}
                   onClick={() => {
-                    p.setPeriodic(tdbSuggestion.periodic)
-                    if (tdbSuggestion.periodic) p.setPeriodDays(tdbSuggestion.days)
+                    if (!tdbSuggestion.periodic) {
+                      p.setPeriodic(false)
+                      p.setPeriodDaysList?.([])
+                    } else {
+                      applyDaysList([...selectedDaysList, ...suggestionDays])
+                    }
                   }}
                 >
                   Uygula
                 </button>
               </div>
             )}
-            <div className={styles.presetGrid} role="group" aria-label="Hızlı hatırlatma süreleri">
+            <div className={styles.presetGrid} role="group" aria-label="Hızlı hatırlatma süreleri (Çoklu seçim)">
               <button
                 type="button"
                 className={`${styles.presetChip} ${!p.periodic ? styles.presetChipActive : ''}`}
-                onClick={() => p.setPeriodic(false)}
+                onClick={() => {
+                  p.setPeriodic(false)
+                  p.setPeriodDaysList?.([])
+                }}
               >
                 <strong>Kapalı</strong>
                 <span>Hatırlatma yok</span>
               </button>
               {REMINDER_PRESETS.map(preset => {
-                const active = p.periodic && p.periodDays === preset.days
+                const active = p.periodic && selectedDaysList.includes(preset.days)
                 return (
                   <button
                     type="button"
                     key={preset.days}
+                    aria-pressed={active}
                     className={`${styles.presetChip} ${active ? styles.presetChipActive : ''}`}
-                    onClick={() => {
-                      p.setPeriodic(true)
-                      p.setPeriodDays(preset.days)
-                    }}
+                    onClick={() => toggleReminderDay(preset.days)}
                   >
-                    <strong>{preset.label}</strong>
+                    <strong>{active ? `✓ ${preset.label}` : preset.label}</strong>
                     <span>{preset.sublabel}</span>
                   </button>
                 )
               })}
+              {customSelectedDays.map(customDay => (
+                <button
+                  type="button"
+                  key={`custom-${customDay}`}
+                  aria-pressed={true}
+                  className={`${styles.presetChip} ${styles.presetChipActive}`}
+                  onClick={() => toggleReminderDay(customDay)}
+                  title="Kaldırmak için tıklayın"
+                >
+                  <strong>✓ {customDay} Gün</strong>
+                  <span>Özel Kontrol (Kaldır)</span>
+                </button>
+              ))}
             </div>
             <div className={styles.customDaysRow}>
               <label htmlFor="reminder-days" className={styles.dropdownLabel}>
-                Özel gün belirle {isCustomDays ? `(${p.periodDays} gün aktif)` : '(1 – 3650 gün)'}
+                Özel gün ekle (1 – 3650 gün)
               </label>
               <div className={styles.customDaysInputWrap}>
                 <input
@@ -309,18 +459,37 @@ export default function PineTreatmentPlanView(p: any) {
                   min="1"
                   max="3650"
                   placeholder="Örn: 45"
-                  value={p.periodDays || ''}
-                  onChange={event => {
-                    const val = Math.max(1, Math.min(3650, Number(event.target.value) || 1))
-                    if (!p.periodic) p.setPeriodic(true)
-                    p.setPeriodDays(val)
+                  value={customDayDraft}
+                  onChange={event => setCustomDayDraft(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      commitCustomDayDraft()
+                    }
                   }}
                 />
                 <span>gün sonra</span>
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.pale} ${styles.small}`}
+                  disabled={!customDayDraft.trim()}
+                  onClick={commitCustomDayDraft}
+                >
+                  + Ekle
+                </button>
               </div>
             </div>
             <div className={styles.dropdownActions}>
-              <button type="button" className={`${styles.button} ${styles.small}`} onClick={() => setReminderOpen(false)}>Bitti</button>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.small}`}
+                onClick={() => {
+                  if (customDayDraft.trim()) commitCustomDayDraft()
+                  setReminderOpen(false)
+                }}
+              >
+                Bitti
+              </button>
             </div>
           </div>
         )}
@@ -333,19 +502,28 @@ export default function PineTreatmentPlanView(p: any) {
       {(p.listening || p.analyzing || p.voiceError) && <div className={styles.hint} aria-live="polite">{p.voiceError || (p.analyzing ? 'Komut analiz ediliyor…' : p.transcript || 'Dinleniyor…')}</div>}
     </header>
     <main className={styles.content}>
-      <PlanMediaPanel patientId={p.event.patientId} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} />
+      <PlanMediaPanel patientId={p.event.patientId} groupId={p.identity?.id} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} onAttachmentSaved={p.onAttachmentSaved} />
       <section className={styles.section} aria-label="Odontogram">
-        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>{p.selected.length ? `Seçili dişler: ${p.selected.join(', ')}` : 'Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.'}</span>
+        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.</span>
           <div className={styles.chartActions}>
             <button className={`${styles.button} ${styles.small}`} type="button" onClick={() => p.setSelected([])}>Seçimi temizle</button>
             <select className={styles.select} value={p.jaw} aria-label="Çene seçimi" onChange={event => p.changeJaw(event.target.value)}><option value="all">Tüm ağız</option><option value="upper">Üst çene</option><option value="lower">Alt çene</option></select>
             <div className={styles.segment}><button type="button" className={`${styles.button} ${p.mode === '2d' ? styles.primary : ''}`} aria-pressed={p.mode === '2d'} onClick={() => p.setMode('2d')}>2B Chart</button><button type="button" className={`${styles.button} ${p.mode === '3d' ? styles.primary : ''}`} aria-pressed={p.mode === '3d'} onClick={() => p.setMode('3d')}>3B Anatomik</button></div>
           </div>
         </div>
-        {p.mode === '2d' ? <div className={styles.chart}>{[UPPER_TEETH, LOWER_TEETH].map((teeth, index) => <div className={styles.teeth} key={index}>{teeth.map(tooth => <ToothChip key={tooth} number={tooth} selected={p.selected.includes(tooth)} hasDraft={!!p.drafts[tooth]?.length} colors={Array.from(new Set((p.drafts[tooth] || []).map((item: any) => item.color).filter(Boolean)))} onContextMenu={(event: React.MouseEvent) => p.onContextMenu(tooth, event)} onDoubleClick={() => p.setDetailTooth(String(tooth))} onClick={(event: React.MouseEvent) => p.clickTooth(tooth, event)} onDragOver={(event: React.DragEvent) => event.preventDefault()} onDrop={(event: React.DragEvent) => { event.preventDefault(); try { const data = JSON.parse(event.dataTransfer.getData('value') || event.dataTransfer.getData('application/json') || event.dataTransfer.getData('text/plain')); p.add([tooth], data) } catch { toast.error('Tedavi sürükleme verisi geçersiz.') } }} />)}</div>)}</div> : p.odontogram3d}
+        <OdontogramSelectionBar
+          selected={p.selected}
+          setSelected={p.setSelected}
+          drafts={p.drafts}
+          setDrafts={p.setDrafts}
+          resolveProcColor={resolveProcColor}
+          onToothClick={p.clickTooth}
+          onToothContextMenu={p.onContextMenu}
+        />
+        {p.mode === '2d' ? <div className={styles.chart}>{[UPPER_TEETH, LOWER_TEETH].map((teeth, index) => <div className={styles.teeth} key={index}>{teeth.map(tooth => <ToothChip key={tooth} number={tooth} selected={p.selected.includes(tooth)} hasDraft={!!p.drafts[tooth]?.length} colors={(p.drafts[tooth] || []).map((d: any) => resolveProcColor(d)).filter(Boolean)} onContextMenu={(event: React.MouseEvent) => p.onContextMenu(tooth, event)} onDoubleClick={() => p.setDetailTooth(String(tooth))} onClick={(event: React.MouseEvent) => p.clickTooth(tooth, event)} onDragOver={(event: React.DragEvent) => event.preventDefault()} onDrop={(event: React.DragEvent) => { event.preventDefault(); try { const data = JSON.parse(event.dataTransfer.getData('value') || event.dataTransfer.getData('application/json') || event.dataTransfer.getData('text/plain')); p.add([tooth], data) } catch { toast.error('Tedavi sürükleme verisi geçersiz.') } }} />)}</div>)}</div> : p.odontogram3d}
       </section>
       <div className={styles.bottom}>
-        <section className={styles.section} aria-label="Klinik değerlendirme ve planlama"><div className={styles.sectionHeading}><span className={styles.step}>3</span><h2>Klinik Değerlendirme ve Planlama</h2><button type="button" className={`${styles.button} ${styles.pale} ${styles.small}`} style={{ marginLeft: 'auto' }} onClick={() => apply(p.selected)}><Plus size={14} /> {selectedProcedure?.scope === 'mouth' ? 'Tüm Ağza Ekle' : selectedProcedure?.scope === 'jaw' && !p.selected.length ? (p.jaw === 'lower' ? 'Alt Çeneye Ekle' : 'Üst Çeneye Ekle') : 'Seçilenleri Ekle'}</button></div>
+        <section className={styles.section} aria-label="Tedavi Tanım ve Atama"><div className={styles.sectionHeading}><span className={styles.step}>3</span><h2>Tedavi Tanım ve Atama</h2><button type="button" className={`${styles.button} ${styles.pale} ${styles.small}`} style={{ marginLeft: 'auto' }} onClick={() => apply(p.selected)}><Plus size={14} /> {selectedProcedure?.scope === 'mouth' ? 'Tüm Ağza Ekle' : selectedProcedure?.scope === 'jaw' && !p.selected.length ? (p.jaw === 'lower' ? 'Alt Çeneye Ekle' : 'Üst Çeneye Ekle') : 'Seçilenleri Ekle'}</button></div>
           <div className={styles.workgrid}>
             <div className={styles.box}>
               <div className={styles.boxhead}><h3>Endikasyonlar</h3><div className={styles.wrapActions}>
@@ -373,50 +551,405 @@ export default function PineTreatmentPlanView(p: any) {
               <div className={styles.searchBox}><Search size={13} aria-hidden="true" /><input className={styles.search} placeholder="Tedavi ara..." aria-label="Tedavi ara" value={procedureSearch} onChange={event => setProcedureSearch(event.target.value)} /></div>
               {procedureEditor !== null && <InlineCatalogForm key={editingProcedure?.id || 'new-procedure'} kind="procedure" initialName={procedureEditor} editingItem={editingProcedure} replacingMaterials={!editingProcedure && materials.length > 0} onCreated={entry => catalogCreated('procedure', entry)} onCancel={() => closeCatalogEditor('procedure')} />}
               <div className={styles.list} ref={procedureListRef}>
-                {filteredProcedures.map((item: any) => <button type="button" key={item.id} draggable className={`${styles.listItem} ${procedureId === item.id ? styles.listItemSelected : ''}`} aria-pressed={procedureId === item.id} onClick={() => selectProcedure(item)} onDoubleClick={() => apply(p.selected, item, indications, procedureId === item.id ? materials : item.materials || [])} onDragStart={event => event.dataTransfer.setData('value', JSON.stringify({ procedures: [item], indications: procedureId === item.id ? indications : [], activeMaterials: procedureId === item.id ? materials : item.materials || [] }))}><GripVertical size={14} aria-hidden="true" className={styles.listGrip} /><span style={{ flex: 1 }}>{item.name}</span><span>{money(Math.round(item.price * 100))}</span></button>)}
+                {filteredProcedures.map((item: any) => <button type="button" key={item.id} draggable className={`${styles.listItem} ${procedureId === item.id ? styles.listItemSelected : ''}`} aria-pressed={procedureId === item.id} onClick={() => selectProcedure(item)} onDoubleClick={() => apply(p.selected, item, indications, procedureId === item.id ? materials : item.materials || [])} onDragStart={event => event.dataTransfer.setData('value', JSON.stringify({ procedures: [item], indications: procedureId === item.id ? indications : [], activeMaterials: procedureId === item.id ? materials : item.materials || [] }))}><GripVertical size={14} aria-hidden="true" className={styles.listGrip} /><span className={styles.procColorDot} style={{ width: 10, height: 10, borderRadius: '50%', background: resolveProcColor(item), flexShrink: 0 }} aria-hidden="true" /><span style={{ flex: 1 }}>{item.name}</span><span>{money(Math.round(item.price * 100))}</span></button>)}
                 {!filteredProcedures.length && <div className={styles.catalogEmpty}><p className={styles.hint}>{procedureSearch.trim() ? 'Eşleşen tedavi bulunamadı.' : 'Katalogda tedavi bulunmuyor.'}</p>{procedureSearch.trim() && procedureEditor === null && <button type="button" className={styles.catalogCreate} onClick={() => { setEditingProcedure(null); setProcedureEditor(procedureSearch.trim().slice(0, 120)) }}><Plus size={14} /><span>“{procedureSearch.trim()}” ile yeni kayıt oluştur</span></button>}</div>}
               </div>
               <div className={styles.materialBox}><h4>Malzeme <span className={styles.description}>(opsiyonel · seçili tedavi için)</span></h4><div className={styles.materialLine}><select className={styles.select} aria-label="Malzeme seç" value={materialId} onChange={event => setMaterialId(event.target.value)} disabled={!selectedProcedure}><option value="">Malzeme seç...</option>{p.inventory.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button type="button" className={`${styles.button} ${styles.primary} ${styles.small}`} onClick={addMaterial} disabled={!materialId || !selectedProcedure}>+ Ekle</button></div>{materials.map((item, index) => <div className={styles.materialLine} key={item.inventoryItemId}><span>{item.name}</span><input className={styles.input} aria-label={`${item.name} miktarı`} type="number" min="1" style={{ width: 54 }} value={item.quantity} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} /><input className={styles.input} aria-label={`${item.name} satış fiyatı`} type="number" min="0" step="0.01" style={{ width: 70 }} value={(item.unitSalePriceMinor || 0) / 100} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value))} /><button type="button" className={`${styles.button} ${styles.small}`} aria-label={`${item.name} kaldır`} onClick={() => syncProcedureMaterials(materials.filter((_, i) => i !== index))}>×</button></div>)}</div>
             </div>
           </div><div className={styles.note}><div className={styles.noteHead}><strong><FileText size={15} /> Konsültasyon Notu</strong><div className={styles.wrapActions}><button type="button" className={`${styles.button} ${styles.small}`} onClick={() => setHistoryOpen(true)}>Hasta geçmişi</button><button type="button" className={`${styles.button} ${styles.pale} ${styles.small}`} disabled={p.saving} onClick={() => p.save({ closeAfter: false, allowEmpty: true })}>Notu kaydet</button></div></div><textarea className={styles.textarea} aria-label="Plan konsültasyon notu" placeholder="Konsültasyon notu ekleyin..." value={p.note} onChange={event => p.setNote(event.target.value)} /></div>
         </section>
-        <section className={styles.section} aria-label="Tedavi planı"><div className={styles.sectionHeading}><span className={styles.step}>4</span><h2>Tedavi planı</h2><div className={styles.chartActions}><label className={styles.description} htmlFor="pine-doctor">Genel ilgilenen doktor</label><select id="pine-doctor" className={styles.select} value={p.defaultDoctor || ''} onChange={event => {
-          const nextDoctorId = event.target.value || null
-          p.setDefaultDoctor(nextDoctorId)
-          p.setDrafts((previous: any) => Object.fromEntries(
-            Object.entries(previous).map(([target, items]) => [
-              target,
-              (items as any[]).map(item => item.locked ? item : { ...item, doctorId: nextDoctorId, doctorIds: nextDoctorId ? [nextDoctorId] : [] }),
-            ])
-          ))
-        }}><option value="">Seçiniz</option>{p.doctors.map((doctor: any) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></div></div>
+        <section className={styles.section} aria-label="Tedavi planı"><div className={styles.sectionHeading}><span className={styles.step}>4</span><h2>Tedavi planı</h2></div>
+          {doctorWarning && (
+            <div
+              role="alert"
+              style={{
+                marginBottom: 8,
+                padding: '9px 12px',
+                borderRadius: 10,
+                background: 'var(--card-inner, var(--pc-surface))',
+                border: '1.5px solid var(--danger, #ef4444)',
+                color: 'var(--foreground)',
+                fontSize: 12,
+                fontWeight: 600,
+                lineHeight: 1.45,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                boxShadow: 'var(--pc-neo-subcard)',
+              }}
+            >
+              <AlertTriangle size={16} style={{ color: 'var(--danger, #ef4444)', flexShrink: 0, marginTop: 1 }} />
+              <span style={{ flex: 1 }}>{doctorWarning.replace(/^⚠️\s*/, '')}</span>
+              <button
+                type="button"
+                aria-label="Hekim uyarısını kapat"
+                onClick={() => setDoctorWarning(null)}
+                style={{
+                  background: 'transparent',
+                  border: 0,
+                  padding: 0,
+                  color: 'var(--pc-muted)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          <TreatmentTableColumnBar columnManager={columnManager} />
           <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <colgroup><col style={{ width: '4%' }} /><col style={{ width: '21%' }} /><col style={{ width: '20%' }} /><col style={{ width: '19%' }} /><col style={{ width: '20%' }} /><col style={{ width: '12%' }} /><col style={{ width: '4%' }} /></colgroup>
-              <thead><tr><th>Diş</th><th>Endikasyonlar</th><th>Tedavi</th><th>Hekim</th><th>Fiyat (₺)</th><th>Tutar (₺)</th><th aria-label="İşlemler" /></tr></thead>
-              <tbody>{rows.map(({ target, item }) => <tr key={`${target}-${item.id}`}>
-                <td className={styles.toothId}>{/^[1-4][1-8]$/.test(target) ? <button type="button" className={styles.toothDetailLink} onClick={() => p.setDetailTooth(target)} aria-label={`${target} diş detayları`}>{target}</button> : targetName(target)}</td>
-                <td><div className={styles.indicationChips}>
-                  {item.indications.map((indication: string) => <span className={styles.indicationChip} key={indication}>{indication}{!item.locked && <button type="button" aria-label={`${indication} endikasyonunu kaldır`} onClick={() => updateRow(target, item.id, row => ({ ...row, indications: row.indications.filter((value: string) => value !== indication) }))}>×</button>}</span>)}
-                  {!item.locked && <select className={styles.addIndication} aria-label={`${targetName(target)} endikasyon ekle`} value="" onChange={event => { const value = event.target.value; if (value && !item.indications.includes(value)) updateRow(target, item.id, row => ({ ...row, indications: [...row.indications, value] })) }}><option value="">+</option>{p.indications.map((value: string) => <option key={p.indicationIds[value] || value} value={value}>{value}</option>)}</select>}
-                </div></td>
-                <td>{item.locked ? item.name : <select className={styles.cellSelect} title={item.name} aria-label={`${targetName(target)} tedavi`} value={item.procedureId || ''} onChange={event => { const replacement = p.procedures.find((value: any) => value.id === event.target.value); if (!replacement || replacement.id === item.procedureId) return; updateRow(target, item.id, row => ({ ...row, name: replacement.name, procedureId: replacement.id, scope: replacement.scope, price: replacement.price, materials: (replacement.materials || []).map((value: any) => ({ ...value })) })) }}><option value={p.procedures.some((value: any) => value.id === item.procedureId) ? '' : item.procedureId || ''}>{item.name}</option>{p.procedures.filter((value: any) => (value.scope || 'tooth') === (item.scope || 'tooth')).map((value: any) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>}</td>
-                <td><TreatmentDoctorMultiSelect doctors={p.doctors} selectedDoctorIds={Array.isArray(item.doctorIds) ? item.doctorIds : (item.doctorId ? [item.doctorId] : [])} disabled={item.locked} compact placeholder="Seçiniz" onChange={nextDoctorIds => updateRow(target, item.id, row => ({ ...row, doctorId: nextDoctorIds[0] || null, doctorIds: nextDoctorIds }))} /></td>
-                <td><input className={styles.moneyInput} aria-label={`${targetName(target)} işlem fiyatı`} disabled={item.locked} type="number" min="0" step="0.01" value={item.price} onChange={event => updateRow(target, item.id, row => ({ ...row, price: Number(event.target.value) }))} /><button type="button" className={styles.materialLink} disabled={item.locked && !item.materials.length} title={item.materials.map((material: any) => `${material.name} ${material.quantity} adet`).join(', ')} onClick={() => setMaterialRow({ target, id: item.id })}>{item.materials.length ? `Malzeme: ${item.materials.map((material: any) => `${material.name} ${material.quantity} adet +${money(Number(material.quantity) * Number(material.unitSalePriceMinor || 0))}`).join(', ')}` : item.locked ? 'Malzeme yok' : '+ Malzeme ekle'}</button></td>
-                <td className={styles.rowTotal}>{money(Math.round(item.price * 100) + item.materials.reduce((sum: number, material: any) => sum + Number(material.quantity) * Number(material.unitSalePriceMinor || 0), 0))}</td>
-                <td><button type="button" className={styles.rowDelete} disabled={item.locked} aria-label={`${targetName(target)} ${item.name} kaldır`} onClick={() => p.setDrafts((previous: any) => ({ ...previous, [target]: previous[target].filter((row: any) => row.id !== item.id) }))}><Trash2 size={15} /></button></td>
-              </tr>)}</tbody>
+            <table className={styles.table} style={tableStyle}>
+              <colgroup>
+                {visibleColumns.tooth && <col style={{ width: colWidths.tooth }} />}
+                {visibleColumns.indications && <col style={{ width: colWidths.indications }} />}
+                {visibleColumns.procedure && <col style={{ width: colWidths.procedure }} />}
+                {visibleColumns.doctor && <col style={{ width: colWidths.doctor }} />}
+                {visibleColumns.price && <col style={{ width: colWidths.price }} />}
+                {visibleColumns.total && <col style={{ width: colWidths.total }} />}
+                {visibleColumns.actions && <col style={{ width: colWidths.actions }} />}
+              </colgroup>
+              <thead>
+                <tr>
+                  {visibleColumns.tooth && <th>Diş</th>}
+                  {visibleColumns.indications && (
+                    <th>
+                      <HideableColumnHeader label="Endikasyonlar" columnKey="indications" onHide={columnManager.hideColumn} />
+                    </th>
+                  )}
+                  {visibleColumns.procedure && <th>Tedavi</th>}
+                  {visibleColumns.doctor && (
+                    <th>
+                      <HideableColumnHeader label="Hekim" columnKey="doctor" onHide={columnManager.hideColumn} />
+                    </th>
+                  )}
+                  {visibleColumns.price && (
+                    <th>
+                      <HideableColumnHeader label="Fiyat (₺)" columnKey="price" onHide={columnManager.hideColumn} />
+                    </th>
+                  )}
+                  {visibleColumns.total && (
+                    <th>
+                      <HideableColumnHeader label="Tutar (₺)" columnKey="total" onHide={columnManager.hideColumn} />
+                    </th>
+                  )}
+                  {visibleColumns.actions && <th aria-label="İşlemler" />}
+                </tr>
+              </thead>
+              <tbody>
+                {groupedRows.map(group => {
+                  const { groupKey, primaryTarget: target, primaryItem: item, entries } = group
+                  const groupLabel = entries.length > 1
+                    ? `${entries.map(e => formatTargetPlainName(e.target)).join(', ')}`
+                    : formatTargetPlainName(target)
+                  const unitMinor =
+                    Math.round(item.price * 100) +
+                    item.materials.reduce((sum: number, material: any) => sum + Number(material.quantity) * Number(material.unitSalePriceMinor || 0), 0)
+                  const groupTotalMinor = unitMinor * entries.length
+                  return (
+                    <tr key={groupKey}>
+                      {visibleColumns.tooth && (
+                        <td className={styles.toothId}>
+                          <TableToothGroupCell
+                            entries={entries}
+                            procedureName={item.name}
+                            procedureColor={resolveProcColor(item)}
+                            locked={item.locked}
+                            onRemoveToothEntry={removeSingleToothEntry}
+                            onRemoveAllEntries={() => removeGroupEntries(entries)}
+                          />
+                        </td>
+                      )}
+                      {visibleColumns.indications && (
+                        <td>
+                          <div className={styles.indicationChips}>
+                            {item.indications.map((indication: string) => (
+                              <span className={styles.indicationChip} key={indication}>
+                                {indication}
+                                {!item.locked && (
+                                  <button
+                                    type="button"
+                                    aria-label={`${indication} endikasyonunu kaldır`}
+                                    onClick={() =>
+                                      updateGroupEntries(entries, row => ({
+                                        ...row,
+                                        indications: row.indications.filter((value: string) => value !== indication),
+                                      }))
+                                    }
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                            {!item.locked && (
+                              <select
+                                className={styles.addIndication}
+                                aria-label={`${groupLabel} endikasyon ekle`}
+                                value=""
+                                onChange={event => {
+                                  const value = event.target.value
+                                  if (value && !item.indications.includes(value)) {
+                                    updateGroupEntries(entries, row => ({
+                                      ...row,
+                                      indications: row.indications.includes(value) ? row.indications : [...row.indications, value],
+                                    }))
+                                  }
+                                }}
+                              >
+                                <option value="">+</option>
+                                {p.indications.map((value: string) => (
+                                  <option key={p.indicationIds[value] || value} value={value}>
+                                    {value}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                      {visibleColumns.procedure && (
+                        <td>
+                          <div className={styles.procCellWrap}>
+                            <span
+                              className={styles.procColorDot}
+                              style={{ width: 10, height: 10, borderRadius: '50%', background: resolveProcColor(item), flexShrink: 0 }}
+                              aria-hidden="true"
+                            />
+                            {item.locked ? (
+                              <span>{item.name}</span>
+                            ) : (
+                              <select
+                                className={styles.cellSelect}
+                                title={item.name}
+                                aria-label={`${groupLabel} tedavi`}
+                                value={item.procedureId || ''}
+                                onChange={event => {
+                                  const replacement = p.procedures.find((value: any) => value.id === event.target.value)
+                                  if (!replacement || replacement.id === item.procedureId) return
+                                  updateGroupEntries(entries, row => ({
+                                    ...row,
+                                    name: replacement.name,
+                                    procedureId: replacement.id,
+                                    scope: replacement.scope,
+                                    price: replacement.price,
+                                    color: replacement.color || row.color,
+                                    materials: (replacement.materials || []).map((value: any) => ({ ...value })),
+                                  }))
+                                }}
+                              >
+                                <option value={p.procedures.some((value: any) => value.id === item.procedureId) ? '' : item.procedureId || ''}>
+                                  {item.name}
+                                </option>
+                                {p.procedures
+                                  .filter((value: any) => (value.scope || 'tooth') === (item.scope || 'tooth'))
+                                  .map((value: any) => (
+                                    <option key={value.id} value={value.id}>
+                                      {value.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                      {visibleColumns.doctor && (
+                        <td>
+                          <TreatmentDoctorMultiSelect
+                            doctors={p.doctors}
+                            selectedDoctorIds={Array.isArray(item.doctorIds) ? item.doctorIds : item.doctorId ? [item.doctorId] : []}
+                            shifts={p.shifts}
+                            doctorLeaves={p.doctorLeaves}
+                            targetApptTime={item.sessionStartTime || p.event?.startTime}
+                            enforceAvailability={false}
+                            onAvailabilityWarning={setDoctorWarning}
+                            contextLabel={`${/^[1-4][1-8]$/.test(target) ? `#${groupLabel}` : groupLabel} (${item.name}) işlemi için`}
+                            disabled={item.locked}
+                            compact
+                            placeholder="Seçiniz"
+                            onChange={nextDoctorIds =>
+                              updateGroupEntries(entries, row => ({
+                                ...row,
+                                doctorId: nextDoctorIds[0] || null,
+                                doctorIds: nextDoctorIds,
+                                doctorManuallySelected: nextDoctorIds.length > 0,
+                                doctorAutoFilled: false,
+                              }))
+                            }
+                          />
+                        </td>
+                      )}
+                      {visibleColumns.price && (
+                        <td>
+                          <input
+                            className={styles.moneyInput}
+                            aria-label={`${groupLabel} işlem fiyatı`}
+                            disabled={item.locked}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.price}
+                            onChange={event => updateGroupEntries(entries, row => ({ ...row, price: Number(event.target.value) }))}
+                          />
+                          <button
+                            type="button"
+                            className={styles.materialLink}
+                            disabled={item.locked && !item.materials.length}
+                            title={item.materials.map((material: any) => `${material.name} ${material.quantity} adet`).join(', ')}
+                            onClick={() => setMaterialRow({ target, id: item.id, entries })}
+                          >
+                            {item.materials.length
+                              ? `Malzeme: ${item.materials
+                                .map((material: any) => `${material.name} ${material.quantity} adet +${money(Number(material.quantity) * Number(material.unitSalePriceMinor || 0))}`)
+                                .join(', ')}`
+                              : item.locked
+                                ? 'Malzeme yok'
+                                : '+ Malzeme ekle'}
+                          </button>
+                        </td>
+                      )}
+                      {visibleColumns.total && (
+                        <td className={styles.rowTotal}>
+                          <div>{money(groupTotalMinor)}</div>
+                          {entries.length > 1 && (
+                            <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--pc-muted)' }}>
+                              {entries.length} diş × {money(unitMinor)}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {visibleColumns.actions && (
+                        <td>
+                          <button
+                            type="button"
+                            className={styles.rowDelete}
+                            disabled={item.locked}
+                            aria-label={`${groupLabel} ${item.name} kaldır`}
+                            onClick={() => removeGroupEntries(entries)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
             </table>
-            {!rows.length && <div className={styles.empty}>Henüz plan öğesi eklenmedi.</div>}
+            {!groupedRows.length && <div className={styles.empty}>Henüz plan öğesi eklenmedi.</div>}
           </div>
           <div className={styles.summary}><div className={styles.sumcard}><div className={styles.sumline}><span>Ara Toplam</span><strong>{p.pricing ? money(p.pricing.subtotalMinor) : '—'}</strong></div><div className={styles.sumline}><label htmlFor="pine-discount">İskonto (%)</label><span className={styles.sumValue}><input id="pine-discount" className={styles.input} type="number" min="0" max="100" step="0.01" value={p.discount} onChange={event => p.setDiscount(Number(event.target.value))} /> % <strong>{p.pricing ? `−${money(p.pricing.percentageDiscountMinor)}` : '—'}</strong></span></div><div className={styles.sumline}><label htmlFor="pine-fixed">Manuel iskonto</label><span className={styles.sumValue}><input id="pine-fixed" className={styles.input} type="number" min="0" step="0.01" value={p.discountFixed} onChange={event => p.setDiscountFixed(Number(event.target.value))} /> ₺ <strong>{p.pricing ? `−${money(p.pricing.fixedDiscountMinor)}` : '—'}</strong></span></div>{!p.pricing && <span role="alert">Fiyat veya iskonto geçersiz.</span>}</div><div className={styles.totalcard}><svg className={styles.totalWave} viewBox="0 0 320 120" preserveAspectRatio="none" aria-hidden="true"><path fill="var(--pc-total-wave-1)" d="M115 120C170 112 204 62 252 44C282 33 304 16 320 0V120H115Z" /><path fill="var(--pc-total-wave-2)" d="M176 120C216 116 242 92 276 78C296 70 310 58 320 42V120H176Z" /></svg><span>Genel Toplam</span><strong>{p.pricing ? money(p.pricing.totalMinor) : '—'}</strong></div></div>
           <div className={styles.actions}><button type="button" className={styles.button} onClick={p.print}><Printer size={15} /> Yazdır</button><button type="button" className={`${styles.button} ${styles.primary}`} disabled={p.saving} onClick={() => p.save()}><Save size={15} /> {p.saving ? 'Kaydediliyor…' : 'Planı Kaydet'}</button></div>
         </section>
       </div>
     </main>
-    <PlanToothTools {...p} openMaterials={setMaterialRow} />
+    <PlanToothTools
+      {...p}
+      drafts={p.drafts}
+      openMaterials={setMaterialRow}
+      onRemoveDraft={p.onRemoveDraft || ((teeth: number[], draftId?: string, procName?: string) => {
+        p.setDrafts((prev: any) => {
+          const next = { ...prev }
+          teeth.forEach((t: number) => {
+            const tk = String(t)
+            if (next[tk]) {
+              next[tk] = next[tk].filter((item: any) => draftId ? item.id !== draftId : item.name !== procName)
+              if (next[tk].length === 0) delete next[tk]
+            }
+          })
+          return next
+        })
+      })}
+      onClearTeethDrafts={p.onClearTeethDrafts || ((teeth: number[]) => {
+        p.setDrafts((prev: any) => {
+          const next = { ...prev }
+          teeth.forEach((t: number) => {
+            const tk = String(t)
+            if (next[tk]) {
+              delete next[tk]
+            }
+          })
+          return next
+        })
+      })}
+    />
     {historyOpen && <PlanHistoryDialog patientId={p.event.patientId} entries={p.consultations} onChange={p.setConsultations} onClose={() => setHistoryOpen(false)} />}
-    {p.showClose && <div role="dialog" aria-modal="true" aria-labelledby="pine-unsaved" className={styles.dialogOverlay}><div className={styles.dialog}><h3 id="pine-unsaved">Kaydedilmemiş değişiklikler</h3><p>Planı kapatmadan önce değişikliklerinizi kaydedebilirsiniz.</p><div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} onClick={() => { p.setShowClose(false); p.save({ closeAfter: true, allowEmpty: true }) }}>Kaydet</button><button type="button" className={styles.button} onClick={p.discard}>Değişiklikleri bırak</button><button type="button" autoFocus className={styles.button} onClick={() => p.setShowClose(false)}>Devam et</button></div></div></div>}
-    {materialRow && materialItem && <div role="dialog" aria-modal="true" aria-label="Satır malzemeleri" className={styles.dialogOverlay}><div className={styles.dialog}><h3>Satır malzemeleri · {materialItem.name}</h3>{materialItem.materials.map((item: any, index: number) => <div className={styles.materialLine} key={`${item.inventoryItemId}-${index}`}><span>{item.name}</span><input className={styles.input} style={{ width: 65 }} aria-label={`${item.name} miktarı`} disabled={materialItem.locked} type="number" min="1" value={item.quantity} onChange={event => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, quantity: Number(event.target.value) } : value) }))} /><input className={styles.input} style={{ width: 80 }} aria-label={`${item.name} satış fiyatı`} disabled={materialItem.locked} type="number" min="0" step="0.01" value={(item.unitSalePriceMinor || 0) / 100} onChange={event => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value) }))} /><button type="button" className={styles.button} disabled={materialItem.locked} onClick={() => updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: row.materials.filter((_: any, i: number) => i !== index) }))}>Kaldır</button></div>)}<label htmlFor="pine-row-material">Malzeme ekle</label><select id="pine-row-material" className={styles.select} disabled={materialItem.locked} value="" onChange={event => { const item = p.inventory.find((value: any) => value.id === event.target.value); if (item && !materialItem.materials.some((value: any) => value.inventoryItemId === item.id)) updateRow(materialRow.target, materialRow.id, row => ({ ...row, materials: [...row.materials, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit, unitSalePriceMinor: 0 }] })) }}><option value="">Malzeme seçin</option>{p.inventory.map((item: any) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><div className={styles.actions}><button type="button" className={styles.button} onClick={() => setMaterialRow(null)}>Kapat</button></div></div></div>}
+    {p.showClose && (
+      <PlanDialog title="Kaydedilmemiş Değişiklikler" onClose={() => p.setShowClose(false)}>
+        <p className={styles.dialogDescription} style={{ margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.55 }}>
+          Tedavi planında kaydedilmemiş değişiklikleriniz var. Planı kapatmadan önce değişikliklerinizi kaydetmek ister misiniz?
+        </p>
+        <div className={styles.actions} style={{ marginTop: 6, justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type="button"
+            autoFocus
+            className={styles.button}
+            style={{ minWidth: 0, padding: '9px 14px', flex: '0 1 auto' }}
+            onClick={() => p.setShowClose(false)}
+          >
+            Devam Et
+          </button>
+          <button
+            type="button"
+            className={styles.button}
+            style={{ minWidth: 0, padding: '9px 14px', flex: '0 1 auto', color: 'var(--danger)', borderColor: 'var(--danger)' }}
+            onClick={p.discard}
+          >
+            Değişiklikleri Bırak
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.primary}`}
+            style={{ minWidth: 0, padding: '9px 18px', flex: '0 1 auto' }}
+            onClick={() => { p.setShowClose(false); p.save({ closeAfter: true, allowEmpty: true }) }}
+          >
+            Kaydet
+          </button>
+        </div>
+      </PlanDialog>
+    )}
+    {materialRow && materialItem && (
+      <PlanDialog title={`Satır Malzemeleri · ${materialItem.name}`} onClose={() => setMaterialRow(null)}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {materialItem.materials.map((item: any, index: number) => (
+            <div className={styles.materialLine} key={`${item.inventoryItemId}-${index}`}>
+              <span>{item.name}</span>
+              <input className={styles.input} style={{ width: 65 }} aria-label={`${item.name} miktarı`} disabled={materialItem.locked} type="number" min="1" value={item.quantity} onChange={event => {
+                const nextQty = Number(event.target.value)
+                const updater = (row: any) => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, quantity: nextQty } : value) })
+                if (materialRow.entries?.length) updateGroupEntries(materialRow.entries, updater)
+                else updateRow(materialRow.target, materialRow.id, updater)
+              }} />
+              <input className={styles.input} style={{ width: 80 }} aria-label={`${item.name} satış fiyatı`} disabled={materialItem.locked} type="number" min="0" step="0.01" value={(item.unitSalePriceMinor || 0) / 100} onChange={event => {
+                const nextPriceMinor = Math.round(Number(event.target.value) * 100)
+                const updater = (row: any) => ({ ...row, materials: row.materials.map((value: any, i: number) => i === index ? { ...value, unitSalePriceMinor: nextPriceMinor } : value) })
+                if (materialRow.entries?.length) updateGroupEntries(materialRow.entries, updater)
+                else updateRow(materialRow.target, materialRow.id, updater)
+              }} />
+              <button type="button" className={styles.button} disabled={materialItem.locked} onClick={() => {
+                const updater = (row: any) => ({ ...row, materials: row.materials.filter((_: any, i: number) => i !== index) })
+                if (materialRow.entries?.length) updateGroupEntries(materialRow.entries, updater)
+                else updateRow(materialRow.target, materialRow.id, updater)
+              }}>Kaldır</button>
+            </div>
+          ))}
+          <label htmlFor="pine-row-material" style={{ marginTop: 6, fontWeight: 600, fontSize: 12.5 }}>Malzeme ekle</label>
+          <select id="pine-row-material" className={styles.select} disabled={materialItem.locked} value="" onChange={event => {
+            const item = p.inventory.find((value: any) => value.id === event.target.value)
+            if (item && !materialItem.materials.some((value: any) => value.inventoryItemId === item.id)) {
+              const updater = (row: any) => ({ ...row, materials: [...row.materials, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit, unitSalePriceMinor: 0 }] })
+              if (materialRow.entries?.length) updateGroupEntries(materialRow.entries, updater)
+              else updateRow(materialRow.target, materialRow.id, updater)
+            }
+          }}>
+            <option value="">Malzeme seçin</option>
+            {p.inventory.map((item: any) => <option value={item.id} key={item.id}>{item.name}</option>)}
+          </select>
+        </div>
+        <div className={styles.actions} style={{ marginTop: 18 }}>
+          <button type="button" className={styles.button} onClick={() => setMaterialRow(null)}>Kapat</button>
+        </div>
+      </PlanDialog>
+    )}
   </div></div>
 }

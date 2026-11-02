@@ -9,6 +9,7 @@ node_modules/
 temp/
 template-uikit/
 client/public/downloads/
+server/public/uploads/plan-assets/
 cbct-service/backend/.venv
 cbct-service/backend/.venv/
 cbct-service/backend/__pycache__/

@@ -35,6 +35,23 @@
      - **Modal Boyutu ve Gövdesi:** `width: min(460px, calc(100vw - 24px))`, `maxWidth: 460px`, `maxHeight: 90vh`, `borderRadius: 14px`, opak `background: var(--card-bg)` (Light: `#ffffff` / `#f4f8fe`, Dark: `#1e293b` / `#0f172a`), `border: 1.5px solid var(--input-border)` ve `boxShadow: var(--pc-modal-shadow)` ile birlikte Neomorphism & Claymorphism kuralları geçerli olmalıdır.
      - **Koyu Mavi (Deep Clinical Blue) Buton Uyumu:** Tüm birincil butonlar, aktif sekmeler ve seçili öğeler birbiriyle tam uyumlu koyu klinik mavi (`linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)`, border `#1d4ed8`, metin `#ffffff`) kullanmalıdır.
      - **Özel Tarih ve Saat Seçiciler:** Tarayıcı varsayılanı olan ham `<input type="date">` ve uzun `<select>` saat listeleri yerine, klinik temasına uyumlu özel `DayPicker` takvim açılır penceresi ve sürüklenebilir 24 saatlik `InteractiveTimeRangePicker` (çift başlıklı slider + saat ızgarası) kullanılmalıdır.
+7. **Tedavi Planlama, Odontogram, Seans Planlama ve Context Menu Standartları (Regresyon Önleme Kuralları)**:
+   - **İşlem Renk Seçici ve Tüm Ekranlarda Renk Senkronizasyonu**:
+     - Tedavi Planlama modalında (`InlineCatalogForm.tsx` / `PineTreatmentPlanView.tsx`) yeni tedavi eklerken veya düzenlerken mutlaka **Klinik İşlem Renk Seçici** bulunmalıdır; burada gereksiz `Diş / Çene / Tüm ağız` (`catalogScope`) select kutusu yer almamalıdır.
+     - Seçilen işlem rengi; Tedaviler kataloğunda, Tedavi Planı tablosunda, Odontogram dişlerinin üst kısmında, sağ panel Tedavi Planı kartlarında (`CalendarTab.tsx`) ve Günlük Takvim Seans Planlama modalında (`FastScheduleModal.tsx`) birebir aynı renk kimliğiyle gösterilmelidir.
+   - **Odontogram İşlem Atanmış Diş Görünümü (Yuvarlak Renk Noktaları), Tamamlanmış İşlem Düzenleme Uyarısı ve Sağ Tık (Context Menu) ile İşlem Ekleme/Silme**:
+     - Odontogramda dişlerin zemin rengi yalnızca **seçim durumuna** göre değişmelidir (seçili değilken normal kart zemini `var(--card-bg)`, seçili iken klinik mavi `var(--pc-blue)`); işlem atanmış ancak seçili olmayan dişler koyu lacivert (`#1e293b` / `#1e3a5f`) zeminle boyanmamalıdır.
+     - Dişe atanan tedaviler, dişin üst kısmını boydan boya kaplayan düz çizgi yerine, çoklu tedavilerin yan yana net seçilebilmesi için **yuvarlak renk noktaları (`8px × 8px`, `border-radius: 50%`)** olarak gösterilmelidir.
+     - Düzenle (`Edit`) modunda daha önce **tamamlanmış (`completed`)** olan işlemler de kilitlenmemeli; tablodan veya sağ tık context menüsünden düzenlenebilmeli ve silinebilmelidir. Ancak tamamlanmış bir işlemde değişiklik veya silme yapıldığında kullanıcıya uyarı verilmeli ve kaydetme aşamasında onay modalı (`ConfirmModal`) gösterilmelidir.
+     - Dişe sağ tıklandığında açılan context menüde (`PlanToothTools.tsx`) yalnızca o dişe atanmış mevcut işlemleri tekil olarak **silme ("Atanan İşlemler (Sil)")** ve yeni **İşlem / Endikasyon ekleme** bölümleri sade biçimde yer almalıdır.
+   - **Context Menu Sabitliği (Sayfa Kaydığında Kaymama Kuralı)**:
+     - Uygulamadaki tüm sağ tık (context) menüleri (`PlanToothContextMenu`, `ShiftContextMenu`, `eventContextMenu` vb.) açıkken tam ekran sabit yakalayıcı katman (`position: fixed; inset: 0`) ve arka plan scroll kilidi (`wheel` engellemesi) uygulanmalıdır; sayfa veya modal aşağı kaydırıldığında context menünün hedef öğeden kopup kayması kesinlikle engellenmelidir.
+   - **Dropdown ve Form İçi Uzun Açıklamaların Tooltip (`ⓘ`) İçinde Gösterilmesi**:
+     - Tedavi hatırlatma bildirimleri (TDB kontrol süreleri vb.) gibi açılır pencerelerde uzun açıklama metinleri ve öneri gerekçeleri doğrudan kutu içine yığılmamalı; başlık yanındaki `ⓘ` bilgi ikonu **tooltip**'i içinde (opak yüzeyli, yüksek kontrastlı) gösterilmelidir.
+   - **Seans Planlama (`FastScheduleModal.tsx`) Esnek Saat, Renk ve Çakışma Kuralları**:
+     - Tedavi saat planlaması 15/30 dakikalık katı adımlara zorlanmamalı; **1 dakikalık esnek çözünürlükle** ve yüksek FPS (`pointermove`) ile sürüklenip boyutlandırılabilmelidir.
+     - Seçim kutusu koyu mavi + siyah yazı olmamalı; diğer randevu kartları gibi yumuşak klinik pastel tonlarda ve işlem rengiyle uyumlu olmalıdır.
+     - Bir hekim aynı anda **farklı iki hastaya** bakamaz (farklı hasta randevusu üzerine sürükleme/bırakma kilitlidir); ancak **aynı hastanın** birden fazla tedavisi tek seansta gruplanabilir veya mevcut seansın üstüne sürüklenerek birleştirilebilir.
 
 
 ## Project Isolation Rules

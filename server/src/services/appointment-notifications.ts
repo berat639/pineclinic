@@ -11,7 +11,7 @@ import {
   users,
 } from '../db/schema'
 import { ensureTreatmentPlanningSchema } from '../db/treatment-planning-schema'
-import { ensureAiAppointmentReviewSchema } from '../db/repositories/dental'
+import { ensureAiAppointmentReviewSchema, logPatientActivity } from '../db/repositories/dental'
 import {
   getNotificationPolicy,
   type NotificationChannelKey,
@@ -652,6 +652,22 @@ export async function applyPatientAppointmentResponse(input: {
     .where(and(eq(dentalAppointments.id, appointment.id), eq(dentalAppointments.clinicId, input.clinicId)))
     .returning()
 
+  if (appointment.patientId) {
+    await logPatientActivity({
+      clinicId: input.clinicId,
+      patientId: appointment.patientId,
+      appointmentId: appointment.id,
+      category: 'patient_response',
+      event_type: 'patient_response',
+      title: 'Hasta Bildirim Yanıtı',
+      old_value: appointment.status,
+      new_value: nextStatus,
+      actorType: 'patient',
+      actorName: `${patientName} (Hasta)`,
+      note: cleanNote || (cleanPreferredDate ? `Tercih edilen tarih: ${cleanPreferredDate}` : null),
+    })
+  }
+
   // Stop any pending escalation notifications for this appointment
   await db.execute(sql`
     UPDATE appointment_notification_jobs
@@ -677,6 +693,7 @@ export async function applyPatientAppointmentResponse(input: {
       note: cleanNote,
       preferredDate: cleanPreferredDate,
       startTime: appointment.startTime.toISOString(),
+      appointment: updated,
     })
   } catch {}
 

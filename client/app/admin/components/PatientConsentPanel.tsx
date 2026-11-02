@@ -17,7 +17,15 @@ type UnsavedContact = {
   whatsappOptOut?: boolean
 }
 type ConsentState = { patient: Contact & { smsOptOut: boolean; whatsappOptOut: boolean; emailOptOut: boolean }; preferences: { channel: string; status: string; textVersion: string }[]; requests: { id: string; status: string; deliveryChannel: string }[] }
-type Settings = { text: string; version: string | null; canEdit: boolean; canManageConsent?: boolean }
+type ChannelIntegrationStatus = 'active' | 'unconfigured' | 'error'
+type ChannelIntegrationInfo = { status: ChannelIntegrationStatus; message?: string }
+type Settings = {
+  text: string
+  version: string | null
+  canEdit: boolean
+  canManageConsent?: boolean
+  integrations?: Partial<Record<NotificationChannel, ChannelIntegrationInfo>>
+}
 type Props = {
   patientId?: string
   compact?: boolean
@@ -76,6 +84,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   const [formText, setFormText] = useState('')
   const [contact, setContact] = useState<Contact>({ phone: '', email: '' })
   const [pendingChannel, setPendingChannel] = useState<NotificationChannel | null>(null)
+  const [sendFailedChannel, setSendFailedChannel] = useState<Delivery | null>(null)
   const [error, setError] = useState('')
   const [dialogError, setDialogError] = useState('')
   const requestKey = useRef<string | null>(null)
@@ -113,7 +122,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
 
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true); setConsent(null); requestKey.current = null; autoSelectedRef.current = false
+    setLoading(true); setConsent(null); setSendFailedChannel(null); requestKey.current = null; autoSelectedRef.current = false
     void refresh(controller.signal)
     const onFocus = () => { void refresh(controller.signal) }
     window.addEventListener('focus', onFocus)
@@ -135,20 +144,69 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
     whatsappOptOut: Boolean(unsavedContact.whatsappOptOut),
   } : null)
 
+  const channelStatus = useCallback((channel: NotificationChannel): ChannelIntegrationStatus => {
+    if (sendFailedChannel === channel) return 'error'
+    if (consent?.requests[0]?.deliveryChannel === channel && consent?.requests[0]?.status === 'failed') return 'error'
+    return settings?.integrations?.[channel]?.status || 'active'
+  }, [sendFailedChannel, consent?.requests, settings?.integrations])
+
+  const channelMessage = (channel: NotificationChannel): string => {
+    const msg = settings?.integrations?.[channel]?.message
+    if (msg) return msg
+    const st = channelStatus(channel)
+    if (st === 'error') return `${labels[channel]} entegrasyonunda bağlantı hatası var`
+    if (st === 'unconfigured') return `${labels[channel]} Klinikler ekranından entegre edilmedi`
+    return labels[channel]
+  }
+
+  const hasIntegrationError = !loading && (
+    Boolean(error) ||
+    Boolean(sendFailedChannel) ||
+    consent?.requests[0]?.status === 'failed' ||
+    NOTIFICATION_CHANNELS.some(ch => channelStatus(ch) === 'error')
+  )
+
+  const integrationErrorSummary = error || NOTIFICATION_CHANNELS
+    .filter(ch => channelStatus(ch) === 'error')
+    .map(ch => `${labels[ch]}: ${channelMessage(ch)}`)
+    .join(' · ') || 'Entegrasyon bağlantısında hata oluştu.'
+
+  const isChannelUsable = useCallback((channel: NotificationChannel): boolean => {
+    if (loading || hasIntegrationError) return false
+    return channelStatus(channel) === 'active'
+  }, [loading, hasIntegrationError, channelStatus])
+
   const allowed = NOTIFICATION_CHANNELS.filter(channel => consent && effectivePatient && consentAllows(channel, consent.preferences, settings?.version, effectivePatient))
+  const usableAllowed = allowed.filter(channel => isChannelUsable(channel))
   const canManageConsent = settings ? settings.canManageConsent !== false : true
 
-  // Hastanın onam formunda seçtiği tüm kanallar otomatik olarak seçili gelir
+  // Hastanın onam formunda seçtiği tüm aktif/sorunsuz kanallar otomatik olarak seçili gelir
   useEffect(() => {
-    if (!loading && onChannelsChange && !autoSelectedRef.current && allowed.length > 0 && selectedChannels.length === 0) {
-      autoSelectedRef.current = true
-      onChannelsChange([...allowed])
+    if (!loading && onChannelsChange) {
+      if (hasIntegrationError && selectedChannels.length > 0) {
+        onChannelsChange([])
+        return
+      }
+      if (!autoSelectedRef.current && usableAllowed.length > 0 && selectedChannels.length === 0) {
+        autoSelectedRef.current = true
+        onChannelsChange([...usableAllowed])
+      }
     }
-  }, [loading, allowed, selectedChannels.length, onChannelsChange])
+  }, [loading, hasIntegrationError, usableAllowed, selectedChannels.length, onChannelsChange])
 
   const blocked = (channel: Delivery) => !!effectivePatient && (
     (channel === 'sms' && effectivePatient.smsOptOut) || (channel === 'whatsapp' && effectivePatient.whatsappOptOut) || (channel === 'email' && effectivePatient.emailOptOut) ||
     (!unsavedContact && !!consent && consent.preferences.some(item => item.channel === channel && ['refused', 'revoked'].includes(item.status))))
+
+  const deliveryDisabled = (channel: Delivery) => !isChannelUsable(channel) || blocked(channel)
+  const availableDeliveries = (['sms', 'whatsapp', 'email'] as const).filter(channel => !deliveryDisabled(channel))
+  const allDeliveriesUnconfigured = !loading && !hasIntegrationError && (['sms', 'whatsapp', 'email'] as const).every(ch => channelStatus(ch) === 'unconfigured')
+
+  useEffect(() => {
+    if (!loading && deliveryDisabled(delivery) && availableDeliveries.length > 0) {
+      setDelivery(availableDeliveries[0])
+    }
+  }, [loading, delivery, availableDeliveries])
 
   const missingContact = (channel: NotificationChannel, state = consent) => {
     if (channel === 'assistant_call') {
@@ -199,9 +257,9 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
   }
 
   async function send() {
-    if (pending.current || blocked(delivery)) return
+    if (pending.current || deliveryDisabled(delivery)) return
     if (missingContact(delivery)) { openContact(delivery); return }
-    pending.current = true; setBusy(true); requestKey.current ||= crypto.randomUUID()
+    pending.current = true; setBusy(true); setSendFailedChannel(null); requestKey.current ||= crypto.randomUUID()
     try {
       let targetId = activePatientId
       if (!targetId && onEnsurePatient) {
@@ -222,15 +280,22 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deliveryChannel: delivery, requestKey: requestKey.current }),
       })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok) { requestKey.current = null; throw new Error(result.error || 'Form gönderilemedi.') }
-      if (!['sent', 'responded'].includes(result.status)) throw new Error('Gönderim doğrulanamadı. Yeniden kontrol edin.')
-      requestKey.current = null; toast.success('Form gönderildi; hasta yanıtı bekleniyor.'); await refresh(undefined, targetId)
+      if (!response.ok) {
+        requestKey.current = null
+        if (response.status >= 500) setSendFailedChannel(delivery)
+        throw new Error(result.error || 'Form gönderilemedi.')
+      }
+      if (!['sent', 'responded'].includes(result.status)) {
+        setSendFailedChannel(delivery)
+        throw new Error('Gönderim doğrulanamadı. Yeniden kontrol edin.')
+      }
+      requestKey.current = null; setSendFailedChannel(null); toast.success('Form gönderildi; hasta yanıtı bekleniyor.'); await refresh(undefined, targetId)
     } catch (reason) { toast.error(reason instanceof Error ? reason.message : 'Form gönderilemedi.') }
     finally { pending.current = false; setBusy(false) }
   }
 
   async function saveClinicConsent(nextChannels: NotificationChannel[], closeOnSuccess = false) {
-    if (pending.current || !activePatientId) return
+    if (pending.current || !activePatientId || hasIntegrationError) return
     pending.current = true; setBusy(true); setDialogError('')
     try {
       await syncUnsavedIfNeeded(activePatientId)
@@ -284,7 +349,7 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       }
       await refresh(); setDialog(null); setPendingChannel(null)
       toast.success(editingText ? 'Onam metni kaydedildi.' : 'İletişim bilgileri kaydedildi.')
-      if (!editingText && targetChannel && allowed.length > 0) {
+      if (!editingText && targetChannel && allowed.length > 0 && isChannelUsable(targetChannel)) {
         if (!allowed.includes(targetChannel) && canManageConsent) {
           pending.current = false
           const nextAllowed = Array.from(new Set([...allowed, targetChannel]))
@@ -307,7 +372,11 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
 
   const closeDialog = () => { if (!busy) { setDialog(null); setPendingChannel(null) } }
 
-  return <section className={`${styles.consent} ${!compact ? styles.consentStacked : ''}`} aria-label="Hasta bildirimleri">
+  return <section
+    className={`${styles.consent} ${!compact ? styles.consentStacked : ''} ${hasIntegrationError ? styles.consentError : ''}`}
+    aria-label="Hasta bildirimleri"
+    title={hasIntegrationError ? integrationErrorSummary : undefined}
+  >
     <div className={styles.consentRow}>
     {onOpenReminder && (
       <button
@@ -321,21 +390,39 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
       </button>
     )}
     <div className={styles.consentTitle}><ShieldCheck size={15} /><strong>{allowed.length ? 'Bildirim yöntemi' : 'Bildirim onamı'}</strong>
-      {!allowed.length && <span>{loading ? 'Yükleniyor…' : error ? 'Yüklenemedi' : consent?.requests[0]?.status === 'sent' ? 'Yanıt bekleniyor' : 'Onam yok'}</span>}
+      {hasIntegrationError ? (
+        <span title={integrationErrorSummary}>Bağlantı hatası</span>
+      ) : !allowed.length ? (
+        <span>{loading ? 'Yükleniyor…' : allDeliveriesUnconfigured ? 'Entegre değil' : consent?.requests[0]?.status === 'sent' ? 'Yanıt bekleniyor' : 'Onam yok'}</span>
+      ) : null}
     </div>
     {error ? <div role="alert" className={styles.consentActions}>{error}<button type="button" className={styles.button} onClick={() => void refresh()}>Yeniden dene</button></div> : loading ? null : allowed.length > 0 ?
       <div className={styles.consentActions} role="group" aria-label="Bildirim yöntemleri (birden fazla seçilebilir)">
         {NOTIFICATION_CHANNELS.map(channel => {
-          const isAllowed = allowed.includes(channel)
-          const isChecked = onChannelsChange ? selectedChannels.includes(channel) : isAllowed
-          const isDisabled = busy || (!isAllowed && !canManageConsent) || (!onChannelsChange && !canManageConsent)
+          const st = channelStatus(channel)
+          const usable = isChannelUsable(channel)
+          const isAllowed = usable && allowed.includes(channel)
+          const isChecked = usable && (onChannelsChange ? selectedChannels.includes(channel) : isAllowed)
+          const isDisabled = busy || loading || !usable || (!isAllowed && !canManageConsent) || (!onChannelsChange && !canManageConsent)
+          const pillTitle = hasIntegrationError || st === 'error'
+            ? channelMessage(channel)
+            : st === 'unconfigured'
+              ? channelMessage(channel)
+              : isAllowed
+                ? labels[channel]
+                : (canManageConsent ? `${labels[channel]} iznini aktif et` : 'Bu kanal için hasta izni bulunmuyor')
           return (
-            <label key={channel} className={styles.consentPill} title={isAllowed ? labels[channel] : (canManageConsent ? `${labels[channel]} iznini aktif et` : 'Bu kanal için hasta izni bulunmuyor')}>
+            <label
+              key={channel}
+              className={`${styles.consentPill} ${hasIntegrationError || st === 'error' ? styles.consentPillError : ''}`}
+              title={pillTitle}
+            >
               <input
                 type="checkbox"
                 disabled={isDisabled}
                 checked={isChecked}
                 onChange={event => {
+                  if (isDisabled) return
                   const checked = event.target.checked
                   if (checked && missingContact(channel)) { openContact(channel); return }
                   if (!onChannelsChange) {
@@ -359,15 +446,45 @@ export default function PatientConsentPanel({ patientId, compact, selectedChanne
           )
         })}
       </div> : <div className={styles.consentActions}>
-        <select className={styles.select} aria-label="Onam formu gönderim kanalı" disabled={busy || loading} value={delivery} onChange={event => {
-          const nextDelivery = event.target.value as Delivery
-          setDelivery(nextDelivery)
-          requestKey.current = null
-          if (consent && missingContact(nextDelivery, consent)) openContact(nextDelivery)
-        }}>
-          {(['sms', 'whatsapp', 'email'] as const).map(channel => <option key={channel} value={channel} disabled={blocked(channel)}>{labels[channel]}{blocked(channel) ? ' · İletişim kapalı' : ''}</option>)}
+        <select
+          className={styles.select}
+          aria-label="Onam formu gönderim kanalı"
+          disabled={busy || loading || hasIntegrationError || availableDeliveries.length === 0}
+          value={delivery}
+          title={hasIntegrationError ? integrationErrorSummary : allDeliveriesUnconfigured ? 'Klinikler ekranından bildirim kanalları entegre edilmedi' : undefined}
+          onChange={event => {
+            const nextDelivery = event.target.value as Delivery
+            setDelivery(nextDelivery)
+            setSendFailedChannel(null)
+            requestKey.current = null
+            if (consent && missingContact(nextDelivery, consent)) openContact(nextDelivery)
+          }}
+        >
+          {(['sms', 'whatsapp', 'email'] as const).map(channel => {
+            const st = channelStatus(channel)
+            const suffix = st === 'error'
+              ? ' · Bağlantı hatası'
+              : st === 'unconfigured'
+                ? ' · Entegre değil'
+                : blocked(channel)
+                  ? ' · İletişim kapalı'
+                  : ''
+            return (
+              <option key={channel} value={channel} disabled={deliveryDisabled(channel)}>
+                {labels[channel]}{suffix}
+              </option>
+            )
+          })}
         </select>
-        <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || loading || blocked(delivery)} onClick={() => void send()}><Send size={13} />{busy ? 'Gönderiliyor…' : 'Form gönder'}</button>
+        <button
+          type="button"
+          className={`${styles.button} ${styles.primary}`}
+          disabled={busy || loading || hasIntegrationError || deliveryDisabled(delivery)}
+          title={hasIntegrationError ? integrationErrorSummary : deliveryDisabled(delivery) ? channelMessage(delivery) : undefined}
+          onClick={() => void send()}
+        >
+          <Send size={13} />{busy ? 'Gönderiliyor…' : 'Form gönder'}
+        </button>
       </div>}
       <button type="button" className={styles.consentTextButton} disabled={loading || !!error} onClick={openTextDialog}><FileText size={13} />Onam metni</button>
     </div>

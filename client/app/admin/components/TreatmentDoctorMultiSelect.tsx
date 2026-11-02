@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Users, UserPlus } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import { AlertTriangle, Check, ChevronDown, Users, UserPlus, X } from 'lucide-react';
+import { checkDoctorAvailability } from '../../../lib/doctor-availability';
 
 export interface DoctorOption {
   id: string;
@@ -14,7 +16,11 @@ interface TreatmentDoctorMultiSelectProps {
   selectedDoctorIds: string[];
   onChange: (nextDoctorIds: string[]) => void;
   shifts?: any[];
+  doctorLeaves?: any[];
   targetApptTime?: string | null;
+  enforceAvailability?: boolean;
+  onAvailabilityWarning?: (message: string | null) => void;
+  contextLabel?: string;
   disabled?: boolean;
   compact?: boolean;
   placeholder?: string;
@@ -25,18 +31,23 @@ export default function TreatmentDoctorMultiSelect({
   selectedDoctorIds,
   onChange,
   shifts = [],
+  doctorLeaves = [],
   targetApptTime,
+  enforceAvailability = false,
+  onAvailabilityWarning,
+  contextLabel = '',
   disabled = false,
   compact = false,
   placeholder = 'Hekim Seç',
 }: TreatmentDoctorMultiSelectProps) {
   const [open, setOpen] = useState(false);
+  const [popoverWarning, setPopoverWarning] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number; width: number; openUp: boolean }>({
     top: 0,
     left: 0,
-    width: 240,
+    width: 280,
     openUp: false,
   });
 
@@ -45,20 +56,13 @@ export default function TreatmentDoctorMultiSelect({
     .map(id => doctors.find(d => d.id === id))
     .filter((d): d is DoctorOption => !!d);
 
-  const apptDateStr = targetApptTime
-    ? (() => {
-        const d = new Date(targetApptTime);
-        return isNaN(d.getTime()) ? '' : d.toLocaleDateString('sv');
-      })()
-    : '';
-
   const updatePosition = () => {
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const menuHeight = Math.min(280, doctors.length * 42 + 56);
+    const menuHeight = Math.min(320, doctors.length * 42 + 80);
     const openUp = spaceBelow < menuHeight && rect.top > menuHeight;
-    const width = Math.max(rect.width, 250);
+    const width = Math.max(rect.width, 285);
     const left = Math.min(rect.left, window.innerWidth - width - 12);
     setCoords({
       top: openUp ? rect.top - 6 : rect.bottom + 6,
@@ -69,7 +73,10 @@ export default function TreatmentDoctorMultiSelect({
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setPopoverWarning(null);
+      return;
+    }
     updatePosition();
     const handleOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -102,7 +109,34 @@ export default function TreatmentDoctorMultiSelect({
   const toggleDoctor = (docId: string) => {
     if (disabled) return;
     const exists = normalizedIds.includes(docId);
-    const next = exists ? normalizedIds.filter(id => id !== docId) : [...normalizedIds, docId];
+    if (exists) {
+      setPopoverWarning(null);
+      onAvailabilityWarning?.(null);
+      const next = normalizedIds.filter(id => id !== docId);
+      onChange(next);
+      return;
+    }
+
+    if (enforceAvailability && targetApptTime) {
+      const check = checkDoctorAvailability(
+        docId,
+        doctors,
+        shifts,
+        doctorLeaves,
+        targetApptTime,
+        contextLabel
+      );
+      if (!check.valid) {
+        setPopoverWarning(check.message);
+        onAvailabilityWarning?.(check.message);
+        toast.error(check.message, { duration: 6000, id: 'doctor-availability-warn' });
+        return;
+      }
+    }
+
+    setPopoverWarning(null);
+    onAvailabilityWarning?.(null);
+    const next = [...normalizedIds, docId];
     onChange(next);
   };
 
@@ -222,11 +256,11 @@ export default function TreatmentDoctorMultiSelect({
               bottom: coords.openUp ? window.innerHeight - coords.top : undefined,
               left: coords.left,
               width: coords.width,
-              maxHeight: 300,
+              maxHeight: 340,
               background: 'var(--card-bg, #ffffff)',
               border: '1px solid var(--input-border, #cbd5e1)',
               borderRadius: 10,
-              boxShadow: '0 12px 28px rgba(15, 23, 42, 0.22)',
+              boxShadow: 'var(--pc-modal-shadow, 0 12px 28px rgba(15, 23, 42, 0.22))',
               zIndex: 100050,
               display: 'flex',
               flexDirection: 'column',
@@ -260,7 +294,11 @@ export default function TreatmentDoctorMultiSelect({
               {selectedDoctors.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => onChange([])}
+                  onClick={() => {
+                    setPopoverWarning(null);
+                    onAvailabilityWarning?.(null);
+                    onChange([]);
+                  }}
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -276,6 +314,44 @@ export default function TreatmentDoctorMultiSelect({
               )}
             </div>
 
+            {popoverWarning && (
+              <div
+                role="alert"
+                style={{
+                  margin: '6px 6px 2px',
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: 'var(--card-inner, #f1f5f9)',
+                  border: '1.5px solid var(--danger, #ef4444)',
+                  color: 'var(--foreground)',
+                  fontSize: '0.7rem',
+                  lineHeight: 1.4,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 7,
+                }}
+              >
+                <AlertTriangle size={14} style={{ color: 'var(--danger, #ef4444)', flexShrink: 0, marginTop: 1 }} />
+                <span style={{ flex: 1 }}>{popoverWarning.replace(/^⚠️\s*/, '')}</span>
+                <button
+                  type="button"
+                  aria-label="Uyarıyı kapat"
+                  onClick={() => setPopoverWarning(null)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    color: 'var(--foreground-3)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+
             <div style={{ overflowY: 'auto', padding: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {doctors.length === 0 ? (
                 <div style={{ padding: '10px 8px', fontSize: '0.74rem', color: 'var(--foreground-3)', textAlign: 'center' }}>
@@ -284,21 +360,46 @@ export default function TreatmentDoctorMultiSelect({
               ) : (
                 doctors.map(doc => {
                   const isChecked = normalizedIds.includes(doc.id);
-                  const docShifts = apptDateStr
-                    ? (shifts || []).filter((s: any) => s.userId === doc.id && s.date === apptDateStr)
-                    : [];
-                  const hasShift = !apptDateStr || docShifts.length > 0;
-                  const shiftLabel = apptDateStr
-                    ? hasShift
-                      ? docShifts.map((s: any) => `${s.startTime}-${s.endTime}`).join(', ')
-                      : 'Vardiya Yok'
-                    : doc.specialty || '';
+                  const availability = checkDoctorAvailability(
+                    doc.id,
+                    doctors,
+                    shifts,
+                    doctorLeaves,
+                    targetApptTime,
+                    contextLabel
+                  );
+
+                  const badgeStyle: React.CSSProperties =
+                    availability.badgeVariant === 'available'
+                      ? {
+                          background: 'var(--btn-clinic-mint-bg, #f0fdf4)',
+                          border: '1px solid var(--btn-clinic-mint-border, #86efac)',
+                          color: 'var(--btn-clinic-mint-text, #15803d)',
+                        }
+                      : availability.badgeVariant === 'leave'
+                        ? {
+                            background: 'var(--card-inner, #f1f5f9)',
+                            border: '1px solid var(--danger, #ef4444)',
+                            color: 'var(--danger, #ef4444)',
+                          }
+                        : availability.badgeVariant === 'no_shift'
+                          ? {
+                              background: 'var(--card-inner, #f1f5f9)',
+                              border: '1px solid #d97706',
+                              color: '#d97706',
+                            }
+                          : {
+                              background: 'var(--card-inner, #f1f5f9)',
+                              border: '1px solid var(--input-border, #cbd5e1)',
+                              color: 'var(--foreground-3)',
+                            };
 
                   return (
                     <button
                       key={doc.id}
                       type="button"
                       onClick={() => toggleDoctor(doc.id)}
+                      title={!availability.valid ? availability.message : doc.name}
                       style={{
                         width: '100%',
                         display: 'flex',
@@ -351,7 +452,11 @@ export default function TreatmentDoctorMultiSelect({
                           style={{
                             fontSize: '0.76rem',
                             fontWeight: isChecked ? 700 : 600,
-                            color: isChecked ? 'var(--btn-clinic-secondary-text, #0284c7)' : 'var(--foreground)',
+                            color: isChecked
+                              ? 'var(--btn-clinic-secondary-text, #0284c7)'
+                              : !availability.valid && targetApptTime
+                                ? 'var(--foreground-2)'
+                                : 'var(--foreground)',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -361,26 +466,22 @@ export default function TreatmentDoctorMultiSelect({
                         </span>
                       </div>
 
-                      {shiftLabel && (
+                      {availability.badgeText && (
                         <span
                           style={{
-                            fontSize: '0.64rem',
+                            fontSize: '0.63rem',
                             fontWeight: 700,
                             padding: '2px 6px',
                             borderRadius: 999,
-                            background: hasShift
-                              ? 'var(--btn-clinic-mint-bg, #f0fdf4)'
-                              : 'var(--card-inner, #f1f5f9)',
-                            border: hasShift
-                              ? '1px solid var(--btn-clinic-mint-border, #86efac)'
-                              : '1px solid var(--input-border, #cbd5e1)',
-                            color: hasShift
-                              ? 'var(--btn-clinic-mint-text, #15803d)'
-                              : 'var(--foreground-3)',
                             flexShrink: 0,
+                            maxWidth: 145,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            ...badgeStyle,
                           }}
                         >
-                          {shiftLabel}
+                          {availability.badgeText}
                         </span>
                       )}
                     </button>
@@ -394,4 +495,3 @@ export default function TreatmentDoctorMultiSelect({
     </>
   );
 }
-

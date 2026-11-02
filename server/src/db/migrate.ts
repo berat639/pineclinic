@@ -1120,21 +1120,43 @@ async function runMigrations() {
 
   await sql`
     CREATE TABLE IF NOT EXISTS doctor_leaves (
-      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      clinic_id   UUID REFERENCES clinics(id) ON DELETE CASCADE,
-      doctor_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      date        TEXT NOT NULL,
-      start_time  TEXT NOT NULL,
-      end_time    TEXT NOT NULL,
-      is_full_day BOOLEAN NOT NULL DEFAULT false,
-      reason      TEXT,
-      notes       TEXT,
-      created_by  UUID REFERENCES users(id),
-      created_at  TIMESTAMPTZ DEFAULT now()
+      id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id            UUID REFERENCES clinics(id) ON DELETE CASCADE,
+      doctor_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      substitute_doctor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      date                 TEXT NOT NULL,
+      start_time           TEXT NOT NULL,
+      end_time             TEXT NOT NULL,
+      is_full_day          BOOLEAN NOT NULL DEFAULT false,
+      reason               TEXT,
+      notes                TEXT,
+      created_by           UUID REFERENCES users(id),
+      created_at           TIMESTAMPTZ DEFAULT now()
     )
   `
+  await sql`ALTER TABLE doctor_leaves ADD COLUMN IF NOT EXISTS substitute_doctor_id UUID REFERENCES users(id) ON DELETE SET NULL`
   await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_clinic_date_idx ON doctor_leaves (clinic_id, date)`
   await sql`CREATE INDEX IF NOT EXISTS doctor_leaves_doctor_date_idx ON doctor_leaves (doctor_id, date)`
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS patient_activity_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      clinic_id UUID REFERENCES clinics(id) ON DELETE CASCADE,
+      patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
+      appointment_id UUID,
+      treatment_id UUID,
+      category TEXT NOT NULL DEFAULT 'appointment',
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      actor_type TEXT NOT NULL DEFAULT 'desk',
+      actor_name TEXT,
+      note TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS patient_activity_logs_patient_idx ON patient_activity_logs (clinic_id, patient_id, created_at DESC)`
 
   await sql`
     CREATE TABLE IF NOT EXISTS staff_invitations (

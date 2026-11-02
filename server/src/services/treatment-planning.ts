@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { ensureTreatmentPlanningSchema } from '../db/treatment-planning-schema'
 import {
@@ -52,6 +52,76 @@ function normalizeDoctorIds(doctorIds: unknown, doctorId: unknown): string[] {
   return []
 }
 
+async function syncAppointmentTitles(tx: any, clinicId: string, appointmentIds: Iterable<string>) {
+  const uniqueApptIds = Array.from(new Set(Array.from(appointmentIds).filter(id => validUuid(id))))
+  if (!uniqueApptIds.length) return
+
+  for (const apptId of uniqueApptIds) {
+    const [appt] = await tx
+      .select({
+        id: dentalAppointments.id,
+        patientId: dentalAppointments.patientId,
+        title: dentalAppointments.title,
+        type: dentalAppointments.type,
+      })
+      .from(dentalAppointments)
+      .where(and(eq(dentalAppointments.id, apptId), eq(dentalAppointments.clinicId, clinicId)))
+      .limit(1)
+    if (!appt) continue
+
+    let patientName = 'Hasta'
+    if (appt.patientId) {
+      const [pat] = await tx
+        .select({ name: patients.name })
+        .from(patients)
+        .where(and(eq(patients.id, appt.patientId), eq(patients.clinicId, clinicId)))
+        .limit(1)
+      if (pat?.name) patientName = pat.name.trim()
+    } else if (typeof appt.title === 'string' && appt.title.includes(' - ')) {
+      patientName = appt.title.split(' - ')[0].trim() || 'Hasta'
+    }
+
+    const linkedRows = await tx
+      .select({
+        procedureName: treatmentPlans.procedureName,
+        toothNumber: treatmentPlans.toothNumber,
+      })
+      .from(appointmentTreatments)
+      .innerJoin(treatmentPlans, eq(appointmentTreatments.treatmentPlanId, treatmentPlans.id))
+      .where(
+        and(
+          eq(appointmentTreatments.appointmentId, apptId),
+          eq(treatmentPlans.clinicId, clinicId),
+          ne(treatmentPlans.status, 'cancelled')
+        )
+      )
+      .orderBy(appointmentTreatments.sessionNumber, treatmentPlans.createdAt)
+
+    if (linkedRows.length > 0) {
+      const labels = Array.from(
+        new Set(
+          linkedRows
+            .map((row: { toothNumber: string | null; procedureName: string | null }) =>
+              row.toothNumber
+                ? `#${row.toothNumber} ${(row.procedureName || '').trim()}`.trim()
+                : (row.procedureName || '').trim()
+            )
+            .filter(Boolean)
+        )
+      )
+      if (labels.length > 0) {
+        const nextTitle = `${patientName} - ${labels.join(', ')}`
+        if (nextTitle !== appt.title) {
+          await tx
+            .update(dentalAppointments)
+            .set({ title: nextTitle, updatedAt: new Date() })
+            .where(eq(dentalAppointments.id, apptId))
+        }
+      }
+    }
+  }
+}
+
 /** Load a complete plan without exposing another clinic's data. */
 export async function getTreatmentPlan(groupId: string, clinicId: string) {
   await ensureTreatmentPlanningSchema()
@@ -68,7 +138,12 @@ export async function getTreatmentPlan(groupId: string, clinicId: string) {
   const paid = rows.length ? await db.select({ treatmentId: patientPayments.treatmentPlanId })
     .from(patientPayments).where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.treatmentPlanId, rows.map(row => row.plan.id)))) : []
   const paidIds = new Set(paid.map(row => row.treatmentId))
-  const attachments = await db.select().from(planAttachments).where(and(eq(planAttachments.clinicId, clinicId), eq(planAttachments.patientId, group.patientId), eq(planAttachments.groupId, groupId)))
+  const attachments = await db.select().from(planAttachments).where(and(
+    eq(planAttachments.clinicId, clinicId),
+    eq(planAttachments.patientId, group.patientId),
+    eq(planAttachments.status, 'complete'),
+    or(eq(planAttachments.groupId, groupId), isNull(planAttachments.groupId))
+  )).orderBy(planAttachments.createdAt)
   return {
     ...group,
     version: details?.version ?? 0,
@@ -85,7 +160,9 @@ export async function getTreatmentPlan(groupId: string, clinicId: string) {
       return {
         ...plan, doctorIds, materials: item?.materials ?? [], basePriceMinor: item?.basePriceMinor ?? plan.cost * 100,
         netPriceMinor: item?.netPriceMinor ?? plan.cost * 100, metadata: item?.metadata ?? {},
-        stockState: item?.stockState ?? 'legacy_unknown', locked: plan.status === 'completed' || item?.stockState === 'consumed' || paidIds.has(plan.id),
+        stockState: item?.stockState ?? 'legacy_unknown',
+        locked: false,
+        wasCompleted: plan.status === 'completed' || item?.stockState === 'consumed' || paidIds.has(plan.id),
       }
     }),
   }
@@ -184,8 +261,10 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
         const [details] = await tx.select().from(treatmentGroupDetails).where(eq(treatmentGroupDetails.groupId, currentGroupId))
         if ((input.expectedVersion ?? -1) !== (details?.version ?? 0)) throw new TreatmentPlanError('Plan başka bir oturumda değiştirildi. Güncel planı açın.', 409)
         await tx.update(treatmentGroups).set({ name: input.name.trim(), updatedById: userId }).where(eq(treatmentGroups.id, currentGroupId))
-        if (details) await tx.update(treatmentGroupDetails).set({ version: details.version + 1, consultationNote: input.consultationNote ?? details.consultationNote,
-          discountPercentBps: percentBps, discountFixedMinor: fixedMinor, metadata: input.metadata ?? details.metadata }).where(eq(treatmentGroupDetails.groupId, currentGroupId))
+        if (details) await tx.update(treatmentGroupDetails).set({
+          version: details.version + 1, consultationNote: input.consultationNote ?? details.consultationNote,
+          discountPercentBps: percentBps, discountFixedMinor: fixedMinor, metadata: input.metadata ?? details.metadata
+        }).where(eq(treatmentGroupDetails.groupId, currentGroupId))
         else await tx.insert(treatmentGroupDetails).values({ groupId: currentGroupId, clinicId, version: 1, consultationNote: input.consultationNote ?? '', discountPercentBps: percentBps, discountFixedMinor: fixedMinor, metadata: input.metadata ?? {} })
         oldRows = await tx.select().from(treatmentPlans).where(and(eq(treatmentPlans.groupId, currentGroupId), eq(treatmentPlans.clinicId, clinicId))).for('update')
       } else {
@@ -197,12 +276,14 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
         }
         const [group] = await tx.insert(treatmentGroups).values({ clinicId, patientId: input.patientId, name: input.name.trim(), createdById: userId }).returning()
         currentGroupId = group.id
-        await tx.insert(treatmentGroupDetails).values({ groupId: currentGroupId, clinicId, version: 1, idempotencyKey: input.idempotencyKey,
-          requestHash, consultationNote: input.consultationNote ?? '', discountPercentBps: percentBps, discountFixedMinor: fixedMinor, metadata: input.metadata ?? {} })
+        await tx.insert(treatmentGroupDetails).values({
+          groupId: currentGroupId, clinicId, version: 1, idempotencyKey: input.idempotencyKey,
+          requestHash, consultationNote: input.consultationNote ?? '', discountPercentBps: percentBps, discountFixedMinor: fixedMinor, metadata: input.metadata ?? {}
+        })
       }
       if (input.attachmentIds !== undefined) {
         const selected = input.attachmentIds.length ? await tx.select().from(planAttachments).where(and(eq(planAttachments.clinicId, clinicId), inArray(planAttachments.id, input.attachmentIds))).for('update') : []
-        if (selected.length !== input.attachmentIds.length || selected.some(file => file.patientId !== input.patientId || file.status !== 'complete' || (file.groupId && file.groupId !== currentGroupId)))
+        if (selected.length !== input.attachmentIds.length || selected.some(file => file.patientId !== input.patientId || file.status !== 'complete'))
           throw new TreatmentPlanError('Plan ekleri bu hastaya ait değil veya yükleme tamamlanmadı')
         const existing = await tx.select().from(planAttachments).where(and(eq(planAttachments.clinicId, clinicId), eq(planAttachments.groupId, currentGroupId))).for('update')
         const removed = existing.filter(file => !input.attachmentIds!.includes(file.id)).map(file => file.id)
@@ -211,7 +292,43 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
       }
       const oldById = new Map(oldRows.map(row => [row.id, row]))
       const activeRows = oldRows.filter(row => row.status !== 'cancelled')
-      const incomingIds = new Set<string>()
+      const incomingIds = new Set<string>(
+        normalized.map(item => item.id).filter((id): id is string => Boolean(id && validUuid(id)))
+      )
+      const existingApptLinks = activeRows.length
+        ? await tx
+          .select({
+            id: appointmentTreatments.id,
+            appointmentId: appointmentTreatments.appointmentId,
+            treatmentPlanId: appointmentTreatments.treatmentPlanId,
+            sessionNumber: appointmentTreatments.sessionNumber,
+          })
+          .from(appointmentTreatments)
+          .where(inArray(appointmentTreatments.treatmentPlanId, activeRows.map(row => row.id)))
+        : []
+      const existingLinksByTreatmentId = new Map<string, string[]>()
+      for (const link of existingApptLinks) {
+        const list = existingLinksByTreatmentId.get(link.treatmentPlanId) || []
+        if (!list.includes(link.appointmentId)) list.push(link.appointmentId)
+        existingLinksByTreatmentId.set(link.treatmentPlanId, list)
+      }
+      // If a user replaced a treatment on the same tooth in Edit mode (deleted old item, added new item on same tooth),
+      // preserve that tooth's scheduled appointment session(s) instead of jumping it to input.appointmentId.
+      const replacedToothLinksQueue = new Map<string, string[][]>()
+      for (const old of activeRows) {
+        if (!incomingIds.has(old.id)) {
+          const oldApptIds = existingLinksByTreatmentId.get(old.id)
+          if (oldApptIds && oldApptIds.length > 0) {
+            const toothKey = old.toothNumber || ''
+            const queue = replacedToothLinksQueue.get(toothKey) || []
+            queue.push(oldApptIds)
+            replacedToothLinksQueue.set(toothKey, queue)
+          }
+        }
+      }
+      const affectedAppointmentIds = new Set<string>(existingApptLinks.map(l => l.appointmentId))
+      if (input.appointmentId) affectedAppointmentIds.add(input.appointmentId)
+
       const payments = activeRows.length ? await tx.select({ id: patientPayments.treatmentPlanId }).from(patientPayments)
         .where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.treatmentPlanId, activeRows.map(row => row.id)))) : []
       const paidIds = new Set(payments.map(row => row.id))
@@ -223,11 +340,12 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
       const catalog = catalogIds.length ? await tx.select().from(treatmentCatalog).where(and(eq(treatmentCatalog.clinicId, clinicId), inArray(treatmentCatalog.id, catalogIds))) : []
       if (catalog.length !== catalogIds.length) throw new TreatmentPlanError('Katalog kaydı bu kliniğe ait değil')
 
+      const processedIds = new Set<string>()
       for (let i = 0; i < normalized.length; i++) {
         const item = normalized[i]
         const old = item.id ? oldById.get(item.id) : undefined
-        if (item.id && (!old || old.status === 'cancelled' || incomingIds.has(item.id))) throw new TreatmentPlanError('Tedavi bu plana ait değil veya tekrarlanmış')
-        if (item.id) incomingIds.add(item.id)
+        if (item.id && (!old || old.status === 'cancelled' || processedIds.has(item.id))) throw new TreatmentPlanError('Tedavi bu plana ait değil veya tekrarlanmış')
+        if (item.id) processedIds.add(item.id)
         const existingDetail = old ? detailById.get(old.id) : undefined
         const procedureId = item.metadata?.procedureId
         if (typeof procedureId === 'string') {
@@ -247,15 +365,6 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
           const original = (existingDetail.materials as Material[]).find(previous => previous.inventoryItemId === material.inventoryItemId)
           if (original) { material.unitCostMinor = original.unitCostMinor; material.name = original.name }
         }
-        if (old && (old.status === 'completed' || existingDetail?.stockState === 'consumed' || paidIds.has(old.id))) {
-          const incomingMaterials = item.materials.map(({ inventoryItemId, quantity, unitSalePriceMinor }) => ({ inventoryItemId, quantity, unitSalePriceMinor }))
-          const originalMaterials = ((existingDetail?.materials ?? []) as Material[]).map(({ inventoryItemId, quantity, unitSalePriceMinor }) => ({ inventoryItemId, quantity, unitSalePriceMinor }))
-          if (old.procedureName !== item.procedureName || (old.toothNumber ?? '') !== (item.toothNumber ?? '') ||
-            (old.indication ?? '') !== (item.indication ?? '') || (old.doctorId ?? '') !== (item.doctorId ?? '') ||
-            (existingDetail?.netPriceMinor ?? old.cost * 100) !== pricing.lineNetMinor[i] || JSON.stringify(originalMaterials) !== JSON.stringify(incomingMaterials))
-            throw new TreatmentPlanError('Tamamlanmış veya ödemeli tedavi değiştirilemez', 409)
-          continue
-        }
         const values = {
           procedureName: item.procedureName.trim(), toothNumber: item.toothNumber || null,
           indication: item.indication || null, doctorId: item.doctorId || null,
@@ -269,20 +378,40 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
         const [saved] = old
           ? await tx.update(treatmentPlans).set(values).where(eq(treatmentPlans.id, old.id)).returning()
           : await tx.insert(treatmentPlans).values({ ...values, patientId: input.patientId, clinicId, groupId: currentGroupId, status: 'planned' }).returning()
-        await tx.insert(treatmentPlanDetails).values({ treatmentId: saved.id, clinicId, basePriceMinor: item.basePriceMinor,
-          netPriceMinor: pricing.lineNetMinor[i], materials: item.materials, metadata: item.metadata ?? {}, stockState: old ? 'legacy_unknown' : 'planned' })
+        await tx.insert(treatmentPlanDetails).values({
+          treatmentId: saved.id, clinicId, basePriceMinor: item.basePriceMinor,
+          netPriceMinor: pricing.lineNetMinor[i], materials: item.materials, metadata: item.metadata ?? {}, stockState: existingDetail?.stockState ?? (old ? 'legacy_unknown' : 'planned')
+        })
           .onConflictDoUpdate({ target: treatmentPlanDetails.treatmentId, set: { basePriceMinor: item.basePriceMinor, netPriceMinor: pricing.lineNetMinor[i], materials: item.materials, metadata: item.metadata ?? {} } })
-        if (input.appointmentId) {
-          const [link] = await tx.select({ id: appointmentTreatments.id }).from(appointmentTreatments).where(and(
-            eq(appointmentTreatments.appointmentId, input.appointmentId), eq(appointmentTreatments.treatmentPlanId, saved.id),
-          )).limit(1)
-          if (!link) await tx.insert(appointmentTreatments).values({ appointmentId: input.appointmentId, treatmentPlanId: saved.id })
+
+        if (old) {
+          // Existing treatment: only link to input.appointmentId if it had NO session links at all
+          const existingLinks = existingLinksByTreatmentId.get(old.id) || []
+          if (existingLinks.length === 0 && input.appointmentId) {
+            await tx.insert(appointmentTreatments).values({ appointmentId: input.appointmentId, treatmentPlanId: saved.id })
+          }
+        } else {
+          // New treatment: check if it replaced a cancelled treatment on the same tooth that had session links
+          const toothKey = item.toothNumber || ''
+          const toothQueue = replacedToothLinksQueue.get(toothKey)
+          const inheritedApptIds = toothQueue && toothQueue.length > 0 ? toothQueue.shift() : undefined
+          const targetApptIds = inheritedApptIds && inheritedApptIds.length > 0
+            ? inheritedApptIds
+            : (input.appointmentId ? [input.appointmentId] : [])
+          for (const targetApptId of targetApptIds) {
+            const [link] = await tx.select({ id: appointmentTreatments.id }).from(appointmentTreatments).where(and(
+              eq(appointmentTreatments.appointmentId, targetApptId), eq(appointmentTreatments.treatmentPlanId, saved.id),
+            )).limit(1)
+            if (!link) await tx.insert(appointmentTreatments).values({ appointmentId: targetApptId, treatmentPlanId: saved.id })
+            affectedAppointmentIds.add(targetApptId)
+          }
         }
       }
       for (const old of activeRows) if (!incomingIds.has(old.id)) {
-        if (old.status === 'completed' || detailById.get(old.id)?.stockState === 'consumed' || paidIds.has(old.id)) throw new TreatmentPlanError('Tamamlanmış veya ödemeli tedavi kaldırılamaz', 409)
+        await tx.delete(appointmentTreatments).where(eq(appointmentTreatments.treatmentPlanId, old.id))
         await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(eq(treatmentPlans.id, old.id))
       }
+      await syncAppointmentTitles(tx, clinicId, affectedAppointmentIds)
       return currentGroupId
     })
     return await getTreatmentPlan(savedId, clinicId)
@@ -377,8 +506,6 @@ export async function completeTreatmentItem(id: string, clinicId: string, values
       if (doctors.length !== resolvedDoctorIds.length) throw new TreatmentPlanError('Seçilen hekim kliniğe ait değil')
     }
     const [details] = await tx.select().from(treatmentPlanDetails).where(eq(treatmentPlanDetails.treatmentId, id)).for('update')
-    if ((plan.status === 'completed' || details?.stockState === 'consumed') && hasDoctorUpdate && effectiveDoctorId !== plan.doctorId)
-      throw new TreatmentPlanError('Tamamlanmış tedavinin hekimi değiştirilemez', 409)
     if (values.status === 'completed' && details?.stockState === 'planned') {
       const materials = [...(details.materials as Material[])].sort((a, b) => a.inventoryItemId.localeCompare(b.inventoryItemId))
       for (const material of materials) {
@@ -388,8 +515,10 @@ export async function completeTreatmentItem(id: string, clinicId: string, values
         const date = new Date().toISOString().slice(0, 10)
         await tx.insert(inventoryMovements).values({ clinicId, itemId: material.inventoryItemId, type: 'cikis', quantity: material.quantity, notes: `Tedavi ${plan.id}` })
         if (effectiveDoctorId || plan.doctorId) await tx.insert(materialUsages).values({ clinicId, doctorId: (effectiveDoctorId || plan.doctorId)!, patientId: plan.patientId, inventoryItemId: material.inventoryItemId, quantity: material.quantity, date })
-        await tx.insert(expenses).values({ clinicId, category: 'malzeme', itemName: material.name, quantity: material.quantity,
-          unitCost: material.unitCostMinor / 100, totalCost: material.quantity * material.unitCostMinor / 100, date, notes: `Tedavi ${plan.id}` })
+        await tx.insert(expenses).values({
+          clinicId, category: 'malzeme', itemName: material.name, quantity: material.quantity,
+          unitCost: material.unitCostMinor / 100, totalCost: material.quantity * material.unitCostMinor / 100, date, notes: `Tedavi ${plan.id}`
+        })
       }
       await tx.update(treatmentPlanDetails).set({ stockState: 'consumed' }).where(eq(treatmentPlanDetails.treatmentId, id))
     }
@@ -422,12 +551,10 @@ export async function cancelTreatmentItem(id: string, clinicId: string) {
   return db.transaction(async tx => {
     const [plan] = await tx.select().from(treatmentPlans).where(and(eq(treatmentPlans.id, id), eq(treatmentPlans.clinicId, clinicId))).for('update')
     if (!plan) return false
-    const [details] = await tx.select().from(treatmentPlanDetails).where(eq(treatmentPlanDetails.treatmentId, id))
-    const [payment] = await tx.select({ id: patientPayments.id }).from(patientPayments)
-      .where(and(eq(patientPayments.clinicId, clinicId), eq(patientPayments.treatmentPlanId, id))).limit(1)
-    if (plan.status === 'completed' || details?.stockState === 'consumed' || payment)
-      throw new TreatmentPlanError('Tamamlanmış veya ödemeli tedavi kaldırılamaz', 409)
+    const links = await tx.select({ appointmentId: appointmentTreatments.appointmentId }).from(appointmentTreatments).where(eq(appointmentTreatments.treatmentPlanId, id))
+    await tx.delete(appointmentTreatments).where(eq(appointmentTreatments.treatmentPlanId, id))
     await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(eq(treatmentPlans.id, id))
+    await syncAppointmentTitles(tx, clinicId, links.map(l => l.appointmentId))
     return true
   })
 }
@@ -440,10 +567,6 @@ export async function cancelTreatmentGroup(id: string, clinicId: string) {
     if (!group) return false
     const items = await tx.select().from(treatmentPlans).where(and(eq(treatmentPlans.groupId, id), eq(treatmentPlans.clinicId, clinicId))).for('update')
     const ids = items.map(item => item.id)
-    const details = ids.length ? await tx.select().from(treatmentPlanDetails).where(inArray(treatmentPlanDetails.treatmentId, ids)) : []
-    const payments = ids.length ? await tx.select({ id: patientPayments.id }).from(patientPayments).where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.treatmentPlanId, ids))) : []
-    if (items.some(item => item.status === 'completed') || details.some(item => item.stockState === 'consumed') || payments.length)
-      throw new TreatmentPlanError('Tamamlanmış veya ödemeli tedavi içeren plan kaldırılamaz', 409)
     if (ids.length) await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(inArray(treatmentPlans.id, ids))
     await tx.update(treatmentGroups).set({ status: 'cancelled' }).where(eq(treatmentGroups.id, id))
     return true

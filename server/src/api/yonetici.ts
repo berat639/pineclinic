@@ -627,6 +627,10 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     }
 
     const b = (body || {}) as any
+    if (b.role === 'yonetici') {
+      set.status = 403
+      return { error: 'Yönetici (Seed User) ataması ve e-posta daveti yalnızca satış ekibi tarafından Klinikler sekmesinden yapılabilir.' }
+    }
     const hostname = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
     try {
       const invitation = await createStaffInvitation({
@@ -634,7 +638,7 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
         invitedBy: user.id || null,
         name: b.name,
         email: b.email,
-        role: b.role || 'hekim',
+        role: b.role === 'host' ? 'host' : 'hekim',
         specialty: b.specialty,
         color: b.color,
         hostname,
@@ -671,8 +675,12 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (!b.email || !b.name || !b.password || !b.role) {
       set.status = 400; return { error: 'email, name, password, role gerekli' }
     }
-    if (!['yonetici', 'hekim', 'host'].includes(b.role)) {
-      set.status = 400; return { error: 'role: yonetici, hekim veya host' }
+    if (b.role === 'yonetici') {
+      set.status = 403
+      return { error: 'Yönetici (Seed User) ataması yalnızca satış ekibi tarafından Klinikler sekmesinden yapılabilir.' }
+    }
+    if (!['hekim', 'host'].includes(b.role)) {
+      set.status = 400; return { error: 'role: hekim veya host olmalıdır' }
     }
 
     const { getUserByEmail, createUser } = await import('../db/repositories/users')
@@ -697,12 +705,40 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { hasClinicStaffPermission } = await import('../services/staff-invitations')
-    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'manageStaff'))) {
+    const clinicId = requireClinicId()
+    if (!user || !(await hasClinicStaffPermission(clinicId, user.role, 'manageStaff'))) {
       set.status = 403; return { error: 'Yetki yok' }
     }
 
-    const { updateUser } = await import('../db/repositories/users')
+    const { updateUser, getUserById, countActiveClinicAdmins } = await import('../db/repositories/users')
     const b = body as any
+
+    const targetUser = await getUserById(params.id)
+    if (!targetUser) { set.status = 404; return { error: 'Kullanıcı bulunamadı' } }
+
+    const isTargetAdmin = targetUser.role === 'yonetici'
+    if (isTargetAdmin && b.active !== undefined && b.active !== targetUser.active) {
+      set.status = 403
+      return {
+        error:
+          'Yönetici hesabı yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında dondurulabilir veya aktifleştirilebilir.',
+      }
+    }
+    if (isTargetAdmin && b.role && b.role !== 'yonetici') {
+      set.status = 403
+      return {
+        error:
+          'Yönetici hesabının rolü personel ekranından düşürülemez. Yönetici işlemleri yalnızca satışçı tarafından Klinikler sekmesinden yapılabilir.',
+      }
+    }
+    if (!isTargetAdmin && b.role === 'yonetici') {
+      set.status = 403
+      return {
+        error:
+          'Yönetici (Seed User) ataması yalnızca satışçı tarafından Klinikler sekmesinden ilgili klinik altında yapılabilir.',
+      }
+    }
+
     const data: any = {}
     if (b.name) data.name = b.name
     if (b.email) data.email = b.email.toLowerCase().trim()
@@ -715,14 +751,22 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
 
     const updated = await updateUser(params.id, data)
     if (!updated) { set.status = 404; return { error: 'Kullanıcı bulunamadı' } }
-    return { id: updated.id, email: updated.email, name: updated.name, role: updated.role, active: updated.active }
+    return {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role,
+      active: updated.active,
+      unassignedAppointmentsCount: updated.unassignedAppointmentsCount ?? 0,
+    }
   })
 
   .delete('/users/:id', async ({ params, cookie, set }) => {
     const isAdmin = cookie.admin_auth?.value === 'true'
     const user = isAdmin ? { id: null, role: 'yonetici' } : await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
     const { hasClinicStaffPermission } = await import('../services/staff-invitations')
-    if (!user || !(await hasClinicStaffPermission(requireClinicId(), user.role, 'manageStaff'))) {
+    const clinicId = requireClinicId()
+    if (!user || !(await hasClinicStaffPermission(clinicId, user.role, 'manageStaff'))) {
       set.status = 403; return { error: 'Yetki yok' }
     }
 
@@ -730,7 +774,13 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
       set.status = 400; return { error: 'Kendi hesabınızı silemezsiniz' }
     }
 
-    const { deleteUser } = await import('../db/repositories/users')
+    const { deleteUser, getUserById } = await import('../db/repositories/users')
+    const targetUser = await getUserById(params.id)
+    if (targetUser?.role === 'yonetici') {
+      set.status = 403
+      return { error: 'Yönetici hesabı personel ekranından silinemez. Yönetici işlemleri yalnızca satışçı tarafından Klinikler sekmesinden yapılabilir.' }
+    }
+
     const ok = await deleteUser(params.id)
     if (!ok) { set.status = 404; return { error: 'Kullanıcı bulunamadı' } }
     return { success: true }

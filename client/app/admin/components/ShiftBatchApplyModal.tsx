@@ -353,7 +353,7 @@ export default function ShiftBatchApplyModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -363,121 +363,130 @@ export default function ShiftBatchApplyModal({
       {...backdropDismiss}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%',
-          maxWidth: 680,
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          background: 'var(--card-bg, #1e293b)',
-          borderRadius: 16,
-          border: '1px solid var(--input-border, #334155)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-          padding: 24,
+          width: 'calc(100vw - 24px)',
+          maxWidth: 460,
+          maxHeight: '90vh',
+          background: 'var(--card-bg)',
+          borderRadius: 14,
+          border: '1.5px solid var(--input-border)',
+          boxShadow: 'var(--pc-modal-shadow)',
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          gap: 16
+          overflow: 'hidden'
         }}
       >
-        {/* Modal Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* Modal Header (Yeni Randevu Standardı) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderBottom: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: 'rgba(59, 130, 246, 0.15)',
-              border: '1px solid rgba(59, 130, 246, 0.3)',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: '#2563eb',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: 'var(--accent, #3b82f6)'
+              color: '#ffffff',
+              boxShadow: 'var(--pc-clay-primary)',
+              flexShrink: 0
             }}>
-              <Zap size={20} />
+              <Zap size={17} color="#ffffff" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                Vardiya Şablonu Uygula
+              <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                Vardiya Planı Uygula
               </h3>
-              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)' }}>
-                Haftalık veya aylık şablonları personele toplu olarak atayın
+              <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>
+                Haftalık veya aylık planları personele atayın
               </div>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', padding: 4 }}
+            aria-label="Kapat"
+            style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}
           >
-            <X size={20} />
+            <X size={16} />
           </button>
         </div>
 
         {/* Mode Tabs */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, border: '1px solid var(--glass-border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, background: 'var(--card-inner)', padding: '12px 20px', borderBottom: '1px solid var(--input-border)' }}>
           <button
             type="button"
             onClick={() => setMode('weekly')}
             style={{
-              padding: '8px 12px',
+              padding: '8px 10px',
               borderRadius: 8,
-              border: 'none',
-              background: mode === 'weekly' ? 'var(--accent, #3b82f6)' : 'transparent',
-              color: mode === 'weekly' ? '#fff' : 'var(--foreground-2)',
+              border: mode === 'weekly' ? '1px solid #2563eb' : '1px solid var(--input-border)',
+              background: mode === 'weekly' ? '#2563eb' : 'var(--card-bg)',
+              color: mode === 'weekly' ? '#ffffff' : 'var(--foreground)',
               fontSize: '0.78rem',
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 6
+              gap: 6,
+              boxShadow: mode === 'weekly' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
             }}
           >
-            <Calendar size={14} /> Haftalık Şablon
+            <Calendar size={14} color={mode === 'weekly' ? '#ffffff' : 'currentColor'} /> <span style={{ color: mode === 'weekly' ? '#ffffff' : 'inherit' }}>Haftalık</span>
           </button>
 
           <button
             type="button"
             onClick={() => setMode('monthly')}
             style={{
-              padding: '8px 12px',
+              padding: '8px 10px',
               borderRadius: 8,
-              border: 'none',
-              background: mode === 'monthly' ? '#a855f7' : 'transparent',
-              color: mode === 'monthly' ? '#fff' : 'var(--foreground-2)',
+              border: mode === 'monthly' ? '1px solid #2563eb' : '1px solid var(--input-border)',
+              background: mode === 'monthly' ? '#2563eb' : 'var(--card-bg)',
+              color: mode === 'monthly' ? '#ffffff' : 'var(--foreground)',
               fontSize: '0.78rem',
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 6
+              gap: 6,
+              boxShadow: mode === 'monthly' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
             }}
           >
-            <CalendarDays size={14} /> Aylık Şablon
+            <CalendarDays size={14} color={mode === 'monthly' ? '#ffffff' : 'currentColor'} /> <span style={{ color: mode === 'monthly' ? '#ffffff' : 'inherit' }}>Aylık</span>
           </button>
 
           <button
             type="button"
             onClick={() => setMode('daily')}
             style={{
-              padding: '8px 12px',
+              padding: '8px 10px',
               borderRadius: 8,
-              border: 'none',
-              background: mode === 'daily' ? '#10b981' : 'transparent',
-              color: mode === 'daily' ? '#fff' : 'var(--foreground-2)',
+              border: mode === 'daily' ? '1px solid #2563eb' : '1px solid var(--input-border)',
+              background: mode === 'daily' ? '#2563eb' : 'var(--card-bg)',
+              color: mode === 'daily' ? '#ffffff' : 'var(--foreground)',
               fontSize: '0.78rem',
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 6
+              gap: 6,
+              boxShadow: mode === 'daily' ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
             }}
           >
-            <Clock size={14} /> Hızlı Günlük Yay
+            <Clock size={14} color={mode === 'daily' ? '#ffffff' : 'currentColor'} /> <span style={{ color: mode === 'daily' ? '#ffffff' : 'inherit' }}>Günlük</span>
           </button>
         </div>
+
+        {/* Body */}
+        <div style={{ padding: '18px 20px', flex: 1, overflowY: 'auto', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* 1. Şablon Seçimi */}
         <div style={{ background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 10, border: '1px solid var(--glass-border)' }}>
@@ -787,50 +796,58 @@ export default function ShiftBatchApplyModal({
         </div>
 
         {error && (
-          <div style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 600, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600, padding: '8px 12px', borderRadius: 8, background: 'var(--card-inner)', border: '1px solid var(--danger)' }}>
             ⚠️ {error}
           </div>
         )}
+        </div>
 
         {/* Footer Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--input-border)', background: 'var(--card-inner)' }}>
           <button
             type="button"
             onClick={onClose}
-            className="btn-clinic-blue"
             style={{
-              padding: '8px 16px',
+              padding: '9px 18px',
               borderRadius: 8,
-              fontSize: '0.8rem',
-              cursor: 'pointer'
+              border: '1px solid var(--input-border)',
+              background: 'var(--card-bg)',
+              color: 'var(--foreground)',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: 'var(--pc-clay-btn)',
             }}
           >
-            Vazgeç
+            İptal
           </button>
           <button
             type="button"
             onClick={handleApply}
             disabled={isSubmitting || generatedShifts.length === 0}
-            className="btn-clinic-primary"
             style={{
-              padding: '8px 20px',
+              padding: '9px 24px',
               borderRadius: 8,
-              fontSize: '0.8rem',
-              fontWeight: 600,
+              border: 'none',
+              background: '#2563eb',
+              color: '#ffffff',
+              fontSize: '0.86rem',
+              fontWeight: 700,
               cursor: isSubmitting || generatedShifts.length === 0 ? 'not-allowed' : 'pointer',
               opacity: isSubmitting || generatedShifts.length === 0 ? 0.6 : 1,
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6
+              gap: 6,
+              boxShadow: 'var(--pc-clay-primary)',
             }}
           >
             {isSubmitting ? (
               <>
-                <RefreshCw size={14} className="animate-spin" /> Kaydediliyor...
+                <RefreshCw size={14} color="#ffffff" className="animate-spin" /> <span style={{ color: '#ffffff' }}>Kaydediliyor...</span>
               </>
             ) : (
               <>
-                <Zap size={14} /> Şablonu Uygula ve Takvime İşle
+                <Zap size={14} color="#ffffff" /> <span style={{ color: '#ffffff' }}>Kaydet</span>
               </>
             )}
           </button>

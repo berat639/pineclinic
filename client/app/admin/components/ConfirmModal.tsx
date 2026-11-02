@@ -30,31 +30,25 @@ export default function ConfirmModal({
     switch (variant) {
       case 'warning':
         return {
-          icon: <AlertTriangle size={28} className="text-amber-500" />,
-          iconBg: 'rgba(245, 158, 11, 0.12)',
-          iconBorder: 'rgba(245, 158, 11, 0.25)',
-          btnBg: '#f59e0b',
-          btnHover: '#d97706',
-          btnText: '#fff'
+          icon: <AlertTriangle size={17} color="#ffffff" />,
+          iconBg: '#d97706',
+          btnBg: '#d97706',
+          subtitle: 'Lütfen işlemi onaylayın',
         };
       case 'primary':
         return {
-          icon: <CheckCircle2 size={28} className="text-blue-500" />,
-          iconBg: 'rgba(59, 130, 246, 0.12)',
-          iconBorder: 'rgba(59, 130, 246, 0.25)',
-          btnBg: '#3b82f6',
-          btnHover: '#2563eb',
-          btnText: '#fff'
+          icon: <CheckCircle2 size={17} color="#ffffff" />,
+          iconBg: '#2563eb',
+          btnBg: '#2563eb',
+          subtitle: 'İşlem onayı',
         };
       case 'danger':
       default:
         return {
-          icon: <Trash2 size={28} className="text-rose-500" />,
-          iconBg: 'rgba(239, 68, 68, 0.12)',
-          iconBorder: 'rgba(239, 68, 68, 0.25)',
-          btnBg: '#ef4444',
-          btnHover: '#dc2626',
-          btnText: '#fff'
+          icon: <Trash2 size={17} color="#ffffff" />,
+          iconBg: '#dc2626',
+          btnBg: '#dc2626',
+          subtitle: 'Bu işlem geri alınamaz',
         };
     }
   };
@@ -72,105 +66,143 @@ export default function ConfirmModal({
         justifyContent: 'center',
         zIndex: 9999999,
         padding: '16px',
-        animation: 'fadeIn 0.15s ease-out'
       }}
       {...backdropDismiss}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%',
+          width: 'calc(100vw - 24px)',
           maxWidth: '460px',
-          background: 'var(--card-bg, #1e293b)',
+          background: 'var(--card-bg)',
           borderRadius: '14px',
-          border: '1.5px solid var(--input-border, #334155)',
+          border: '1.5px solid var(--input-border)',
           boxShadow: 'var(--pc-modal-shadow)',
-          padding: '24px',
-          position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center',
-          animation: 'scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
+          overflow: 'hidden',
         }}
       >
-        {/* Kapat Butonu */}
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: 14,
-            right: 14,
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--foreground-3, #94a3b8)',
-            cursor: 'pointer',
-            padding: 4,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.15s'
-          }}
-        >
-          <X size={18} />
-        </button>
-
-        {/* İkon */}
+        {/* Header (Yeni Randevu Standardı) */}
         <div
           style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            background: vStyle.iconBg,
-            border: `1.5px solid ${vStyle.iconBorder}`,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '16px'
+            justifyContent: 'space-between',
+            padding: '15px 20px',
+            borderBottom: '1px solid var(--input-border)',
+            background: 'var(--card-inner)',
           }}
         >
-          {vStyle.icon}
-        </div>
-
-        {/* Başlık */}
-        <h3
-          style={{
-            margin: '0 0 8px 0',
-            fontSize: '1.15rem',
-            fontWeight: 700,
-            color: 'var(--foreground, #f8fafc)'
-          }}
-        >
-          {title}
-        </h3>
-
-        {/* Mesaj */}
-        <p
-          style={{
-            margin: '0 0 24px 0',
-            fontSize: '0.88rem',
-            lineHeight: 1.5,
-            color: 'var(--foreground-2, #94a3b8)'
-          }}
-        >
-          {message}
-        </p>
-
-        {/* Butonlar */}
-        <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: vStyle.iconBg,
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 'var(--pc-clay-primary)',
+                flexShrink: 0,
+              }}
+            >
+              {vStyle.icon}
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: '1.02rem',
+                  fontWeight: 700,
+                  color: 'var(--foreground)',
+                  lineHeight: 1.2,
+                }}
+              >
+                {title}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.75rem',
+                  color: 'var(--foreground-3)',
+                  marginTop: '2px',
+                }}
+              >
+                {vStyle.subtitle}
+              </div>
+            </div>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="btn-clinic-blue"
+            aria-label="Kapat"
             style={{
-              flex: 1,
-              padding: '10px 16px',
-              borderRadius: '10px',
-              fontWeight: 600,
-              fontSize: '0.88rem',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--input-border)',
+              borderRadius: '6px',
+              width: '28px',
+              height: '28px',
               cursor: 'pointer',
-              transition: 'all 0.15s'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--foreground)',
+              boxShadow: 'var(--pc-clay-btn)',
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div
+          style={{
+            padding: '18px 20px',
+            background: 'var(--card-bg)',
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--card-inner)',
+              padding: '14px',
+              borderRadius: '10px',
+              border: '1px solid var(--input-border)',
+              fontSize: '0.86rem',
+              lineHeight: 1.55,
+              color: 'var(--foreground-2)',
+            }}
+          >
+            {message}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: '14px 20px',
+            borderTop: '1px solid var(--input-border)',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px',
+            background: 'var(--card-inner)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: '1px solid var(--input-border)',
+              background: 'var(--card-bg)',
+              color: 'var(--foreground)',
+              fontWeight: 600,
+              fontSize: '0.86rem',
+              cursor: 'pointer',
+              boxShadow: 'var(--pc-clay-btn)',
             }}
           >
             {cancelText}
@@ -182,20 +214,18 @@ export default function ConfirmModal({
               onClose();
             }}
             style={{
-              flex: 1,
-              padding: '10px 16px',
-              borderRadius: '10px',
+              padding: '9px 24px',
+              borderRadius: '8px',
               border: 'none',
               background: vStyle.btnBg,
-              color: vStyle.btnText,
-              fontWeight: 600,
-              fontSize: '0.88rem',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: '0.86rem',
               cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
-              transition: 'all 0.15s'
+              boxShadow: 'var(--pc-clay-primary)',
             }}
           >
-            {confirmText}
+            <span style={{ color: '#ffffff' }}>{confirmText}</span>
           </button>
         </div>
       </div>

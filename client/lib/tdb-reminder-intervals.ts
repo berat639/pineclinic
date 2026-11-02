@@ -13,13 +13,24 @@ export const REMINDER_PRESETS: ReminderPreset[] = [
   { days: 365, label: '1 Yıl (365g)', sublabel: 'Yıllık / Protez' },
 ]
 
-export function formatReminderLabel(periodic: boolean, periodDays: number): string {
+export function formatSingleReminderInterval(days: number): string {
+  if (days === 180) return '6 Ay (180g)'
+  if (days === 90) return '3 Ay (90g)'
+  if (days === 30) return '1 Ay (30g)'
+  if (days === 365) return '1 Yıl (365g)'
+  if (days === 14) return '14 Gün'
+  if (days === 7) return '7 Gün'
+  return `${days} gün`
+}
+
+export function formatReminderLabel(periodic: boolean, periodDays: number | number[]): string {
   if (!periodic) return 'Tedavi hatırlatma bildirimleri · Kapalı'
-  if (periodDays === 180) return 'Tedavi hatırlatma bildirimleri · 6 Ay (180g)'
-  if (periodDays === 90) return 'Tedavi hatırlatma bildirimleri · 3 Ay (90g)'
-  if (periodDays === 30) return 'Tedavi hatırlatma bildirimleri · 1 Ay (30g)'
-  if (periodDays === 365) return 'Tedavi hatırlatma bildirimleri · 1 Yıl (365g)'
-  return `Tedavi hatırlatma bildirimleri · ${periodDays} gün`
+  const list = (Array.isArray(periodDays) ? periodDays : [periodDays])
+    .map(n => Number(n))
+    .filter(n => Number.isFinite(n) && n >= 1)
+  const uniqueSorted = Array.from(new Set(list)).sort((a, b) => a - b)
+  if (uniqueSorted.length === 0) return 'Tedavi hatırlatma bildirimleri · Kapalı'
+  return `Tedavi hatırlatma bildirimleri · ${uniqueSorted.map(formatSingleReminderInterval).join(' + ')}`
 }
 
 // Complete TDB (Türk Dişhekimleri Birliği) clinical recall rules
@@ -203,6 +214,7 @@ const NO_REMINDER_DIAGNOSTIC_KEYWORDS = [
 export interface TdbReminderSuggestion {
   periodic: boolean
   days: number
+  daysList?: number[]
   badge: string
   reason: string
 }
@@ -217,48 +229,47 @@ export function getTdbReminderSuggestion(procedureNames: string[]): TdbReminderS
   const matchesAny = (keywords: string[]) =>
     normalized.some(proc => keywords.some(kw => proc.includes(kw)))
 
+  const matchedDays: number[] = []
+  const matchedLabels: string[] = []
+  const matchedReasons: string[] = []
+
   if (matchesAny(POST_OP_7_DAY_KEYWORDS)) {
-    return {
-      periodic: true,
-      days: 7,
-      badge: '7 Gün (Cerrahi / Dikiş Kontrolü)',
-      reason: 'Planda cerrahi / greft / operasyon işlemi yer aldığı için TDB klinik akışına göre 7. günde yara ve dikiş kontrolü önerilir.',
-    }
+    matchedDays.push(7)
+    matchedLabels.push('7 Gün (Cerrahi / Dikiş)')
+    matchedReasons.push('Planda cerrahi / greft / operasyon işlemi yer aldığı için TDB klinik akışına göre 7. günde yara ve dikiş kontrolü önerilir.')
   }
 
   if (matchesAny(MONTHLY_30_DAY_KEYWORDS)) {
-    return {
-      periodic: true,
-      days: 30,
-      badge: '1 Ay / 30 Gün (Aktif Takip)',
-      reason: 'Planda ortodontik tedavi, plak/splint veya ara seans işlemi yer aldığı için aylık (30 gün) kontrol önerilir.',
-    }
+    matchedDays.push(30)
+    matchedLabels.push('1 Ay / 30 Gün (Aktif Takip)')
+    matchedReasons.push('Planda ortodontik tedavi, plak/splint veya ara seans işlemi yer aldığı için aylık (30 gün) kontrol önerilir.')
   }
 
   if (matchesAny(QUARTERLY_90_DAY_KEYWORDS)) {
-    return {
-      periodic: true,
-      days: 90,
-      badge: '3 Ay / 90 Gün (İmplant / Lezyon / Perio)',
-      reason: 'Planda implant, periapikal lezyonlu kanal veya ileri periodontal işlem yer aldığı için 90. günde (3 ay) osteointegrasyon/iyileşme kontrolü önerilir.',
-    }
+    matchedDays.push(90)
+    matchedLabels.push('3 Ay / 90 Gün (İmplant / Perio)')
+    matchedReasons.push('Planda implant, periapikal lezyonlu kanal veya ileri periodontal işlem yer aldığı için 90. günde (3 ay) osteointegrasyon/iyileşme kontrolü önerilir.')
   }
 
   if (matchesAny(SIX_MONTH_180_DAY_KEYWORDS)) {
-    return {
-      periodic: true,
-      days: 180,
-      badge: '6 Ay / 180 Gün (Rutin Kontrol)',
-      reason: 'Restoratif, endodontik, protetik veya detartraj/flor işlemleri için standart 6 ayda bir (180 gün) kontrol önerilir.',
-    }
+    matchedDays.push(180)
+    matchedLabels.push('6 Ay / 180 Gün (Rutin Kontrol)')
+    matchedReasons.push('Restoratif, endodontik, protetik veya detartraj/flor işlemleri için standart 6 ayda bir (180 gün) kontrol önerilir.')
   }
 
   if (matchesAny(YEARLY_365_DAY_KEYWORDS)) {
+    matchedDays.push(365)
+    matchedLabels.push('1 Yıl / 365 Gün (Yıllık Kontrol)')
+    matchedReasons.push('Hareketli protez ve genel takip işlemleri için yıllık (365 gün) uyum ve kontrol randevusu önerilir.')
+  }
+
+  if (matchedDays.length > 0) {
     return {
       periodic: true,
-      days: 365,
-      badge: '1 Yıl / 365 Gün (Yıllık Kontrol)',
-      reason: 'Hareketli protez ve genel takip işlemleri için yıllık (365 gün) uyum ve kontrol randevusu önerilir.',
+      days: matchedDays[0],
+      daysList: matchedDays,
+      badge: matchedLabels.join(' + '),
+      reason: matchedReasons.join(' '),
     }
   }
 
