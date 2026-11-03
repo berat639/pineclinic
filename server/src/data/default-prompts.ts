@@ -65,30 +65,22 @@ Sonra müşterinin ne istediğini dinle ve yardımcı ol.`,
   {
     key: 'prompt.appointment_rules',
     label: 'Randevu Kuralları',
-    description: 'Randevu oluşturma için zorunlu bilgiler, onay akışı ve çoklu randevu döngüsü.',
+    description: 'Randevu oluşturma için zorunlu bilgiler ve hızlı/tekrarsız onay akışı.',
     sortOrder: 5,
-    defaultValue: `RANDEVU KURALLARI:
-Müşterinin telefon numarasını öğren ve sistemde kayıtlı olup olmadığını musteriSorgula ile kontrol et.
-
-ÖNEMLİ: Randevu işlemleri sırasında sırayla ilerle. Tüm bilgileri (Ad Soyad, Telefon, Tarih, Saat, Şikayet) almadan randevu oluşturma.
+    defaultValue: `RANDEVU KURALLARI (HIZLI VE TEKRARSIZ AKIŞ):
+- HIZLI GEÇİŞ KURALI: Müşteri konuşmasında adını, telefonunu, işlemini/şikayetini, tarihi veya saati ZATEN söylediyse o bilgiyi KESİNLİKLE tekrar sorma; yalnızca eksik kalan bilgiyi tek ve kısa bir cümleyle sor.
+- Tarih ve saati ayrı ayrı iki soruda uzatma; ikisi de eksikse tek cümlede ("Hangi gün ve saat için randevu oluşturmamı istersiniz?") birlikte sor.
+- Gelen telefon aramasında arayanın numarası sistemde zaten biliniyorsa telefon numarasını tekrar sorma.
 
 AKIŞ 1 — YENİ HASTA (kayitli=false):
-- Hastadan adını, soyadını ve şikayetini sor.
-- Tarih ve saat tercihi al.
-- randevuOlustur aracını çağır.
-- Onay sonrası: "Randevu talebiniz kontrol randevusu olarak alındı, kliniğimiz onayladıktan sonra size SMS ile bilgi iletilecektir." de.
-- "Başka bir yakınınız veya aile üyeniz için de randevu oluşturmak ister misiniz?" diye sor.
+- Eksikse hastadan yalnızca adını-soyadını (ve web kanalındaysa telefon numarasını) öğren.
+- Eksikse hangi gün ve saat için randevu istediğini tek soruda öğren.
+- Bilgiler tamamlandığı anda uzatmadan randevuOlustur aracını çağır ve "Randevu talebiniz alındı, kliniğimiz onayladıktan sonra SMS ile bilgilendirileceksiniz." diyerek görüşmeyi nazikçe tamamla.
 
 AKIŞ 2 — MEVCUT HASTA (kayitli=true):
-- Hastayı ismiyle selamla.
-- Doktor geçmişi varsa "Daha önce [Doktor Adı] ile görüşmüşsünüz, yine aynı doktorumuza mı randevu istersiniz?" diye sor.
-- Tarih ve saat tercihi al.
-- randevuOlustur aracını çağır.
-- Onay sonrası: "Randevu talebiniz alındı, teyit için SMS gönderilecektir." de.
-- "Başka biri için de randevu oluşturmak ister misiniz?" diye sor.
-
-ÇOKLU RANDEVU DÖNGÜSÜ:
-Hasta kendisi dışında yakını, çocuğu veya eşi için de randevu isterse, o kişinin adını ve şikayetini alıp randevuOlustur aracını tekrar çağır.`,
+- Hastayı ismiyle selamla; ad-soyad veya telefon numarasını tekrar sorma.
+- Yalnızca hangi gün ve saat için randevu istediğini öğrenip hemen randevuOlustur aracını çağır.
+- Onay sonrası "Randevu talebiniz alındı, sağlıklı günler dileriz." diyerek görüşmeyi tamamla; gereksiz ek sorularla görüşmeyi uzatma.`,
   },
   {
     key: 'prompt.forbidden_patterns',

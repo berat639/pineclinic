@@ -63,6 +63,46 @@ function validField(node: FlowNode, fields: Record<string, unknown>) {
   return true
 }
 
+export function buildFlowNodePrompt(
+  flow: ConversationFlow,
+  node: FlowNode,
+  fields: Record<string, unknown> = {},
+): string | undefined {
+  if (node.type === 'FIELD') {
+    const nextEdge = edgesFrom(flow.edges, node.id)[0]
+    const nextNode = nextEdge ? flow.nodes.find(n => n.id === nextEdge.target) : undefined
+    if (
+      node.data.fieldName === 'tarih' &&
+      nextNode?.type === 'FIELD' &&
+      nextNode.data.fieldName === 'saat' &&
+      !validField(nextNode, fields)
+    ) {
+      return 'Hangi gün ve saat için randevu oluşturmamı istersiniz? (Bu soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; cevap almadan sıradaki adıma geçme.)'
+    }
+    if (
+      node.data.fieldName === 'musteri_adi' &&
+      nextNode?.type === 'FIELD' &&
+      nextNode.data.fieldName === 'telefon' &&
+      !validField(nextNode, fields)
+    ) {
+      return 'Randevunuz için adınızı, soyadınızı ve telefon numaranızı alabilir miyim? (Bu soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; cevap almadan sıradaki adıma geçme.)'
+    }
+    const base = node.data.description || `${node.data.fieldName || 'Bu bilgiyi'} kullanıcıdan kısa ve açık biçimde iste.`
+    return `${base} (Bu soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; cevap almadan sıradaki adıma geçme.)`
+  }
+  if (node.type === 'END') return node.data.message || 'Görüşmeyi kısa ve nazikçe tamamla.'
+  if (node.type === 'ACTION') {
+    const act = String(node.data.action || '')
+    if (act === 'wait_reprompt' || act === 'wait') {
+      return renderFlowTemplate(node.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?', fields)
+    }
+    if (act === 'switch_prompt') {
+      return renderFlowTemplate(node.data.promptInstruction || node.data.message || '', fields)
+    }
+  }
+  return undefined
+}
+
 export async function resolveFlowRuntimeMode(clinicId?: string): Promise<FlowRuntimeMode> {
   const value = await getSetting('ai.flow_runtime_mode', clinicId).catch(() => null)
   return value === 'active' || value === 'observe' ? value : 'legacy'
@@ -123,21 +163,7 @@ export class FlowEngine {
   private next(edge?: FlowEdge) { this.state.currentNodeId = edge?.target }
 
   private promptFor(node: FlowNode) {
-    if (node.type === 'FIELD') {
-      const base = node.data.description || `${node.data.fieldName || 'Bu bilgiyi'} kullanıcıdan kısa ve açık biçimde iste.`
-      return `${base} (Bu soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; cevap almadan sıradaki adıma geçme.)`
-    }
-    if (node.type === 'END') return node.data.message || 'Görüşmeyi kısa ve nazikçe tamamla.'
-    if (node.type === 'ACTION') {
-      const act = String(node.data.action || '')
-      if (act === 'wait_reprompt' || act === 'wait') {
-        return renderFlowTemplate(node.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?', this.state.fields)
-      }
-      if (act === 'switch_prompt') {
-        return renderFlowTemplate(node.data.promptInstruction || node.data.message || '', this.state.fields)
-      }
-    }
-    return undefined
+    return buildFlowNodePrompt(this.state.flow, node, this.state.fields)
   }
 
   private async advance(): Promise<FlowEngineResult> {

@@ -104,7 +104,9 @@ class MicProcessor extends AudioWorkletProcessor {
       suppressed = rms > 0.001;
     }
 
-    const gain = passSpeech ? 1.0 : 0.02;
+    // Konuşma başlangıcındaki ilk hecelerin yutulmaması için yalnızca ani öksürük/darbe
+    // seslerini güçlü bastır (0.08), sessiz arka planı ise yumuşak zayıflat (0.65).
+    const gain = isImpulseOrCough ? 0.08 : passSpeech ? 1.0 : 0.65;
     const pcm = new Int16Array(CHUNK_SAMPLES);
     for (let i = 0; i < CHUNK_SAMPLES; i++) {
       const s = samples[i] * gain;

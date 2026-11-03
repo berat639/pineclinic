@@ -108,5 +108,33 @@ describe('voice-settings validation & prompt registry', () => {
     expect(hayirSection).toContain('"tarih" bilgisini sor')
     expect(hayirSection).toContain('"saat" bilgisini sor')
     expect(hayirSection).toContain('RANDEVU OLUŞTUR')
+    expect(prompt).toContain('⚡ HIZLI GEÇİŞ VE TEKRARSIZ SORU KURALI')
+  })
+
+  test('isEnglishResponseDetected never false-positives on Turkish text or isolated common words', async () => {
+    const { isEnglishResponseDetected, buildRealtimeDetectionConfig } = await import('./turn-detector')
+    expect(isEnglishResponseDetected('Merhaba, randevu planı için uygun tarih nedir?')).toBe(false)
+    expect(isEnglishResponseDetected('Tamam, test sonuçlarınızı kontrol ediyorum.')).toBe(false)
+    expect(isEnglishResponseDetected('What time would you like to book your appointment?')).toBe(true)
+    expect(isEnglishResponseDetected("I'm sorry, I cannot help with that.")).toBe(true)
+
+    const phoneCfg = buildRealtimeDetectionConfig('semantic', 'phone')
+    expect(phoneCfg.automaticActivityDetection?.silenceDurationMs).toBe(380)
+    const webCfg = buildRealtimeDetectionConfig('semantic', 'web')
+    expect(webCfg.automaticActivityDetection?.silenceDurationMs).toBe(420)
+  })
+
+  test('buildFlowNodePrompt combines consecutive musteri_adi+telefon and tarih+saat into single natural questions', async () => {
+    const { buildDefaultWebFlow } = await import('../db/repositories/flows')
+    const { buildFlowNodePrompt } = await import('./flow-engine')
+    const webFlow = buildDefaultWebFlow()
+
+    const firstNode = webFlow.nodes.find(n => n.id === 'field_musteri_adi')!
+    const combinedIdentityPrompt = buildFlowNodePrompt(webFlow, firstNode, {})
+    expect(combinedIdentityPrompt).toContain('adınızı, soyadınızı ve telefon numaranızı')
+
+    const dateNode = webFlow.nodes.find(n => n.id === 'field_tarih')!
+    const combinedSlotPrompt = buildFlowNodePrompt(webFlow, dateNode, { musteri_adi: 'Ahmet Yılmaz', telefon: '05551234567' })
+    expect(combinedSlotPrompt).toContain('Hangi gün ve saat için randevu oluşturmamı istersiniz?')
   })
 })

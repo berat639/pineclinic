@@ -287,7 +287,7 @@ export default function Home() {
 
     let liveConfig = activeSessionConfig
     try {
-      const response = await fetch('/api/flow-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'inbound' }) })
+      const response = await fetch('/api/flow-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'web' }) })
       if (response.ok) {
         const flowSession = await response.json()
         liveConfig = {
@@ -390,24 +390,9 @@ export default function Home() {
 
     try {
       await session.connect(currentApiKey, liveConfig, mode)
-
-      // Wait briefly to confirm session is stable (AI may close immediately on errors)
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (session.connected) resolve()
-          else reject(new Error('Oturum hemen kapatıldı'))
-        }, 800)
-        // If already disconnected, reject immediately
-        const check = setInterval(() => {
-          if (!session.connected) {
-            clearTimeout(timer)
-            clearInterval(check)
-            reject(new Error('Oturum hemen kapatıldı'))
-          }
-        }, 100)
-        // Clear interval on success
-        setTimeout(() => clearInterval(check), 800)
-      })
+      if (!session.connected) {
+        throw new Error('Oturum hemen kapatıldı')
+      }
 
       setStatus('listening')
 
@@ -423,10 +408,6 @@ export default function Home() {
           noiseFilter: (liveConfig.noiseFilterMode ?? 'rnnoise') !== 'off',
         })
         micRef.current = mic
-        const startWaitMs = Math.max(0, Math.round((liveConfig.startWaitSeconds ?? 0.4) * 1000))
-        if (startWaitMs > 0) {
-          await new Promise(resolve => setTimeout(resolve, startWaitMs))
-        }
         if (sessionRef.current !== session) return
         await mic.start((pcm) => {
           session.sendAudio(pcm)

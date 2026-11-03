@@ -144,9 +144,26 @@ export class AiLiveSession {
   private _currentUserTranscript = ''
   private _englishInterceptedInTurn = false
   private _englishRecoveryCount = 0
+  private _pendingClientTexts: string[] = []
+  private _setupReady = false
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
+  }
+
+  private flushPendingTexts() {
+    if (!this.session || !this._isConnected || this._sendGuard || this._pendingClientTexts.length === 0) return
+    while (this._pendingClientTexts.length > 0) {
+      const text = this._pendingClientTexts.shift()
+      if (text) {
+        try {
+          this.session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text }] }],
+            turnComplete: true,
+          })
+        } catch { /* ignore */ }
+      }
+    }
   }
 
   async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
@@ -161,6 +178,8 @@ export class AiLiveSession {
     this._currentUserTranscript = ''
     this._englishInterceptedInTurn = false
     this._englishRecoveryCount = 0
+    this._pendingClientTexts = []
+    this._setupReady = false
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
     // "response modalities (TEXT) is not supported". Keep text chat on the
@@ -185,18 +204,28 @@ export class AiLiveSession {
     return new Promise<void>((resolve, reject) => {
       const ai = new GoogleGenAI({ apiKey })
       let resolved = false
+      const finishConnect = () => {
+        if (!resolved && this.session && this._isConnected) {
+          resolved = true
+          this._setupReady = true
+          this.flushPendingTexts()
+          resolve()
+        }
+      }
 
       ai.live
         .connect({
           model: `models/${modelName}`,
           callbacks: {
             onopen: () => {
-              // console.log('[Live] Connected')
               this._isConnected = true
               this.callbacks.onConnectionChange(true)
-              if (!resolved) { resolved = true; resolve() }
             },
             onmessage: (message: LiveServerMessage) => {
+              if ((message as any).setupComplete) {
+                this._setupReady = true
+                finishConnect()
+              }
               this.handleMessage(message)
             },
             onerror: (e: ErrorEvent) => {
@@ -251,7 +280,12 @@ export class AiLiveSession {
         })
         .then((session) => {
           this.session = session
-          // console.log(`[Live] Session: ${modelName}`)
+          if (this._setupReady) {
+            finishConnect()
+          } else {
+            // setupComplete onmessage içinde gelmiş veya 120ms içinde gelecek olabilir
+            setTimeout(() => finishConnect(), 120)
+          }
         })
         .catch((err) => {
           console.error('[Live] Connect failed:', err)
@@ -282,7 +316,10 @@ export class AiLiveSession {
       return
     }
 
-    if (!this.session) return
+    if (!this.session || !this._setupReady) {
+      this._pendingClientTexts.push(text)
+      return
+    }
     try {
       this.session.sendClientContent({
         turns: [{ role: 'user', parts: [{ text }] }],
@@ -451,17 +488,9 @@ export class AiLiveSession {
       }
     }
 
-    // Audio & text
+    // Audio parts (modelTurn.parts[].text Native Audio modunda iç düşünce/thought içerdiği için yok sayılır)
     if (!this._englishInterceptedInTurn && message.serverContent?.modelTurn?.parts) {
       for (const part of message.serverContent.modelTurn.parts) {
-        if (part?.text) {
-          this._currentModelTranscript = `${this._currentModelTranscript}${part.text}`.slice(-600)
-          if (isEnglishResponseDetected(this._currentModelTranscript)) {
-            this.triggerEnglishGuard()
-            break
-          }
-          this.callbacks.onText(part.text)
-        }
         if (!this._englishInterceptedInTurn && part?.inlineData?.data) {
           this.callbacks.onAudioChunk(part.inlineData.data)
         }

@@ -393,7 +393,7 @@ export default function KnowledgeTab() {
   const [callerIdSaving, setCallerIdSaving] = useState(false)
   const [greetingErrors, setGreetingErrors] = useState<Errors>({})
 
-  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'whatsapp'>('inbound')
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | 'web' | 'whatsapp'>('inbound')
 
   // Dış arama
   const [callModalOpen, setCallModalOpen] = useState(false)
@@ -735,9 +735,10 @@ export default function KnowledgeTab() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const flowOptions = [
-    { value: 'inbound' as const, label: `📥 ${TERM_LABELS.inbound} Akışı (Randevu)` },
-    { value: 'outbound' as const, label: `📤 ${TERM_LABELS.outbound} Akışı (Anket ve Takip)` },
-    { value: 'whatsapp' as const, label: '💬 WhatsApp Asistan Akışı' },
+    { value: 'inbound' as const, label: `📞 ${TERM_LABELS.inbound} (Telefon Santral)` },
+    { value: 'outbound' as const, label: `📤 ${TERM_LABELS.outbound} (Telefon Anket)` },
+    { value: 'web' as const, label: '🌐 Web Sesli Asistan' },
+    { value: 'whatsapp' as const, label: '💬 WhatsApp Asistanı' },
   ]
 
   return (
@@ -940,9 +941,11 @@ export default function KnowledgeTab() {
         </div>
         <div className={s.flowNotice}>
           {flowDirection === 'inbound'
-            ? '📥 Şu an gelen arama akışı düzenleniyor — kliniği arayan hastaların karşılama, sorgulama ve randevu akışı.'
+            ? '📞 Şu an Telefon (Santral) Gelen Arama akışı düzenleniyor — arayan numara (CallerID) otomatik algılanır, santral dahiliye aktarım ve randevu adımları paralel çalışır.'
             : flowDirection === 'outbound'
-            ? '📤 Şu an giden arama akışı düzenleniyor — asistanın yaptığı memnuniyet anketi ve takip aramalarının akışı.'
+            ? '📤 Şu an Telefon (Santral) Giden Arama akışı düzenleniyor — asistanın yaptığı dış arama, memnuniyet anketi ve takip senaryosu.'
+            : flowDirection === 'web'
+            ? '🌐 Şu an Web Sesli Asistan akışı düzenleniyor — telefon santralinden bağımsız olarak tarayıcı üzerinden en kısa yoldan randevu ve bilgi veren paralel akış.'
             : '💬 Şu an WhatsApp asistan akışı düzenleniyor — WhatsApp üzerinden gelen hasta mesajlarında uygulanacak konuşma akışı.'}
         </div>
         <FlowBuilder key={flowDirection} direction={flowDirection} />

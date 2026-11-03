@@ -57,7 +57,7 @@ import {
   getBranding,
   setBranding,
 } from './db/repositories/settings'
-import { embedText, getPreWarmEmbedding, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
+import { embedText, getPreWarmEmbedding, getPreWarmedRagContext, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
 
 const PUBLIC_DIR = resolve(import.meta.dir, '../public')
@@ -2208,7 +2208,8 @@ const app = new Elysia()
   .post('/api/flow-sessions', async ({ body, set }) => {
     const clinicId = currentClinicId()
     if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
-    const direction = (body as { direction?: string } | undefined)?.direction === 'outbound' ? 'outbound' : 'inbound'
+    const rawDir = (body as { direction?: string } | undefined)?.direction
+    const direction = rawDir && ['web', 'inbound', 'outbound', 'whatsapp'].includes(rawDir) ? rawDir : 'web'
     const { createWebFlowSession } = await import('./services/flow-engine')
     const session = await createWebFlowSession(clinicId, direction)
     if (!session) { set.status = 409; return { error: 'Akışla çalışma bu görüşmede kullanılamıyor.' } }
@@ -2281,39 +2282,33 @@ const app = new Elysia()
 
   // ── Direct Mode: Session Config ──────────────────────────────────────────────
   // Client bağlanmadan önce dinamik system prompt, RAG context ve tool declarations alır
-  .get('/api/direct-session-config', async ({ set }) => {
+  // Web oturumları Asterisk telefon hatlarından (tel_*) tamamen bağımsız ve paralel çalışır.
+  .get('/api/direct-session-config', async () => {
     const clinicId = currentClinicId()
     const { resolveVoiceSettings } = await import('./services/voice-settings')
-    const voiceSettings = await resolveVoiceSettings(clinicId ?? undefined)
-    if (clinicId) {
-      const activeForClinic = Array.from(sessions.values()).filter(s => s.clinicId === clinicId).length
-      if (activeForClinic >= voiceSettings.maxActivePhoneCalls) {
-        set.status = 429
-        return { error: `Klinik eşzamanlı AI görüşme kapasitesi (${voiceSettings.maxActivePhoneCalls}) dolu. Lütfen biraz sonra tekrar deneyin.` }
-      }
-    }
     const { issueWebToolSessionKey } = await import('./services/flow-engine')
-    const sessionKey = clinicId ? issueWebToolSessionKey(clinicId) : undefined
     const { buildToolDeclarations } = await import('./gemini')
-    const greeting = await getGreeting() ?? DEFAULT_GREETING
-    const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
-    const systemPrompt = dateHeader + await buildSystemPrompt(greeting)
+    const { prepareLiveToolDeclarations } = await import('./services/live-model-profile')
 
-    // RAG pre-warm
-    let ragContext = ''
-    try {
-      const preWarmEmbedding = await getPreWarmEmbedding()
-      const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
-      if (topDocs.length > 0) {
-        ragContext = await buildRagPrompt(topDocs)
-      }
-    } catch { /* ignore */ }
+    const [voiceSettings, greetingRaw, ragContext, branding, rawTools] = await Promise.all([
+      resolveVoiceSettings(clinicId ?? undefined),
+      getGreeting('web').then(g => g || getGreeting('inbound')),
+      getPreWarmedRagContext(clinicId, 'web', 250),
+      getBranding(),
+      buildToolDeclarations('web'),
+    ])
+
+    const sessionKey = clinicId ? issueWebToolSessionKey(clinicId) : undefined
+    const greeting = greetingRaw ?? DEFAULT_GREETING
+    const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
+    const systemPrompt = dateHeader + await buildSystemPrompt(greeting, 'web')
 
     const model = voiceSettings.model
-    const branding = await getBranding()
-    const { prepareLiveToolDeclarations } = await import('./services/live-model-profile')
-    const toolDeclarations = prepareLiveToolDeclarations(model, (await buildToolDeclarations())
-      .filter(t => t.name !== 'cagriySonlandir'))
+    const ASTERISK_ONLY_TOOLS = new Set(['cagriySonlandir', 'aramaAktar', 'insanaAktar', 'whatsappKonumGonder'])
+    const toolDeclarations = prepareLiveToolDeclarations(
+      model,
+      rawTools.filter(t => !ASTERISK_ONLY_TOOLS.has(t.name || '')),
+    )
 
     return {
       systemPrompt: systemPrompt + ragContext,
@@ -2534,30 +2529,18 @@ app.ws('/ws', {
 
     try {
       const { resolveVoiceSettings } = await import('./services/voice-settings')
-      const voiceSettings = await resolveVoiceSettings(tenant.clinicId)
-      const activeForClinic = Array.from(sessions.values()).filter(s => s.clinicId === tenant.clinicId).length
-      if (activeForClinic >= voiceSettings.maxActivePhoneCalls) {
-        ws.send(JSON.stringify({ type: 'error', message: `Klinik eşzamanlı AI görüşme kapasitesi (${voiceSettings.maxActivePhoneCalls}) dolu.` }))
-        ws.close()
-        return
-      }
-      // RAG pre-warm
-      let ragContext = ''
-      try {
-        const preWarmEmbedding = await getPreWarmEmbedding()
-        const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5)
-        if (topDocs.length > 0) {
-          ragContext = await buildRagPrompt(topDocs)
-          console.log(`[${shortId}] RAG: ${topDocs.length} belge → ${topDocs.map(d => d.title).join(', ')}`)
-        }
-      } catch (e) { console.error(`[${shortId}] RAG hatası:`, e) }
+      const [voiceSettings, ragContext, greetingRaw] = await Promise.all([
+        resolveVoiceSettings(tenant.clinicId),
+        getPreWarmedRagContext(tenant.clinicId, 'web', 250),
+        getGreeting('web').then(g => g || getGreeting('inbound')),
+      ])
 
       const dateHeader = `BUGÜNÜN TARİHİ: ${getTodayTurkish()}. Randevu tarihlerini söylerken mutlaka bu tarihe göre gün hesapla — asla tahmin yapma.\n\n`
-      const greeting = await getGreeting() ?? DEFAULT_GREETING
-      const systemPrompt = dateHeader + await buildSystemPrompt(greeting) + ragContext
+      const greeting = greetingRaw ?? DEFAULT_GREETING
+      const systemPrompt = dateHeader + await buildSystemPrompt(greeting, 'web') + ragContext
       const model = voiceSettings.model
       const voiceName = voiceSettings.voiceName
-      console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName}`)
+      console.log(`[${shortId}] Gemini Live model: ${model}, voice: ${voiceName} (web)`)
 
       const { getGeminiClient } = await import('./services/gemini-client')
       const clinicAi = await getGeminiClient(tenant.clinicId).catch(() => getAI())
@@ -2584,7 +2567,7 @@ app.ws('/ws', {
           sessions.delete(shortId)
           notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
         },
-      }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'inbound', appointmentSource: 'web_ai' })
+      }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'web', appointmentSource: 'web_ai' })
 
       info.session = session
         ; (ws.data as any).sessionId = shortId

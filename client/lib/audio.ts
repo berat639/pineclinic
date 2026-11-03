@@ -11,7 +11,8 @@ export class AudioStreamPlayer {
   private gainNode: GainNode;
   private pendingChunks: Float32Array[] = [];
   private activeSources = new Set<AudioBufferSourceNode>();
-  private readonly maxScheduledAheadSeconds = 1.5;
+  private readonly maxScheduledAheadSeconds = 1.8;
+  private readonly initialJitterBufferSeconds = 0.06;
 
   constructor(sampleRate = 24000) {
     this.audioContext = createAudioContext({ sampleRate });
@@ -77,11 +78,12 @@ export class AudioStreamPlayer {
     if (!this.isActive || this.audioContext.state !== 'running') return;
 
     const now = this.audioContext.currentTime;
-    if (this.nextStartTime < now) this.nextStartTime = now;
+    // Akış yeni başlıyorsa veya kuyruk tamamen boşalmışsa 60ms mikro-jitter tamponu bırak;
+    // ardışık paketlerde ise boşluk eklemeden doğrudan nextStartTime üzerine kenetle.
+    if (this.nextStartTime <= now) {
+      this.nextStartTime = now + (this.activeSources.size === 0 ? this.initialJitterBufferSeconds : 0.005);
+    }
 
-    // Do not hand the browser an unbounded timeline of AudioBufferSourceNodes.
-    // Gemini can stream faster than the speaker consumes audio; remaining PCM
-    // stays in this queue and is discarded cleanly on interruption.
     while (
       this.pendingChunks.length > 0 &&
       this.nextStartTime < now + this.maxScheduledAheadSeconds
@@ -100,7 +102,7 @@ export class AudioStreamPlayer {
         this.drainQueue();
       };
 
-      const startTime = Math.max(now + 0.02, this.nextStartTime);
+      const startTime = Math.max(now + 0.002, this.nextStartTime);
       source.start(startTime);
       this.nextStartTime = startTime + buffer.duration;
       this.activeSources.add(source);

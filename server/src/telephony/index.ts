@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto'
 import { StartSensitivity, EndSensitivity, type GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
-import { buildRagPrompt, getPreWarmEmbedding } from '../rag'
+import { buildRagPrompt, getPreWarmEmbedding, getPreWarmedRagContext } from '../rag'
 import { retrieveTopK as retrieveDocsByEmbedding, findCustomerDocByPhone } from '../db/repositories/knowledge'
 import { getCustomerByPhone } from '../db/repositories/appointments'
 import { findVipByPhone } from '../db/repositories/vip'
@@ -74,11 +74,11 @@ function isPhoneConversationFarewell(text: string, customCloseMessage?: string):
 // (gerçek audio yerine sessizlik frame'i geçer); böylece Gemini'nin VAD timing'i
 // bozulmaz.
 const PHONE_FRAME_MS = 20
-const RAG_BOOTSTRAP_TIMEOUT_MS = 2_500
+const RAG_BOOTSTRAP_TIMEOUT_MS = 350
 const SESSION_CONNECT_TIMEOUT_MS = 20_000
-const DEFAULT_OUTPUT_START_BUFFER_MS = 700
-const DEFAULT_OUTPUT_REBUFFER_MS = 1_200
-const MIN_OUTPUT_BUFFER_MS = 200
+const DEFAULT_OUTPUT_START_BUFFER_MS = 160
+const DEFAULT_OUTPUT_REBUFFER_MS = 240
+const MIN_OUTPUT_BUFFER_MS = 100
 const MAX_OUTPUT_BUFFER_MS = 4_000
 const GREETING_HARD_TIMEOUT_MS = 30_000
 const GREETING_TRANSCRIPT_IDLE_COMPLETE_MS = 1_800
@@ -634,19 +634,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             ] = await Promise.all([
               (async () => {
                 try {
-                  const preWarmEmbedding = await withTimeout(
-                    getPreWarmEmbedding(),
-                    RAG_BOOTSTRAP_TIMEOUT_MS,
-                    'RAG başlangıç zaman aşımı',
-                  )
-                  const topDocs = await retrieveDocsByEmbedding(preWarmEmbedding, 5, direction)
-                  const flowSafeDocs = topDocs.filter(d => !/akış dışı|eğlence|fıkra|asistan kişilik|sohbet/i.test(d.title))
-                  if (flowSafeDocs.length > 0) {
-                    console.log(
-                      `[${shortId}] RAG (${direction}): ${flowSafeDocs.length} belge → ${flowSafeDocs.map((d) => d.title).join(', ')}`,
-                    )
-                    return await buildRagPrompt(flowSafeDocs)
-                  }
+                  return await getPreWarmedRagContext(state.clinicId, direction, RAG_BOOTSTRAP_TIMEOUT_MS)
                 } catch (e) {
                   console.error(`[${shortId}] RAG hatası:`, e)
                 }

@@ -252,6 +252,7 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
   const lines: string[] = [
     'KONUŞMA AKIŞI VE TALİMATLARI:',
     '⚠️ SIRA VE BEKLEME KURALI: Her adımda yalnızca TEK BİR soru sor. Her sorudan sonra DUR ve müşterinin konuşmasını/cevabını bekle; müşteri yanıt vermeden KESİNLİKLE bir sonraki adıma geçme.',
+    '⚡ HIZLI GEÇİŞ VE TEKRARSIZ SORU KURALI (SUNUM & CANLI GÖRÜŞME OPTİMİZASYONU): Müşteri konuşmasında aşağıdaki adımlardaki bilgilerden birini veya birkaçını (ör. işlem/şikayet, gün/tarih, saat, ad-soyad veya telefon) ZATEN söylediyse o adımı KESİNLİKLE tekrar sorma; bilinen adımları atlayıp yalnızca eksik kalan ilk bilgiyi sor. "tarih" ve "saat" peş peşe geliyorsa ve ikisi de bilinmiyorsa ayrı ayrı sormak yerine tek cümlede ("Hangi gün ve saat için randevu oluşturmamı istersiniz?") birlikte sor.',
     '',
   ]
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
@@ -774,7 +775,7 @@ function ConditionRulesEditor({
   update: (u: Record<string, any>) => void
   inputStyle: React.CSSProperties
   customFieldNames: string[]
-  direction?: 'inbound' | 'outbound' | 'whatsapp'
+  direction?: 'inbound' | 'outbound' | 'web' | 'whatsapp'
 }) {
   const logic: 'AND' | 'OR' = data.conditionLogic === 'OR' ? 'OR' : 'AND'
   const rules: ConditionRule[] = Array.isArray(data.rules) && data.rules.length > 0
@@ -1200,7 +1201,7 @@ const nodeTypes: NodeTypes = {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'inbound' | 'outbound' | 'whatsapp' }) {
+export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'inbound' | 'outbound' | 'web' | 'whatsapp' }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any)
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
@@ -1521,22 +1522,30 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
   }, [edges, setNodes, rfInstance, pushHistory])
 
   // Sample flows with non-crossing condition branches (Evet on left, Hayır on right)
-  const loadSampleFlow = () => {
-    if (direction === 'outbound') {
-      if (!window.confirm('Örnek hasta memnuniyet anket akışını yüklemek mevcut giden arama akışınızı değiştirecektir. Onaylıyor musunuz?')) return
+  const loadSampleFlow = (presetKey?: string) => {
+    const selectedPreset = presetKey || (
+      direction === 'outbound'
+        ? 'fast_survey'
+        : direction === 'whatsapp'
+        ? 'fast_wa'
+        : direction === 'web'
+        ? 'fast_web'
+        : 'fast_phone'
+    )
+
+    if (selectedPreset === 'fast_survey') {
+      if (!window.confirm('⚡ 2 soruluk hızlı hasta memnuniyet anket akışını yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
 
       const surveyNodes: Node[] = [
         { id: 'start', type: 'startNode', position: { x: 250, y: 20 }, data: { label: 'Giden Arama Başladı' } },
-        { id: 'field_memnuniyet', type: 'fieldNode', position: { x: 250, y: 140 }, data: { label: 'Memnuniyet Durumu (Anket)', fieldName: 'memnuniyet', fieldType: 'text', description: 'Son kliniğimize ziyaretinizden ve tedavinizden memnun kaldınız mı?', required: true } },
-        { id: 'field_puan', type: 'fieldNode', position: { x: 250, y: 280 }, data: { label: 'Değerlendirme Puanı (1-10)', fieldName: 'puan', fieldType: 'text', description: 'Hizmetimizi 1 ile 10 arasında değerlendirecek olsanız kaç puan verirsiniz?', required: false } },
-        { id: 'field_oneri', type: 'fieldNode', position: { x: 250, y: 420 }, data: { label: 'Hasta Notu / Önerisi', fieldName: 'hastaNotu', fieldType: 'text', description: 'Bizlere iletmek istediğiniz özel bir notunuz veya öneriniz var mı?', required: false } },
-        { id: 'action_not', type: 'actionNode', position: { x: 250, y: 560 }, data: { action: 'save_patient_note', label: '🗒️ Hastadan Not Al (Bankoya İlet)' } },
-        { id: 'end', type: 'endNode', position: { x: 250, y: 700 }, data: { label: 'Teşekkür Et ve Bitir', message: 'Değerli geri bildiriminiz için teşekkür eder, sağlıklı günler dileriz.' } },
+        { id: 'field_memnuniyet', type: 'fieldNode', position: { x: 250, y: 150 }, data: { label: 'Memnuniyet Durumu (Anket)', fieldName: 'memnuniyet', fieldType: 'text', description: 'Son kliniğimize ziyaretinizden memnun kaldınız mı, 1 ile 10 arasında kaç puan verirsiniz?', required: true } },
+        { id: 'field_oneri', type: 'fieldNode', position: { x: 250, y: 290 }, data: { label: 'Hasta Notu / Önerisi', fieldName: 'hastaNotu', fieldType: 'text', description: 'Ekibimize iletmek istediğiniz kısa bir notunuz var mı?', required: false } },
+        { id: 'action_not', type: 'actionNode', position: { x: 250, y: 430 }, data: { action: 'save_patient_note', label: '🗒️ Hastadan Not Al (Bankoya İlet)' } },
+        { id: 'end', type: 'endNode', position: { x: 250, y: 570 }, data: { label: 'Teşekkür Et ve Bitir', message: 'Değerli geri bildiriminiz için teşekkür eder, sağlıklı günler dileriz.' } },
       ]
       const surveyEdges = decorateEdges([
         { id: 'e1', source: 'start', target: 'field_memnuniyet' },
-        { id: 'e2', source: 'field_memnuniyet', target: 'field_puan' },
-        { id: 'e3', source: 'field_puan', target: 'field_oneri' },
+        { id: 'e2', source: 'field_memnuniyet', target: 'field_oneri' },
         { id: 'e4', source: 'field_oneri', target: 'action_not' },
         { id: 'e5', source: 'action_not', target: 'end' },
       ], surveyNodes)
@@ -1546,31 +1555,29 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       setEdges(surveyEdges)
       pushHistory(layouted, surveyEdges)
       setTimeout(() => rfInstance?.fitView({ padding: 0.18, duration: 350 }), 60)
-      showToast('🌟 Örnek giden arama anket akışı yüklendi')
+      showToast('⚡ Hızlı giden arama anket akışı (2 soru) yüklendi')
       return
     }
 
-    if (direction === 'whatsapp') {
-      if (!window.confirm('Örnek WhatsApp asistan akışını yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
+    if (selectedPreset === 'fast_wa') {
+      if (!window.confirm('⚡ Hızlı WhatsApp randevu akışını yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
 
       const waNodes: Node[] = [
         { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'WhatsApp Mesajı Geldi' } },
         { id: 'cond_kayitli', type: 'conditionNode', position: { x: 260, y: 130 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Hasta Kayıtlı mı?' } },
-        // Evet (Sol - 30% handle)
-        { id: 'field_sikayet', type: 'fieldNode', position: { x: 60, y: 280 }, data: { label: 'Şikayet / Endikasyon', fieldName: 'sikayet', fieldType: 'text', description: 'Size hangi işlem veya şikayetiniz için yardımcı olabilirim?', required: true } },
-        // Hayır (Sağ - 70% handle)
-        { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 280 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Merhabalar, size nasıl hitap edebilirim? Adınızı ve soyadınızı öğrenebilir miyim?', required: true } },
-        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 420 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün için randevu oluşturmamı istersiniz?', required: true } },
+        // Hayır (Sağ)
+        { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 280 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı öğrenebilir miyim?', required: true } },
+        // Ortak: Gün ve Saat
+        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 420 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
         { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 550 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
         { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 680 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
-        { id: 'end', type: 'endNode', position: { x: 260, y: 810 }, data: { label: 'Talebi Onayla ve Bitir' } },
+        { id: 'end', type: 'endNode', position: { x: 260, y: 810 }, data: { label: 'Talebi Onayla ve Bitir', message: 'Randevu talebiniz alınmıştır, sağlıklı günler dileriz.' } },
       ]
       const waEdges = decorateEdges([
         { id: 'e_s_c', source: 'start', target: 'cond_kayitli' },
-        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet' },
+        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_tarih' },
         { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi' },
-        { id: 'e_ad_sik', source: 'field_musteri_adi', target: 'field_sikayet' },
-        { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
+        { id: 'e_ad_tar', source: 'field_musteri_adi', target: 'field_tarih' },
         { id: 'e_tar_saat', source: 'field_tarih', target: 'field_saat' },
         { id: 'e_saat_act', source: 'field_saat', target: 'action_randevu' },
         { id: 'e_act_end', source: 'action_randevu', target: 'end' },
@@ -1581,34 +1588,114 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       setEdges(waEdges)
       pushHistory(layouted, waEdges)
       setTimeout(() => rfInstance?.fitView({ padding: 0.18, duration: 350 }), 60)
-      showToast('🌟 Örnek WhatsApp asistan akışı yüklendi')
+      showToast('⚡ Hızlı WhatsApp randevu akışı yüklendi')
       return
     }
 
-    if (!window.confirm('Örnek hasta kayıt ve randevu akışını yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
+    if (selectedPreset === 'fast_web') {
+      if (!window.confirm('⚡ Sunum Dostu Hızlı Web Randevu Akışını (Maks. 2 Soru) yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
 
+      const webNodes: Node[] = [
+        { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'Web Karşılama Mesajı' } },
+        { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 260, y: 140 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Randevunuz için adınızı, soyadınızı ve telefon numaranızı alabilir miyim?', required: true } },
+        { id: 'field_tel', type: 'fieldNode', position: { x: 260, y: 270 }, data: { label: 'Telefon Numarası', fieldName: 'telefon', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
+        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 400 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+        { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 530 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
+        { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 660 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+        { id: 'end', type: 'endNode', position: { x: 260, y: 790 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
+      ]
+      const webEdges = decorateEdges([
+        { id: 'e_s_ad', source: 'start', target: 'field_musteri_adi' },
+        { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel' },
+        { id: 'e_tel_tar', source: 'field_tel', target: 'field_tarih' },
+        { id: 'e_tar_saat', source: 'field_tarih', target: 'field_saat' },
+        { id: 'e_saat_act', source: 'field_saat', target: 'action_randevu' },
+        { id: 'e_act_end', source: 'action_randevu', target: 'end' },
+      ], webNodes)
+
+      const layouted = layoutNodes(webNodes, webEdges)
+      setNodes(layouted)
+      setEdges(webEdges)
+      pushHistory(layouted, webEdges)
+      setTimeout(() => rfInstance?.fitView({ padding: 0.18, duration: 350 }), 60)
+      showToast('⚡ Hızlı Web Randevu Akışı (Maks. 2 Soru) yüklendi')
+      return
+    }
+
+    if (selectedPreset === 'quick_note') {
+      if (!window.confirm('🗒️ Hızlı Geri Arama / Bankoya Not Bırakma şablonunu yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
+
+      const noteNodes: Node[] = [
+        { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'Karşılama Mesajı' } },
+        { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 260, y: 150 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı, soyadınızı ve iletmek istediğiniz notu alabilir miyim?', required: true } },
+        { id: 'field_oneri', type: 'fieldNode', position: { x: 260, y: 280 }, data: { label: 'Hasta Notu / Önerisi', fieldName: 'hastaNotu', fieldType: 'text', description: 'Bankomuza iletmek istediğiniz mesajınız nedir?', required: true } },
+        { id: 'action_not', type: 'actionNode', position: { x: 260, y: 410 }, data: { action: 'save_patient_note', label: '🗒️ Hastadan Not Al (Bankoya İlet)' } },
+        { id: 'end', type: 'endNode', position: { x: 260, y: 540 }, data: { label: 'Görüşmeyi Bitir', message: 'Notunuz bankomuza iletildi, en kısa sürede size dönüş yapılacaktır. Sağlıklı günler dileriz.' } },
+      ]
+      const noteEdges = decorateEdges([
+        { id: 'e_s_ad', source: 'start', target: 'field_musteri_adi' },
+        { id: 'e_ad_not', source: 'field_musteri_adi', target: 'field_oneri' },
+        { id: 'e_not_act', source: 'field_oneri', target: 'action_not' },
+        { id: 'e_act_end', source: 'action_not', target: 'end' },
+      ], noteNodes)
+
+      const layouted = layoutNodes(noteNodes, noteEdges)
+      setNodes(layouted)
+      setEdges(noteEdges)
+      pushHistory(layouted, noteEdges)
+      setTimeout(() => rfInstance?.fitView({ padding: 0.18, duration: 350 }), 60)
+      showToast('🗒️ Hızlı Not Bırakma şablonu yüklendi')
+      return
+    }
+
+    if (!window.confirm('⚡ Sunum Dostu Hızlı Telefon Randevu Akışını (CallerID otomatik, Maks. 1-2 Soru) yüklemek mevcut akışınızı değiştirecektir. Onaylıyor musunuz?')) return
+
+    // fast_phone veya full_asterisk:
+    // Asterisk Gelen Aramada telefon numarası (CallerID) zaten bilindiği için tekrar telefon sorulmaz!
+    // Kayıtlı hasta ise doğrudan gün/saat sorulur (1 soru); yeni hasta ise yalnızca Ad Soyad + Gün/Saat sorulur (2 soru).
     const sampleNodes: Node[] = [
       { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'Karşılama Mesajı' } },
-      { id: 'cond_kayitli', type: 'conditionNode', position: { x: 260, y: 130 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Hasta Kayıtlı mı?' } },
-      // Evet dalı (Sol)
-      { id: 'field_sikayet', type: 'fieldNode', position: { x: 60, y: 280 }, data: { label: 'Şikayet / Endikasyon', fieldName: 'sikayet', fieldType: 'text', description: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?', required: false } },
-      // Hayır dalı (Sağ)
-      { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 280 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
-      { id: 'field_tel', type: 'fieldNode', position: { x: 440, y: 410 }, data: { label: 'Telefon Numarası', fieldName: 'telefon', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
-      // Ortak devam
-      { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 540 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi tarihe randevu oluşturmak istersiniz?', required: true } },
-      { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 670 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
-      { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 800 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
-      { id: 'end', type: 'endNode', position: { x: 260, y: 920 }, data: { label: 'Görüşmeyi Bitir' } },
+      { id: 'cond_kayitli', type: 'conditionNode', position: { x: 260, y: 130 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Arayan Numara (CallerID) Kayıtlı mı?' } },
+      // Hayır dalı (Yeni Hasta — yalnızca Ad Soyad sorulur, numara CallerID'den otomatik alınır!)
+      { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 270 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
+      // Ortak devam (Gün ve Saat tek soruda birleştirilir)
+      { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 410 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+      { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 540 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
+      { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 670 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+      { id: 'end', type: 'endNode', position: { x: 260, y: 800 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
+      ...(selectedPreset === 'full_asterisk'
+        ? [
+            {
+              id: 'action_transfer_global',
+              type: 'actionNode',
+              position: { x: 640, y: 80 },
+              data: {
+                action: 'transfer_call',
+                label: '📞 Santrale / Resepsiyona Aktar',
+                transferNumber: 'resepsiyon',
+                triggerKeywords: 'resepsiyon, operatör, sekreter, yetkili, canlı destek',
+                requireConfirmation: true,
+              },
+            },
+            {
+              id: 'action_wa_loc_global',
+              type: 'actionNode',
+              position: { x: 640, y: 220 },
+              data: {
+                action: 'send_wa_location',
+                label: '📍 WhatsApp’tan Konum Gönder',
+                triggerKeywords: 'konum, adres, yol tarifi, nerede',
+              },
+            },
+          ]
+        : []),
     ]
 
     const sampleEdges = decorateEdges([
       { id: 'e_s_c', source: 'start', target: 'cond_kayitli' },
-      { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet' },
+      { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_tarih' },
       { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi' },
-      { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel' },
-      { id: 'e_tel_sik', source: 'field_tel', target: 'field_sikayet' },
-      { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
+      { id: 'e_ad_tar', source: 'field_musteri_adi', target: 'field_tarih' },
       { id: 'e_tar_sa', source: 'field_tarih', target: 'field_saat' },
       { id: 'e_sa_act', source: 'field_saat', target: 'action_randevu' },
       { id: 'e_act_end', source: 'action_randevu', target: 'end' },
@@ -1619,7 +1706,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
     setEdges(sampleEdges)
     pushHistory(layouted, sampleEdges)
     setTimeout(() => rfInstance?.fitView({ padding: 0.18, duration: 350 }), 60)
-    showToast('🌟 Örnek gelen arama randevu akışı yüklendi')
+    showToast(selectedPreset === 'full_asterisk' ? '🏥 Klinik Randevu + Asterisk Santral şablonu yüklendi' : '⚡ Hızlı Telefon Randevu Akışı (1-2 Soru) yüklendi')
   }
 
   const saveFlow = async () => {
@@ -2133,6 +2220,26 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--foreground)' }}>🔀 Akış Tasarımcısı</span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '3px 9px',
+              borderRadius: 12,
+              background: 'var(--pc-tint)',
+              border: '1px solid var(--pc-border)',
+              color: 'var(--pc-tint-fg)',
+              boxShadow: 'var(--pc-clay-pale)',
+            }}
+          >
+            {direction === 'inbound'
+              ? '📞 Santral (Asterisk Gelen)'
+              : direction === 'outbound'
+              ? '📤 Santral (Asterisk Giden)'
+              : direction === 'web'
+              ? '🌐 Web Tarayıcı (Paralel)'
+              : '💬 WhatsApp Kanalı'}
+          </span>
           {/* Validation Status Pill */}
           <span
             style={{
@@ -2259,23 +2366,44 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
           <span style={{ color: simActive ? '#ffffff' : 'inherit' }}>🧪 {simActive ? 'Simülasyon Açık' : 'Akışı Test Et'}</span>
         </button>
 
-        <button
-          type="button"
-          onClick={loadSampleFlow}
+        <select
+          aria-label="Hazır şablon yükle"
+          value=""
+          onChange={e => {
+            if (e.target.value) loadSampleFlow(e.target.value)
+          }}
           style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            background: 'var(--card-bg)',
-            border: '1px solid var(--input-border)',
-            color: 'var(--foreground)',
+            ...inputStyle,
+            width: 'auto',
+            padding: '6px 11px',
             fontSize: 11,
             fontWeight: 700,
             cursor: 'pointer',
+            background: 'var(--card-bg)',
             boxShadow: 'var(--pc-clay-btn)',
           }}
         >
-          🌟 Örnek Akış Yükle
-        </button>
+          <option value="">🌟 Hazır Şablon Yükle…</option>
+          {direction === 'inbound' && (
+            <>
+              <option value="fast_phone">⚡ Hızlı Telefon Randevusu (Sunum Dostu · 1-2 Soru)</option>
+              <option value="full_asterisk">🏥 Klinik Randevu + Santral Aktarımı &amp; Konum</option>
+              <option value="quick_note">🗒️ Hızlı Not Bırakma (1 Soru)</option>
+            </>
+          )}
+          {direction === 'web' && (
+            <>
+              <option value="fast_web">⚡ Hızlı Web Randevusu (Sunum Dostu · 2 Soru)</option>
+              <option value="quick_note">🗒️ Web Geri Arama / Mesaj Notu</option>
+            </>
+          )}
+          {direction === 'outbound' && (
+            <option value="fast_survey">⚡ Hızlı Memnuniyet Anketi (2 Soru)</option>
+          )}
+          {direction === 'whatsapp' && (
+            <option value="fast_wa">⚡ Hızlı WhatsApp Randevu (1-2 Soru)</option>
+          )}
+        </select>
 
         <button
           type="button"
@@ -2953,11 +3081,13 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <option value="switch_prompt">{ACTION_LABELS.switch_prompt}</option>
                           {direction === 'whatsapp' ? (
                             <option value="send_wa_message">📱 WhatsApp Mesajı Gönder</option>
+                          ) : direction === 'web' ? (
+                            <option value="end_call">👋 Bilgi Ver ve Görüşmeyi Tamamla</option>
                           ) : (
                             <>
-                              <option value="end_call">👋 Bilgi Ver ve Görüşmeyi Bitir</option>
-                              <option value="transfer_call">📞 Aramayı Yetkiliye Aktar</option>
-                              <option value="send_wa_location">📍 Arayana WhatsApp’tan Konum Gönder</option>
+                              <option value="end_call">📴 Bilgi Ver ve Telefon Hattını Kapat (Santral)</option>
+                              <option value="transfer_call">📞 Santrale / Dahiliye Aktar (Asterisk)</option>
+                              <option value="send_wa_location">📍 Arayan Numaraya WhatsApp Konum Gönder (Santral)</option>
                             </>
                           )}
                           {d.action === 'randevuOlustur' && <option value="randevuOlustur">📝 Randevu Oluştur</option>}
@@ -2977,9 +3107,13 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                           <option value="">Normal Akış Adımı (Olay Yok)</option>
                           <option value="on_silence">🤫 Sessiz Kalındığında</option>
                           <option value="on_no_match">❓ Cevap Anlaşılamadığında</option>
-                          <option value="on_transfer_fail">📵 Aktarım Başarısız Olduğunda</option>
+                          {(direction === 'inbound' || direction === 'outbound') && (
+                            <option value="on_transfer_fail">📵 Santral Aktarımı Başarısız Olduğunda</option>
+                          )}
                           <option value="on_call_end">📴 Görüşme Kapandığında</option>
-                          <option value="on_whatsapp_message">💬 WhatsApp Mesajı Geldiğinde</option>
+                          {direction === 'whatsapp' && (
+                            <option value="on_whatsapp_message">💬 WhatsApp Mesajı Geldiğinde</option>
+                          )}
                         </select>
                       </div>
 

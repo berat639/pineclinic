@@ -453,17 +453,24 @@ const ENGLISH_IMMEDIATE_WORD_RE =
 const ENGLISH_PHRASE_RE =
   /\b(?:how\s+can\s+i|how\s+may\s+i|what\s+can\s+i|can\s+i\s+help|may\s+i\s+help|help\s+you|assist\s+you|i\s+am|i\s+can|i\s+will|i\s+would|i\s+have|i\s+need|i\s+understand|would\s+you|could\s+you|do\s+you|did\s+you|are\s+you|will\s+you|thank\s+you|for\s+calling|of\s+course|right\s+now|one\s+moment|just\s+a\s+moment|let\s+me|tell\s+me|give\s+me|your\s+name|your\s+phone|phone\s+number|good\s+morning|good\s+afternoon|good\s+evening|have\s+a\s+nice|have\s+a\s+great|please\s+provide|please\s+wait|please\s+repeat|hear\s+you)\b/i
 
+const COMMON_TURKISH_WORDS = new Set([
+  'merhaba', 'merhabalar', 'hoş', 'geldiniz', 'nasıl', 'yardımcı', 'olabilirim',
+  'randevu', 'klinik', 'kliniğimize', 'hekim', 'doktor', 'hasta', 'tarih', 'saat',
+  'gün', 'için', 'size', 'sizi', 'sizin', 'olarak', 'evet', 'hayır', 'tamam',
+  'tabii', 'lütfen', 'teşekkür', 'teşekkürler', 'sağlıklı', 'günler', 'iyi',
+  'adınızı', 'soyadınızı', 'numaranızı', 'telefon', 'şikayetiniz', 'işlem',
+])
+
 /**
- * Modelin ürettiği çıktı transkriptinde (outputTranscription / modelTurn)
- * İngilizce yanıt üretilip üretilmediğini gerçek zamanlı tespit eder.
+ * Modelin ürettiği çıktı transkriptinde (outputTranscription)
+ * tamamen İngilizce yanıt üretilip üretilmediğini tespit eder.
+ * Türkçe karakter veya Türkçe kelime içeren cümlelerde asla tetiklenmez.
  */
 export function isEnglishResponseDetected(text: string): boolean {
   const cleaned = (text || '').trim()
-  if (!cleaned || cleaned.length < 3) return false
+  if (!cleaned || cleaned.length < 4) return false
 
-  if (ENGLISH_CONTRACTION_RE.test(cleaned)) return true
-  if (ENGLISH_IMMEDIATE_WORD_RE.test(cleaned)) return true
-  if (ENGLISH_PHRASE_RE.test(cleaned)) return true
+  if (/[çğıöşüÇĞİÖŞÜ]/.test(cleaned)) return false
 
   const tokens = cleaned
     .toLowerCase()
@@ -471,14 +478,21 @@ export function isEnglishResponseDetected(text: string): boolean {
     .split(/\s+/)
     .filter(Boolean)
 
+  for (const token of tokens) {
+    if (COMMON_TURKISH_WORDS.has(token)) return false
+  }
+
+  if (ENGLISH_CONTRACTION_RE.test(cleaned)) return true
+  if (ENGLISH_IMMEDIATE_WORD_RE.test(cleaned)) return true
+  if (ENGLISH_PHRASE_RE.test(cleaned)) return true
+
   let englishHits = 0
   const seen = new Set<string>()
   for (const token of tokens) {
-    if (/[çğıöşü]/.test(token)) continue
     if (STRICT_ENGLISH_WORDS.has(token) && !seen.has(token)) {
       seen.add(token)
       englishHits++
-      if (englishHits >= 2) return true
+      if (englishHits >= 3) return true
     }
   }
 
@@ -494,7 +508,7 @@ export function buildRealtimeDetectionConfig(
         disabled: false,
         startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-        prefixPaddingMs: 100,
+        prefixPaddingMs: 120,
         silenceDurationMs: 300,
       },
     }
@@ -503,10 +517,10 @@ export function buildRealtimeDetectionConfig(
   return {
     automaticActivityDetection: {
       disabled: false,
-      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
       endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-      prefixPaddingMs: 220,
-      silenceDurationMs: 650,
+      prefixPaddingMs: 160,
+      silenceDurationMs: 420,
     },
   }
 }

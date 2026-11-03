@@ -214,12 +214,67 @@ export function chunkDocumentText(
 }
 
 let cachedPreWarmEmbedding: number[] | null = null
+let pendingPreWarmPromise: Promise<number[]> | null = null
+const preWarmedRagContextCache = new Map<string, { context: string; expiresAt: number }>()
+const PRE_WARM_CONTEXT_TTL_MS = 5 * 60 * 1000
+
+export function invalidatePreWarmedRagCache(clinicId?: string): void {
+  if (!clinicId) {
+    preWarmedRagContextCache.clear()
+    return
+  }
+  for (const key of preWarmedRagContextCache.keys()) {
+    if (key.startsWith(`${clinicId}:`)) preWarmedRagContextCache.delete(key)
+  }
+}
 
 export async function getPreWarmEmbedding(): Promise<number[]> {
   if (cachedPreWarmEmbedding) return cachedPreWarmEmbedding
+  if (pendingPreWarmPromise) return pendingPreWarmPromise
   console.log('Caching PRE_WARM_QUERY embedding...')
-  cachedPreWarmEmbedding = await embedText(PRE_WARM_QUERY, { taskType: 'RETRIEVAL_QUERY' })
-  return cachedPreWarmEmbedding
+  pendingPreWarmPromise = embedText(PRE_WARM_QUERY, { taskType: 'RETRIEVAL_QUERY' })
+    .then(vec => {
+      cachedPreWarmEmbedding = vec
+      pendingPreWarmPromise = null
+      return vec
+    })
+    .catch(err => {
+      pendingPreWarmPromise = null
+      throw err
+    })
+  return pendingPreWarmPromise
+}
+
+export async function getPreWarmedRagContext(clinicId?: string | null, direction = 'inbound', maxWaitMs = 250): Promise<string> {
+  const key = `${clinicId || 'default'}:${direction}`
+  const now = Date.now()
+  const hit = preWarmedRagContextCache.get(key)
+  if (hit && hit.expiresAt > now) {
+    return hit.context
+  }
+
+  const refreshTask = (async () => {
+    try {
+      const emb = await getPreWarmEmbedding()
+      const topDocs = await retrieveDocsByEmbedding(emb, 5, direction === 'web' ? 'inbound' : direction)
+      const ctx = topDocs.length > 0 ? await buildRagPrompt(topDocs) : ''
+      preWarmedRagContextCache.set(key, { context: ctx, expiresAt: Date.now() + PRE_WARM_CONTEXT_TTL_MS })
+      return ctx
+    } catch {
+      return hit?.context ?? ''
+    }
+  })()
+
+  if (hit) {
+    // Stale-while-revalidate: eski bağlamı 0ms'de döndür, arka planda yenile
+    void refreshTask
+    return hit.context
+  }
+
+  return Promise.race([
+    refreshTask,
+    new Promise<string>(resolve => setTimeout(() => resolve(''), maxWaitMs)),
+  ])
 }
 
 // ── Retrieval ─────────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import { resolve } from 'path'
 import postgres from 'postgres'
 import { embedText } from '../rag'
 import { RAG_PROMPT_DOCS } from '../data/rag-prompts'
+import { buildDefaultWebFlow } from '../db/repositories/flows'
 
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
@@ -162,6 +163,16 @@ async function seedDefaultFlows() {
       VALUES (${clinicId}, 'Anket Akışı (Giden Arama)', 'outbound', true, ${JSON.stringify(outboundNodes)}, ${JSON.stringify(outboundEdges)})
     `
     console.log('[Seed] Anket Akışı (Giden) eklendi')
+  }
+
+  const existingWeb = await sql`SELECT 1 FROM conversation_flows WHERE clinic_id = ${clinicId} AND direction = 'web' LIMIT 1`
+  if (existingWeb.length === 0) {
+    const defaultWeb = buildDefaultWebFlow()
+    await sql`
+      INSERT INTO conversation_flows (clinic_id, name, direction, is_active, nodes, edges)
+      VALUES (${clinicId}, ${defaultWeb.name}, 'web', true, ${JSON.stringify(defaultWeb.nodes)}, ${JSON.stringify(defaultWeb.edges)})
+    `
+    console.log('[Seed] Web Sesli Asistan akışı eklendi')
   }
 }
 

@@ -23,17 +23,25 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
   const parts: string[] = []
   let activeFlow: import('../db/repositories/flows').ConversationFlow | null = null
   let minimalFlow = false
+  let hasStructuredFlow = false
   let flowRuntimeActive = false
   try {
     const flows = await import('../db/repositories/flows')
     activeFlow = await flows.getActiveFlow(direction)
     minimalFlow = Boolean(activeFlow && flows.isMinimalGreetingEndFlow(activeFlow))
+    hasStructuredFlow = Boolean(activeFlow && activeFlow.nodes.length > 2)
     flowRuntimeActive = (await getSetting('ai.flow_runtime_mode')) === 'active'
   } catch {}
   for (const key of PROMPT_SECTION_KEYS) {
-    // Minimal Flow Builder akışında varsayılan randevu senaryosu devreye
-    // girerse model, akışta olmayan soruları kendiliğinden üretir.
-    if (minimalFlow && key === 'prompt.appointment_rules') continue
+    // Minimal Flow Builder akışında veya kendi adımları olan yapılandırılmış bir diyagram
+    // aktifken varsayılan randevu senaryosunu tekrar ekleme; aksi halde model iki ayrı
+    // soru listesini birden sormaya çalışıp soruları tekrarlar.
+    if ((minimalFlow || hasStructuredFlow) && key === 'prompt.appointment_rules') continue
+    // Web kanalında telefon santral aktarımı (aramaAktar) talimatlarını ekleme
+    if (direction === 'web' && key === 'prompt.service_flow') {
+      parts.push('NOT BIRAKMA: Hasta randevu almak istemeyip mesaj, şikayet veya geri arama notu bırakmak isterse hastaNotKaydet aracını çağırarak bankoya ilet.')
+      continue
+    }
     let value = dbSections[key] || getDefaultPromptValue(key) || ''
     if (key === 'prompt.greeting_flow') {
       if (direction === 'whatsapp') {
@@ -47,6 +55,8 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
         value = /\{\{\s*greeting\s*\}\}/.test(outboundTpl)
           ? renderPromptTemplate(outboundTpl, { greeting })
           : `${outboundTpl}\n"${greeting}"`
+      } else if (direction === 'web') {
+        value = `WEB SESLİ ASİSTAN KARŞILAMA:\nMüşteri web asistanına bağlandığında şu karşılama mesajını söyle: "${greeting}"\nSonra müşterinin ne istediğini dinle, zaten söylediği bilgileri asla tekrar sorma ve en kısa yoldan yardımcı ol.`
       } else {
         value = /\{\{\s*greeting\s*\}\}/.test(value)
           ? renderPromptTemplate(value, { greeting })

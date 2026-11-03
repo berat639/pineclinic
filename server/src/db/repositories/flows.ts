@@ -345,6 +345,34 @@ function toIso(d: Date | null | undefined): string {
   return d ? d.toISOString() : ''
 }
 
+export function buildDefaultWebFlow(): ConversationFlow {
+  const nowIso = new Date().toISOString()
+  return {
+    id: 'default-web-flow',
+    name: 'Hızlı Web Randevu Akışı (2 Soru)',
+    isActive: true,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    nodes: [
+      { id: 'start', type: 'START', position: { x: 260, y: 20 }, data: { label: 'Web Karşılama Mesajı' } },
+      { id: 'field_musteri_adi', type: 'FIELD', position: { x: 260, y: 140 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Randevunuz için adınızı, soyadınızı ve telefon numaranızı alabilir miyim?', required: true } },
+      { id: 'field_tel', type: 'FIELD', position: { x: 260, y: 270 }, data: { label: 'Telefon Numarası', fieldName: 'telefon', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
+      { id: 'field_tarih', type: 'FIELD', position: { x: 260, y: 400 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+      { id: 'field_saat', type: 'FIELD', position: { x: 260, y: 530 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
+      { id: 'action_randevu', type: 'ACTION', position: { x: 260, y: 660 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+      { id: 'end', type: 'END', position: { x: 260, y: 790 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
+    ],
+    edges: [
+      { id: 'e_s_ad', source: 'start', target: 'field_musteri_adi' },
+      { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel' },
+      { id: 'e_tel_tar', source: 'field_tel', target: 'field_tarih' },
+      { id: 'e_tar_saat', source: 'field_tarih', target: 'field_saat' },
+      { id: 'e_saat_act', source: 'field_saat', target: 'action_randevu' },
+      { id: 'e_act_end', source: 'action_randevu', target: 'end' },
+    ],
+  }
+}
+
 export async function getActiveFlow(direction: string = 'inbound', explicitClinicId?: string): Promise<ConversationFlow | null> {
   const clinicId = explicitClinicId ?? requireClinicId()
   const rows = await db
@@ -353,7 +381,10 @@ export async function getActiveFlow(direction: string = 'inbound', explicitClini
     .where(and(eq(conversationFlows.clinicId, clinicId), eq(conversationFlows.isActive, true), eq(conversationFlows.direction, direction)))
     .orderBy(desc(conversationFlows.updatedAt))
     .limit(1)
-  if (rows.length === 0) return null
+  if (rows.length === 0) {
+    if (direction === 'web') return buildDefaultWebFlow()
+    return null
+  }
   const r = rows[0]
   const normalized = normalizeFlowNodes(r.nodes as FlowNode[])
   if (normalized.changed) {
@@ -385,7 +416,7 @@ export async function saveFlow(nodes: FlowNode[], edges: FlowEdge[], direction: 
       eq(conversationFlows.direction, direction),
       eq(conversationFlows.isActive, true),
     ))
-  if (existing) {
+  if (existing && !existing.id.startsWith('default-')) {
     const [updated] = await db
       .update(conversationFlows)
       .set({ nodes, edges, isActive: true, updatedAt: new Date() })
@@ -496,6 +527,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
   const lines: string[] = [
     'KONUŞMA AKIŞI VE TALİMATLARI:',
     '⚠️ SIRA VE BEKLEME KURALI: Her adımda yalnızca TEK BİR soru sor. Her sorudan sonra DUR ve müşterinin konuşmasını/cevabını bekle; müşteri yanıt vermeden KESİNLİKLE bir sonraki adıma geçme.',
+    '⚡ HIZLI GEÇİŞ VE TEKRARSIZ SORU KURALI (SUNUM & CANLI GÖRÜŞME OPTİMİZASYONU): Müşteri konuşmasında aşağıdaki adımlardaki bilgilerden birini veya birkaçını (ör. işlem/şikayet, gün/tarih, saat, ad-soyad veya telefon) ZATEN söylediyse o adımı KESİNLİKLE tekrar sorma; bilinen adımları atlayıp yalnızca eksik kalan ilk bilgiyi sor. "tarih" ve "saat" peş peşe geliyorsa ve ikisi de bilinmiyorsa ayrı ayrı sormak yerine tek cümlede ("Hangi gün ve saat için randevu oluşturmamı istersiniz?") birlikte sor.',
     '',
   ]
   const nodeMap = new Map(flow.nodes.map(n => [n.id, n]))

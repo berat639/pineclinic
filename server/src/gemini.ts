@@ -858,8 +858,9 @@ export async function createLiveSession(
           return
         }
 
-        // Önce outputTranscription kontrol edilir: İngilizce tespit edilirse
-        // aynı mesajdaki ve turdaki ses paketleri hiç oynatılmadan kesilir.
+        // Yalnızca gerçek konuşma dökümü (outputTranscription) kontrol edilir.
+        // modelTurn.parts içindeki part.text / part.thought alanları Gemini Native Audio'nun
+        // İngilizce iç düşünce özeti olduğu için dil kilidine sokulmaz (aksi halde Türkçe konuşurken sesi keser).
         if (content.outputTranscription?.text) {
           currentModelTurnTranscript = `${currentModelTurnTranscript}${content.outputTranscription.text}`.slice(-600)
           if (isEnglishResponseDetected(currentModelTurnTranscript)) {
@@ -867,17 +868,9 @@ export async function createLiveSession(
           }
         }
 
-        // Audio and text parts
+        // Audio parts (ve düşünce olmayan metin parçaları)
         if (!englishInterceptedInTurn && content.modelTurn?.parts) {
           for (const part of content.modelTurn.parts) {
-            if (part.text) {
-              currentModelTurnTranscript = `${currentModelTurnTranscript}${part.text}`.slice(-600)
-              if (isEnglishResponseDetected(currentModelTurnTranscript)) {
-                triggerEnglishGuard(currentModelTurnTranscript)
-                break
-              }
-              callbacks.onTranscript('model', part.text)
-            }
             if (!englishInterceptedInTurn && part.inlineData?.data) {
               callbacks.onAudio(Buffer.from(part.inlineData.data, 'base64'))
             }
