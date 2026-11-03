@@ -279,8 +279,12 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         return
       }
 
-      const first = await advance({})
-      if (!alive()) return
+      const startNode = optsRef.current.nodes.find(n => n.type === 'startNode' || n.type === 'START')
+      if (startNode) {
+        stateRef.current.currentNodeId = startNode.id
+        stateRef.current.visitedNodeIds = [startNode.id]
+        optsRef.current.onNodeVisited(startNode.id)
+      }
 
       const liveConfig: SessionConfig = {
         systemPrompt: voice.systemPrompt || '',
@@ -334,8 +338,8 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
 
       setStatus('listening')
       session.sendText(
-        `Sistem bildirimi: Hasta sesli görüşmeye bağlandı (simülasyon). Önce şu karşılamayı söyle: "${voice.greeting || 'Merhaba, size nasıl yardımcı olabilirim?'}" ` +
-        `Ardından şu görevi uygula: ${first.nextInstruction || 'Akıştaki ilk adıma göre devam et.'} (Bu bir sistem bildirimidir, hasta adı sanma.)`,
+        `Sistem bildirimi: Hasta sesli görüşmeye bağlandı (simülasyon). Yalnızca şu karşılama mesajını söyle: "${voice.greeting || 'Merhaba, size nasıl yardımcı olabilirim?'}" ` +
+        `Karşılamayı söyledikten sonra DUR ve müşterinin konuşmasını bekle; müşteri konuşmadan başka soru sorma. Müşteri konuştuğunda akisBilgisiGuncelle aracını çağırarak sıradaki adıma geç. (Bu bir sistem bildirimidir, hasta adı sanma.)`,
       )
 
       const mic = new MicrophoneCapture({

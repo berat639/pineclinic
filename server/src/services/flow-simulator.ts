@@ -147,7 +147,7 @@ async function resolveGreeting(direction: string): Promise<string> {
 const DEFAULT_SIMULATOR_SYSTEM_RULES =
   'Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.'
 const DEFAULT_SIMULATOR_VOICE_FLOW_RULES =
-  'AKIŞ YÖNETİMİ: Hasta yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır ve araçtan gelen sıradaki görevi uygula. Bilgi bankasında aranacak sorular için bilgiBankasindaAra aracını kullan.'
+  'AKIŞ YÖNETİMİ: Karşılama mesajını söyledikten sonra DUR ve hastanın konuşmasını bekle. Hasta konuştuğunda veya her soruya yanıt verdiğinde önce akisBilgisiGuncelle aracını çağır, araçtan gelen sıradaki TEK görevi/soruyu uygula ve tekrar hastanın konuşmasını bekle. Hasta yanıt vermeden asla bir sonraki soruya geçme. Bilgi bankasında aranacak sorular için bilgiBankasindaAra aracını kullan.'
 
 /** Kliniğin (yoksa platformun) sistem talimatlarını sırayla birleştirir. Salt okunur. */
 async function buildClinicInstructions(clinicId: string | undefined, direction: string, greeting: string): Promise<string> {
@@ -333,7 +333,7 @@ ${intentCondNodes.length > 0 ? `Kontrol edilecek özel niyet koşulu: "${intentC
 Kullanıcının son mesajı: "${userMessage}"
 
 Görev:
-1. Kullanıcının mesajından çıkarılabilen alanları (fields) JSON içinde doldur. Eğer şu anki aktif adım bir FIELD ise ve kullanıcı kısa bir yanıt verdiyse (ör. sadece isim, sadece saat, sadece puan), o yanıtı aktif adımın fieldName alanına ata.
+1. Yalnızca kullanıcının son mesajında AÇIKÇA söylediği alanları (fields) JSON içinde doldur; kullanıcının henüz söylemediği alanları KESİNLİKLE tahmin etme veya doldurma. Eğer şu anki aktif adım bir FIELD ise ve kullanıcı kısa bir yanıt verdiyse (ör. sadece isim, sadece saat, sadece puan), o yanıtı yalnızca aktif adımın fieldName alanına ata.
 2. Eğer özel niyet koşulu varsa, kullanıcının mesajının bu niyeti taşıyıp taşımadığını intentMatched (true/false) olarak belirt.`,
                 },
               ],
@@ -433,6 +433,14 @@ Görev:
         logs.push({ role: 'system', text: '⚠️ Karşılama adımından sonra bağlı bir adım bulunmuyor.' })
         break
       }
+      if (!userMessage && !req.manualBranch && !req.skipReply) {
+        stoppedNode = node
+        logs.push({
+          role: 'system',
+          text: '⏳ Karşılama mesajı söylendi — müşterinin konuşması bekleniyor (müşteri yanıt verdikten sonra sıradaki adıma geçilir).',
+        })
+        break
+      }
       if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
       currId = outEdge.target
       continue
@@ -524,10 +532,12 @@ Görev:
   })
 
   let stepInstruction = ''
-  if (stoppedNode?.type === 'FIELD') {
-    stepInstruction = `Şu anki akış adımında hastadan "${stoppedNode.data.fieldName}" bilgisini istemelisin. Sorulacak soru: "${stoppedNode.data.description || stoppedNode.data.fieldName}".`
+  if (stoppedNode?.type === 'START') {
+    stepInstruction = `Yalnızca şu karşılama mesajını söyle: "${greetingText}". Karşılamayı söyledikten sonra DUR ve müşterinin konuşmasını bekle; başka soru sorma.`
+  } else if (stoppedNode?.type === 'FIELD') {
+    stepInstruction = `Şu anki akış adımında hastadan YALNIZCA "${stoppedNode.data.fieldName}" bilgisini istemelisin. Sorulacak soru: "${stoppedNode.data.description || stoppedNode.data.fieldName}". Bu tek soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; başka adımın sorusunu peşine ekleme.`
   } else if (stoppedNode?.type === 'CONDITION') {
-    stepInstruction = `Şu anki adımda hastanın niyetini ("${stoppedNode.data.conditionValue}") anlamak için nasıl yardımcı olabileceğini sor.`
+    stepInstruction = `Şu anki adımda hastanın niyetini ("${stoppedNode.data.conditionValue}") anlamak için nasıl yardımcı olabileceğini sor ve müşterinin konuşmasını bekle.`
   } else if (stoppedNode?.type === 'END' || completed) {
     const closeMsg = stoppedNode?.data?.message || 'Görüşmeyi nazikçe tamamla ve sağlıklı günler dile.'
     stepInstruction = `Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
@@ -562,7 +572,7 @@ Görev:
       const simSystemRules = renderPromptTemplate(rawSimRules.trim() || DEFAULT_SIMULATOR_SYSTEM_RULES, {}).trim() || DEFAULT_SIMULATOR_SYSTEM_RULES
       const sysInstruction = `${simSystemRules}
 Bugünün tarihi: ${getTodayIso()}.
-${startedFromStartNode && !userMessage ? `Görüşme yeni başladı. İlk olarak şu karşılama mesajını söyle: "${greetingText}" ve ardından sıradaki adımın sorusunu doğalca ekle.` : ''}
+${stoppedNode?.type === 'START' ? `Görüşme yeni başladı. Yalnızca şu karşılama mesajını söyle: "${greetingText}" ve müşterinin konuşmasını bekle; ek soru sorma.` : ''}
 ${ragContext ? `\nKLİNİK BİLGİ BANKASI (Eğer kullanıcı bir soru sorduysa bu bilgilerle yanıtla):\n${ragContext}\n` : ''}
 ${clinicInstructions ? `\nKLİNİK TALİMATLARI:\n${clinicInstructions}\n` : ''}
 ${flowPrompt}

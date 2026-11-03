@@ -493,7 +493,11 @@ function formatRuleText(r: FlowConditionRule): string {
 export function flowToPromptText(flow: ConversationFlow): string {
   if (flow.nodes.length === 0) return ''
 
-  const lines: string[] = ['KONUŞMA AKIŞI VE TALİMATLARI:']
+  const lines: string[] = [
+    'KONUŞMA AKIŞI VE TALİMATLARI:',
+    '⚠️ SIRA VE BEKLEME KURALI: Her adımda yalnızca TEK BİR soru sor. Her sorudan sonra DUR ve müşterinin konuşmasını/cevabını bekle; müşteri yanıt vermeden KESİNLİKLE bir sonraki adıma geçme.',
+    '',
+  ]
   const nodeMap = new Map(flow.nodes.map(n => [n.id, n]))
   const edgeMap = new Map<string, FlowEdge[]>()
   for (const e of flow.edges) {
@@ -508,21 +512,30 @@ export function flowToPromptText(flow: ConversationFlow): string {
   let step = 1
   const visited = new Set<string>()
 
-  function traverse(nodeId: string, indent: number) {
-    if (visited.has(nodeId)) return
-    visited.add(nodeId)
-
+  function traverse(nodeId: string, indent: number, pathVisited: Set<string> = new Set()) {
+    if (step > 80) return
     const node = nodeMap.get(nodeId)
     if (!node) return
     const prefix = '  '.repeat(indent)
 
+    if (pathVisited.has(nodeId)) {
+      lines.push(`${prefix}${step}. Döngü: "${node.data.fieldName || node.data.label || nodeId}" adımına geri dön ve müşterinin konuşmasını bekle.`)
+      step++
+      return
+    }
+    visited.add(nodeId)
+    const nextPath = new Set(pathVisited)
+    nextPath.add(nodeId)
+
     switch (node.type) {
       case 'START':
         lines.push(`${prefix}${step}. Karşılama mesajını söyleyerek söze başla.`)
+        lines.push(`${prefix}   ↳ Müşterinin konuşmasını bekle ve ne söylediğini dinle.`)
         step++
         break
       case 'FIELD':
-        lines.push(`${prefix}${step}. "${node.data.fieldName}" alanını sor${node.data.required ? ' (zorunlu)' : ''}: "${node.data.description}"`)
+        lines.push(`${prefix}${step}. "${node.data.fieldName}" bilgisini sor${node.data.required ? ' (zorunlu)' : ''}: "${node.data.description}"`)
+        lines.push(`${prefix}   ↳ Müşterinin konuşmasını ve cevabını bekle; cevap almadan sıradaki adıma geçme.`)
         step++
         break
       case 'CONDITION': {
@@ -545,12 +558,12 @@ export function flowToPromptText(flow: ConversationFlow): string {
         const trueEdge = edges.find(e => e.sourceHandle === 'true')
         const falseEdge = edges.find(e => e.sourceHandle === 'false')
         if (trueEdge) {
-          lines.push(`${prefix}  - Evet:`)
-          traverse(trueEdge.target, indent + 2)
+          lines.push(`${prefix}  - Evet (Yeşil Yol):`)
+          traverse(trueEdge.target, indent + 2, nextPath)
         }
         if (falseEdge) {
-          lines.push(`${prefix}  - Hayır:`)
-          traverse(falseEdge.target, indent + 2)
+          lines.push(`${prefix}  - Hayır (Kırmızı Yol):`)
+          traverse(falseEdge.target, indent + 2, nextPath)
         }
         return
       }
@@ -560,7 +573,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
         if (act === 'transfer_call') {
           const { target, keywords, requiresConfirmation, questionInstruction } = getTransferPromptConfig(actionData)
           if (requiresConfirmation) {
-            lines.push(`${prefix}${step}. ARAMAYI ONAYLA VE AKTAR: Önce kullanıcıya ${questionInstruction}. Açık bir olumlu cevap gelmeden aramaAktar aracını çağırma veya aktardığını söyleme. Kullanıcı onaylarsa aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Bu kural "${keywords}" tetikleyici ifadeleri için geçerlidir.` : ''}`)
+            lines.push(`${prefix}${step}. ARAMAYI ONAYLA VE AKTAR: Önce kullanıcıya ${questionInstruction} ve müşterinin cevabını bekle. Açık bir olumlu cevap gelmeden aramaAktar aracını çağırma veya aktardığını söyleme. Kullanıcı onaylarsa aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Bu kural "${keywords}" tetikleyici ifadeleri için geçerlidir.` : ''}`)
           } else {
             lines.push(`${prefix}${step}. ARAMAYI AKTAR: ŞU AN aramaAktar aracını çağır ve "hedef" parametresine "${target}" değerini yaz.${keywords ? ` Müşteri "${keywords}" ifadelerinden birini söylerse de derhal aktar.` : ''}`)
           }
@@ -580,10 +593,11 @@ export function flowToPromptText(flow: ConversationFlow): string {
           lines.push(`${prefix}${step}. SMS GÖNDER: Hastaya "${actionData.message || ''}" içerikli bilgilendirme SMS'ini ilet.`)
         } else if (act === 'wait_reprompt' || act === 'wait') {
           lines.push(`${prefix}${step}. BEKLE / YENİDEN SOR: "${actionData.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'}" cümlesiyle hastayı yönlendir.`)
+          lines.push(`${prefix}   ↳ Müşterinin konuşmasını ve cevabını bekle.`)
         } else if (act === 'switch_prompt') {
           lines.push(`${prefix}${step}. MOD / TALİMAT DEĞİŞTİR: Bundan sonraki konuşmada şu talimata göre davran: "${actionData.promptInstruction || actionData.message || ''}".`)
         } else {
-          lines.push(`${prefix}${step}. Randevu bilgilerini toplayıp randevuOlustur aracını çağır.`)
+          lines.push(`${prefix}${step}. RANDEVU OLUŞTUR: Toplanan bilgilerle randevuOlustur aracını çağır.`)
         }
         step++
         break
@@ -598,9 +612,7 @@ export function flowToPromptText(flow: ConversationFlow): string {
 
     const edges = edgeMap.get(nodeId) || []
     for (const e of edges) {
-      if (!visited.has(e.target)) {
-        traverse(e.target, indent)
-      }
+      traverse(e.target, indent, nextPath)
     }
   }
 

@@ -67,4 +67,46 @@ describe('voice-settings validation & prompt registry', () => {
     expect(keys).toContain('prompt.flow_priority_rules')
     expect(keys).toContain('prompt.vip_default')
   })
+
+  test('flowToPromptText includes wait-for-customer instructions after every question and traverses merged Hayır branch', async () => {
+    const { flowToPromptText } = await import('../db/repositories/flows')
+    const prompt = flowToPromptText({
+      id: 'sample',
+      name: 'sample',
+      isActive: true,
+      createdAt: '',
+      updatedAt: '',
+      nodes: [
+        { id: 'start', type: 'START', position: { x: 0, y: 0 }, data: { label: 'Karşılama Mesajı' } },
+        { id: 'cond_kayitli', type: 'CONDITION', position: { x: 0, y: 100 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true' } },
+        { id: 'field_sikayet', type: 'FIELD', position: { x: 0, y: 200 }, data: { fieldName: 'sikayet', description: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?' } },
+        { id: 'field_musteri_adi', type: 'FIELD', position: { x: 200, y: 200 }, data: { fieldName: 'musteri_adi', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
+        { id: 'field_tel', type: 'FIELD', position: { x: 200, y: 300 }, data: { fieldName: 'telefon', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
+        { id: 'field_tarih', type: 'FIELD', position: { x: 0, y: 400 }, data: { fieldName: 'tarih', description: 'Hangi tarihe randevu oluşturmak istersiniz?', required: true } },
+        { id: 'field_saat', type: 'FIELD', position: { x: 0, y: 500 }, data: { fieldName: 'saat', description: 'Saat kaç için randevu istersiniz?', required: true } },
+        { id: 'action_randevu', type: 'ACTION', position: { x: 0, y: 600 }, data: { action: 'save_appointment_pending' } },
+        { id: 'end', type: 'END', position: { x: 0, y: 700 }, data: { label: 'Görüşmeyi Bitir' } },
+      ],
+      edges: [
+        { id: 'e_s_c', source: 'start', target: 'cond_kayitli' },
+        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet' },
+        { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi' },
+        { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel' },
+        { id: 'e_tel_sik', source: 'field_tel', target: 'field_sikayet' },
+        { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
+        { id: 'e_tar_sa', source: 'field_tarih', target: 'field_saat' },
+        { id: 'e_sa_act', source: 'field_saat', target: 'action_randevu' },
+        { id: 'e_act_end', source: 'action_randevu', target: 'end' },
+      ],
+    })
+
+    expect(prompt).toContain('Müşterinin konuşmasını ve cevabını bekle')
+    const hayirSection = prompt.split('- Hayır (Kırmızı Yol):')[1] || ''
+    expect(hayirSection).toContain('"musteri_adi" bilgisini sor')
+    expect(hayirSection).toContain('"telefon" bilgisini sor')
+    expect(hayirSection).toContain('"sikayet" bilgisini sor')
+    expect(hayirSection).toContain('"tarih" bilgisini sor')
+    expect(hayirSection).toContain('"saat" bilgisini sor')
+    expect(hayirSection).toContain('RANDEVU OLUŞTUR')
+  })
 })

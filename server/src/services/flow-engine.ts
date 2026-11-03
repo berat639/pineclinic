@@ -123,7 +123,10 @@ export class FlowEngine {
   private next(edge?: FlowEdge) { this.state.currentNodeId = edge?.target }
 
   private promptFor(node: FlowNode) {
-    if (node.type === 'FIELD') return node.data.description || `${node.data.fieldName || 'Bu bilgiyi'} kullanıcıdan kısa ve açık biçimde iste.`
+    if (node.type === 'FIELD') {
+      const base = node.data.description || `${node.data.fieldName || 'Bu bilgiyi'} kullanıcıdan kısa ve açık biçimde iste.`
+      return `${base} (Bu soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; cevap almadan sıradaki adıma geçme.)`
+    }
     if (node.type === 'END') return node.data.message || 'Görüşmeyi kısa ve nazikçe tamamla.'
     if (node.type === 'ACTION') {
       const act = String(node.data.action || '')

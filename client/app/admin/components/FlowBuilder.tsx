@@ -249,7 +249,11 @@ function validateFlowClient(nodes: Node[], edges: Edge[]): FlowIssue[] {
 
 function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
   if (nodes.length === 0) return 'Akışta henüz düğüm bulunmuyor.'
-  const lines: string[] = ['KONUŞMA AKIŞI VE TALİMATLARI:']
+  const lines: string[] = [
+    'KONUŞMA AKIŞI VE TALİMATLARI:',
+    '⚠️ SIRA VE BEKLEME KURALI: Her adımda yalnızca TEK BİR soru sor. Her sorudan sonra DUR ve müşterinin konuşmasını/cevabını bekle; müşteri yanıt vermeden KESİNLİKLE bir sonraki adıma geçme.',
+    '',
+  ]
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
   const edgeMap = new Map<string, Edge[]>()
   for (const e of edges) {
@@ -262,23 +266,31 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
   if (!startNode) return 'Karşılama (Başlangıç) adımı bulunamadı.'
 
   let step = 1
-  const visited = new Set<string>()
 
-  function traverse(nodeId: string, indent: number) {
-    if (visited.has(nodeId)) return
-    visited.add(nodeId)
+  function traverse(nodeId: string, indent: number, pathVisited: Set<string> = new Set()) {
+    if (step > 80) return
     const node = nodeMap.get(nodeId)
     if (!node) return
     const d = (node.data || {}) as Record<string, any>
     const prefix = '  '.repeat(indent)
 
+    if (pathVisited.has(nodeId)) {
+      lines.push(`${prefix}${step}. Döngü: "${d.fieldName || d.label || nodeId}" adımına geri dön ve müşterinin konuşmasını bekle.`)
+      step++
+      return
+    }
+    const nextPath = new Set(pathVisited)
+    nextPath.add(nodeId)
+
     switch (node.type) {
       case 'startNode':
         lines.push(`${prefix}${step}. Karşılama mesajını söyleyerek söze başla.`)
+        lines.push(`${prefix}   ↳ Müşterinin konuşmasını bekle ve ne söylediğini dinle.`)
         step++
         break
       case 'fieldNode':
         lines.push(`${prefix}${step}. "${d.fieldName || 'alan'}" bilgisini sor${d.required ? ' (zorunlu)' : ''}: "${d.description || ''}"`)
+        lines.push(`${prefix}   ↳ Müşterinin konuşmasını ve cevabını bekle; cevap almadan sıradaki adıma geçme.`)
         step++
         break
       case 'conditionNode': {
@@ -295,18 +307,18 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
         const falseEdge = nextEdges.find(e => e.sourceHandle === 'false')
         if (trueEdge) {
           lines.push(`${prefix}  - Evet (Yeşil Yol):`)
-          traverse(trueEdge.target, indent + 2)
+          traverse(trueEdge.target, indent + 2, nextPath)
         }
         if (falseEdge) {
           lines.push(`${prefix}  - Hayır (Kırmızı Yol):`)
-          traverse(falseEdge.target, indent + 2)
+          traverse(falseEdge.target, indent + 2, nextPath)
         }
         return
       }
       case 'actionNode': {
         const act = d.action
         if (act === 'transfer_call') {
-          lines.push(`${prefix}${step}. ARAMAYI AKTAR: Hedef "${d.transferNumber || 'resepsiyon'}" (${d.requireConfirmation !== false ? 'Önce onay iste' : 'Doğrudan aktar'}).`)
+          lines.push(`${prefix}${step}. ARAMAYI AKTAR: Hedef "${d.transferNumber || 'resepsiyon'}" (${d.requireConfirmation !== false ? 'Önce onay iste ve müşterinin cevabını bekle' : 'Doğrudan aktar'}).`)
         } else if (act === 'send_wa_location') {
           lines.push(`${prefix}${step}. WHATSAPP KONUM GÖNDER: whatsappKonumGonder aracını çağır.`)
         } else if (act === 'send_wa_message') {
@@ -315,6 +327,9 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
           lines.push(`${prefix}${step}. HASTADAN NOT AL: hastaNotKaydet aracını çağırarak notu kaydet.`)
         } else if (act === 'end_call') {
           lines.push(`${prefix}${step}. BİLGİ VER VE BİTİR: ${d.message ? `"${d.message}" diyerek ` : ''}cagriySonlandir aracını çağır.`)
+        } else if (act === 'wait_reprompt' || act === 'wait') {
+          lines.push(`${prefix}${step}. BEKLE / YENİDEN SOR: "${d.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'}"`)
+          lines.push(`${prefix}   ↳ Müşterinin konuşmasını ve cevabını bekle.`)
         } else if (act === 'webhook') {
           break
         } else {
@@ -330,7 +345,7 @@ function buildPromptPreview(nodes: Node[], edges: Edge[]): string {
     }
 
     for (const e of edgeMap.get(nodeId) || []) {
-      if (!visited.has(e.target)) traverse(e.target, indent)
+      traverse(e.target, indent, nextPath)
     }
   }
 
