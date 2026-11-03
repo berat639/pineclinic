@@ -324,6 +324,7 @@ interface CallState {
   playbackReady: boolean
   outputUnderruns: number
   outputTranscript: string
+  lastCompletedAiTranscript: string
   userTranscript: string
   turnDetectionMode: TurnDetectionMode
   semanticTurnHoldTimer?: ReturnType<typeof setTimeout>
@@ -453,6 +454,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           playbackReady: false,
           outputUnderruns: 0,
           outputTranscript: '',
+          lastCompletedAiTranscript: '',
           userTranscript: '',
           turnDetectionMode: 'semantic',
           lastAiAudioAt: 0,
@@ -485,6 +487,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
         const finishOutputTurn = () => {
           if (!state.outputTurnActive) return
+          if (state.outputTranscript.trim()) {
+            state.lastCompletedAiTranscript = state.outputTranscript.trim()
+          }
           state.outputTurnActive = false
           state.outputTurnComplete = false
           state.playbackReady = false
@@ -1085,10 +1090,14 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 })
               }
               if (state.turnDetectionMode === 'semantic') {
-                const analysis = analyzeTurkishTurnCompleteness(state.userTranscript)
+                const analysis = analyzeTurkishTurnCompleteness(
+                  state.userTranscript,
+                  state.lastCompletedAiTranscript,
+                )
                 if (analysis.status === 'incomplete') {
+                  const holdMs = Math.max(400, analysis.recommendedSilenceMs - 300)
                   if (state.semanticTurnHoldTimer) clearTimeout(state.semanticTurnHoldTimer)
-                  state.semanticTurnHoldTimer = setTimeout(sendStreamEnd, 450)
+                  state.semanticTurnHoldTimer = setTimeout(sendStreamEnd, holdMs)
                 } else {
                   sendStreamEnd()
                 }

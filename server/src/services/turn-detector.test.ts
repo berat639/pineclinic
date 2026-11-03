@@ -4,6 +4,7 @@ import {
   analyzePcmFrameCharacteristics,
   analyzeTurkishTurnCompleteness,
   buildRealtimeDetectionConfig,
+  evaluateLiveKitTurkishTurn,
 } from './turn-detector'
 import { validateVoiceSettings } from './voice-settings'
 
@@ -15,6 +16,22 @@ describe('Turkish Semantic Turn Detector', () => {
     expect(analyzeTurkishTurnCompleteness('sıfır beş yüz otuz iki').status).toBe('incomplete')
     expect(analyzeTurkishTurnCompleteness('Pazartesi günü bir de').status).toBe('incomplete')
     expect(analyzeTurkishTurnCompleteness('Dişim ağrıyor yani').status).toBe('incomplete')
+  })
+
+  test('evaluates LiveKit context-aware EOU probability with assistant question context', () => {
+    // Bağlam yokken "Salı günü" tümleçtir ve yüklem bekler
+    const withoutContext = evaluateLiveKitTurkishTurn({ userText: 'Salı günü' })
+    expect(withoutContext.status).toBe('incomplete')
+    expect(withoutContext.eouProbability).toBeLessThan(0.5)
+
+    // Asistan "Hangi gün?" diye sorduğunda ise "Salı günü" tam bir cevaptır
+    const withDateQuestion = evaluateLiveKitTurkishTurn({
+      userText: 'Salı günü',
+      assistantText: 'Hangi gün için randevu oluşturmamı istersiniz?',
+    })
+    expect(withDateQuestion.status).toBe('complete')
+    expect(withDateQuestion.eouProbability).toBeGreaterThanOrEqual(0.85)
+    expect(withDateQuestion.recommendedSilenceMs).toBeLessThanOrEqual(400)
   })
 
   test('detects Turkish SOV verb-final pauses (infinitives, case suffixes, conditionals, genitives) as incomplete', () => {

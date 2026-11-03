@@ -8,8 +8,10 @@ import {
 } from '@google/genai'
 import {
   buildRealtimeDetectionConfig,
+  evaluateLiveKitTurkishTurn,
   SEMANTIC_TURN_PROMPT_INSTRUCTION,
   type NoiseFilterMode,
+  type TurnAnalysisResult,
   type TurnDetectionMode,
 } from './turn-detector'
 
@@ -23,6 +25,8 @@ export type LiveChatCallbacks = {
   onInteractionStatus?: (status: 'IN_PROGRESS' | 'IDLE') => void
   /** Kullanıcının konuşmasının yazıya dökümü (sesli modda). */
   onUserText?: (text: string) => void
+  /** LiveKit + Türkçe SOV sıra algılayıcı sonucu */
+  onTurnDetection?: (result: TurnAnalysisResult) => void
 }
 
 export type SessionConfig = {
@@ -129,6 +133,10 @@ export class AiLiveSession {
   private sessionKey?: string
   private toolHandler?: SessionConfig['toolHandler']
   private _interactionInProgress = false
+  private _turnMode: TurnDetectionMode = 'semantic'
+  private _lastAssistantTranscript = ''
+  private _currentModelTranscript = ''
+  private _currentUserTranscript = ''
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
@@ -140,6 +148,10 @@ export class AiLiveSession {
     this.sessionKey = config.flowSession?.token || config.sessionKey
     this.toolHandler = config.toolHandler
     this._interactionInProgress = false
+    this._turnMode = config.turnDetectionMode === 'standard' ? 'standard' : 'semantic'
+    this._lastAssistantTranscript = ''
+    this._currentModelTranscript = ''
+    this._currentUserTranscript = ''
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
     // "response modalities (TEXT) is not supported". Keep text chat on the
@@ -399,14 +411,35 @@ export class AiLiveSession {
     // Output transcription (text of what AI said in audio mode)
     const transcript = (message as any).serverContent?.outputTranscription?.text
     if (transcript) {
-      // console.log('[AI]', transcript)
+      this._currentModelTranscript = `${this._currentModelTranscript}${transcript}`.slice(-600)
+      this._currentUserTranscript = ''
       this.callbacks.onText(transcript)
     }
 
     const userTranscript = (message as any).serverContent?.inputTranscription?.text
-    if (userTranscript) this.callbacks.onUserText?.(userTranscript)
+    if (userTranscript) {
+      this._currentUserTranscript = `${this._currentUserTranscript} ${userTranscript}`.trim().slice(-500)
+      this.callbacks.onUserText?.(userTranscript)
+      if (this._turnMode === 'semantic') {
+        const analysis = evaluateLiveKitTurkishTurn({
+          userText: this._currentUserTranscript,
+          assistantText: this._lastAssistantTranscript,
+        })
+        this.callbacks.onTurnDetection?.(analysis)
+      }
+    }
 
-    if (message.serverContent?.turnComplete) this.callbacks.onTurnComplete()
-    if (message.serverContent?.interrupted) this.callbacks.onInterrupted()
+    if (message.serverContent?.turnComplete) {
+      if (this._currentModelTranscript.trim()) {
+        this._lastAssistantTranscript = this._currentModelTranscript.trim()
+      }
+      this._currentModelTranscript = ''
+      this._currentUserTranscript = ''
+      this.callbacks.onTurnComplete()
+    }
+    if (message.serverContent?.interrupted) {
+      this._currentModelTranscript = ''
+      this.callbacks.onInterrupted()
+    }
   }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import InfoTooltip from './ui/InfoTooltip'
 import { checkBrowserAudioSupport, runMicrophoneTest, type BrowserAudioSupport } from '../../../lib/browser-audio-support'
+import { evaluateLiveKitTurkishTurn } from '../../../lib/turn-detector'
 
 type Tab = 'model' | 'voice' | 'conversation' | 'telephony'
 type VoiceSettings = {
@@ -134,6 +135,65 @@ function BrowserSupportCard({ noiseFilterEnabled }: { noiseFilterEnabled: boolea
   </div>
 }
 
+function SovLiveTesterCard() {
+  const [sampleText, setSampleText] = useState('Yarın öğleden sonra implant için randevu almak')
+  const [assistantContext, setAssistantContext] = useState('')
+  const analysis = evaluateLiveKitTurkishTurn({ userText: sampleText, assistantText: assistantContext })
+  const isWaiting = analysis.status === 'incomplete'
+  const eouPct = Math.round(analysis.eouProbability * 100)
+
+  const examples: Array<[string, string, string]> = [
+    ['Mastar (-mak)', 'Yarın öğleden sonra implant için randevu almak', ''],
+    ['Hâl eki (-den)', 'Doktor Ahmet Beyden', ''],
+    ['Şart (-sa)', 'Yarın saat üçte boşluk varsa', ''],
+    ['Eksik numara', 'Numaram 0532 411', ''],
+    ['Soru bağlamlı gün', 'Salı günü', 'Hangi gün için randevu oluşturmamı istersiniz?'],
+    ['Tam cümle (Yüklem)', 'Yarın saat 14 için randevu almak istiyorum', ''],
+  ]
+
+  return <div style={{ ...subCard, padding: 12, marginTop: 10 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <strong style={{ fontSize: 11, color: 'var(--foreground)' }}>Türkçe SOV ve Cümle Sonu Sınama Alanı</strong>
+        <InfoTooltip title="Nasıl çalışır?">Türkçe Özne-Nesne-Yüklem (SOV) diziliminde yüklem en sonda gelir. Aşağıya bir hasta cümlesi yazarak veya hazır örnekleri seçerek sistemin sözü kesip kesmeyeceğini ve hesaplanan cümle bitme olasılığını canlı görebilirsiniz.</InfoTooltip>
+      </div>
+      <span style={{
+        padding: '3px 9px',
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 700,
+        background: isWaiting ? 'var(--pc-tint, #e0f2fe)' : '#f0fdf4',
+        color: isWaiting ? 'var(--pc-tint-fg, #0369a1)' : '#15803d',
+        border: `1px solid ${isWaiting ? 'var(--input-border)' : '#86efac'}`,
+        boxShadow: 'var(--pc-clay-pale)',
+      }}>
+        {isWaiting ? `Bekliyor (Yüklem Gelmedi • ${analysis.recommendedSilenceMs} ms)` : `Tamamlandı (Yanıt Verir • ${analysis.recommendedSilenceMs} ms)`}
+      </span>
+    </div>
+
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 8 }}>
+      {examples.map(([label, text, ctx]) => <button
+        key={label}
+        type="button"
+        onClick={() => { setSampleText(text); setAssistantContext(ctx) }}
+        style={sampleText === text ? { ...primaryBtn, padding: '4px 9px', fontSize: 10, cursor: 'pointer' } : { ...clayBtn, padding: '4px 9px', fontSize: 10, cursor: 'pointer' }}
+      >{label}</button>)}
+    </div>
+
+    <input
+      type="text"
+      value={sampleText}
+      onChange={e => setSampleText(e.target.value)}
+      placeholder="Test etmek istediğiniz Türkçe hasta cümlesini yazın…"
+      style={{ ...inputStyle, marginBottom: 6 }}
+    />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--foreground-2)' }}>
+      <span><strong>Analiz:</strong> {analysis.reasonLabelTr}</span>
+      <span style={{ fontWeight: 700, color: 'var(--foreground)' }}>Bitme olasılığı: %{eouPct}</span>
+    </div>
+  </div>
+}
+
 export default function VoiceAiSettings({ onToast }: { onToast: (message: string, type?: 'success' | 'error') => void }) {
   const [tab, setTab] = useState<Tab>('model')
   const [settings, setSettings] = useState<VoiceSettings>(DEFAULTS)
@@ -241,7 +301,7 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
         </div>
         <div style={{ display: 'grid', gap: 8 }}>
           {([
-            ['semantic', 'Akıllı Sıra Algılama (Önerilen)', 'Cümlenin anlam olarak tamamlanmasını bekler; düşünme duraksamalarında sözü kesmez.'],
+            ['semantic', 'Akıllı Sıra Algılama — Türkçe SOV & Anlam Motoru (Önerilen)', 'Türkçe Özne-Nesne-Yüklem (SOV) eklerini, mastarları, hâl eklerini ve bağlaçları analiz eder; düşünme duraksamalarında sözü kesmez.'],
             ['standard', 'Standart Algılama', 'Klasik süre tabanlı ses algılama; kısa sessizlikte hemen yanıt üretir.'],
           ] as const).map(([id, title, description]) => <label key={id} style={{ display: 'block', padding: 12, border: `1.5px solid ${settings.turnDetectionMode === id ? '#2563eb' : 'var(--input-border)'}`, borderRadius: 10, background: settings.turnDetectionMode === id ? 'var(--pc-pale-bg, var(--card-inner))' : 'var(--card-inner)', boxShadow: 'var(--pc-neo-subcard)', cursor: 'pointer' }}>
             <input type="radio" name="turn-detection-mode" checked={settings.turnDetectionMode === id} onChange={() => patch({ turnDetectionMode: id })} style={{ marginRight: 8 }} />
@@ -250,6 +310,7 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
           </label>)}
         </div>
         <FieldError name="turnDetectionMode" />
+        {settings.turnDetectionMode === 'semantic' && <SovLiveTesterCard />}
       </div>
 
       <div>
