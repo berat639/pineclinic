@@ -17,8 +17,31 @@ describe('Turkish Semantic Turn Detector', () => {
     expect(analyzeTurkishTurnCompleteness('Dişim ağrıyor yani').status).toBe('incomplete')
   })
 
-  test('classifies complete Turkish sentences, confirmations, and full phone numbers as complete', () => {
+  test('detects Turkish SOV verb-final pauses (infinitives, case suffixes, conditionals, genitives) as incomplete', () => {
+    // Mastar (-mak/-mek) ile biten ve henüz "istiyorum" yüklemi gelmemiş cümleler
+    expect(analyzeTurkishTurnCompleteness('Yarın öğleden sonra randevu almak').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('İmplant tedavisi için muayene olmak').status).toBe('incomplete')
+    // İsim-fiil (-mayı/-meye)
+    expect(analyzeTurkishTurnCompleteness('Yarın kliniğinize gelmeyi').status).toBe('incomplete')
+    // Şart kipi (-sa/-se) yan cümlesi
+    expect(analyzeTurkishTurnCompleteness('Yarın saat üçte boşluk varsa').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Doktor Bey müsaitse').status).toBe('incomplete')
+    // Tamlayan eki (-ın/-in/-nın) — tamlanan henüz gelmedi
+    expect(analyzeTurkishTurnCompleteness('Benim dişimin').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Doktor Ahmet Beyin').status).toBe('incomplete')
+    // SOV Hâl ekleri (Ayrılma -dan/-den, Vasıta -la/-le, Yönelme/Belirtme)
+    expect(analyzeTurkishTurnCompleteness('Doktor Ahmet Beyden').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Yarın sabah eşimle').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Mevcut randevumu').status).toBe('incomplete')
+    // Özne ile başlayıp henüz yüklemi söylenmemiş 3+ kelimeli SOV cümleler
+    expect(analyzeTurkishTurnCompleteness('Ben yarın öğleden sonra klinikte').status).toBe('incomplete')
+  })
+
+  test('classifies complete Turkish sentences, finite verbs, confirmations, and full phone numbers as complete', () => {
     expect(analyzeTurkishTurnCompleteness('Yarın öğleden sonra randevu almak istiyorum').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Yarın saat üçte geleceğim').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Sol alt azı dişim çok ağrıyor').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Randevu alabilir miyim').status).toBe('complete')
     expect(analyzeTurkishTurnCompleteness('Evet onaylıyorum').status).toBe('complete')
     expect(analyzeTurkishTurnCompleteness('0532 411 22 33').status).toBe('complete')
     expect(analyzeTurkishTurnCompleteness('Perşembe günü boş yer var mı?').status).toBe('complete')
@@ -82,3 +105,4 @@ describe('Turkish Semantic Turn Detector', () => {
     expect(invalid.fieldErrors.noiseFilterMode).toBeDefined()
   })
 })
+
