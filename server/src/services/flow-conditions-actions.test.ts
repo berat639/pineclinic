@@ -9,6 +9,7 @@ import {
 } from '../db/repositories/flows'
 import { buildFlowNodePrompt, FlowEngine } from './flow-engine'
 import { runFlowSimulationStep } from './flow-simulator'
+import { normalizeAppointmentDate, normalizeAppointmentTime } from './assistant-appointments'
 
 describe('Diagram Conditions & Actions — Full End-to-End Verification', () => {
   test('evaluates all 15 condition operators accurately in Turkish', () => {
@@ -289,5 +290,66 @@ describe('Diagram Conditions & Actions — Full End-to-End Verification', () => 
     expect(promptText).toContain('GLOBAL TETİKLEYİCİLER')
     expect(promptText).toContain('operatör, canlı destek')
     expect(promptText).toContain('aramaAktar')
+  })
+
+  test('FlowEngine skips optional FIELD nodes when downstream booking fields are already collected and normalizes Turkish dates/times', async () => {
+    expect(normalizeAppointmentDate('2026-11-04')).toBe('2026-11-04')
+    expect(normalizeAppointmentDate('04.11.2026')).toBe('2026-11-04')
+    expect(normalizeAppointmentDate('4 Kasım 2026')).toBe('2026-11-04')
+    expect(normalizeAppointmentTime('14:00')).toBe('14:00')
+    expect(normalizeAppointmentTime('14.00')).toBe('14:00')
+    expect(normalizeAppointmentTime('9:30')).toBe('09:30')
+
+    const dentalBranchingFlow: ConversationFlow = {
+      id: 'dental-branching',
+      name: 'dental-branching',
+      isActive: true,
+      createdAt: '',
+      updatedAt: '',
+      nodes: [
+        { id: 'start', type: 'START', position: { x: 0, y: 0 }, data: { label: 'Karşılama' } },
+        { id: 'field_telefon', type: 'FIELD', position: { x: 0, y: 100 }, data: { fieldName: 'telefon', required: true } },
+        { id: 'cond_kayitli', type: 'CONDITION', position: { x: 0, y: 200 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true' } },
+        { id: 'field_doktor_id', type: 'FIELD', position: { x: -100, y: 300 }, data: { fieldName: 'doktor_id', required: false } },
+        { id: 'field_islem_turu', type: 'FIELD', position: { x: -100, y: 400 }, data: { fieldName: 'islem_turu', required: false } },
+        { id: 'field_tarih_existing', type: 'FIELD', position: { x: -100, y: 500 }, data: { fieldName: 'tarih', fieldType: 'date', required: true } },
+        { id: 'field_saat_existing', type: 'FIELD', position: { x: -100, y: 600 }, data: { fieldName: 'saat', fieldType: 'time', required: true } },
+        { id: 'action_existing', type: 'ACTION', position: { x: -100, y: 700 }, data: { action: 'randevuOlustur' } },
+        { id: 'end_existing', type: 'END', position: { x: -100, y: 800 }, data: { label: 'Son' } },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'field_telefon' },
+        { id: 'e2', source: 'field_telefon', target: 'cond_kayitli' },
+        { id: 'e3', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_doktor_id' },
+        { id: 'e4', source: 'field_doktor_id', target: 'field_islem_turu' },
+        { id: 'e5', source: 'field_islem_turu', target: 'field_tarih_existing' },
+        { id: 'e6', source: 'field_tarih_existing', target: 'field_saat_existing' },
+        { id: 'e7', source: 'field_saat_existing', target: 'action_existing' },
+        { id: 'e8', source: 'action_existing', target: 'end_existing' },
+      ],
+    }
+
+    const engine = FlowEngine.fromMemory(dentalBranchingFlow, {
+      direction: 'inbound',
+      channel: 'phone',
+      initialFields: { telefon: '5076652367', kayitli: 'true', musteri_adi: 'Berat İnceçam' },
+    })
+
+    const step = await engine.accept({
+      fields: {
+        telefon: '5076652367',
+        tarih: '4 Kasım 2026',
+        saat: '14.00',
+        sikayet: 'Diş kontrolü',
+        musteri_adi: 'Berat İnceçam',
+      },
+    })
+
+    expect(step.success).toBe(true)
+    expect(step.next?.nodeId).toBe('action_existing')
+    expect(step.next?.type).toBe('ACTION')
+    expect(step.fields.tarih).toBe('2026-11-04')
+    expect(step.fields.saat).toBe('14:00')
+    expect(step.fields.islem_turu).toBe('Diş kontrolü')
   })
 })

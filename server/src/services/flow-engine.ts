@@ -15,6 +15,7 @@ import {
   type FlowNode,
 } from '../db/repositories/flows'
 import { getSetting } from '../db/repositories/settings'
+import { normalizeAppointmentDate, normalizeAppointmentTime } from './assistant-appointments'
 
 export type FlowRuntimeMode = 'legacy' | 'observe' | 'active'
 export type FlowChannel = 'web_direct' | 'web_socket' | 'phone' | 'whatsapp'
@@ -46,22 +47,53 @@ type StoredState = {
 }
 
 function cleanFields(fields: Record<string, unknown> = {}) {
-  return Object.fromEntries(Object.entries(fields).filter(([key, value]) => {
+  const out = Object.fromEntries(Object.entries(fields).filter(([key, value]) => {
     if (!key || key.startsWith('_') || value === undefined || value === null) return false
     return typeof value !== 'string' || value.trim().length > 0
   }))
+  if (typeof out.tarih === 'string') out.tarih = normalizeAppointmentDate(out.tarih)
+  if (typeof out.saat === 'string') out.saat = normalizeAppointmentTime(out.saat)
+  const nameVal = out.musteri_adi || out.ad_soyad || out.hasta_adi
+  if (nameVal) {
+    out.musteri_adi ??= nameVal
+    out.ad_soyad ??= nameVal
+  }
+  const complaintVal = out.sikayet || out.islem_turu || out.randevu_turu || out.sorun_veya_talep
+  if (complaintVal) {
+    out.sikayet ??= complaintVal
+    out.islem_turu ??= complaintVal
+    out.randevu_turu ??= complaintVal
+  }
+  return out
 }
 
 function edgesFrom(edges: FlowEdge[], nodeId: string) { return edges.filter(edge => edge.source === nodeId) }
 
 function validField(node: FlowNode, fields: Record<string, unknown>) {
   const name = node.data.fieldName || ''
-  const value = String(fields[name] ?? '').trim()
-  if (!value) return false
-  if (node.data.fieldType === 'date' || name === 'tarih') return /^\d{4}-\d{2}-\d{2}$/.test(value)
-  if (node.data.fieldType === 'time' || name === 'saat') return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
-  if (name === 'telefon') return value.replace(/\D/g, '').length >= 10
+  const raw = String(fields[name] ?? '').trim()
+  if (!raw) return false
+  if (node.data.fieldType === 'date' || name === 'tarih') return /^\d{4}-\d{2}-\d{2}$/.test(normalizeAppointmentDate(raw))
+  if (node.data.fieldType === 'time' || name === 'saat') return /^([01]\d|2[0-3]):[0-5]\d$/.test(normalizeAppointmentTime(raw))
+  if (name === 'telefon') return raw.replace(/\D/g, '').length >= 10
   return true
+}
+
+function hasCompletedDownstreamField(flow: ConversationFlow, startNodeId: string, fields: Record<string, unknown>): boolean {
+  const visited = new Set<string>()
+  const queue = [startNodeId]
+  while (queue.length > 0) {
+    const curr = queue.shift()!
+    if (visited.has(curr)) continue
+    visited.add(curr)
+    for (const edge of edgesFrom(flow.edges, curr)) {
+      const target = flow.nodes.find(n => n.id === edge.target)
+      if (!target) continue
+      if (target.type === 'FIELD' && validField(target, fields)) return true
+      queue.push(target.id)
+    }
+  }
+  return false
 }
 
 export function buildFlowNodePrompt(
@@ -228,7 +260,14 @@ export class FlowEngine {
       if (!node) return { success: false, revision: this.revision, fields: this.state.fields, message: 'Akışın devam edeceği adım bulunamadı.' }
       if (node.type === 'START') { this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue }
       if (node.type === 'FIELD') {
-        if (!validField(node, this.state.fields)) return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }
+        if (!validField(node, this.state.fields)) {
+          const isOptional = node.data.required === false
+          if (isOptional && hasCompletedDownstreamField(this.state.flow, node.id, this.state.fields)) {
+            this.next(edgesFrom(this.state.flow.edges, node.id)[0])
+            continue
+          }
+          return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }
+        }
         this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue
       }
       if (node.type === 'CONDITION') {

@@ -354,6 +354,8 @@ interface CallState {
   turnDetectionMode: TurnDetectionMode
   semanticTurnHoldTimer?: ReturnType<typeof setTimeout>
   lastAiAudioAt: number
+  lastAudioFrameAt: number
+  hangupRequestedAt: number
   greetingAudioStarted: boolean
   startWaitMs: number
   micOpenTimer?: ReturnType<typeof setTimeout>
@@ -403,7 +405,10 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
       state.silenceClosePending = false
       if (state.closed || state.hangupPending || !state.info.session) return
       console.log(`[${state.shortId}] Sessizlik timeout — görüşme sonlandırılıyor`)
+      state.micEnabled = false
+      state.micBuffer = []
       try {
+        state.info.session.beginClosing?.()
         state.info.session.sendClientContent({
           turns: [{
             role: 'user',
@@ -412,10 +417,21 @@ function startSilenceWatch(state: CallState, socket: { end: () => void }) {
           turnComplete: true,
         })
       } catch { }
-      // Fallback: 3s sonra gene kapalı değilse direkt kapat.
-      setTimeout(() => {
-        if (!state.closed) { state.closed = true; try { socket.end() } catch { } }
-      }, 3_000)
+      // AI veda cümlesini ve ses kuyruğunu tamamlamadan hattı yarıda kesme; en geç 12sn içinde kapat.
+      const notBefore = Date.now() + 4_500
+      const deadline = Date.now() + 12_000
+      const closeWhenQuiet = () => {
+        if (state.closed) return
+        const rtpDraining = state.lastAudioFrameAt > 0 && Date.now() - state.lastAudioFrameAt < 650
+        if ((Date.now() < notBefore || state.aiSpeaking || state.outputTurnActive || state.audioQueue.length > 0 || rtpDraining) && Date.now() < deadline) {
+          setTimeout(closeWhenQuiet, 250)
+          return
+        }
+        state.closed = true
+        try { state.info.session?.close() } catch { }
+        try { socket.end() } catch { }
+      }
+      setTimeout(closeWhenQuiet, 1_000)
     }, closeMs)
   }, warnMs)
 }
@@ -483,6 +499,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           userTranscript: '',
           turnDetectionMode: 'semantic',
           lastAiAudioAt: 0,
+          lastAudioFrameAt: 0,
+          hangupRequestedAt: 0,
           greetingAudioStarted: false,
           startWaitMs: 400,
         }
@@ -567,6 +585,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
             const frame = state.playbackReady ? state.audioQueue.shift() : undefined
             if (frame) {
+              state.lastAudioFrameAt = Date.now()
               try { socket.write(frame); scheduleFrame() } catch { }
             } else if (state.outputTurnActive && state.outputTurnComplete) {
               finishOutputTurn()
@@ -576,12 +595,19 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               state.outputUnderruns++
               console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
               try { socket.write(silenceFrame); scheduleFrame() } catch { }
-            } else if (state.hangupPending && !state.outputTurnActive) {
-              // Ses kuyruğu boşaldı ve hangup bekleniyor — şimdi kapat
-              console.log(`[${shortId}] Ses kuyruğu boşaldı, bağlantı kapatılıyor`)
-              try { socket.write(encodeHangupFrame()) } catch { }
-              state.closed = true
-              try { socket.end() } catch { }
+            } else if (state.hangupPending && !state.outputTurnActive && !state.interactionInProgress) {
+              const sinceHangupMs = state.hangupRequestedAt > 0 ? Date.now() - state.hangupRequestedAt : 9999
+              const sinceLastAudioMs = state.lastAudioFrameAt > 0 ? Date.now() - state.lastAudioFrameAt : 9999
+              // cagriySonlandir sonrasındaki olası veda sesinin başlaması için en az 900ms
+              // ve son ses karesinin Asterisk RTP tamponundan çıkması için 650ms sessizlik karesi bekle.
+              if (sinceHangupMs < 900 || sinceLastAudioMs < 650) {
+                try { socket.write(silenceFrame); scheduleFrame() } catch { }
+              } else {
+                console.log(`[${shortId}] Ses kuyruğu ve RTP tamponu boşaldı, bağlantı kapatılıyor`)
+                try { socket.write(encodeHangupFrame()) } catch { }
+                state.closed = true
+                try { socket.end() } catch { }
+              }
             } else {
               try { socket.write(silenceFrame); scheduleFrame() } catch { }
             }
@@ -786,6 +812,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     console.log(`[${shortId}] Gemini görüşmeyi sonlandırıyor (ses kuyruğu boşalınca kapanacak)`)
                     if (state.closed || state.hangupPending) return
                     state.hangupPending = true
+                    state.hangupRequestedAt = Date.now()
+                    state.micEnabled = false
+                    state.micBuffer = []
+                    clearSilenceTimers(state)
                   },
                   onTurnComplete: () => {
                     const tailFrame = state.outChunker.flush()
@@ -795,6 +825,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     if (!state.hangupPending && !state.interactionInProgress && isPhoneConversationFarewell(state.outputTranscript, voiceSettings.offTopicCloseMessage)) {
                       console.log(`[${shortId}] Konu dışı / kapanış veda cümlesi algılandı — ses kuyruğu bitince hat kapatılacak`)
                       state.hangupPending = true
+                      state.hangupRequestedAt = state.hangupRequestedAt || Date.now()
                       state.micEnabled = false
                       state.micBuffer = []
                       clearSilenceTimers(state)
@@ -986,6 +1017,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               clearSilenceTimers(state)
               console.log(`[${shortId}] Maksimum çağrı süresi (${maxCallSeconds}sn) doldu — görüşme sonlandırılıyor`)
               try {
+                state.info.session.beginClosing?.()
                 state.info.session.sendClientContent({
                   turns: [{
                     role: 'user',
@@ -1000,7 +1032,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               const deadline = Date.now() + 12_000
               const closeWhenQuiet = () => {
                 if (state.closed) return
-                if ((Date.now() < notBefore || state.aiSpeaking || state.audioQueue.length > 0) && Date.now() < deadline) {
+                const rtpDraining = state.lastAudioFrameAt > 0 && Date.now() - state.lastAudioFrameAt < 650
+                if ((Date.now() < notBefore || state.aiSpeaking || state.outputTurnActive || state.audioQueue.length > 0 || rtpDraining) && Date.now() < deadline) {
                   setTimeout(closeWhenQuiet, 250)
                   return
                 }

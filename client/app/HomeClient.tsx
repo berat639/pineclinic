@@ -136,16 +136,21 @@ export default function Home() {
   }, [clearWebTimers])
 
   const stopAfterPlayback = useCallback(() => {
-    const deadline = Date.now() + 6000
-    const waitForPlayback = () => {
-      const player = playerRef.current
-      if (!player || !player.isPlaying || Date.now() >= deadline) {
-        stop()
-        return
-      }
-      farewellTimerRef.current = setTimeout(waitForPlayback, 100)
+    webClosingRef.current = true
+    micRef.current?.stop()
+    micRef.current = null
+    if (farewellTimerRef.current) {
+      clearTimeout(farewellTimerRef.current)
+      farewellTimerRef.current = null
     }
-    waitForPlayback()
+    const player = playerRef.current
+    if (!player) {
+      stop()
+      return
+    }
+    void player.waitForDrain(15000).then(() => {
+      if (webClosingRef.current) stop()
+    })
   }, [stop])
 
   const scheduleWebSilenceTimer = useCallback((warningSeconds: number, closeSeconds: number) => {
@@ -164,12 +169,14 @@ export default function Home() {
       webSilenceCloseTimerRef.current = setTimeout(() => {
         if (!sessionRef.current || !webWarningPendingRef.current) return
         webClosingRef.current = true
+        micRef.current?.stop()
+        micRef.current = null
         sessionRef.current.sendText(
           `Sistem bildirimi: Sessizlik uyarısından sonra da yanıt gelmedi. Görüşmeyi kısa bir veda cümlesiyle sonlandır ve iyi günler dile.`
         )
         webCloseFallbackTimerRef.current = setTimeout(() => {
           if (webClosingRef.current) stopAfterPlayback()
-        }, 8000)
+        }, 12000)
       }, closeSeconds * 1000)
     }, warningSeconds * 1000)
   }, [mode, stopAfterPlayback])
@@ -202,7 +209,7 @@ export default function Home() {
       )
       webCloseFallbackTimerRef.current = setTimeout(() => {
         if (webClosingRef.current) stopAfterPlayback()
-      }, 6500)
+      }, 12000)
     }, maxSeconds * 1000)
   }, [clearWebSilenceTimers, stopAfterPlayback])
 

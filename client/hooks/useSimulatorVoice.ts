@@ -168,6 +168,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
   const maxWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closingRef = useRef(false)
   const runIdRef = useRef(0)
   const modelBufferRef = useRef('')
   const userBufferRef = useRef('')
@@ -191,6 +192,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
     if (maxWarnTimerRef.current) { clearTimeout(maxWarnTimerRef.current); maxWarnTimerRef.current = null }
     if (maxDurationTimerRef.current) { clearTimeout(maxDurationTimerRef.current); maxDurationTimerRef.current = null }
     if (closeFallbackTimerRef.current) { clearTimeout(closeFallbackTimerRef.current); closeFallbackTimerRef.current = null }
+    closingRef.current = false
     micRef.current?.stop()
     micRef.current = null
     playerRef.current?.stop()
@@ -206,6 +208,20 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
     release()
     setStatus('idle')
   }, [flushModel, flushUser, release])
+
+  const stopAfterPlayback = useCallback(() => {
+    closingRef.current = true
+    micRef.current?.stop()
+    micRef.current = null
+    const player = playerRef.current
+    if (!player) {
+      stop()
+      return
+    }
+    void player.waitForDrain(15000).then(() => {
+      if (closingRef.current) stop()
+    })
+  }, [stop])
 
   // Bileşen kapanınca veya sekme kapanınca mikrofon mutlaka kapanır.
   useEffect(() => {
@@ -275,13 +291,18 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         return (data.toolResult as Record<string, unknown>) || { sonuc: 'Bilgi bankasında ilgili kayıt bulunamadı.' }
       }
       if (name === 'cagriySonlandir') {
+        closingRef.current = true
         micRef.current?.stop()
         micRef.current = null
         if (closeFallbackTimerRef.current) clearTimeout(closeFallbackTimerRef.current)
+        // AI veda cümlesini tamamladıktan ve ses kuyruğu boşaldıktan sonra kapat
         closeFallbackTimerRef.current = setTimeout(() => {
-          stop()
-        }, 4500)
-        return { success: true, mesaj: 'Görüşme sonlandırılıyor.' }
+          stopAfterPlayback()
+        }, 2500)
+        return {
+          success: true,
+          mesaj: 'Görüşme sonlandırılıyor. Eğer veda cümleni henüz söylemediysen kısa bir veda cümlesi söyle ve dur.',
+        }
       }
       if (name === 'aramaAktar') {
         const hedef = String(args.hedef || 'Resepsiyon')
@@ -336,7 +357,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
     } catch (err) {
       return { success: false, mesaj: err instanceof Error ? err.message : 'Araç çalıştırılamadı.' }
     }
-  }, [advance, stop])
+  }, [advance, stopAfterPlayback])
 
   const start = useCallback(async () => {
     if (status !== 'idle' && status !== 'error') return
@@ -423,9 +444,14 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         onTurnComplete: () => {
           flushUser()
           flushModel()
+          if (closingRef.current) {
+            stopAfterPlayback()
+            return
+          }
           if (alive()) setStatus('listening')
         },
         onInterrupted: () => {
+          if (closingRef.current) return
           flushModel()
           playerRef.current?.stop()
           playerRef.current = new AudioStreamPlayer(24000)
@@ -469,6 +495,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
       }, warnMs)
       maxDurationTimerRef.current = setTimeout(() => {
         if (!alive()) return
+        closingRef.current = true
         micRef.current?.stop()
         micRef.current = null
         try {
@@ -477,14 +504,14 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
           )
         } catch {}
         closeFallbackTimerRef.current = setTimeout(() => {
-          if (alive()) stop()
-        }, 6500)
+          if (alive()) stopAfterPlayback()
+        }, 12000)
       }, maxMs)
     } catch (err) {
       const denied = err instanceof Error && /permission|denied|notallowed/i.test(`${err.name} ${err.message}`)
       fail(denied ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verip tekrar deneyin.' : err instanceof Error && err.message ? err.message : 'Sesli simülasyon başlatılamadı.')
     }
-  }, [advance, flushModel, flushUser, handleTool, release, status])
+  }, [advance, flushModel, flushUser, handleTool, release, status, stopAfterPlayback])
 
   return { status, error, start, stop }
 }

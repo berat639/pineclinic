@@ -163,23 +163,38 @@ export async function createLiveSession(
     }
 
     if (name === 'randevuOlustur') {
-      if (!args.telefon && lastPhoneUsed) args.telefon = lastPhoneUsed
+      if (!args.telefon && (lastPhoneUsed || options.callerPhone)) {
+        args.telefon = lastPhoneUsed || options.callerPhone
+      }
+      if (!args.musteri_adi && initialFields?.musteri_adi) {
+        args.musteri_adi = initialFields.musteri_adi
+      }
       let flowActionId: string | undefined
       if (flowEngine) {
         const step = await flowEngine.accept({ fields: args })
-        if (!step.success || step.next?.type !== 'ACTION') {
+        const hasCoreBookingFields = Boolean(
+          String(args.musteri_adi || step.fields?.musteri_adi || '').trim().length >= 3 &&
+          String(args.telefon || step.fields?.telefon || '').replace(/\D/g, '').length >= 10 &&
+          String(args.tarih || step.fields?.tarih || '').trim() &&
+          String(args.saat || step.fields?.saat || '').trim()
+        )
+        if ((!step.success || step.next?.type !== 'ACTION') && !hasCoreBookingFields) {
           return { success: false, message: step.message || step.next?.prompt || 'Randevu için gerekli bilgileri önce tamamlayın.' }
         }
-        flowActionId = step.next.nodeId
+        if (step.next?.type === 'ACTION') {
+          flowActionId = step.next.nodeId
+        }
       }
       try {
         const { createAssistantAppointment } = await import('./services/assistant-appointments')
         const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId, source: options.appointmentSource || 'phone_ai' })
         if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, true)
-        return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı. Başka bir konuda yardımcı olabilir miyim?` }
-      } catch {
+        return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için başarıyla oluşturuldu. Müşteriye randevusunun oluşturulduğunu net biçimde söyle ve başka bir isteği yoksa görüşmeyi nazikçe tamamla.` }
+      } catch (err) {
+        console.error('[randevuOlustur] Hata:', err)
         if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, false)
-        return { success: false, message: 'Randevu oluşturulamadı. Ad, telefon, tarih ve saati kontrol edin.' }
+        const errMsg = err instanceof Error && err.message ? err.message : 'Randevu oluşturulamadı. Ad, telefon, tarih ve saati kontrol edin.'
+        return { success: false, message: errMsg }
       }
     }
 
@@ -675,6 +690,7 @@ export async function createLiveSession(
       return { success: true, sehir, sicaklik: '20°C', durum: 'açık', message: `${sehir}'da hava şu an gayet güzel ve ılıman görünüyor.` }
     }
     if (name === 'cagriySonlandir') {
+      closingSession = true
       if (flowEngine) {
         const expected = flowEngine.expectedAction()
         if (expected && expected.action === 'end_call') {
@@ -682,7 +698,10 @@ export async function createLiveSession(
         }
       }
       callbacks.onHangup?.()
-      return { success: true }
+      return {
+        success: true,
+        message: 'Görüşme sonlandırılıyor. Eğer veda cümleni henüz söylemediysen yalnızca kısa bir veda cümlesi söyle ve dur.',
+      }
     }
     return { success: false, message: 'Bilinmeyen araç çağrısı. Yalnızca Türkçe yanıt ver.' }
   }
@@ -695,6 +714,7 @@ export async function createLiveSession(
   let activeSession: Awaited<ReturnType<typeof ai.live.connect>> | null = null
   let resumptionHandle: string | undefined
   let closedByUser = false
+  let closingSession = false
   let reconnecting = false
   let readyFired = false
 
@@ -705,6 +725,7 @@ export async function createLiveSession(
    */
   function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: Record<string, unknown>, attempt = 0): void {
     if (closedByUser) return
+    if (closingSession && fcName !== 'cagriySonlandir') return
     const payload = {
       ...result,
       _dil_kurali: 'YALNIZCA TÜRKÇE KONUŞ. İngilizce tek kelime bile kullanma.',
@@ -859,6 +880,10 @@ export async function createLiveSession(
         if (msg.toolCall?.functionCalls?.length) {
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
+            if (closingSession && fcName !== 'cagriySonlandir') {
+              console.log(`[Tool ${fcName}] Kapanış aşamasında olduğu için araç çağrısı yoksayıldı`)
+              continue
+            }
             const start = Date.now()
             const invokeTool = () => handleTool(fcName, fc.args as Record<string, unknown>)
             const toolPromise = options.clinicId && options.hostname
@@ -1259,8 +1284,12 @@ export async function createLiveSession(
     sendToolResponse: (input: LiveSendToolResponseParameters) => {
       try { activeSession?.sendToolResponse(input) } catch {}
     },
+    beginClosing: () => {
+      closingSession = true
+    },
     close: () => {
       closedByUser = true
+      closingSession = true
       if (flowEngine) void flowEngine.close()
       try { activeSession?.close() } catch {}
     },

@@ -1,4 +1,4 @@
-import { eq, ne, desc, and, gte, lte, sql, ilike, or, inArray } from 'drizzle-orm'
+import { eq, ne, desc, and, gt, gte, lt, lte, sql, ilike, or, inArray } from 'drizzle-orm'
 import { db } from '../client'
 import {
   users,
@@ -1993,8 +1993,8 @@ export async function approveAiAppointment(id: string, data: {
       eq(dentalAppointments.clinicId, clinicId),
       sql`${dentalAppointments.id} <> ${id}`,
       sql`${dentalAppointments.status} <> 'cancelled'`,
-      sql`${dentalAppointments.startTime} < ${data.endTime}`,
-      sql`${dentalAppointments.endTime} > ${data.startTime}`,
+      lt(dentalAppointments.startTime, data.endTime),
+      gt(dentalAppointments.endTime, data.startTime),
     )).limit(1)
     if (conflicts.length) throw new Error('Seçilen saat geçici veya planlanmış başka bir randevu ile çakışıyor.')
 

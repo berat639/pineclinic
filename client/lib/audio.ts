@@ -37,7 +37,39 @@ export class AudioStreamPlayer {
   }
 
   get isPlaying(): boolean {
-    return this.pendingChunks.length > 0 || this.activeSources.size > 0 || this.audioContext.currentTime < this.nextStartTime;
+    const hwLatency =
+      (this.audioContext.baseLatency || 0) +
+      ((this.audioContext as unknown as { outputLatency?: number }).outputLatency || 0) +
+      0.32;
+    return (
+      this.pendingChunks.length > 0 ||
+      this.activeSources.size > 0 ||
+      this.audioContext.currentTime < this.nextStartTime + hwLatency
+    );
+  }
+
+  /**
+   * Kuyruktaki tüm ses paketlerinin ve işletim sistemi hoparlör tamponunun
+   * son heceye kadar tamamen çalınmasını bekler.
+   */
+  waitForDrain(maxWaitMs = 15000): Promise<void> {
+    return new Promise((resolve) => {
+      const deadline = Date.now() + maxWaitMs;
+      const check = () => {
+        if (!this.isActive || Date.now() >= deadline) {
+          resolve();
+          return;
+        }
+        this.drainQueue();
+        if (!this.isPlaying) {
+          // Hoparlör donanım tamponundaki son hecenin kesilmemesi için 350ms ek kuyruk payı
+          setTimeout(resolve, 350);
+          return;
+        }
+        setTimeout(check, 80);
+      };
+      check();
+    });
   }
 
   /** Discard the current assistant turn without losing the user-unlocked context. */

@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, gt, lt, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { appointments, dentalAppointments } from '../db/schema'
 import { createFlowAppointment } from '../db/repositories/appointments'
@@ -7,7 +7,44 @@ import { type DbTransaction } from '../db/repositories/whatsapp'
 import { normalizePhone } from '../integrations/whatsapp'
 import { broadcastSSE } from '../events'
 
-export function appointmentTime(date: string, time: string): Date {
+const TR_MONTHS: Record<string, string> = {
+  ocak: '01', subat: '02', şubat: '02', mart: '03', nisan: '04',
+  mayis: '05', mayıs: '05', haziran: '06', temmuz: '07', agustos: '08',
+  ağustos: '08', eylul: '09', eylül: '09', ekim: '10', kasim: '11',
+  kasım: '11', aralik: '12', aralık: '12',
+}
+
+export function normalizeAppointmentDate(raw: string): string {
+  const s = String(raw || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  const dmy = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/)
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
+  }
+  const trMatch = s.toLocaleLowerCase('tr-TR').match(/(\d{1,2})\s+([a-zçğıöşü]+)(?:\s+(\d{4}))?/)
+  if (trMatch && TR_MONTHS[trMatch[2]]) {
+    const year = trMatch[3] || String(new Date().getFullYear())
+    return `${year}-${TR_MONTHS[trMatch[2]]}-${trMatch[1].padStart(2, '0')}`
+  }
+  return s
+}
+
+export function normalizeAppointmentTime(raw: string): string {
+  const s = String(raw || '').trim()
+  const hm = s.match(/^(\d{1,2})[:.](\d{2})(?::\d{2})?$/)
+  if (hm) {
+    const h = Number(hm[1])
+    const m = Number(hm[2])
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    }
+  }
+  return s
+}
+
+export function appointmentTime(rawDate: string, rawTime: string): Date {
+  const date = normalizeAppointmentDate(rawDate)
+  const time = normalizeAppointmentTime(rawTime)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('Geçerli tarih ve saat gerekli.')
   const calendarDate = new Date(`${date}T00:00:00Z`)
   if (!Number.isFinite(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== date) throw new Error('Geçersiz tarih.')
@@ -24,10 +61,10 @@ export type AiAppointmentSource = 'web_ai' | 'phone_ai' | 'whatsapp_ai'
 export async function createAssistantAppointment(fields: Record<string, unknown>, context: { sessionId: string; clinicId?: string; source: AiAppointmentSource }, transaction?: DbTransaction) {
   await ensureAiAppointmentReviewSchema()
   const run = async (tx: DbTransaction) => {
-    const name = String(fields.musteri_adi || '').trim()
+    const name = String(fields.musteri_adi || fields.ad_soyad || fields.hasta_adi || '').trim()
     const phone = normalizePhone(String(fields.telefon || ''))
-    const date = String(fields.tarih || '')
-    const time = String(fields.saat || '')
+    const date = normalizeAppointmentDate(String(fields.tarih || ''))
+    const time = normalizeAppointmentTime(String(fields.saat || ''))
     const start = appointmentTime(date, time)
     if (name.length < 3 || /\[|\]|placeholder|örnek isim/i.test(name)) throw new Error('Gerçek hasta adı ve soyadı gerekli.')
     if (start.getTime() < Date.now() - 60_000) throw new Error('Geçmiş bir tarih için randevu oluşturulamaz.')
@@ -36,11 +73,11 @@ export async function createAssistantAppointment(fields: Record<string, unknown>
     const conflicts = await tx.select({ id: dentalAppointments.id }).from(dentalAppointments).where(and(
       context.clinicId ? eq(dentalAppointments.clinicId, context.clinicId) : sql`${dentalAppointments.clinicId} IS NULL`,
       sql`${dentalAppointments.status} <> 'cancelled'`,
-      sql`${dentalAppointments.startTime} < ${end}`,
-      sql`${dentalAppointments.endTime} > ${start}`,
+      lt(dentalAppointments.startTime, end),
+      gt(dentalAppointments.endTime, start),
     )).limit(1)
     if (conflicts.length) throw new Error('Seçilen saat geçici veya planlanmış başka bir randevu ile dolu.')
-    const complaint = String(fields.sikayet || fields.sorun_veya_talep || '')
+    const complaint = String(fields.sikayet || fields.islem_turu || fields.randevu_turu || fields.sorun_veya_talep || '')
     const [dental] = await tx.insert(dentalAppointments).values({
       clinicId: context.clinicId, patientId: null, doctorId: null,
       title: `${name} - kontrol`, startTime: start, endTime: end,
