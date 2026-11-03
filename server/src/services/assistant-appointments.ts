@@ -22,17 +22,98 @@ const TR_SPOKEN_HOURS: Record<string, number> = {
   'on bir': 11, onbir: 11, 'on iki': 12, oniki: 12,
 }
 
+const ISTANBUL_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Istanbul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+const ISTANBUL_TIME_FORMATTER = new Intl.DateTimeFormat('tr-TR', {
+  timeZone: 'Europe/Istanbul',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const CLINIC_METADATA_CACHE_TTL_MS = 30_000
+const workingHoursCache = new Map<string, { value: Awaited<ReturnType<typeof getClinicWorkingHours>> | null; expiresAt: number }>()
+const doctorsCache = new Map<string, { value: Awaited<ReturnType<typeof listDoctors>>; expiresAt: number }>()
+
+async function getCachedWorkingHours(clinicId: string) {
+  const now = Date.now()
+  const hit = workingHoursCache.get(clinicId)
+  if (hit && hit.expiresAt > now) return hit.value
+  const value = await getClinicWorkingHours(clinicId).catch(() => null)
+  workingHoursCache.set(clinicId, { value, expiresAt: now + CLINIC_METADATA_CACHE_TTL_MS })
+  return value
+}
+
+async function getCachedDoctors(clinicId: string) {
+  const now = Date.now()
+  const hit = doctorsCache.get(clinicId)
+  if (hit && hit.expiresAt > now) return hit.value
+  const fetchDocs = () => listDoctors().catch(() => [])
+  const value = currentClinicId() === clinicId
+    ? await fetchDocs()
+    : await runWithTenantContext({ clinicId, hostname: 'internal' }, fetchDocs)
+  doctorsCache.set(clinicId, { value, expiresAt: now + CLINIC_METADATA_CACHE_TTL_MS })
+  return value
+}
+
+/**
+ * Çağrı başladığında klinik mesai saatlerini ve hekim listesini RAM önbelleğine
+ * arka planda ısıtır (pre-warm); böylece ilk müsaitlik veya randevu aracında DB beklenmez.
+ */
+export function warmClinicAppointmentCache(clinicId?: string): void {
+  if (!clinicId) return
+  void Promise.all([
+    getCachedWorkingHours(clinicId),
+    getCachedDoctors(clinicId),
+    ensureAiAppointmentReviewSchema(),
+  ]).catch(() => {})
+}
+
 function formatIstanbulYmd(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Istanbul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date)
+  const parts = ISTANBUL_DATE_FORMATTER.formatToParts(date)
   const y = parts.find(p => p.type === 'year')?.value || String(date.getFullYear())
   const m = parts.find(p => p.type === 'month')?.value || String(date.getMonth() + 1).padStart(2, '0')
   const d = parts.find(p => p.type === 'day')?.value || String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+/**
+ * Kullanıcının doğal Türkçe konuşmasından ("bugün", "yarın", "öbür gün", "4 Kasım", "15.11.2026")
+ * YYYY-MM-DD formatında tarihi sıfır gecikmeyle (RAM'de) ayıklar.
+ */
+export function extractSpokenTurkishDate(rawText: string, now: Date = new Date()): string | null {
+  const lower = String(rawText || '').toLocaleLowerCase('tr-TR').trim()
+  if (!lower) return null
+
+  const iso = lower.match(/\b(\d{4}-\d{2}-\d{2})\b/)
+  if (iso) return iso[1]
+
+  const dmy = lower.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/)
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
+  }
+
+  if (/\b(?:öbür\s+gün|obur\s+gun|ertesi\s+gün|ertesi\s+gun)\b/u.test(lower)) {
+    return formatIstanbulYmd(new Date(now.getTime() + 2 * 86_400_000))
+  }
+  if (/\b(?:yarın|yarin)\b/u.test(lower)) {
+    return formatIstanbulYmd(new Date(now.getTime() + 86_400_000))
+  }
+  if (/\b(?:bugün|bugun)\b/u.test(lower)) {
+    return formatIstanbulYmd(now)
+  }
+
+  const trMatch = lower.match(/\b(\d{1,2})\s+(ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)(?:\s+(\d{4}))?\b/u)
+  if (trMatch && TR_MONTHS[trMatch[2]]) {
+    const year = trMatch[3] || String(now.getFullYear())
+    return `${year}-${TR_MONTHS[trMatch[2]]}-${trMatch[1].padStart(2, '0')}`
+  }
+
+  return null
 }
 
 export function normalizeAppointmentDate(raw: string, now: Date = new Date()): string {
@@ -57,7 +138,7 @@ export function normalizeAppointmentDate(raw: string, now: Date = new Date()): s
     const year = trMatch[3] || String(now.getFullYear())
     return `${year}-${TR_MONTHS[trMatch[2]]}-${trMatch[1].padStart(2, '0')}`
   }
-  return s
+  return extractSpokenTurkishDate(s, now) || s
 }
 
 function adjustHourByPeriod(hour: number, period: string): number {
@@ -192,7 +273,20 @@ export async function validateAppointmentWorkingHoursAndLeave(params: {
   const { clinicId, date, time, doctorId } = params
   if (!clinicId) return
 
-  const workingHours = await getClinicWorkingHours(clinicId).catch(() => null)
+  const hasValidDoctorId = Boolean(doctorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(doctorId))
+  const fetchLeaves = async () => {
+    if (!hasValidDoctorId || !doctorId) return []
+    const checkLeaves = () => getDoctorLeaves({ doctorId, date })
+    return currentClinicId() === clinicId
+      ? await checkLeaves().catch(() => [])
+      : await runWithTenantContext({ clinicId, hostname: 'internal' }, checkLeaves).catch(() => [])
+  }
+
+  const [workingHours, leaves] = await Promise.all([
+    getCachedWorkingHours(clinicId),
+    fetchLeaves(),
+  ])
+
   if (workingHours) {
     const calendarDate = new Date(`${date}T12:00:00+03:00`)
     if (Number.isFinite(calendarDate.getTime())) {
@@ -219,12 +313,7 @@ export async function validateAppointmentWorkingHoursAndLeave(params: {
     }
   }
 
-  if (doctorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(doctorId)) {
-    const checkLeaves = async () => getDoctorLeaves({ doctorId, date })
-    const leaves = currentClinicId() === clinicId
-      ? await checkLeaves().catch(() => [])
-      : await runWithTenantContext({ clinicId, hostname: 'internal' }, checkLeaves).catch(() => [])
-
+  if (leaves.length > 0) {
     const reqMin = timeToMinutes(time)
     for (const leave of leaves) {
       if (leave.isFullDay) {
@@ -252,59 +341,19 @@ export async function getClinicAvailabilityReport(params: {
   const fromDate = params.from ? normalizeAppointmentDate(params.from) : targetDate
   const toDate = params.to ? normalizeAppointmentDate(params.to) : fromDate
 
-  const workingHours = clinicId ? await getClinicWorkingHours(clinicId).catch(() => null) : null
-  const hoursLine = workingHours
-    ? `Klinik Çalışma Saatleri: ${workingHours.startTime} - ${workingHours.endTime}`
-    : 'Klinik Çalışma Saatleri: 08:00 - 20:00'
-
-  let closedDayWarning = ''
-  if (workingHours && targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-    const dt = new Date(`${targetDate}T12:00:00+03:00`)
-    if (Number.isFinite(dt.getTime())) {
-      const dayIdx = (dt.getUTCDay() + 6) % 7
-      if (workingHours.workingDays.length > 0 && !workingHours.workingDays.includes(dayIdx)) {
-        closedDayWarning = `⚠️ UYARI: Kliniğimiz ${targetDate} (${DAY_NAMES_TR[dayIdx]}) günü kapalıdır.`
-      }
-    }
+  const fetchLeavesForTarget = async () => {
+    if (!clinicId || !targetDate) return []
+    const getLeaves = () => getDoctorLeaves({ date: targetDate }).catch(() => [])
+    return currentClinicId() === clinicId
+      ? await getLeaves()
+      : await runWithTenantContext({ clinicId, hostname: 'internal' }, getLeaves)
   }
 
-  let doctorsLine = ''
-  if (clinicId) {
-    const fetchDoctorsInfo = async () => {
-      const [docs, leaves] = await Promise.all([
-        listDoctors().catch(() => []),
-        targetDate ? getDoctorLeaves({ date: targetDate }).catch(() => []) : Promise.resolve([]),
-      ])
-      return { docs, leaves }
-    }
-    const { docs, leaves } = currentClinicId() === clinicId
-      ? await fetchDoctorsInfo()
-      : await runWithTenantContext({ clinicId, hostname: 'internal' }, fetchDoctorsInfo)
-
-    if (docs.length > 0) {
-      const docSummaries = docs.map(d => {
-        const docLeave = leaves.find(l => l.doctorId === d.id)
-        const leaveTag = docLeave
-          ? (docLeave.isFullDay ? ' [Tam Gün İzinli]' : ` [${docLeave.startTime}-${docLeave.endTime} İzinli]`)
-          : ''
-        return `${d.name}${d.specialty ? ` (${d.specialty})` : ''}${leaveTag}`
-      })
-      doctorsLine = `Aktif Hekimler: ${docSummaries.join(', ')}`
-    }
-  }
-
-  // Hem dental_appointments hem de akış randevularını kontrol et
-  const legacyResult = await getAppointmentsByDateRange({
-    date: targetDate,
-    from: fromDate,
-    to: toDate,
-  }).catch(() => [])
-
-  let dentalSlots: Array<{ time: string; title: string }> = []
-  if (clinicId && fromDate && /^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+  const fetchDentalRows = async () => {
+    if (!clinicId || !fromDate || !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return []
     const rangeStart = new Date(`${fromDate}T00:00:00+03:00`)
     const rangeEnd = new Date(`${toDate || fromDate}T23:59:59+03:00`)
-    const rows = await db
+    return db
       .select({
         startTime: dentalAppointments.startTime,
         endTime: dentalAppointments.endTime,
@@ -321,16 +370,51 @@ export async function getClinicAvailabilityReport(params: {
       .orderBy(dentalAppointments.startTime)
       .limit(50)
       .catch(() => [])
-
-    dentalSlots = rows.map(r => {
-      const t = new Date(r.startTime).toLocaleTimeString('tr-TR', {
-        timeZone: 'Europe/Istanbul',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-      return { time: t, title: r.title || r.type || 'Randevu' }
-    })
   }
+
+  const [workingHours, docs, leaves, legacyResult, rows] = await Promise.all([
+    clinicId ? getCachedWorkingHours(clinicId) : Promise.resolve(null),
+    clinicId ? getCachedDoctors(clinicId) : Promise.resolve([]),
+    fetchLeavesForTarget(),
+    getAppointmentsByDateRange({
+      date: targetDate,
+      from: fromDate,
+      to: toDate,
+    }).catch(() => []),
+    fetchDentalRows(),
+  ])
+
+  const hoursLine = workingHours
+    ? `Klinik Çalışma Saatleri: ${workingHours.startTime} - ${workingHours.endTime}`
+    : 'Klinik Çalışma Saatleri: 08:00 - 20:00'
+
+  let closedDayWarning = ''
+  if (workingHours && targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+    const dt = new Date(`${targetDate}T12:00:00+03:00`)
+    if (Number.isFinite(dt.getTime())) {
+      const dayIdx = (dt.getUTCDay() + 6) % 7
+      if (workingHours.workingDays.length > 0 && !workingHours.workingDays.includes(dayIdx)) {
+        closedDayWarning = `⚠️ UYARI: Kliniğimiz ${targetDate} (${DAY_NAMES_TR[dayIdx]}) günü kapalıdır.`
+      }
+    }
+  }
+
+  let doctorsLine = ''
+  if (docs.length > 0) {
+    const docSummaries = docs.map(d => {
+      const docLeave = leaves.find(l => l.doctorId === d.id)
+      const leaveTag = docLeave
+        ? (docLeave.isFullDay ? ' [Tam Gün İzinli]' : ` [${docLeave.startTime}-${docLeave.endTime} İzinli]`)
+        : ''
+      return `${d.name}${d.specialty ? ` (${d.specialty})` : ''}${leaveTag}`
+    })
+    doctorsLine = `Aktif Hekimler: ${docSummaries.join(', ')}`
+  }
+
+  const dentalSlots = rows.map(r => ({
+    time: ISTANBUL_TIME_FORMATTER.format(new Date(r.startTime)),
+    title: r.title || r.type || 'Randevu',
+  }))
 
   const headerParts = [hoursLine, doctorsLine, closedDayWarning].filter(Boolean)
   const totalCount = Math.max(legacyResult.length, dentalSlots.length)

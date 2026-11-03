@@ -117,6 +117,13 @@ const LEGACY_CONDITION_ALIASES: Record<string, string> = {
   is_registered: 'kayitli',
 }
 
+const ISTANBUL_FLOW_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Istanbul',
+  hour: 'numeric',
+  hour12: false,
+  weekday: 'short',
+})
+
 export function injectFlowSystemVariables(
   fields: Record<string, unknown> = {},
   ctx?: {
@@ -128,12 +135,7 @@ export function injectFlowSystemVariables(
   },
 ): Record<string, unknown> {
   const now = ctx?.now ?? new Date()
-  const istanbulParts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Istanbul',
-    hour: 'numeric',
-    hour12: false,
-    weekday: 'short',
-  }).formatToParts(now)
+  const istanbulParts = ISTANBUL_FLOW_TIME_FORMATTER.formatToParts(now)
   const hourStr = istanbulParts.find(p => p.type === 'hour')?.value ?? String(now.getHours())
   const hour = Number(hourStr) % 24
   const weekdayMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }

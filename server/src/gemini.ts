@@ -14,8 +14,18 @@ import {
   type LiveSendToolResponseParameters,
 } from '@google/genai'
 import { createAppointment, updateAppointment, getCustomerByPhone, getAppointmentsByDateRange } from './db/repositories/appointments'
+import { createPatientNote, findPatientByPhone, getPatientDoctorHistory } from './db/repositories/dental'
 import { createCalendarEvent, updateCalendarEvent } from './integrations/google-calendar'
-import { searchKnowledge } from './services/knowledge'
+import {
+  createAssistantAppointment,
+  extractSpokenTurkishDate,
+  extractSpokenTurkishTime,
+  getClinicAvailabilityReport,
+  normalizeAppointmentDate,
+  warmClinicAppointmentCache,
+} from './services/assistant-appointments'
+import { buildClinicRosterAndHoursText, searchKnowledge } from './services/knowledge'
+import { sendLocationToCaller } from './services/voice-whatsapp'
 import { findCustomerDocByPhone } from './db/repositories/knowledge'
 import { getToolDescriptions } from './db/repositories/settings'
 import { runWithTenantContext } from './tenancy/context'
@@ -133,11 +143,13 @@ export async function createLiveSession(
     reason: string
     question: string
   } | null = null
+  if (options.clinicId) {
+    warmClinicAppointmentCache(options.clinicId)
+  }
   let initialFields: Record<string, unknown> | undefined = options.callerPhone ? { telefon: options.callerPhone } : undefined
   if (options.callerPhone && options.clinicId) {
     try {
       const lookupPromise = (async () => {
-        const { findPatientByPhone } = await import('./db/repositories/dental')
         const [customer, dentalPatient] = await Promise.all([
           getCustomerByPhone(options.callerPhone!, options.clinicId).catch(() => null),
           findPatientByPhone(options.callerPhone!, options.clinicId).catch(() => null),
@@ -177,12 +189,20 @@ export async function createLiveSession(
       if (!flowEngine) return { success: false, message: 'Akışla çalışma bu görüşmede açık değil.' }
       const rawFields = (args.bilgiler && typeof args.bilgiler === 'object') ? args.bilgiler as Record<string, unknown> : {}
       const fields: Record<string, unknown> = { ...rawFields }
-      if (!fields.saat && recentUserTranscript) {
-        const { extractSpokenTurkishTime } = await import('./services/assistant-appointments')
-        const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
-        if (extractedTime) {
-          fields.saat = extractedTime
-          console.log(`[akisBilgisiGuncelle] Kullanıcı konuşmasından saat otomatik tamamlandı: ${extractedTime}`)
+      if (recentUserTranscript) {
+        if (!fields.tarih) {
+          const extractedDate = extractSpokenTurkishDate(recentUserTranscript)
+          if (extractedDate) {
+            fields.tarih = extractedDate
+            console.log(`[akisBilgisiGuncelle] Kullanıcı konuşmasından tarih otomatik tamamlandı: ${extractedDate}`)
+          }
+        }
+        if (!fields.saat) {
+          const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
+          if (extractedTime) {
+            fields.saat = extractedTime
+            console.log(`[akisBilgisiGuncelle] Kullanıcı konuşmasından saat otomatik tamamlandı: ${extractedTime}`)
+          }
         }
       }
       const result = await flowEngine.accept({ fields, intent: args.yeni_kisi === true ? 'new_person' : 'continue' })
@@ -201,11 +221,18 @@ export async function createLiveSession(
       if (!args.musteri_adi && initialFields?.musteri_adi) {
         args.musteri_adi = initialFields.musteri_adi
       }
-      if (!args.saat && recentUserTranscript) {
-        const { extractSpokenTurkishTime } = await import('./services/assistant-appointments')
-        const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
-        if (extractedTime) {
-          args.saat = extractedTime
+      if (recentUserTranscript) {
+        if (!args.tarih) {
+          const extractedDate = extractSpokenTurkishDate(recentUserTranscript)
+          if (extractedDate) {
+            args.tarih = extractedDate
+          }
+        }
+        if (!args.saat) {
+          const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
+          if (extractedTime) {
+            args.saat = extractedTime
+          }
         }
       }
       let flowActionId: string | undefined
@@ -225,7 +252,6 @@ export async function createLiveSession(
         }
       }
       try {
-        const { createAssistantAppointment } = await import('./services/assistant-appointments')
         const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId, source: options.appointmentSource || 'phone_ai' })
         if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, true)
         return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için başarıyla oluşturuldu. Müşteriye randevusunun oluşturulduğunu net biçimde söyle ve başka bir isteği yoksa görüşmeyi nazikçe tamamla.` }
@@ -247,7 +273,6 @@ export async function createLiveSession(
       }
 
       try {
-        const { createPatientNote } = await import('./db/repositories/dental')
         const fullContent = patientName ? `[${patientName}] ${noteContent}` : noteContent
         await createPatientNote({
           phone,
@@ -276,7 +301,6 @@ export async function createLiveSession(
       if (locationSent) return { success: true, message: 'Konum bu görüşme sırasında daha önce WhatsApp üzerinden gönderildi.' }
       if (!options.callerPhone) return { success: false, message: 'Arayan numara alınamadı. Kullanıcıdan WhatsApp numarasını istemek gerekiyor.' }
       try {
-        const { sendLocationToCaller } = await import('./services/voice-whatsapp')
         await sendLocationToCaller(options.callerPhone)
         locationSent = true
         if (flowEngine) {
@@ -505,7 +529,6 @@ export async function createLiveSession(
       console.log(`[Knowledge] searchKnowledgeBase sorgu (#${knowledgeCallsInTurn}): "${sorgu}"`)
       try {
         if (knowledgeCallsInTurn >= 2) {
-          const { buildClinicRosterAndHoursText } = await import('./services/knowledge')
           const liveRoster = await buildClinicRosterAndHoursText(options.clinicId)
           return {
             sonuc: `${liveRoster ? `${liveRoster}\n\n` : ''}Bu konuşma turunda bilgi tabanı araması zaten tamamlandı. Tekrar searchKnowledgeBase aracını ÇAĞIRMA; mevcut bilgilerinle müşteriye hemen yanıt ver.`,
@@ -545,9 +568,8 @@ export async function createLiveSession(
       lastPhoneUsed = rawPhone
       console.log(`[DB] musteriSorgula: telefon=${rawPhone}`)
       try {
-        const customer = await getCustomerByPhone(rawPhone, options.clinicId)
-        const { findPatientByPhone, getPatientDoctorHistory } = await import('./db/repositories/dental')
-        const [dentalPatient, doktorGecmisi] = await Promise.all([
+        const [customer, dentalPatient, doktorGecmisi] = await Promise.all([
+          getCustomerByPhone(rawPhone, options.clinicId),
           findPatientByPhone(rawPhone, options.clinicId),
           getPatientDoctorHistory(rawPhone, options.clinicId),
         ])
@@ -676,11 +698,14 @@ export async function createLiveSession(
       const tarih = args.tarih as string | undefined
       const from = args.baslangic_tarih as string | undefined
       const to = args.bitis_tarih as string | undefined
-      const { getClinicAvailabilityReport, normalizeAppointmentDate } = await import('./services/assistant-appointments')
-      const normTarih = tarih ? normalizeAppointmentDate(tarih) : undefined
+      let normTarih = tarih ? normalizeAppointmentDate(tarih) : undefined
       const normFrom = from ? normalizeAppointmentDate(from) : undefined
       const normTo = to ? normalizeAppointmentDate(to) : undefined
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+      if ((!normTarih || !dateRegex.test(normTarih)) && recentUserTranscript) {
+        const spokenDate = extractSpokenTurkishDate(recentUserTranscript)
+        if (spokenDate) normTarih = spokenDate
+      }
       const hasValidDate = (normTarih && dateRegex.test(normTarih)) || (normFrom && dateRegex.test(normFrom))
       if (!hasValidDate) {
         console.log(`[DB] randevuMusaitlikKontrol: geçersiz/eksik tarih (tarih=${tarih} from=${from} to=${to})`)

@@ -173,6 +173,7 @@ export class FlowEngine {
   private state: StoredState
   private revision = 0
   private chain: Promise<unknown> = Promise.resolve()
+  private persistChain: Promise<unknown> = Promise.resolve()
   private skipPersist = false
   readonly id: string
   readonly mode: FlowRuntimeMode
@@ -205,11 +206,14 @@ export class FlowEngine {
   }
 
   static async create(args: { clinicId: string; direction: string; channel: FlowChannel; mode?: FlowRuntimeMode; initialFields?: Record<string, unknown> }) {
-    const flow = await getActiveFlow(args.direction, args.clinicId)
+    const [flow, resolvedMode] = await Promise.all([
+      getActiveFlow(args.direction, args.clinicId),
+      args.mode ? Promise.resolve(args.mode) : resolveFlowRuntimeMode(args.clinicId),
+    ])
     if (!flow) return null
     const validation = validateConversationFlow(flow.nodes, flow.edges)
     if (validation.some(issue => issue.level === 'error')) return null
-    const mode = args.mode || await resolveFlowRuntimeMode(args.clinicId)
+    const mode = args.mode || resolvedMode
     if (mode === 'legacy') return null
     const start = flow.nodes.find(node => node.type === 'START')
     const initialWithSys = injectFlowSystemVariables(cleanFields(args.initialFields), {
@@ -220,20 +224,28 @@ export class FlowEngine {
       id: randomUUID(), mode, channel: args.channel, direction: args.direction, clinicId: args.clinicId,
       state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: initialWithSys, handledEvents: {}, completedActions: [] },
     })
-    await engine.persist()
+    engine.schedulePersist('active')
     return engine
   }
 
-  private async persist(status = 'active') {
+  private async persistSnapshot(status: string, revision: number, stateSnapshot: StoredState) {
     if (this.skipPersist) return
     const expiresAt = new Date(Date.now() + 35 * 60_000)
     await db.insert(flowSessions).values({
-      id: this.id, clinicId: this.clinicId, direction: this.direction, channel: this.channel, flowId: this.state.flow.id,
-      status, revision: this.revision, state: this.state, expiresAt, updatedAt: new Date(),
+      id: this.id, clinicId: this.clinicId, direction: this.direction, channel: this.channel, flowId: stateSnapshot.flow.id,
+      status, revision, state: stateSnapshot, expiresAt, updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: flowSessions.id,
-      set: { status, revision: this.revision, state: this.state, expiresAt, updatedAt: new Date() },
+      set: { status, revision, state: stateSnapshot, expiresAt, updatedAt: new Date() },
     }).catch(error => console.error('[FlowEngine] durum kaydedilemedi:', error))
+  }
+
+  private schedulePersist(status = 'active') {
+    if (this.skipPersist) return
+    const revision = this.revision
+    const snapshot = structuredClone(this.state)
+    const run = () => this.persistSnapshot(status, revision, snapshot)
+    this.persistChain = this.persistChain.then(run, run)
   }
 
   private node() { return this.state.flow.nodes.find(node => node.id === this.state.currentNodeId) }
@@ -346,7 +358,7 @@ export class FlowEngine {
       const committed = { ...result, revision: this.revision }
       this.state.handledEvents[eventId] = committed
       if (Object.keys(this.state.handledEvents).length > 50) delete this.state.handledEvents[Object.keys(this.state.handledEvents)[0]]
-      await this.persist(committed.completed ? 'completed' : 'active')
+      this.schedulePersist(committed.completed ? 'completed' : 'active')
       return committed
     }
     const queued = this.chain.then(run, run) as Promise<FlowEngineResult>
@@ -360,11 +372,14 @@ export class FlowEngine {
     if (!success) return { success: false, revision: this.revision, fields: this.state.fields, message: message || 'İşlem tamamlanamadı.' }
     if (!this.state.completedActions.includes(nodeId)) this.state.completedActions.push(nodeId)
     this.next(edgesFrom(this.state.flow.edges, node.id)[0])
-    const result = await this.advance(); this.revision += 1; await this.persist(result.completed ? 'completed' : 'active')
+    const result = await this.advance(); this.revision += 1; this.schedulePersist(result.completed ? 'completed' : 'active')
     return { ...result, revision: this.revision }
   }
 
-  async close() { await this.persist('closed') }
+  async close() {
+    this.schedulePersist('closed')
+    await this.persistChain
+  }
 }
 
 const liveEngines = new Map<string, FlowEngine>()
