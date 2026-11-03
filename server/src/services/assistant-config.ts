@@ -2,6 +2,7 @@ import { getAiModel, getSetting } from '../db/repositories/settings'
 import { PROMPT_SECTION_KEYS, getDefaultPromptValue } from '../data/default-prompts'
 import { getEffectivePromptSections, renderPromptTemplate } from '../prompts/registry'
 import { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL, isLiveModel } from './live-model-profile'
+import { wrapWithTurkishLanguageLock } from './turn-detector'
 
 export { ALLOWED_LIVE_MODELS, DEFAULT_LIVE_MODEL }
 
@@ -88,11 +89,7 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     } else if (responseLength === 'detailed') {
       behaviorLines.push('- Yanıt Uzunluğu: Hastanın sorularını açıklayıcı ve kapsamlı yanıtla.')
     }
-    if (languagePref === 'tr_only') {
-      behaviorLines.push('- Dil Politikası: Yalnızca Türkçe konuş.')
-    } else if (languagePref === 'multilingual') {
-      behaviorLines.push('- Dil Politikası: Varsayılan dil Türkçe; ancak hasta İngilizce/Almanca/Arapça konuşursa o dilde yanıt ver.')
-    }
+    behaviorLines.push('- Dil Politikası (KESİN KURAL): Yalnızca ve sadece Türkçe konuş. Karşı taraf yabancı dilde konuşsa veya ses İngilizceye benzese dahi asla İngilizce kelime kullanma.')
     if (kbStrictness === 'strict') {
       behaviorLines.push('- Bilgi Tabanı Kuralı (SIKI MOD): Yalnızca Bilgi Bankası içinde açıkça yer alan bilgileri söyle; bilgi bankasında olmayan konularda asla tahmin yürütme.')
     }
@@ -133,5 +130,5 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     }
   }
 
-  return parts.join('\n\n')
+  return wrapWithTurkishLanguageLock(parts.join('\n\n'))
 }

@@ -448,6 +448,79 @@ export function analyzeTurkishTurnCompleteness(
 export const SEMANTIC_TURN_PROMPT_INSTRUCTION =
   'AKILLI KONUŞMA SIRASI (LIVEKIT EOU & TÜRKÇE SOV MOTORU): Türkçe Özne-Nesne-Yüklem diziliminde yüklem cümlenin en sonunda gelir. Karşı taraf cümlesini bağlaçla ("ve", "ama", "yani", "şey"), edatla ("için", "ile", "gibi"), hâl veya mastar ekiyle ("dişime...", "randevu almak...", "doktordan..."), yarım kalmış telefon numarasıyla veya düşünme duraksamasıyla bıraktıysa yüklemi söyleyene kadar bekle; sözünü kesme. Öksürük, hapşırık, boğaz temizleme veya anlık ortam seslerinde konuşma sırası alma.'
 
+export const STRICT_TURKISH_LANGUAGE_LOCK = `MUTLAK TÜRKÇE DİL KİLİDİ (EN YÜKSEK ÖNCELİKLİ SİSTEM KURALI — İHLAL EDİLEMEZ):
+1. Sen YALNIZCA ve SADECE TÜRKÇE (tr-TR) konuşan bir asistansın. Çıktı dilin her koşulda %100 Türkçe olmak zorundadır.
+2. İngilizce veya başka herhangi bir yabancı dilde TEK BİR KELİME, CÜMLE, BAĞLAÇ veya ÜNLEM ("Hello", "Hi", "Sure", "Okay", "Yes", "Sorry", "How can I help you", "I'm sorry", "Let me check", "One moment", "Thank you", "Of course", "Please" vb.) üretmen KESİNLİKLE YASAKTIR.
+3. Mikrofondan gelen ses gürültülü, bozuk, kesik veya anlaşılmaz olsa dahi; ya da karşı tarafın sesi İngilizce bir kelimeye ("Hello" -> "Alo", "Yes" -> "Evet", "Okay" -> "Tamam") benzese, hatta karşı taraf açıkça İngilizce konuşsa bile ASLA İngilizceye geçme, her zaman %100 TÜRKÇE yanıt ver.
+4. Sesi anlamadıysan İngilizce konuşmak yerine yalnızca Türkçe olarak "Sizi tam duyamadım, lütfen tekrar eder misiniz?" de.`
+
+export const ENGLISH_INTERCEPT_RECOVERY_PROMPT =
+  'SİSTEM UYARISI (DİL İHLALİ ENGELİ): Az önce yanlışlıkla İngilizce yanıt üretmeye başladın ve sesin kesildi. Bu görüşmede İngilizce tek bir kelime bile söylemek KESİNLİKLE YASAKTIR. Şimdi son cevabını veya sıradaki soruyu YALNIZCA TÜRKÇE olarak, kısa ve doğal bir cümleyle tekrar söyle.'
+
+export function wrapWithTurkishLanguageLock(prompt: string): string {
+  const trimmed = (prompt || '').trim()
+  if (trimmed.startsWith('MUTLAK TÜRKÇE DİL KİLİDİ')) {
+    return `${trimmed}\n\n${STRICT_TURKISH_LANGUAGE_LOCK}`
+  }
+  return `${STRICT_TURKISH_LANGUAGE_LOCK}\n\n${trimmed}\n\n${STRICT_TURKISH_LANGUAGE_LOCK}`
+}
+
+const STRICT_ENGLISH_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'without', 'from', 'into', 'about', 'before', 'after',
+  'between', 'through', 'during', 'under', 'again', 'because', 'until', 'while', 'although',
+  'though', 'whether', 'please', 'how', 'what', 'when', 'where', 'which', 'who', 'why',
+  'would', 'could', 'should', 'shall', 'might', 'have', 'had', 'having', 'been', 'being',
+  'your', 'yours', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'this', 'that',
+  'these', 'those', 'there', 'here', 'today', 'tomorrow', 'yesterday', 'morning', 'afternoon',
+  'evening', 'appointment', 'schedule', 'scheduled', 'booking', 'clinic', 'dentist', 'patient',
+  'treatment', 'tooth', 'teeth', 'help', 'assist', 'provide', 'understand', 'repeat', 'hear',
+  'catch', 'moment', 'available', 'availability', 'confirm', 'number', 'phone', 'name', 'date',
+  'time', 'sure', 'absolutely', 'currently', 'already', 'still', 'just', 'only', 'also', 'very',
+  'much', 'many', 'some', 'any', 'every', 'each', 'other', 'another', 'something', 'anything',
+  'nothing', 'everything',
+])
+
+const ENGLISH_CONTRACTION_RE =
+  /\b(?:i'm|i'll|i've|i'd|you're|you'll|we're|we'll|they're|that's|there's|what's|how's|let's|don't|doesn't|didn't|can't|couldn't|wouldn't|shouldn't|isn't|aren't|wasn't|weren't|haven't|hasn't|won't)\b/i
+
+const ENGLISH_IMMEDIATE_WORD_RE =
+  /\b(?:hello|goodbye|sorry|thanks|welcome|certainly|unfortunately|apologies|excuse\s+me|pardon\s+me)\b/i
+
+const ENGLISH_PHRASE_RE =
+  /\b(?:how\s+can\s+i|how\s+may\s+i|what\s+can\s+i|can\s+i\s+help|may\s+i\s+help|help\s+you|assist\s+you|i\s+am|i\s+can|i\s+will|i\s+would|i\s+have|i\s+need|i\s+understand|would\s+you|could\s+you|do\s+you|did\s+you|are\s+you|will\s+you|thank\s+you|for\s+calling|of\s+course|right\s+now|one\s+moment|just\s+a\s+moment|let\s+me|tell\s+me|give\s+me|your\s+name|your\s+phone|phone\s+number|good\s+morning|good\s+afternoon|good\s+evening|have\s+a\s+nice|have\s+a\s+great|please\s+provide|please\s+wait|please\s+repeat|hear\s+you)\b/i
+
+/**
+ * Modelin ürettiği çıktı transkriptinde (outputTranscription / modelTurn)
+ * İngilizce yanıt üretilip üretilmediğini gerçek zamanlı tespit eder.
+ */
+export function isEnglishResponseDetected(text: string): boolean {
+  const cleaned = (text || '').trim()
+  if (!cleaned || cleaned.length < 3) return false
+
+  if (ENGLISH_CONTRACTION_RE.test(cleaned)) return true
+  if (ENGLISH_IMMEDIATE_WORD_RE.test(cleaned)) return true
+  if (ENGLISH_PHRASE_RE.test(cleaned)) return true
+
+  const tokens = cleaned
+    .toLowerCase()
+    .replace(/[^a-zçğıöşü\s']/gi, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+
+  let englishHits = 0
+  const seen = new Set<string>()
+  for (const token of tokens) {
+    if (/[çğıöşü]/.test(token)) continue
+    if (STRICT_ENGLISH_WORDS.has(token) && !seen.has(token)) {
+      seen.add(token)
+      englishHits++
+      if (englishHits >= 2) return true
+    }
+  }
+
+  return false
+}
+
 export function buildRealtimeDetectionConfig(
   mode: TurnDetectionMode = 'semantic',
   channel: 'web' | 'phone' = 'web',

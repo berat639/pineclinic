@@ -5,6 +5,8 @@ import {
   analyzeTurkishTurnCompleteness,
   buildRealtimeDetectionConfig,
   evaluateLiveKitTurkishTurn,
+  isEnglishResponseDetected,
+  wrapWithTurkishLanguageLock,
 } from './turn-detector'
 import { validateVoiceSettings } from './voice-settings'
 
@@ -120,6 +122,24 @@ describe('Turkish Semantic Turn Detector', () => {
     expect(invalid.valid).toBe(false)
     expect(invalid.fieldErrors.turnDetectionMode).toBeDefined()
     expect(invalid.fieldErrors.noiseFilterMode).toBeDefined()
+  })
+
+  test('detects English model responses while never false-triggering on Turkish clinic sentences', () => {
+    expect(isEnglishResponseDetected('Hello, how can I help you today?')).toBe(true)
+    expect(isEnglishResponseDetected("I'm sorry, I didn't catch that.")).toBe(true)
+    expect(isEnglishResponseDetected('Sure, let me check the available appointment slots for you.')).toBe(true)
+    expect(isEnglishResponseDetected('Could you please provide your phone number?')).toBe(true)
+    expect(isEnglishResponseDetected('Hello?')).toBe(true)
+
+    expect(isEnglishResponseDetected('Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?')).toBe(false)
+    expect(isEnglishResponseDetected('Adınızı ve soyadınızı alabilir miyim?')).toBe(false)
+    expect(isEnglishResponseDetected('Hangi tarihe ve saat kaça randevu oluşturmak istersiniz?')).toBe(false)
+    expect(isEnglishResponseDetected('İmplant ve kanal tedavisi kontrol randevunuz oluşturuldu.')).toBe(false)
+    expect(isEnglishResponseDetected('Sizi tam duyamadım, lütfen tekrar eder misiniz?')).toBe(false)
+
+    const wrapped = wrapWithTurkishLanguageLock('Örnek sistem talimatı')
+    expect(wrapped.startsWith('MUTLAK TÜRKÇE DİL KİLİDİ')).toBe(true)
+    expect(wrapped.endsWith('lütfen tekrar eder misiniz?" de.')).toBe(true)
   })
 })
 

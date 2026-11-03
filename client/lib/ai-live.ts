@@ -8,8 +8,11 @@ import {
 } from '@google/genai'
 import {
   buildRealtimeDetectionConfig,
+  ENGLISH_INTERCEPT_RECOVERY_PROMPT,
   evaluateLiveKitTurkishTurn,
+  isEnglishResponseDetected,
   SEMANTIC_TURN_PROMPT_INSTRUCTION,
+  wrapWithTurkishLanguageLock,
   type NoiseFilterMode,
   type TurnAnalysisResult,
   type TurnDetectionMode,
@@ -118,7 +121,7 @@ async function handleToolCall(
     case 'randevuGuncelle': return post('/api/tools/create-appointment', { ...args, _update: true })
     case 'randevuMusaitlikKontrol': return post('/api/tools/check-availability', args)
     case 'gecmisRandevular': return post('/api/tools/customer-query', { telefon: args.telefon })
-    default: return { error: `Unknown tool: ${name}` }
+    default: return { error: `Bilinmeyen araç: ${name}` }
   }
 }
 
@@ -139,6 +142,8 @@ export class AiLiveSession {
   private _lastAssistantTranscript = ''
   private _currentModelTranscript = ''
   private _currentUserTranscript = ''
+  private _englishInterceptedInTurn = false
+  private _englishRecoveryCount = 0
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
@@ -154,6 +159,8 @@ export class AiLiveSession {
     this._lastAssistantTranscript = ''
     this._currentModelTranscript = ''
     this._currentUserTranscript = ''
+    this._englishInterceptedInTurn = false
+    this._englishRecoveryCount = 0
 
     // Gemini Live is an audio session. Requesting TEXT from it causes
     // "response modalities (TEXT) is not supported". Keep text chat on the
@@ -170,9 +177,10 @@ export class AiLiveSession {
     }
 
     const turnMode: TurnDetectionMode = config.turnDetectionMode === 'standard' ? 'standard' : 'semantic'
-    const effectiveSystemPrompt = turnMode === 'semantic'
+    const baseSystemPrompt = turnMode === 'semantic'
       ? `${config.systemPrompt}\n\n${SEMANTIC_TURN_PROMPT_INSTRUCTION}`
       : config.systemPrompt
+    const effectiveSystemPrompt = wrapWithTurkishLanguageLock(baseSystemPrompt)
 
     return new Promise<void>((resolve, reject) => {
       const ai = new GoogleGenAI({ apiKey })
@@ -238,9 +246,6 @@ export class AiLiveSession {
             outputAudioTranscription: {},
             ...(modelName === 'gemini-3.8-live-extended-thinking' ? {
               thinkingConfig: { thinkingLevel: ThinkingLevel[config.thinkingLevel || 'LOW'] },
-              proactiveAudio: true,
-            } : turnMode === 'semantic' ? {
-              proactiveAudio: true,
             } : {}),
           },
         })
@@ -302,7 +307,7 @@ export class AiLiveSession {
           model: config.textModel || 'gemini-2.5-flash',
           contents: this.textHistory as any,
           config: {
-            systemInstruction: config.systemPrompt,
+            systemInstruction: wrapWithTurkishLanguageLock(config.systemPrompt),
             tools: config.toolDeclarations.length > 0
               ? [{ functionDeclarations: config.toolDeclarations }]
               : undefined,
@@ -370,6 +375,22 @@ export class AiLiveSession {
     return handleToolCall(name, args, this.flowSession, this.sessionKey)
   }
 
+  private triggerEnglishGuard() {
+    if (this._englishInterceptedInTurn) return
+    this._englishInterceptedInTurn = true
+    this._currentModelTranscript = ''
+    this.callbacks.onInterrupted()
+    if (this._englishRecoveryCount < 4 && this.session && this._isConnected && !this._sendGuard) {
+      this._englishRecoveryCount += 1
+      try {
+        this.session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: ENGLISH_INTERCEPT_RECOVERY_PROMPT }] }],
+          turnComplete: true,
+        })
+      } catch { /* ignore */ }
+    }
+  }
+
   private handleMessage(message: LiveServerMessage) {
     // Tool calls
     if (message.toolCall?.functionCalls?.length) {
@@ -379,7 +400,14 @@ export class AiLiveSession {
             if (this.session && this._isConnected) {
               try {
                 this.session.sendToolResponse({
-                  functionResponses: [{ id: fc.id, name: fc.name ?? '', response: result }],
+                  functionResponses: [{
+                    id: fc.id,
+                    name: fc.name ?? '',
+                    response: {
+                      ...result,
+                      _dil_kurali: 'YALNIZCA TÜRKÇE KONUŞ. İngilizce tek kelime bile kullanma.',
+                    },
+                  }],
                 })
               } catch { /* */ }
             }
@@ -388,7 +416,15 @@ export class AiLiveSession {
             if (this.session && this._isConnected) {
               try {
                 this.session.sendToolResponse({
-                  functionResponses: [{ id: fc.id, name: fc.name ?? '', response: { error: 'failed' } }],
+                  functionResponses: [{
+                    id: fc.id,
+                    name: fc.name ?? '',
+                    response: {
+                      success: false,
+                      message: 'Araç çalıştırılamadı. Yalnızca Türkçe yanıt ver.',
+                      _dil_kurali: 'YALNIZCA TÜRKÇE KONUŞ.',
+                    },
+                  }],
                 })
               } catch { /* */ }
             }
@@ -402,20 +438,34 @@ export class AiLiveSession {
       this.callbacks.onInteractionStatus?.(interactionStatus)
     }
 
-    // Audio & text
-    if (message.serverContent?.modelTurn?.parts) {
-      for (const part of message.serverContent.modelTurn.parts) {
-        if (part?.inlineData?.data) this.callbacks.onAudioChunk(part.inlineData.data)
-        if (part?.text) this.callbacks.onText(part.text)
+    // Output transcription (text of what AI said in audio mode) — kontrolü
+    // ses parçalarından önce yapılır ki İngilizce algılandığı anda ses kesilsin.
+    const transcript = (message as any).serverContent?.outputTranscription?.text
+    if (transcript && !this._englishInterceptedInTurn) {
+      this._currentModelTranscript = `${this._currentModelTranscript}${transcript}`.slice(-600)
+      this._currentUserTranscript = ''
+      if (isEnglishResponseDetected(this._currentModelTranscript)) {
+        this.triggerEnglishGuard()
+      } else {
+        this.callbacks.onText(transcript)
       }
     }
 
-    // Output transcription (text of what AI said in audio mode)
-    const transcript = (message as any).serverContent?.outputTranscription?.text
-    if (transcript) {
-      this._currentModelTranscript = `${this._currentModelTranscript}${transcript}`.slice(-600)
-      this._currentUserTranscript = ''
-      this.callbacks.onText(transcript)
+    // Audio & text
+    if (!this._englishInterceptedInTurn && message.serverContent?.modelTurn?.parts) {
+      for (const part of message.serverContent.modelTurn.parts) {
+        if (part?.text) {
+          this._currentModelTranscript = `${this._currentModelTranscript}${part.text}`.slice(-600)
+          if (isEnglishResponseDetected(this._currentModelTranscript)) {
+            this.triggerEnglishGuard()
+            break
+          }
+          this.callbacks.onText(part.text)
+        }
+        if (!this._englishInterceptedInTurn && part?.inlineData?.data) {
+          this.callbacks.onAudioChunk(part.inlineData.data)
+        }
+      }
     }
 
     const userTranscript = (message as any).serverContent?.inputTranscription?.text
@@ -432,15 +482,20 @@ export class AiLiveSession {
     }
 
     if (message.serverContent?.turnComplete) {
-      if (this._currentModelTranscript.trim()) {
+      const wasEnglishBlocked = this._englishInterceptedInTurn
+      if (!wasEnglishBlocked && this._currentModelTranscript.trim()) {
         this._lastAssistantTranscript = this._currentModelTranscript.trim()
       }
       this._currentModelTranscript = ''
       this._currentUserTranscript = ''
-      this.callbacks.onTurnComplete()
+      this._englishInterceptedInTurn = false
+      if (!wasEnglishBlocked) {
+        this.callbacks.onTurnComplete()
+      }
     }
     if (message.serverContent?.interrupted) {
       this._currentModelTranscript = ''
+      this._englishInterceptedInTurn = false
       this.callbacks.onInterrupted()
     }
   }

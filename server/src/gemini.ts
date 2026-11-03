@@ -32,7 +32,13 @@ import {
 } from './services/transfer-triggers'
 import { FlowEngine } from './services/flow-engine'
 import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
-import { SEMANTIC_TURN_PROMPT_INSTRUCTION, type TurnDetectionMode } from './services/turn-detector'
+import {
+  ENGLISH_INTERCEPT_RECOVERY_PROMPT,
+  isEnglishResponseDetected,
+  SEMANTIC_TURN_PROMPT_INSTRUCTION,
+  wrapWithTurkishLanguageLock,
+  type TurnDetectionMode,
+} from './services/turn-detector'
 import { recordAiTokenUsage } from './db/repositories/ai-usage'
 import { getPromptTemplate, renderPromptTemplate } from './prompts/registry'
 
@@ -619,7 +625,7 @@ export async function createLiveSession(
       callbacks.onHangup?.()
       return { success: true }
     }
-    return { error: 'Unknown function' }
+    return { success: false, message: 'Bilinmeyen araç çağrısı. Yalnızca Türkçe yanıt ver.' }
   }
 
   // ── Bağlantı yönetimi: session resumption + otomatik reconnect ──────────────
@@ -640,10 +646,14 @@ export async function createLiveSession(
    */
   function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: Record<string, unknown>, attempt = 0): void {
     if (closedByUser) return
+    const payload = {
+      ...result,
+      _dil_kurali: 'YALNIZCA TÜRKÇE KONUŞ. İngilizce tek kelime bile kullanma.',
+    }
     if (activeSession && !reconnecting) {
       try {
         activeSession.sendToolResponse({
-          functionResponses: [{ id: fcId, name: fcName, response: result }],
+          functionResponses: [{ id: fcId, name: fcName, response: payload }],
         })
         return
       } catch (err) {
@@ -671,13 +681,16 @@ export async function createLiveSession(
   const flowRuntimeInstruction = renderPromptTemplate(flowRuntimeTpl.trim() || fallbackFlowRuntimeInstruction, {}).trim() || fallbackFlowRuntimeInstruction
 
   const useSemanticTurn = (options.turnDetectionMode ?? 'semantic') === 'semantic'
-  const liveConfig: any = {
-    responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt + '\n\n' + voiceInstruction + (useSemanticTurn
+  const fullSystemInstruction = wrapWithTurkishLanguageLock(
+    options.systemPrompt + '\n\n' + voiceInstruction + (useSemanticTurn
       ? '\n\n' + SEMANTIC_TURN_PROMPT_INSTRUCTION
       : '') + (flowEngine
       ? '\n\n' + flowRuntimeInstruction
       : ''),
+  )
+  const liveConfig: any = {
+    responseModalities: [Modality.AUDIO],
+    systemInstruction: fullSystemInstruction,
     speechConfig: {
       voiceConfig: {
         prebuiltVoiceConfig: { voiceName: options.voiceName || 'Aoede' },
@@ -697,10 +710,6 @@ export async function createLiveSession(
     sessionResumption: {},
     ...(isThinkingModel(options.model) ? {
       thinkingConfig: { thinkingLevel: normalizeThinkingLevel(options.thinkingLevel).toLowerCase() },
-      // Extended Thinking uses proactive audio while it completes background work.
-      proactiveAudio: true,
-    } : useSemanticTurn ? {
-      proactiveAudio: true,
     } : {}),
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
   }
@@ -747,6 +756,28 @@ export async function createLiveSession(
     let lastReportedPrompt = 0
     let lastReportedResponse = 0
     let lastReportedTotal = 0
+    let currentModelTurnTranscript = ''
+    let englishInterceptedInTurn = false
+    let englishRecoveryCount = 0
+
+    const triggerEnglishGuard = (detectedText: string) => {
+      if (englishInterceptedInTurn) return
+      englishInterceptedInTurn = true
+      console.warn(`[${options.dbSessionId}] [Dil Kilidi] İngilizce yanıt engellendi ve kesildi: "${detectedText}"`)
+      callbacks.onInterrupted()
+      if (englishRecoveryCount < 4 && activeSession && !reconnecting && !closedByUser) {
+        englishRecoveryCount++
+        try {
+          activeSession.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: ENGLISH_INTERCEPT_RECOVERY_PROMPT }] }],
+            turnComplete: true,
+          })
+        } catch (err) {
+          console.error('[Gemini] Dil kilidi kurtarma mesajı gönderilemedi:', err)
+        }
+      }
+    }
+
     return {
       // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
       onopen: () => {},
@@ -782,7 +813,7 @@ export async function createLiveSession(
               })
               .catch((err) => {
                 console.error(`[Tool ${fcName}] handler hatası:`, err)
-                sendToolResponseWithRetry(fcName, fc.id, { error: 'tool failed' })
+                sendToolResponseWithRetry(fcName, fc.id, { success: false, message: 'Araç çalıştırılamadı. Yalnızca Türkçe yanıt ver.' })
               })
           }
         }
@@ -821,18 +852,34 @@ export async function createLiveSession(
         // Barge-in: user interrupted model
         if (content.interrupted) {
           console.log(`[${options.dbSessionId}] Gemini: interrupted`)
+          currentModelTurnTranscript = ''
+          englishInterceptedInTurn = false
           callbacks.onInterrupted()
           return
         }
 
+        // Önce outputTranscription kontrol edilir: İngilizce tespit edilirse
+        // aynı mesajdaki ve turdaki ses paketleri hiç oynatılmadan kesilir.
+        if (content.outputTranscription?.text) {
+          currentModelTurnTranscript = `${currentModelTurnTranscript}${content.outputTranscription.text}`.slice(-600)
+          if (isEnglishResponseDetected(currentModelTurnTranscript)) {
+            triggerEnglishGuard(currentModelTurnTranscript)
+          }
+        }
+
         // Audio and text parts
-        if (content.modelTurn?.parts) {
+        if (!englishInterceptedInTurn && content.modelTurn?.parts) {
           for (const part of content.modelTurn.parts) {
-            if (part.inlineData?.data) {
-              callbacks.onAudio(Buffer.from(part.inlineData.data, 'base64'))
-            }
             if (part.text) {
+              currentModelTurnTranscript = `${currentModelTurnTranscript}${part.text}`.slice(-600)
+              if (isEnglishResponseDetected(currentModelTurnTranscript)) {
+                triggerEnglishGuard(currentModelTurnTranscript)
+                break
+              }
               callbacks.onTranscript('model', part.text)
+            }
+            if (!englishInterceptedInTurn && part.inlineData?.data) {
+              callbacks.onAudio(Buffer.from(part.inlineData.data, 'base64'))
             }
           }
         }
@@ -917,13 +964,18 @@ export async function createLiveSession(
             }
           }
         }
-        if (content.outputTranscription?.text) {
+        if (!englishInterceptedInTurn && content.outputTranscription?.text) {
           callbacks.onTranscript('model', content.outputTranscription.text)
         }
 
         if (content.turnComplete) {
+          const wasEnglishBlocked = englishInterceptedInTurn
+          currentModelTurnTranscript = ''
+          englishInterceptedInTurn = false
           automaticTransferTranscript = ''
-          callbacks.onTurnComplete()
+          if (!wasEnglishBlocked) {
+            callbacks.onTurnComplete()
+          }
         }
 
         // Usage metadata (token counts) — emitted periodically by Gemini

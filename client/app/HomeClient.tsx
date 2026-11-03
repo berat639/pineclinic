@@ -365,6 +365,7 @@ export default function Home() {
       },
       onInterrupted: () => {
         if (webClosingRef.current) return
+        textBufferRef.current = ''
         setStatus('listening')
         playerRef.current?.clear()
       },

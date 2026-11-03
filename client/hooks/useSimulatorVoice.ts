@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Type, type FunctionDeclaration } from '@google/genai'
 import { AiLiveSession, type SessionConfig } from '@/lib/ai-live'
 import { AudioStreamPlayer, MicrophoneCapture } from '@/lib/audio'
+import { isEnglishResponseDetected } from '@/lib/turn-detector'
 
 export type SimulatorVoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error'
 
@@ -125,7 +126,9 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
   const flushModel = useCallback(() => {
     const text = modelBufferRef.current.trim()
     modelBufferRef.current = ''
-    if (text) optsRef.current.onTranscript({ role: 'assistant', text })
+    if (text && !isEnglishResponseDetected(text)) {
+      optsRef.current.onTranscript({ role: 'assistant', text })
+    }
   }, [])
 
   const release = useCallback(() => {

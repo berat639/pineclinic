@@ -10,6 +10,7 @@ import { PROMPT_SECTION_KEYS } from '../data/default-prompts'
 import { resolveClinicGeminiKey } from './gemini-client'
 import { DEFAULT_LIVE_MODEL, isLiveModel } from './live-model-profile'
 import { getAiModel } from '../db/repositories/settings'
+import { wrapWithTurkishLanguageLock } from './turn-detector'
 
 /**
  * GÜVENLİK SINIRI: Bu modül yalnızca bellekteki TASLAK akış üzerinde çalışır.
@@ -199,13 +200,13 @@ async function buildVoiceConfig(req: FlowSimulationRequest, clinicId: string | u
   const offTopicRule = voiceSettings
     ? (await import('./voice-settings')).buildOffTopicPromptRule(voiceSettings.offTopicMaxStrikes, voiceSettings.offTopicCloseMessage)
     : ''
-  const systemPrompt = `BUGÜNÜN TARİHİ: ${getTodayIso()}. Bu bir SİMÜLASYONDUR; hiçbir kayıt gerçekten oluşturulmaz.
+  const systemPrompt = wrapWithTurkishLanguageLock(`BUGÜNÜN TARİHİ: ${getTodayIso()}. Bu bir SİMÜLASYONDUR; hiçbir kayıt gerçekten oluşturulmaz.
 
 ${instructions}
 
 ${flowPrompt}
 
-${voiceFlowRules}${offTopicRule ? `\n\n${offTopicRule}` : ''}${ragContext}`
+${voiceFlowRules}${offTopicRule ? `\n\n${offTopicRule}` : ''}${ragContext}`)
   return {
     available: true,
     apiKey,
@@ -588,7 +589,7 @@ SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
         model: modelName,
         contents: [...historyContents, { role: 'user', parts: [{ text: promptTurn }] }],
         config: {
-          systemInstruction: sysInstruction,
+          systemInstruction: wrapWithTurkishLanguageLock(sysInstruction),
           temperature: 0.35,
         },
       })
