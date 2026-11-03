@@ -768,11 +768,13 @@ function ConditionRulesEditor({
   update,
   inputStyle,
   customFieldNames,
+  direction = 'inbound',
 }: {
   data: ConditionData
   update: (u: Record<string, any>) => void
   inputStyle: React.CSSProperties
   customFieldNames: string[]
+  direction?: 'inbound' | 'outbound' | 'whatsapp'
 }) {
   const logic: 'AND' | 'OR' = data.conditionLogic === 'OR' ? 'OR' : 'AND'
   const rules: ConditionRule[] = Array.isArray(data.rules) && data.rules.length > 0
@@ -822,7 +824,9 @@ function ConditionRulesEditor({
           .map(k => <option key={k} value={k}>{FIELD_LABELS[k]}</option>)}
       </optgroup>
       <optgroup label="Hazır bilgiler">
-        {PRESET_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+        {PRESET_FIELDS
+          .filter(f => f.group === (direction === 'outbound' ? 'outbound' : 'inbound') || f.value === r.field)
+          .map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
       </optgroup>
       {customFieldNames.length > 0 && (
         <optgroup label="Akıştaki özel bilgiler">
@@ -2826,16 +2830,11 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                             style={inputStyle}
                           >
                             <option value="">Bir alan seçin...</option>
-                            <optgroup label="📥 Gelen Arama / Randevu Alanları">
-                              {PRESET_FIELDS.filter(f => f.group === 'inbound').map(f => (
+                            {PRESET_FIELDS
+                              .filter(f => f.group === (direction === 'outbound' ? 'outbound' : 'inbound') || f.value === d.fieldName)
+                              .map(f => (
                                 <option key={f.value} value={f.value}>{f.label}</option>
                               ))}
-                            </optgroup>
-                            <optgroup label="📤 Giden Arama / Anket Alanları">
-                              {PRESET_FIELDS.filter(f => f.group === 'outbound').map(f => (
-                                <option key={f.value} value={f.value}>{f.label}</option>
-                              ))}
-                            </optgroup>
                           </select>
                         )}
                       </div>
@@ -2920,7 +2919,7 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                   const d = selectedNode.data as ConditionData
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      <ConditionRulesEditor data={d} update={updateSelectedNode} inputStyle={inputStyle} customFieldNames={customCanvasFieldNames} />
+                      <ConditionRulesEditor data={d} update={updateSelectedNode} inputStyle={inputStyle} customFieldNames={customCanvasFieldNames} direction={direction} />
                     </div>
                   )
                 })()}
