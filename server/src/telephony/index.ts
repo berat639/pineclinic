@@ -692,10 +692,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
             const flowPriorityInstructions = `\n\n${renderPromptTemplate(flowPriorityTpl, {})}`
             const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
-            console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${minimalGreetingEndFlow ? 'disabled (minimal flow)' : `${maxCallSeconds}s`}, wait: ${startWaitSec}s`)
-            if (minimalGreetingEndFlow) {
-              console.log(`[${shortId}] Minimal Flow Builder akışı: maksimum görüşme süresi devre dışı (sessizlik koruması aktif)`)
-            }
+            console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, minimalFlow: ${minimalGreetingEndFlow}, wait: ${startWaitSec}s`)
 
             const pendingSession = createLiveSession(
                 clinicAi,
@@ -751,6 +748,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     console.log(`[${shortId}] ${label}: ${trimmed}`)
                   },
                   onInterrupted: () => {
+                    // Kapanış aşamasında (maksimum süre dolduğunda veya veda edilirken)
+                    // arayanın konuşması veda cümlesini kesmemelidir.
+                    if (state.hangupPending || (state.maxLimitReached && !state.micEnabled)) return
                     // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
                     state.aiSpeaking = false
                     state.outputTurnActive = false
@@ -939,36 +939,45 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
             // Süre karşılama gönderildikten sonra başlar; bağlantı kurulma
             // gecikmesi klinik yöneticisinin seçtiği konuşma süresinden düşmez.
-            // Gelen ve giden aramalarda aynı klinik ayarı kullanılır.
-          if (!minimalGreetingEndFlow) state.maxCallTimer = setTimeout(() => {
-            if (state.closed || state.hangupPending || !state.info.session) return
-            state.maxLimitReached = true
-            console.log(`[${shortId}] Maksimum çağrı süresi (${Math.round(maxCallSeconds / 60)}dk) — kapanış uyarısı veriliyor`)
-            try {
-              state.info.session.sendClientContent({
-                turns: [{
-                  role: 'user',
-                  parts: [{ text: 'Sistem: Maksimum görüşme süresine ulaşıldı. Kullanıcıya aynen şu anlamda kısa bir uyarı ver: "Görüşme süremiz dolmak üzere. Lütfen mevcut randevu adımına dönelim; konu dışı devam ederseniz görüşmeyi sonlandıracağım." Yeni konu başlatma ve kullanıcıya cevap vermesi için fırsat tanı.' }],
-                }],
-                turnComplete: true,
-              })
-            } catch { }
-            // Uyarıdan sonra kullanıcıya mevcut akışa dönmesi için tolerans ver.
-            state.maxCloseTimer = setTimeout(() => {
+            // Gelen, giden ve minimal akışlı tüm aramalarda maksimum süre KESİN olarak uygulanır.
+            const warnBeforeMs = 20_000
+            const warnAtMs = Math.max(10_000, maxCallMs - warnBeforeMs)
+            state.maxCallTimer = setTimeout(() => {
               if (state.closed || state.hangupPending || !state.info.session) return
+              state.maxLimitReached = true
+              console.log(`[${shortId}] Maksimum çağrı süresine 20sn kaldı (${Math.round(maxCallSeconds / 60)}dk limit) — toparlama uyarısı veriliyor`)
               try {
                 state.info.session.sendClientContent({
                   turns: [{
                     role: 'user',
-                    parts: [{ text: 'Sistem: Kullanıcı akışa dönmedi veya konu dışına devam etti. Şimdi "Üzgünüm, görüşme süremiz doldu. Görüşmeyi sonlandırıyorum, iyi günler." de; cümleyi tamamen söyle, yeni soru sorma ve cagriySonlandir aracını çağır.' }],
+                    parts: [{ text: 'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya nazikçe: "Görüşme süremiz dolmak üzere, randevu veya klinik işleminizi hemen tamamlayalım; farklı bir konu varsa görüşmeyi sonlandırmam gerekecek." de ve işlemi hızla toparla.' }],
+                  }],
+                  turnComplete: true,
+                })
+              } catch { }
+            }, warnAtMs)
+
+            state.maxCloseTimer = setTimeout(() => {
+              if (state.closed || state.hangupPending || !state.info.session) return
+              state.maxLimitReached = true
+              // Mikrofonu kapat ki arayan konuşmaya devam edip veda cümlesini (barge-in ile) kesemesin
+              state.micEnabled = false
+              state.micBuffer = []
+              clearSilenceTimers(state)
+              console.log(`[${shortId}] Maksimum çağrı süresi (${maxCallSeconds}sn) doldu — görüşme sonlandırılıyor`)
+              try {
+                state.info.session.sendClientContent({
+                  turns: [{
+                    role: 'user',
+                    parts: [{ text: 'Sistem: Maksimum görüşme süresi kesin olarak doldu. Şimdi "Üzgünüm, görüşme süremiz doldu. Görüşmeyi sonlandırıyorum, sağlıklı günler dilerim." de; yeni soru sorma ve cagriySonlandir aracını çağır.' }],
                   }],
                   turnComplete: true,
                 })
               } catch { }
 
-              // AI cümlesini ve ses kuyruğunu tamamlamadan hattı kapatma.
-              const notBefore = Date.now() + 6_000
-              const deadline = Date.now() + 30_000
+              // AI cümlesini ve ses kuyruğunu tamamlamadan hattı kapatma; ancak en geç 12sn içinde kesin kapat.
+              const notBefore = Date.now() + 4_500
+              const deadline = Date.now() + 12_000
               const closeWhenQuiet = () => {
                 if (state.closed) return
                 if ((Date.now() < notBefore || state.aiSpeaking || state.audioQueue.length > 0) && Date.now() < deadline) {
@@ -976,11 +985,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   return
                 }
                 state.closed = true
+                try { state.info.session?.close() } catch { }
                 try { socket.end() } catch { }
               }
               setTimeout(closeWhenQuiet, 1_000)
-            }, 20_000)
-          }, maxCallMs)
+            }, maxCallMs)
 
             // Güvenlik zamanlayıcısı: Gemini turnComplete göndermese bile çağrı kilitlenmesin.
             // Normal akışta mikrofon yalnızca greeting turnComplete sonrasında açılır;

@@ -49,6 +49,7 @@ export interface SimulatorVoiceConfig {
   thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
   turnDetectionMode?: 'semantic' | 'standard'
   noiseFilterMode?: 'rnnoise' | 'off'
+  callMaxDuration?: number
   systemPrompt?: string
   greeting?: string
 }
@@ -208,6 +209,7 @@ ${voiceFlowRules}${ragContext}`
     thinkingLevel: voiceSettings?.thinkingLevel || 'LOW',
     turnDetectionMode: voiceSettings?.turnDetectionMode || 'semantic',
     noiseFilterMode: voiceSettings?.noiseFilterMode || 'rnnoise',
+    callMaxDuration: voiceSettings?.callMaxDuration || 600,
     systemPrompt,
     greeting,
   }

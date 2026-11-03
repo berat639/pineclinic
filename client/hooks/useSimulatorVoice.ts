@@ -56,6 +56,14 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
       required: ['sorgu'],
     },
   },
+  {
+    name: 'cagriySonlandir',
+    description: 'Görüşme tamamlandığında, konu dışı ısrar devam ettiğinde veya maksimum süre dolduğunda veda cümlesinden sonra görüşmeyi sonlandırır.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: { neden: { type: Type.STRING, description: 'Kapanış nedeni' } },
+    },
+  },
 ]
 
 function toServerGraph(opts: SimulatorVoiceOptions) {
@@ -100,6 +108,9 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
   const sessionRef = useRef<AiLiveSession | null>(null)
   const playerRef = useRef<AudioStreamPlayer | null>(null)
   const micRef = useRef<MicrophoneCapture | null>(null)
+  const maxWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runIdRef = useRef(0)
   const modelBufferRef = useRef('')
   const userBufferRef = useRef('')
@@ -118,6 +129,9 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
   }, [])
 
   const release = useCallback(() => {
+    if (maxWarnTimerRef.current) { clearTimeout(maxWarnTimerRef.current); maxWarnTimerRef.current = null }
+    if (maxDurationTimerRef.current) { clearTimeout(maxDurationTimerRef.current); maxDurationTimerRef.current = null }
+    if (closeFallbackTimerRef.current) { clearTimeout(closeFallbackTimerRef.current); closeFallbackTimerRef.current = null }
     micRef.current?.stop()
     micRef.current = null
     playerRef.current?.stop()
@@ -201,12 +215,21 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         })
         return (data.toolResult as Record<string, unknown>) || { sonuc: 'Bilgi bankasında ilgili kayıt bulunamadı.' }
       }
+      if (name === 'cagriySonlandir') {
+        micRef.current?.stop()
+        micRef.current = null
+        if (closeFallbackTimerRef.current) clearTimeout(closeFallbackTimerRef.current)
+        closeFallbackTimerRef.current = setTimeout(() => {
+          stop()
+        }, 4500)
+        return { success: true, mesaj: 'Görüşme sonlandırılıyor.' }
+      }
       // Randevu, not vb. gerçek işlemler simülasyonda yürütülmez.
       return { success: true, mesaj: 'Simülasyon: bu işlem gerçekten kaydedilmedi.' }
     } catch (err) {
       return { success: false, mesaj: err instanceof Error ? err.message : 'Araç çalıştırılamadı.' }
     }
-  }, [advance])
+  }, [advance, stop])
 
   const start = useCallback(async () => {
     if (status !== 'idle' && status !== 'error') return
@@ -247,6 +270,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
         turnDetectionMode?: 'semantic' | 'standard'
         noiseFilterMode?: 'rnnoise' | 'off'
+        callMaxDuration?: number
         systemPrompt?: string
         greeting?: string
       } | undefined
@@ -319,7 +343,32 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
       })
       micRef.current = mic
       await mic.start(pcm => session.sendAudio(pcm))
-      if (!alive()) mic.stop()
+      if (!alive()) { mic.stop(); return }
+
+      const maxSec = Math.min(900, Math.max(180, Number(voice.callMaxDuration) || 600))
+      const maxMs = maxSec * 1000
+      const warnMs = Math.max(10_000, maxMs - 20_000)
+      maxWarnTimerRef.current = setTimeout(() => {
+        if (!alive() || !sessionRef.current) return
+        try {
+          sessionRef.current.sendText(
+            'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Hastaya nazikçe sürenin dolmak üzere olduğunu söyleyip randevu/klinik işlemini hemen toparla.',
+          )
+        } catch {}
+      }, warnMs)
+      maxDurationTimerRef.current = setTimeout(() => {
+        if (!alive()) return
+        micRef.current?.stop()
+        micRef.current = null
+        try {
+          sessionRef.current?.sendText(
+            'Sistem: Maksimum görüşme süresi doldu. Şimdi "Üzgünüm, görüşme süremiz doldu. Görüşmeyi sonlandırıyorum, sağlıklı günler dilerim." de ve cagriySonlandir aracını çağır.',
+          )
+        } catch {}
+        closeFallbackTimerRef.current = setTimeout(() => {
+          if (alive()) stop()
+        }, 6500)
+      }, maxMs)
     } catch (err) {
       const denied = err instanceof Error && /permission|denied|notallowed/i.test(`${err.name} ${err.message}`)
       fail(denied ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verip tekrar deneyin.' : err instanceof Error && err.message ? err.message : 'Sesli simülasyon başlatılamadı.')

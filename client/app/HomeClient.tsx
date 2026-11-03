@@ -48,6 +48,7 @@ function isWebConversationFarewell(text: string): boolean {
     /\bhoşçakalın\b/,
     /\bgüle\s*güle\b/,
     /\biyi\s+(?:günler|akşamlar|geceler)\b/,
+    /\bsağlıklı\s+günler\b/,
     /\bkendinize\s+iyi\s+bakın\b/,
     /\bgörüş(?:meyi|memizi)\s+sonlandır/,
     /\bbaşka\s+bir\s+zaman\s+(?:tekrar\s+)?görüş/,
@@ -72,6 +73,7 @@ export default function Home() {
   const farewellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const webSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const webSilenceCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const webMaxWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const webMaxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const webCloseFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const webWarningPendingRef = useRef(false)
@@ -84,6 +86,7 @@ export default function Home() {
     for (const timerRef of [
       webSilenceTimerRef,
       webSilenceCloseTimerRef,
+      webMaxWarnTimerRef,
       webMaxDurationTimerRef,
       webCloseFallbackTimerRef,
     ]) {
@@ -162,20 +165,39 @@ export default function Home() {
 
   const scheduleWebMaxDurationTimer = useCallback((maxSeconds: number) => {
     if (!sessionRef.current || maxSeconds <= 0) return
+    if (webMaxWarnTimerRef.current) clearTimeout(webMaxWarnTimerRef.current)
     if (webMaxDurationTimerRef.current) clearTimeout(webMaxDurationTimerRef.current)
+
+    // Bitişten 20 sn önce uyarı vererek konuyu toparlamasını sağla
+    const warnDelayMs = Math.max(10_000, (maxSeconds - 20) * 1000)
+    if (maxSeconds > 25) {
+      webMaxWarnTimerRef.current = setTimeout(() => {
+        if (!sessionRef.current || webClosingRef.current) return
+        sessionRef.current.sendText(
+          `Sistem bildirimi: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya kısaca "Görüşme süremiz dolmak üzere, randevu veya klinik talebinizi hemen tamamlayalım; konu dışı devam edersek görüşmeyi sonlandırmam gerekecek." de.`
+        )
+      }, warnDelayMs)
+    }
+
+    // Maksimum süre dolduğunda mikrofonu kapat (barge-in ile kapanışın iptal edilmesini önle) ve görüşmeyi bitir
     webMaxDurationTimerRef.current = setTimeout(() => {
       if (!sessionRef.current || webClosingRef.current) return
       webClosingRef.current = true
+      clearWebSilenceTimers()
+      micRef.current?.stop()
+      micRef.current = null
       sessionRef.current.sendText(
-        `Sistem bildirimi: Görüşme süresi doldu. Görüşmeyi kısa bir veda cümlesiyle sonlandır ve iyi günler dile.`
+        `Sistem bildirimi: Maksimum görüşme süresi (${Math.round(maxSeconds / 60)} dakika) doldu. Yeni soru sorma; yalnızca "Görüşme süremiz doldu, sağlıklı ve iyi günler dilerim." diyerek görüşmeyi hemen sonlandır.`
       )
       webCloseFallbackTimerRef.current = setTimeout(() => {
         if (webClosingRef.current) stopAfterPlayback()
-      }, 8000)
+      }, 6500)
     }, maxSeconds * 1000)
-  }, [stopAfterPlayback])
+  }, [clearWebSilenceTimers, stopAfterPlayback])
 
   const markWebSpeech = useCallback((warningSeconds: number, closeSeconds: number) => {
+    // Kapanış aşamasına geçildiyse (maksimum süre dolduysa veya sessizlik kapanışı başladıysa) konuşma sayacı sıfırlayamaz
+    if (webClosingRef.current) return
     const now = Date.now()
     if (now - lastWebSpeechAtRef.current < 250) return
     lastWebSpeechAtRef.current = now
@@ -183,12 +205,7 @@ export default function Home() {
       clearTimeout(webSilenceCloseTimerRef.current)
       webSilenceCloseTimerRef.current = null
     }
-    if (webCloseFallbackTimerRef.current) {
-      clearTimeout(webCloseFallbackTimerRef.current)
-      webCloseFallbackTimerRef.current = null
-    }
     webWarningPendingRef.current = false
-    webClosingRef.current = false
     scheduleWebSilenceTimer(warningSeconds, closeSeconds)
   }, [scheduleWebSilenceTimer])
 
@@ -239,7 +256,17 @@ export default function Home() {
       }
     }
 
-    if (!currentApiKey || !sessionConfig) {
+    let activeSessionConfig = sessionConfig
+    try {
+      const cfgRes = await fetch('/api/direct-session-config')
+      if (cfgRes.ok) {
+        const freshCfg = (await cfgRes.json()) as SessionConfig
+        activeSessionConfig = freshCfg
+        setSessionConfig(freshCfg)
+      }
+    } catch { /* fallback to existing sessionConfig */ }
+
+    if (!currentApiKey || !activeSessionConfig) {
       player.stop()
       playerRef.current = null
       setStatus('error')
@@ -247,15 +274,15 @@ export default function Home() {
       return
     }
 
-    let liveConfig = sessionConfig
+    let liveConfig = activeSessionConfig
     try {
       const response = await fetch('/api/flow-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'inbound' }) })
       if (response.ok) {
         const flowSession = await response.json()
         liveConfig = {
-          ...sessionConfig,
+          ...activeSessionConfig,
           flowSession,
-          systemPrompt: `${sessionConfig.systemPrompt}\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.`,
+          systemPrompt: `${activeSessionConfig.systemPrompt}\n\nAKIŞ YÖNETİMİ: Müşteri yeni veya düzeltilmiş bilgi verdiğinde önce akisBilgisiGuncelle aracını çağır. Araçtan gelen sıradaki görevi uygula. Araç bir bilgi istemenizi söylerse yalnızca o bilgiyi iste. Randevu işlemini ancak araç işlem adımına ulaştığında çağır.`,
         }
       }
     } catch { /* Akış motoru kapalı veya ulaşılamıyor; mevcut görüşme yolu korunur. */ }
@@ -285,13 +312,15 @@ export default function Home() {
       onTurnComplete: () => {
         const modelText = textBufferRef.current.trim()
         if (modelText.length > 0) {
-          // console.log('[AI Turn]', textBufferRef.current.trim())
           addTranscript('model', modelText)
           textBufferRef.current = ''
-          if (!session.interactionInProgress && isWebConversationFarewell(modelText)) {
+          if (webClosingRef.current || (!session.interactionInProgress && isWebConversationFarewell(modelText))) {
             stopAfterPlayback()
             return
           }
+        } else if (webClosingRef.current) {
+          stopAfterPlayback()
+          return
         }
         if (session.interactionInProgress) {
           setStatus('thinking')
@@ -300,8 +329,8 @@ export default function Home() {
         setStatus('listening')
         if (!webWarningPendingRef.current && !webClosingRef.current) {
           scheduleWebSilenceTimer(
-            Math.max(5, sessionConfig.callSilenceTimeout ?? 30),
-            Math.max(5, sessionConfig.callSilenceCloseTimeout ?? 15),
+            Math.max(5, liveConfig.callSilenceTimeout ?? 30),
+            Math.max(5, liveConfig.callSilenceCloseTimeout ?? 15),
           )
         }
       },
@@ -324,6 +353,7 @@ export default function Home() {
         setErrorMsg(err)
       },
       onInterrupted: () => {
+        if (webClosingRef.current) return
         setStatus('listening')
         playerRef.current?.clear()
       },
@@ -369,19 +399,19 @@ export default function Home() {
 
       setStatus('listening')
 
-      const greetingPrompt = sessionConfig?.greeting
-        ? `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Müşteriye tam olarak şu karşılama mesajını okuyarak konuşmayı başlat: "${sessionConfig.greeting}" (Bu bir sistem bildirimidir, müşteri adı sanma.)`
+      const greetingPrompt = liveConfig.greeting
+        ? `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Müşteriye tam olarak şu karşılama mesajını okuyarak konuşmayı başlat: "${liveConfig.greeting}" (Bu bir sistem bildirimidir, müşteri adı sanma.)`
         : `Sistem bildirimi: Müşteri ${mode === 'audio' ? 'sesli' : 'yazılı'} görüşmeye bağlandı. Kısaca "Merhaba, size nasıl yardımcı olabilirim?" diyerek görüşmeyi başlat.`
       session.sendText(greetingPrompt)
 
-      scheduleWebMaxDurationTimer(Math.max(180, sessionConfig.callMaxDuration ?? 600))
+      scheduleWebMaxDurationTimer(Math.max(180, liveConfig.callMaxDuration ?? 600))
 
       if (mode === 'audio') {
         const mic = new MicrophoneCapture({
-          noiseFilter: (sessionConfig.noiseFilterMode ?? 'rnnoise') !== 'off',
+          noiseFilter: (liveConfig.noiseFilterMode ?? 'rnnoise') !== 'off',
         })
         micRef.current = mic
-        const startWaitMs = Math.max(0, Math.round((sessionConfig.startWaitSeconds ?? 0.4) * 1000))
+        const startWaitMs = Math.max(0, Math.round((liveConfig.startWaitSeconds ?? 0.4) * 1000))
         if (startWaitMs > 0) {
           await new Promise(resolve => setTimeout(resolve, startWaitMs))
         }
@@ -391,8 +421,8 @@ export default function Home() {
         }, (level) => {
           if (level >= 0.02) {
             markWebSpeech(
-              Math.max(5, sessionConfig.callSilenceTimeout ?? 30),
-              Math.max(5, sessionConfig.callSilenceCloseTimeout ?? 15),
+              Math.max(5, liveConfig.callSilenceTimeout ?? 30),
+              Math.max(5, liveConfig.callSilenceCloseTimeout ?? 15),
             )
           }
         })

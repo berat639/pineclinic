@@ -113,6 +113,11 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
         'KONUŞMA DIŞI SESLER (ÖKSÜRÜK / HAPŞIRIK / GÜRÜLTÜ): Karşı tarafın öksürmesi, hapşırması, boğaz temizlemesi, nefes sesi veya ortam gürültüsü kapsam dışı bir istek DEĞİLDİR; böyle seslerde ASLA "Bu konuda yardımcı olamıyorum" deme. Öksürük veya hapşırıkta kısaca "Çok geçmiş olsun" deyip kaldığın yerden devam et.',
       )
     }
+    if (!joined.includes('KONU DIŞI ISRAR')) {
+      parts.push(
+        'KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI: Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk seferde nazikçe klinik/randevu konusuna yönlendir. Karşı taraf uyarıya rağmen ikinci kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve hemen cagriySonlandir aracını çağır.',
+      )
+    }
   }
 
   return parts.join('\n\n')
