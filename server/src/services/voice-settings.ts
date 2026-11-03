@@ -1,10 +1,13 @@
 import { isLiveModel, normalizeThinkingLevel, type ThinkingLevel } from './live-model-profile'
+import type { NoiseFilterMode, TurnDetectionMode } from './turn-detector'
 
 export interface VoiceSettings {
   model: 'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'
   thinkingLevel: ThinkingLevel
   voiceName: string
   startWaitSeconds: number
+  turnDetectionMode: TurnDetectionMode
+  noiseFilterMode: NoiseFilterMode
   callSilenceTimeout: number
   callSilenceCloseTimeout: number
   callMaxDuration: number
@@ -16,6 +19,8 @@ export const VOICE_SETTINGS_DEFAULTS: VoiceSettings = {
   thinkingLevel: 'LOW',
   voiceName: 'Aoede',
   startWaitSeconds: 0.4,
+  turnDetectionMode: 'semantic',
+  noiseFilterMode: 'rnnoise',
   callSilenceTimeout: 30,
   callSilenceCloseTimeout: 15,
   callMaxDuration: 600,
@@ -40,6 +45,8 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     thinkingLevelRaw,
     voiceNameRaw,
     startWaitRaw,
+    turnDetectionRaw,
+    noiseFilterRaw,
     silenceWarnRaw,
     silenceCloseRaw,
     maxDurationRaw,
@@ -49,6 +56,8 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     getSetting('ai.thinking_level', clinicId),
     getSetting('ai.voice_name', clinicId),
     getSetting('ai.start_wait_seconds', clinicId),
+    getSetting('ai.turn_detection_mode', clinicId),
+    getSetting('ai.noise_filter_mode', clinicId),
     getSetting('ai.call_silence_timeout', clinicId),
     getSetting('ai.call_silence_close_timeout', clinicId),
     getSetting('ai.call_max_duration', clinicId),
@@ -68,6 +77,12 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     startWaitSeconds: Number.isFinite(startWaitNum) && startWaitRaw !== null
       ? Math.min(2, Math.max(0, startWaitNum))
       : VOICE_SETTINGS_DEFAULTS.startWaitSeconds,
+    turnDetectionMode: turnDetectionRaw === 'standard' || turnDetectionRaw === 'semantic'
+      ? turnDetectionRaw
+      : VOICE_SETTINGS_DEFAULTS.turnDetectionMode,
+    noiseFilterMode: noiseFilterRaw === 'off' || noiseFilterRaw === 'rnnoise'
+      ? noiseFilterRaw
+      : VOICE_SETTINGS_DEFAULTS.noiseFilterMode,
     callSilenceTimeout: Number.isFinite(silenceWarnNum) && silenceWarnNum >= 5 && silenceWarnNum <= 120
       ? silenceWarnNum
       : VOICE_SETTINGS_DEFAULTS.callSilenceTimeout,
@@ -104,6 +119,12 @@ export function validateVoiceSettings(input: Record<string, unknown>): {
     if (!Number.isFinite(wait) || wait < 0 || wait > 2) {
       fieldErrors.startWaitSeconds = 'Başlangıç bekleme süresi 0 ile 2 saniye arasında olmalıdır'
     }
+  }
+  if (input.turnDetectionMode !== undefined && !['semantic', 'standard'].includes(String(input.turnDetectionMode))) {
+    fieldErrors.turnDetectionMode = 'Geçersiz konuşma sırası algılama modu'
+  }
+  if (input.noiseFilterMode !== undefined && !['rnnoise', 'off'].includes(String(input.noiseFilterMode))) {
+    fieldErrors.noiseFilterMode = 'Geçersiz gürültü süzgeci modu'
   }
   if (input.callSilenceTimeout !== undefined) {
     const s = Number(input.callSilenceTimeout)
@@ -144,6 +165,12 @@ export async function saveVoiceSettings(input: Record<string, unknown>, clinicId
   if (input.thinkingLevel !== undefined) await setSetting('ai.thinking_level', normalizeThinkingLevel(String(input.thinkingLevel)), clinicId)
   if (input.voiceName !== undefined) await setSetting('ai.voice_name', String(input.voiceName).trim() || VOICE_SETTINGS_DEFAULTS.voiceName, clinicId)
   if (input.startWaitSeconds !== undefined) await setSetting('ai.start_wait_seconds', String(Number(input.startWaitSeconds)), clinicId)
+  if (input.turnDetectionMode === 'semantic' || input.turnDetectionMode === 'standard') {
+    await setSetting('ai.turn_detection_mode', input.turnDetectionMode, clinicId)
+  }
+  if (input.noiseFilterMode === 'rnnoise' || input.noiseFilterMode === 'off') {
+    await setSetting('ai.noise_filter_mode', input.noiseFilterMode, clinicId)
+  }
   if (input.callSilenceTimeout !== undefined) await setSetting('ai.call_silence_timeout', String(Number(input.callSilenceTimeout)), clinicId)
   if (input.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(Number(input.callSilenceCloseTimeout)), clinicId)
   if (input.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(Number(input.callMaxDuration)), clinicId)

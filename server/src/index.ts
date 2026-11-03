@@ -2325,6 +2325,8 @@ const app = new Elysia()
       branding,
       voiceName: voiceSettings.voiceName,
       startWaitSeconds: voiceSettings.startWaitSeconds,
+      turnDetectionMode: voiceSettings.turnDetectionMode,
+      noiseFilterMode: voiceSettings.noiseFilterMode,
       callSilenceTimeout: voiceSettings.callSilenceTimeout,
       callSilenceCloseTimeout: voiceSettings.callSilenceCloseTimeout,
       callMaxDuration: voiceSettings.callMaxDuration,

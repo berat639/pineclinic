@@ -10,6 +10,8 @@ type VoiceSettings = {
   thinkingLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   voiceName: string
   startWaitSeconds: number
+  turnDetectionMode: 'semantic' | 'standard'
+  noiseFilterMode: 'rnnoise' | 'off'
   callSilenceTimeout: number
   callSilenceCloseTimeout: number
   callMaxDuration: number
@@ -18,7 +20,8 @@ type VoiceSettings = {
 
 const DEFAULTS: VoiceSettings = {
   model: 'gemini-3.8-live', thinkingLevel: 'LOW', voiceName: 'Aoede',
-  startWaitSeconds: 0.4, callSilenceTimeout: 30, callSilenceCloseTimeout: 15,
+  startWaitSeconds: 0.4, turnDetectionMode: 'semantic', noiseFilterMode: 'rnnoise',
+  callSilenceTimeout: 30, callSilenceCloseTimeout: 15,
   callMaxDuration: 600, maxActivePhoneCalls: 3,
 }
 
@@ -34,7 +37,8 @@ const VOICES: Array<[string, string]> = [
 ]
 
 const FIELD_TAB: Record<string, Tab> = {
-  model: 'model', thinkingLevel: 'model', voiceName: 'voice', startWaitSeconds: 'conversation',
+  model: 'model', thinkingLevel: 'model', voiceName: 'voice',
+  startWaitSeconds: 'conversation', turnDetectionMode: 'conversation', noiseFilterMode: 'conversation',
   callSilenceTimeout: 'telephony', callSilenceCloseTimeout: 'telephony', callMaxDuration: 'telephony', maxActivePhoneCalls: 'telephony',
 }
 
@@ -57,10 +61,11 @@ function CheckRow({ ok, label, detail }: { ok: boolean | null; label: string; de
   </div>
 }
 
-function BrowserSupportCard() {
+function BrowserSupportCard({ noiseFilterEnabled }: { noiseFilterEnabled: boolean }) {
   const [support, setSupport] = useState<BrowserAudioSupport | null>(null)
   const [testing, setTesting] = useState(false)
   const [level, setLevel] = useState(0)
+  const [suppressedNow, setSuppressedNow] = useState(false)
   const [testMessage, setTestMessage] = useState('')
   const mounted = useRef(true)
 
@@ -68,23 +73,48 @@ function BrowserSupportCard() {
   useEffect(() => { mounted.current = true; refresh(); return () => { mounted.current = false } }, [])
 
   const testMicrophone = async () => {
-    setTesting(true); setTestMessage('')
+    setTesting(true); setTestMessage(''); setSuppressedNow(false)
     try {
-      const { peak } = await runMicrophoneTest(value => { if (mounted.current) setLevel(value) })
-      if (mounted.current) setTestMessage(peak > 0.05 ? 'Mikrofon çalışıyor, sesiniz algılandı.' : 'Mikrofona erişildi ancak ses algılanmadı. Mikrofonunuzun açık olduğundan emin olun.')
+      const { peak, suppressedCount } = await runMicrophoneTest(
+        (value, meta) => {
+          if (mounted.current) {
+            setLevel(value)
+            setSuppressedNow(Boolean(meta?.suppressed))
+          }
+        },
+        3500,
+        { noiseFilter: noiseFilterEnabled },
+      )
+      if (mounted.current) {
+        const filterSummary = noiseFilterEnabled && suppressedCount > 0
+          ? ` (${suppressedCount} anlık darbe/öksürük süzüldü)`
+          : ''
+        setTestMessage(
+          peak > 0.05
+            ? `Mikrofon çalışıyor, konuşma sesiniz net algılandı${filterSummary}.`
+            : suppressedCount > 0
+              ? `Yalnızca anlık darbe/öksürük algılandı ve süzgeç tarafından bastırıldı${filterSummary}. Normal konuşarak tekrar deneyin.`
+              : 'Mikrofona erişildi ancak ses algılanmadı. Mikrofonunuzun açık olduğundan emin olun.',
+        )
+      }
     } catch (error) {
       const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
       if (mounted.current) setTestMessage(denied ? 'Mikrofon izni verilmedi. Tarayıcının adres çubuğundan izin verip tekrar deneyin.' : 'Mikrofon açılamadı. Cihazınızın bağlı olduğunu kontrol edin.')
     } finally {
-      if (mounted.current) { setTesting(false); setLevel(0); refresh() }
+      if (mounted.current) { setTesting(false); setLevel(0); setSuppressedNow(false); refresh() }
     }
   }
 
   const permissionLabel = !support ? '' : support.microphonePermission === 'granted' ? 'Verildi' : support.microphonePermission === 'denied' ? 'Engellendi' : support.microphonePermission === 'prompt' ? 'İlk kullanımda sorulacak' : 'Denemeden anlaşılamıyor'
   return <div style={{ ...subCard, padding: 14, marginBottom: 16 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-      <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Tarayıcı Uygunluğu</strong>
-      <InfoTooltip title="Bu kart ne işe yarar?">Sesli görüşme için tarayıcınızın güvenli bağlantı, mikrofon ve ses işleme özelliklerini denetler. Eksik bir madde varsa tarayıcınızı güncelleyin veya sayfayı güvenli (https) adresten açın.</InfoTooltip>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Tarayıcı Uygunluğu ve Mikrofon Sınaması</strong>
+        <InfoTooltip title="Bu kart ne işe yarar?">Sesli görüşme için tarayıcınızın güvenli bağlantı, mikrofon ve ses işleme özelliklerini denetler. Mikrofonu denerken gürültü ve öksürük süzgecinin etkisini canlı görebilirsiniz.</InfoTooltip>
+      </div>
+      <span style={{ padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'var(--pc-tint, #e0f2fe)', color: 'var(--pc-tint-fg, #0369a1)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-clay-pale)' }}>
+        {noiseFilterEnabled ? 'Gürültü ve Öksürük Süzgeci: Açık' : 'Gürültü ve Öksürük Süzgeci: Kapalı'}
+      </span>
     </div>
     {support ? <div style={{ display: 'grid', gap: 7 }}>
       <CheckRow ok label="Tarayıcı" detail={support.browserName} />
@@ -94,10 +124,11 @@ function BrowserSupportCard() {
       <CheckRow ok={support.microphonePermission === 'granted' ? true : support.microphonePermission === 'denied' ? false : null} label="Mikrofon izni" detail={permissionLabel} />
     </div> : <p style={hintStyle}>Denetleniyor…</p>}
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-      <button type="button" onClick={() => void testMicrophone()} disabled={testing} style={{ ...primaryBtn, cursor: testing ? 'wait' : 'pointer' }}>{testing ? 'Dinleniyor… (3 sn)' : 'Mikrofonu dene'}</button>
+      <button type="button" onClick={() => void testMicrophone()} disabled={testing} style={{ ...primaryBtn, cursor: testing ? 'wait' : 'pointer' }}>{testing ? 'Dinleniyor… (3,5 sn)' : 'Mikrofonu dene'}</button>
       <div role="meter" aria-label="Ses seviyesi" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)} style={{ flex: 1, minWidth: 120, height: 10, borderRadius: 6, background: 'var(--input-bg)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-neo-inset)', overflow: 'hidden' }}>
         <div style={{ width: `${Math.round(level * 100)}%`, height: '100%', background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)', transition: 'width 80ms linear' }} />
       </div>
+      {testing && suppressedNow && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>Darbe/öksürük süzüldü</span>}
     </div>
     {testMessage && <p style={{ ...hintStyle, marginTop: 8, color: 'var(--foreground-2)' }}>{testMessage}</p>}
   </div>
@@ -163,7 +194,7 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
       <p style={{ fontSize: 11, color: 'var(--foreground-3)', margin: '3px 0 0' }}>Tüm değişiklikler yeni web ve telefon görüşmelerinde uygulanır.</p>
     </div>
 
-    <BrowserSupportCard />
+    <BrowserSupportCard noiseFilterEnabled={settings.noiseFilterMode !== 'off'} />
 
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, padding: 5, borderRadius: 10, background: 'var(--input-bg)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-neo-inset)' }}>
       {tabs.map(([id, label]) => <button key={id} type="button" onClick={() => setTab(id)} style={tab === id ? { ...primaryBtn, cursor: 'pointer' } : { ...clayBtn, cursor: 'pointer', borderColor: tabHasError(id) ? 'var(--danger)' : 'var(--input-border)' }}>{label}{tabHasError(id) ? ' •' : ''}</button>)}
@@ -202,14 +233,52 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
       </div>
     </div>}
 
-    {tab === 'conversation' && <div style={{ display: 'grid', gap: 15 }}>
-      <label style={labelStyle}>Konuşmaya başlamadan önce bekleme: {settings.startWaitSeconds} sn
-        <input type="range" min="0" max="2" step="0.1" value={settings.startWaitSeconds} onChange={event => patch({ startWaitSeconds: Number(event.target.value) })} style={{ width: '100%', marginTop: 6 }} />
-        <FieldError name="startWaitSeconds" />
-      </label>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={hintStyle}>Önerilen ayar 0,4 sn</span>
-        <InfoTooltip title="Bekleme süresi">Çok düşük değer karşı tarafın ilk hecesini kesebilir. 0 ile 2 saniye arasında seçebilirsiniz.</InfoTooltip>
+    {tab === 'conversation' && <div style={{ display: 'grid', gap: 16 }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Konuşma Sırası Algılama Modu</strong>
+          <InfoTooltip title="Akıllı konuşma sırası nasıl çalışır?">Akıllı modda asistan, hastanın cümlesinin anlam olarak bitip bitmediğini değerlendirir. Bağlaçlardan (&quot;ve&quot;, &quot;ama&quot;, &quot;yani&quot;, &quot;şey&quot;) veya yarım kalan telefon numaralarından sonraki düşünme duraksamalarında araya girmez; hem web hem telefon görüşmelerinde çalışır.</InfoTooltip>
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {([
+            ['semantic', 'Akıllı Sıra Algılama (Önerilen)', 'Cümlenin anlam olarak tamamlanmasını bekler; düşünme duraksamalarında sözü kesmez.'],
+            ['standard', 'Standart Algılama', 'Klasik süre tabanlı ses algılama; kısa sessizlikte hemen yanıt üretir.'],
+          ] as const).map(([id, title, description]) => <label key={id} style={{ display: 'block', padding: 12, border: `1.5px solid ${settings.turnDetectionMode === id ? '#2563eb' : 'var(--input-border)'}`, borderRadius: 10, background: settings.turnDetectionMode === id ? 'var(--pc-pale-bg, var(--card-inner))' : 'var(--card-inner)', boxShadow: 'var(--pc-neo-subcard)', cursor: 'pointer' }}>
+            <input type="radio" name="turn-detection-mode" checked={settings.turnDetectionMode === id} onChange={() => patch({ turnDetectionMode: id })} style={{ marginRight: 8 }} />
+            <strong style={{ color: 'var(--foreground)', fontSize: 12 }}>{title}</strong>
+            <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--foreground-3)' }}>{description}</span>
+          </label>)}
+        </div>
+        <FieldError name="turnDetectionMode" />
+      </div>
+
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Gürültü ve Öksürük Süzgeci</strong>
+          <InfoTooltip title="Gürültü ve öksürük süzgeci ne yapar?">Mikrofondan gelen öksürük, hapşırık, boğaz temizleme, masa tıklaması ve arka plan uğultusunu ses yapay zekaya ulaşmadan önce süzer. Böylece asistan öksürük sesini konuşma sanıp sözünüzü kesmez veya yanlış yanıt vermez.</InfoTooltip>
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {([
+            ['rnnoise', 'Açık — Gürültü ve Öksürük Süzgeci (Önerilen)', 'Öksürük, hapşırık, nefes patlaması ve arka plan uğultusunu yapay zekaya göndermeden önce süzer.'],
+            ['off', 'Kapalı — Ham Mikrofon Sesi', 'Mikrofon sesini ek süzgeç olmadan doğrudan iletir.'],
+          ] as const).map(([id, title, description]) => <label key={id} style={{ display: 'block', padding: 12, border: `1.5px solid ${settings.noiseFilterMode === id ? '#2563eb' : 'var(--input-border)'}`, borderRadius: 10, background: settings.noiseFilterMode === id ? 'var(--pc-pale-bg, var(--card-inner))' : 'var(--card-inner)', boxShadow: 'var(--pc-neo-subcard)', cursor: 'pointer' }}>
+            <input type="radio" name="noise-filter-mode" checked={settings.noiseFilterMode === id} onChange={() => patch({ noiseFilterMode: id })} style={{ marginRight: 8 }} />
+            <strong style={{ color: 'var(--foreground)', fontSize: 12 }}>{title}</strong>
+            <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--foreground-3)' }}>{description}</span>
+          </label>)}
+        </div>
+        <FieldError name="noiseFilterMode" />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Konuşmaya başlamadan önce bekleme: {settings.startWaitSeconds} sn
+          <input type="range" min="0" max="2" step="0.1" value={settings.startWaitSeconds} onChange={event => patch({ startWaitSeconds: Number(event.target.value) })} style={{ width: '100%', marginTop: 6 }} />
+          <FieldError name="startWaitSeconds" />
+        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <span style={hintStyle}>Önerilen ayar 0,4 sn</span>
+          <InfoTooltip title="Bekleme süresi">Çok düşük değer karşı tarafın ilk hecesini kesebilir. 0 ile 2 saniye arasında seçebilirsiniz.</InfoTooltip>
+        </div>
       </div>
     </div>}
 

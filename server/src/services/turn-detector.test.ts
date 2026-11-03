@@ -1,0 +1,84 @@
+import { describe, expect, test } from 'bun:test'
+import { EndSensitivity, StartSensitivity } from '@google/genai'
+import {
+  analyzePcmFrameCharacteristics,
+  analyzeTurkishTurnCompleteness,
+  buildRealtimeDetectionConfig,
+} from './turn-detector'
+import { validateVoiceSettings } from './voice-settings'
+
+describe('Turkish Semantic Turn Detector', () => {
+  test('classifies trailing conjunctions, fillers, and partial phone numbers as incomplete', () => {
+    expect(analyzeTurkishTurnCompleteness('Yarın randevu almak istiyorum ama').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Şimdi şöyle').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Numaram 0532 411').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('sıfır beş yüz otuz iki').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Pazartesi günü bir de').status).toBe('incomplete')
+    expect(analyzeTurkishTurnCompleteness('Dişim ağrıyor yani').status).toBe('incomplete')
+  })
+
+  test('classifies complete Turkish sentences, confirmations, and full phone numbers as complete', () => {
+    expect(analyzeTurkishTurnCompleteness('Yarın öğleden sonra randevu almak istiyorum').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Evet onaylıyorum').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('0532 411 22 33').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Perşembe günü boş yer var mı?').status).toBe('complete')
+    expect(analyzeTurkishTurnCompleteness('Teşekkür ederim iyi günler').status).toBe('complete')
+  })
+
+  test('classifies empty or noise-tagged transcripts as non_speech', () => {
+    expect(analyzeTurkishTurnCompleteness('').status).toBe('non_speech')
+    expect(analyzeTurkishTurnCompleteness('[öksürük]').status).toBe('non_speech')
+    expect(analyzeTurkishTurnCompleteness('<noise>').status).toBe('non_speech')
+  })
+
+  test('builds semantic vs standard realtime detection configs accurately', () => {
+    const semanticWeb = buildRealtimeDetectionConfig('semantic', 'web')
+    expect(semanticWeb.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
+      StartSensitivity.START_SENSITIVITY_LOW,
+    )
+    expect(semanticWeb.automaticActivityDetection?.endOfSpeechSensitivity).toBe(
+      EndSensitivity.END_SENSITIVITY_LOW,
+    )
+    expect(semanticWeb.automaticActivityDetection?.silenceDurationMs).toBe(650)
+
+    const standardPhone = buildRealtimeDetectionConfig('standard', 'phone', 300)
+    expect(standardPhone.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
+      StartSensitivity.START_SENSITIVITY_HIGH,
+    )
+    expect(standardPhone.automaticActivityDetection?.endOfSpeechSensitivity).toBe(
+      EndSensitivity.END_SENSITIVITY_HIGH,
+    )
+    expect(standardPhone.automaticActivityDetection?.silenceDurationMs).toBe(300)
+  })
+
+  test('distinguishes sharp impulse/cough bursts from sustained voiced speech', () => {
+    // 160 samples (320 bytes): single sharp spike (cough/click transient)
+    const impulseBuf = Buffer.alloc(320, 0)
+    impulseBuf.writeInt16LE(22000, 20)
+    impulseBuf.writeInt16LE(-21000, 22)
+    const impulse = analyzePcmFrameCharacteristics(impulseBuf)
+    expect(impulse.isImpulseLike).toBe(true)
+
+    // Smooth 250 Hz sine wave (voiced vowel)
+    const speechBuf = Buffer.alloc(320, 0)
+    for (let i = 0; i < 160; i++) {
+      const sample = Math.round(Math.sin((2 * Math.PI * 250 * i) / 8000) * 4000)
+      speechBuf.writeInt16LE(sample, i * 2)
+    }
+    const speech = analyzePcmFrameCharacteristics(speechBuf)
+    expect(speech.isImpulseLike).toBe(false)
+  })
+
+  test('validates turnDetectionMode and noiseFilterMode in voice settings', () => {
+    expect(
+      validateVoiceSettings({ turnDetectionMode: 'semantic', noiseFilterMode: 'rnnoise' }).valid,
+    ).toBe(true)
+    expect(
+      validateVoiceSettings({ turnDetectionMode: 'standard', noiseFilterMode: 'off' }).valid,
+    ).toBe(true)
+    const invalid = validateVoiceSettings({ turnDetectionMode: 'invalid', noiseFilterMode: 'bad' })
+    expect(invalid.valid).toBe(false)
+    expect(invalid.fieldErrors.turnDetectionMode).toBeDefined()
+    expect(invalid.fieldErrors.noiseFilterMode).toBeDefined()
+  })
+})

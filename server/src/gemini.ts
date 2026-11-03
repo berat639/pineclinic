@@ -32,6 +32,7 @@ import {
 } from './services/transfer-triggers'
 import { FlowEngine } from './services/flow-engine'
 import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
+import { SEMANTIC_TURN_PROMPT_INSTRUCTION, type TurnDetectionMode } from './services/turn-detector'
 import { recordAiTokenUsage } from './db/repositories/ai-usage'
 import { getPromptTemplate, renderPromptTemplate } from './prompts/registry'
 
@@ -76,6 +77,7 @@ export async function createLiveSession(
     model: string
     voiceName?: string
     thinkingLevel?: ThinkingLevel
+    turnDetectionMode?: TurnDetectionMode
     realtimeInputConfig?: RealtimeInputConfig
     telephonyChannel?: string
     callerPhone?: string
@@ -668,9 +670,12 @@ export async function createLiveSession(
   const voiceInstruction = renderPromptTemplate(voiceTpl.trim() || fallbackVoiceInstruction, {}).trim() || fallbackVoiceInstruction
   const flowRuntimeInstruction = renderPromptTemplate(flowRuntimeTpl.trim() || fallbackFlowRuntimeInstruction, {}).trim() || fallbackFlowRuntimeInstruction
 
+  const useSemanticTurn = (options.turnDetectionMode ?? 'semantic') === 'semantic'
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
-    systemInstruction: options.systemPrompt + '\n\n' + voiceInstruction + (flowEngine
+    systemInstruction: options.systemPrompt + '\n\n' + voiceInstruction + (useSemanticTurn
+      ? '\n\n' + SEMANTIC_TURN_PROMPT_INSTRUCTION
+      : '') + (flowEngine
       ? '\n\n' + flowRuntimeInstruction
       : ''),
     speechConfig: {
@@ -693,6 +698,8 @@ export async function createLiveSession(
     ...(isThinkingModel(options.model) ? {
       thinkingConfig: { thinkingLevel: normalizeThinkingLevel(options.thinkingLevel).toLowerCase() },
       // Extended Thinking uses proactive audio while it completes background work.
+      proactiveAudio: true,
+    } : useSemanticTurn ? {
       proactiveAudio: true,
     } : {}),
     ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),

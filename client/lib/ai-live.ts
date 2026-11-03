@@ -6,6 +6,12 @@ import {
   type LiveServerMessage,
   type FunctionDeclaration,
 } from '@google/genai'
+import {
+  buildRealtimeDetectionConfig,
+  SEMANTIC_TURN_PROMPT_INSTRUCTION,
+  type NoiseFilterMode,
+  type TurnDetectionMode,
+} from './turn-detector'
 
 export type LiveChatCallbacks = {
   onAudioChunk: (base64Data: string) => void
@@ -34,6 +40,8 @@ export type SessionConfig = {
   voiceName?: string
   thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
   startWaitSeconds?: number
+  turnDetectionMode?: TurnDetectionMode
+  noiseFilterMode?: NoiseFilterMode
   callSilenceTimeout?: number
   callSilenceCloseTimeout?: number
   callMaxDuration?: number
@@ -147,6 +155,11 @@ export class AiLiveSession {
       return
     }
 
+    const turnMode: TurnDetectionMode = config.turnDetectionMode === 'standard' ? 'standard' : 'semantic'
+    const effectiveSystemPrompt = turnMode === 'semantic'
+      ? `${config.systemPrompt}\n\n${SEMANTIC_TURN_PROMPT_INSTRUCTION}`
+      : config.systemPrompt
+
     return new Promise<void>((resolve, reject) => {
       const ai = new GoogleGenAI({ apiKey })
       let resolved = false
@@ -187,7 +200,7 @@ export class AiLiveSession {
           },
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: config.systemPrompt,
+            systemInstruction: effectiveSystemPrompt,
             tools: config.toolDeclarations.length > 0
               ? [{ functionDeclarations: config.toolDeclarations }]
               : undefined,
@@ -204,15 +217,15 @@ export class AiLiveSession {
                 },
               },
             } : undefined,
-            realtimeInputConfig: mode === 'audio' ? {
-              automaticActivityDetection: {
-                disabled: false,
-              },
-            } : undefined,
+            realtimeInputConfig: mode === 'audio'
+              ? buildRealtimeDetectionConfig(turnMode)
+              : undefined,
             inputAudioTranscription: {},
             outputAudioTranscription: {},
             ...(modelName === 'gemini-3.8-live-extended-thinking' ? {
               thinkingConfig: { thinkingLevel: ThinkingLevel[config.thinkingLevel || 'LOW'] },
+              proactiveAudio: true,
+            } : turnMode === 'semantic' ? {
               proactiveAudio: true,
             } : {}),
           },

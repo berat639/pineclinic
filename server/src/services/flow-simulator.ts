@@ -45,6 +45,10 @@ export interface SimulatorVoiceConfig {
   message?: string
   apiKey?: string
   model?: string
+  voiceName?: string
+  thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
+  turnDetectionMode?: 'semantic' | 'standard'
+  noiseFilterMode?: 'rnnoise' | 'off'
   systemPrompt?: string
   greeting?: string
 }
@@ -178,9 +182,10 @@ async function buildVoiceConfig(req: FlowSimulationRequest, clinicId: string | u
     id: 'sim', name: 'simulation', nodes: Array.isArray(req.nodes) ? req.nodes : [], edges: Array.isArray(req.edges) ? req.edges : [],
     isActive: true, createdAt: '', updatedAt: '',
   })
-  const [instructions, rawVoiceFlowRules] = await Promise.all([
+  const [instructions, rawVoiceFlowRules, voiceSettings] = await Promise.all([
     buildClinicInstructions(clinicId, direction, greeting),
     getPromptTemplate('prompt.simulator_voice_flow_rules', clinicId).catch(() => ''),
+    import('./voice-settings').then(m => m.resolveVoiceSettings(clinicId)).catch(() => null),
   ])
   const voiceFlowRules = renderPromptTemplate(rawVoiceFlowRules.trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES, {}).trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES
   let ragContext = ''
@@ -195,7 +200,17 @@ ${instructions}
 ${flowPrompt}
 
 ${voiceFlowRules}${ragContext}`
-  return { available: true, apiKey, model, systemPrompt, greeting }
+  return {
+    available: true,
+    apiKey,
+    model,
+    voiceName: voiceSettings?.voiceName || 'Aoede',
+    thinkingLevel: voiceSettings?.thinkingLevel || 'LOW',
+    turnDetectionMode: voiceSettings?.turnDetectionMode || 'semantic',
+    noiseFilterMode: voiceSettings?.noiseFilterMode || 'rnnoise',
+    systemPrompt,
+    greeting,
+  }
 }
 
 export async function runFlowSimulationStep(req: FlowSimulationRequest): Promise<FlowSimulationResponse> {

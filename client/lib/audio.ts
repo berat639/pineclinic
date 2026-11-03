@@ -117,10 +117,24 @@ export class MicrophoneCapture {
   private stream: MediaStream | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private isActive = false;
+  private noiseFilterEnabled = true;
+
+  constructor(options?: { noiseFilter?: boolean }) {
+    if (typeof options?.noiseFilter === "boolean") {
+      this.noiseFilterEnabled = options.noiseFilter;
+    }
+  }
+
+  setNoiseFilter(enabled: boolean) {
+    this.noiseFilterEnabled = enabled;
+    if (this.workletNode) {
+      this.workletNode.port.postMessage({ type: "config", noiseFilter: enabled });
+    }
+  }
 
   async start(
     onChunk: (base64: string) => void,
-    onLevel?: (level: number) => void
+    onLevel?: (level: number, meta?: { rawLevel?: number; suppressed?: boolean }) => void
   ) {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -146,10 +160,14 @@ export class MicrophoneCapture {
         this.audioContext,
         "mic-processor"
       );
+      this.workletNode.port.postMessage({
+        type: "config",
+        noiseFilter: this.noiseFilterEnabled,
+      });
 
       this.workletNode.port.onmessage = (event) => {
         if (!this.isActive) return;
-        const { pcmBuffer, level } = event.data;
+        const { pcmBuffer, level, rawLevel, suppressed } = event.data;
 
         // Convert raw Int16 buffer to base64 in main thread (btoa is available here)
         const bytes = new Uint8Array(pcmBuffer);
@@ -160,7 +178,7 @@ export class MicrophoneCapture {
         const pcmBase64 = btoa(binary);
 
         onChunk(pcmBase64);
-        if (onLevel) onLevel(level);
+        if (onLevel) onLevel(level, { rawLevel, suppressed });
       };
 
       source.connect(this.workletNode);

@@ -66,13 +66,22 @@ export async function checkBrowserAudioSupport(): Promise<BrowserAudioSupport> {
   }
 }
 
-/** Kullanıcı jestiyle çağrılmalıdır. Süre boyunca ses seviyesini (0–1) bildirir. */
+/** Kullanıcı jestiyle çağrılmalıdır. Süre boyunca ses seviyesini (0–1) ve darbe/öksürük süzgeci durumunu bildirir. */
 export async function runMicrophoneTest(
-  onLevel: (level: number) => void,
-  durationMs = 3000,
-): Promise<{ peak: number }> {
+  onLevel: (level: number, meta?: { suppressed: boolean }) => void,
+  durationMs = 3500,
+  options?: { noiseFilter?: boolean },
+): Promise<{ peak: number; suppressedCount: number }> {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Bu tarayıcı mikrofon erişimini desteklemiyor')
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  const useFilter = options?.noiseFilter ?? true
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: useFilter,
+      autoGainControl: true,
+    },
+  })
   const context = createAudioContext()
   try {
     await context.resume()
@@ -81,25 +90,56 @@ export async function runMicrophoneTest(
     context.createMediaStreamSource(stream).connect(analyser)
     const data = new Uint8Array(analyser.fftSize)
     let peak = 0
+    let suppressedCount = 0
+    let voicedStreak = 0
+    let noiseFloor = 0.004
     const started = performance.now()
     await new Promise<void>(resolve => {
       const tick = () => {
         analyser.getByteTimeDomainData(data)
         let sum = 0
+        let maxAbs = 0
+        let zc = 0
+        let prev = (data[0] - 128) / 128
         for (let i = 0; i < data.length; i++) {
           const v = (data[i] - 128) / 128
+          const abs = Math.abs(v)
+          if (abs > maxAbs) maxAbs = abs
           sum += v * v
+          if ((v >= 0 && prev < 0) || (v < 0 && prev >= 0)) zc++
+          prev = v
         }
-        const level = Math.min(1, Math.sqrt(sum / data.length) * 5)
-        peak = Math.max(peak, level)
-        onLevel(level)
+        const rms = Math.sqrt(sum / data.length)
+        const crest = rms > 0.0001 ? maxAbs / rms : 0
+        const zcr = zc / data.length
+        if (rms < noiseFloor) noiseFloor = noiseFloor * 0.9 + rms * 0.1
+        const threshold = Math.max(0.005, noiseFloor * 2.2)
+
+        const isImpulseOrCough = useFilter && rms > threshold && voicedStreak < 4 && (crest > 4.5 || zcr > 0.4)
+        let suppressed = false
+        let effectiveLevel = Math.min(1, rms * 5)
+
+        if (isImpulseOrCough) {
+          suppressed = true
+          suppressedCount++
+          voicedStreak = 0
+          effectiveLevel = 0
+        } else if (rms >= threshold) {
+          voicedStreak++
+          peak = Math.max(peak, effectiveLevel)
+        } else {
+          voicedStreak = 0
+          if (useFilter) effectiveLevel = 0
+        }
+
+        onLevel(effectiveLevel, { suppressed })
         if (performance.now() - started >= durationMs) resolve()
         else requestAnimationFrame(tick)
       }
       tick()
     })
-    onLevel(0)
-    return { peak }
+    onLevel(0, { suppressed: false })
+    return { peak, suppressedCount }
   } finally {
     stream.getTracks().forEach(track => track.stop())
     void context.close().catch(() => {})

@@ -23,6 +23,13 @@ import { downsample24to8, upsample8to16 } from './resample'
 import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../services/transfer-triggers'
 import { getGeminiClient } from '../services/gemini-client'
 import { resolveVoiceSettings } from '../services/voice-settings'
+import {
+  analyzePcmFrameCharacteristics,
+  analyzeTurkishTurnCompleteness,
+  buildRealtimeDetectionConfig,
+  type NoiseFilterMode,
+  type TurnDetectionMode,
+} from '../services/turn-detector'
 import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
 
 // ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
@@ -112,6 +119,8 @@ class NoiseGate {
   private rmsSum = 0
   private rmsMax = 0
   private lastLogAtFrame = 0
+  private filterMode: NoiseFilterMode = 'rnnoise'
+  private suppressedImpulses = 0
 
   constructor(
     readonly threshold: number,
@@ -121,15 +130,31 @@ class NoiseGate {
     private readonly logIntervalFrames = 500,
   ) { }
 
+  setFilterMode(mode: NoiseFilterMode): void {
+    this.filterMode = mode
+  }
+
   /** Son process() çağrısında gate açık mıydı (konuşma algılandı mı). */
   get isOpen(): boolean { return this.wasOpen }
 
   /** 8 kHz Int16 LE frame'i (320 byte / 20 ms) işle; konuşma varsa frame'leri ve kapanış bilgisini döndür. */
   process(frame: Buffer): { frames: Buffer[]; justClosed: boolean; speechStarted: boolean } {
     this.totalFrames++
-    const rms = computeRmsInt16(frame)
+    const chars = analyzePcmFrameCharacteristics(frame)
+    const rms = chars.rms
     this.rmsSum += rms
     if (rms > this.rmsMax) this.rmsMax = rms
+
+    // Gürültü ve öksürük süzgeci açıkken anlık darbe/öksürük/tıklama patlamalarını süz
+    if (this.filterMode === 'rnnoise' && chars.isImpulseLike && this.highStreak < 6) {
+      this.suppressedImpulses++
+      const silence = Buffer.alloc(frame.length, 0)
+      if (this.threshold === 0) {
+        return { frames: [silence], justClosed: false, speechStarted: false }
+      }
+      this.pushPreRoll(silence)
+      return { frames: [], justClosed: false, speechStarted: false }
+    }
 
     const isHigh = this.threshold > 0 && rms >= this.threshold
     if (isHigh) this.highFrames++
@@ -299,6 +324,9 @@ interface CallState {
   playbackReady: boolean
   outputUnderruns: number
   outputTranscript: string
+  userTranscript: string
+  turnDetectionMode: TurnDetectionMode
+  semanticTurnHoldTimer?: ReturnType<typeof setTimeout>
   lastAiAudioAt: number
   greetingAudioStarted: boolean
   startWaitMs: number
@@ -425,6 +453,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           playbackReady: false,
           outputUnderruns: 0,
           outputTranscript: '',
+          userTranscript: '',
+          turnDetectionMode: 'semantic',
           lastAiAudioAt: 0,
           greetingAudioStarted: false,
           startWaitMs: 400,
@@ -628,6 +658,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             const thinkingLevel = voiceSettings.thinkingLevel
 
             state.voiceName = voiceName
+            state.turnDetectionMode = voiceSettings.turnDetectionMode
+            state.noiseGate.setFilterMode(voiceSettings.noiseFilterMode)
             const silenceWarnSeconds = Math.min(120, Math.max(5, silenceTimeoutSec))
             const silenceCloseSeconds = Math.min(120, Math.max(5, silenceCloseSec))
             state.silenceWarnMs = silenceWarnSeconds * 1000
@@ -698,13 +730,17 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     // konuşmasını metne çevirdiği anda sıfırlanır. NoiseGate'in
                     // açılması tek başına yeterli değildir; hat paraziti veya
                     // AI sesinin mikrofona sızması sayaç davranışını değiştiremez.
-                    if (role === 'user') clearSilenceTimers(state)
+                    if (role === 'user') {
+                      clearSilenceTimers(state)
+                      state.userTranscript = `${state.userTranscript} ${trimmed}`.trim().slice(-500)
+                    }
                     if (role === 'model' && state.userSpeechEndTime) {
                       const responseTime = Date.now() - state.userSpeechEndTime
                       console.log(`[${shortId}] (PERF) AI Yanıt Süresi: ${responseTime}ms`)
                       state.userSpeechEndTime = undefined
                     }
                     if (role === 'model') {
+                      state.userTranscript = ''
                       state.outputTranscript = `${state.outputTranscript}${text}`.slice(-1_000)
                     }
                     console.log(`[${shortId}] ${label}: ${trimmed}`)
@@ -765,16 +801,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   model,
                   voiceName,
                   thinkingLevel: thinkingLevel as any,
-                  realtimeInputConfig: {
-                    automaticActivityDetection: {
-                      disabled: false,
-                      // 8 kHz telefon sesinde kısa ve düşük sesli ifadeleri kaçırma.
-                      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-                      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-                      prefixPaddingMs: 100,
-                      silenceDurationMs: vadSilenceDurationMs,
-                    },
-                  },
+                  turnDetectionMode: voiceSettings.turnDetectionMode,
+                  realtimeInputConfig: buildRealtimeDetectionConfig(
+                    voiceSettings.turnDetectionMode,
+                    'phone',
+                    vadSilenceDurationMs,
+                  ),
                   clinicId: state.clinicId,
                   hostname: state.hostname,
                   telephonyChannel: state.callerChannel,
@@ -1016,6 +1048,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             }
 
             if (frames.length > 0) {
+              if (state.semanticTurnHoldTimer && state.noiseGate.isOpen) {
+                clearTimeout(state.semanticTurnHoldTimer)
+                state.semanticTurnHoldTimer = undefined
+              }
               for (const f8k of frames) {
                 state.micBuffer.push(upsample8to16(f8k))
               }
@@ -1037,13 +1073,28 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               })
             }
 
-            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir
+            // Konuşma bittiğinde Gemini'ye audioStreamEnd sinyali ver -> Gemini anında cevap üretir.
+            // Semantic modda cümle bağlaç veya yarım numara ile bittiyse düşünme payı tanı.
             if (justClosed) {
-              state.userSpeechEndTime = Date.now()
-              info.session.sendRealtimeInput({
-                audioStreamEnd: true,
-              })
-
+              const sendStreamEnd = () => {
+                state.semanticTurnHoldTimer = undefined
+                if (state.closed || state.hangupPending || !info.session) return
+                state.userSpeechEndTime = Date.now()
+                info.session.sendRealtimeInput({
+                  audioStreamEnd: true,
+                })
+              }
+              if (state.turnDetectionMode === 'semantic') {
+                const analysis = analyzeTurkishTurnCompleteness(state.userTranscript)
+                if (analysis.status === 'incomplete') {
+                  if (state.semanticTurnHoldTimer) clearTimeout(state.semanticTurnHoldTimer)
+                  state.semanticTurnHoldTimer = setTimeout(sendStreamEnd, 450)
+                } else {
+                  sendStreamEnd()
+                }
+              } else {
+                sendStreamEnd()
+              }
             }
           } else if (ev.type === 'hangup') {
             console.log(`[${state.shortId}] AudioSocket hangup`)
@@ -1084,6 +1135,7 @@ function finalize(state: CallState | undefined, deps: TelephonyDeps): void {
   clearSilenceTimers(state)
   if (state.greetingTimeoutTimer) { clearTimeout(state.greetingTimeoutTimer); state.greetingTimeoutTimer = undefined }
   if (state.micOpenTimer) { clearTimeout(state.micOpenTimer); state.micOpenTimer = undefined }
+  if (state.semanticTurnHoldTimer) { clearTimeout(state.semanticTurnHoldTimer); state.semanticTurnHoldTimer = undefined }
   if (state.maxCallTimer) { clearTimeout(state.maxCallTimer); state.maxCallTimer = undefined }
   if (state.maxCloseTimer) { clearTimeout(state.maxCloseTimer); state.maxCloseTimer = undefined }
 

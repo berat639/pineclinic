@@ -238,7 +238,18 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
       const { nodes, edges } = toServerGraph(optsRef.current)
       const setup = await callSimulator({ kind: 'sesli_ayar', direction: optsRef.current.direction, nodes, edges })
       if (!alive()) return
-      const voice = setup.voiceConfig as { available: boolean; message?: string; apiKey?: string; model?: string; systemPrompt?: string; greeting?: string } | undefined
+      const voice = setup.voiceConfig as {
+        available: boolean
+        message?: string
+        apiKey?: string
+        model?: string
+        voiceName?: string
+        thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'
+        turnDetectionMode?: 'semantic' | 'standard'
+        noiseFilterMode?: 'rnnoise' | 'off'
+        systemPrompt?: string
+        greeting?: string
+      } | undefined
       if (!voice?.available || !voice.apiKey) {
         fail(voice?.message || SIMULATOR_NO_AI_MESSAGE)
         return
@@ -251,6 +262,10 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         systemPrompt: voice.systemPrompt || '',
         toolDeclarations: TOOL_DECLARATIONS,
         model: voice.model || '',
+        voiceName: voice.voiceName || 'Aoede',
+        thinkingLevel: voice.thinkingLevel || 'LOW',
+        turnDetectionMode: voice.turnDetectionMode || 'semantic',
+        noiseFilterMode: voice.noiseFilterMode || 'rnnoise',
         textModel: 'gemini-2.5-flash',
         greeting: voice.greeting || '',
         branding: { title: '', subtitle: '', logoUrl: '' },
@@ -299,7 +314,9 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         `Ardından şu görevi uygula: ${first.nextInstruction || 'Akıştaki ilk adıma göre devam et.'} (Bu bir sistem bildirimidir, hasta adı sanma.)`,
       )
 
-      const mic = new MicrophoneCapture()
+      const mic = new MicrophoneCapture({
+        noiseFilter: (voice.noiseFilterMode ?? 'rnnoise') !== 'off',
+      })
       micRef.current = mic
       await mic.start(pcm => session.sendAudio(pcm))
       if (!alive()) mic.stop()

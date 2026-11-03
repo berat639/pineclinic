@@ -377,7 +377,9 @@ export default function Home() {
       scheduleWebMaxDurationTimer(Math.max(180, sessionConfig.callMaxDuration ?? 600))
 
       if (mode === 'audio') {
-        const mic = new MicrophoneCapture()
+        const mic = new MicrophoneCapture({
+          noiseFilter: (sessionConfig.noiseFilterMode ?? 'rnnoise') !== 'off',
+        })
         micRef.current = mic
         const startWaitMs = Math.max(0, Math.round((sessionConfig.startWaitSeconds ?? 0.4) * 1000))
         if (startWaitMs > 0) {
