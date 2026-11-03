@@ -110,12 +110,40 @@ export async function createLiveSession(
     reason: string
     question: string
   } | null = null
+  let initialFields: Record<string, unknown> | undefined = options.callerPhone ? { telefon: options.callerPhone } : undefined
+  if (options.callerPhone && options.clinicId) {
+    try {
+      const lookupPromise = (async () => {
+        const { findPatientByPhone } = await import('./db/repositories/dental')
+        const [customer, dentalPatient] = await Promise.all([
+          getCustomerByPhone(options.callerPhone!, options.clinicId).catch(() => null),
+          findPatientByPhone(options.callerPhone!, options.clinicId).catch(() => null),
+        ])
+        const registered = Boolean(customer || dentalPatient)
+        const name = customer?.name || dentalPatient?.name || undefined
+        const hasUpcoming = Boolean(customer?.appointmentHistory?.some(a => !a.isPast))
+        return {
+          telefon: options.callerPhone,
+          kayitli: registered ? 'true' : 'false',
+          'caller.isKnownPatient': registered ? 'true' : 'false',
+          'caller.hasUpcomingAppointment': hasUpcoming ? 'true' : 'false',
+          ...(name ? { musteri_adi: name } : {}),
+        }
+      })()
+      initialFields = await Promise.race([
+        lookupPromise,
+        new Promise<Record<string, unknown>>(resolve => setTimeout(() => resolve({ telefon: options.callerPhone }), 250)),
+      ])
+    } catch {
+      initialFields = { telefon: options.callerPhone }
+    }
+  }
   const flowEngine = options.clinicId
     ? await FlowEngine.create({
       clinicId: options.clinicId,
       direction: options.direction || 'inbound',
       channel: options.telephonyChannel ? 'phone' : 'web_socket',
-      initialFields: options.callerPhone ? { telefon: options.callerPhone } : undefined,
+      initialFields,
     })
     : null
 
@@ -274,12 +302,30 @@ export async function createLiveSession(
             || normalizeTransferPhoneNumber(directSetting || '')
         }
 
+        const triggerTransferFailFlow = async (defaultMsg: string) => {
+          if (flowEngine) {
+            const failStep = await flowEngine.accept({ eventTrigger: 'on_transfer_fail' }).catch(() => null)
+            if (failStep?.next?.prompt) {
+              return `${defaultMsg} (${failStep.next.prompt})`
+            }
+          }
+          return defaultMsg
+        }
+
         if (!targetNumber) {
           transferAttempted = false
           console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
           return {
             success: false,
-            message: 'Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp yetkililerimize iletebilirim.',
+            message: await triggerTransferFailFlow('Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp yetkililerimize iletebilirim.'),
+          }
+        }
+
+        const completeTransferFlow = async () => {
+          if (!flowEngine) return
+          const expected = flowEngine.expectedAction()
+          if (expected && (expected.action === 'transfer_call' || expected.action === 'transfer')) {
+            await flowEngine.completeAction(expected.nodeId, true).catch(() => null)
           }
         }
 
@@ -289,6 +335,7 @@ export async function createLiveSession(
           const result = await transferCall(options.telephonyChannel, targetNumber, options.clinicId)
           console.log(`[PERF] transfer_call: ${Date.now() - transferStartedAt}ms`)
           if (result.success) {
+            await completeTransferFlow()
             return {
               success: true,
               message: 'Aramanız başarıyla aktarılıyor, lütfen hattan ayrılmayın.',
@@ -298,6 +345,7 @@ export async function createLiveSession(
           }
         } else {
           console.log(`[aramaAktar] telephonyChannel yok (web/test oturumu). Hedef: ${targetNumber}`)
+          await completeTransferFlow()
           return {
             success: true,
             message: `Arama aktarma talebiniz simüle edildi (${targetNumber} numarasına aktarılıyor).`,
@@ -306,7 +354,7 @@ export async function createLiveSession(
 
         return {
           success: false,
-          message: 'Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, yetkililerimize iletirim.',
+          message: await triggerTransferFailFlow('Şu an hatta ulaşılamadı, aktarım yapılamadı. Dilerseniz notunuzu alabilirim, yetkililerimize iletirim.'),
         }
       } catch (err) {
         transferAttempted = false
@@ -438,48 +486,58 @@ export async function createLiveSession(
           getPatientDoctorHistory(rawPhone, options.clinicId),
         ])
 
-        const syncFlowLookup = async (registered: boolean, name?: string | null) => {
-          if (!flowEngine) return
-          await flowEngine.accept({
+        const syncFlowLookup = async (registered: boolean, name?: string | null, hasUpcoming = false) => {
+          if (!flowEngine) return undefined
+          const step = await flowEngine.accept({
             fields: {
               telefon: rawPhone,
               kayitli: registered ? 'true' : 'false',
+              'caller.isKnownPatient': registered ? 'true' : 'false',
+              'caller.hasUpcomingAppointment': hasUpcoming ? 'true' : 'false',
               ...(name ? { musteri_adi: name } : {}),
             },
           })
+          return step.next?.prompt
         }
 
         if (!customer) {
           if (dentalPatient) {
-            await syncFlowLookup(true, dentalPatient.name)
+            const nextPrompt = await syncFlowLookup(true, dentalPatient.name, false)
             return {
               kayitli: true,
               musteri_adi: dentalPatient.name,
               doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+              ...(nextPrompt ? { sonraki_gorev: nextPrompt } : {}),
               sonuc: `Hasta Adı: ${dentalPatient.name}\nTelefon: ${dentalPatient.phone || rawPhone}${doktorGecmisi.length > 0 ? `\nDoktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}` : ''}`,
             }
           }
           const knowledgeCustomer = await findCustomerDocByPhone(rawPhone)
           if (knowledgeCustomer) {
-            await syncFlowLookup(true, knowledgeCustomer.name)
+            const nextPrompt = await syncFlowLookup(true, knowledgeCustomer.name, false)
             return {
               kayitli: true,
               musteri_adi: knowledgeCustomer.name,
               doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+              ...(nextPrompt ? { sonraki_gorev: nextPrompt } : {}),
               sonuc: `Hasta Adı: ${knowledgeCustomer.name}`,
             }
           }
           if (doktorGecmisi.length > 0) {
-            await syncFlowLookup(true, null)
+            const nextPrompt = await syncFlowLookup(true, null, false)
             return {
               kayitli: true,
               musteri_adi: null,
               doktor_gecmisi: doktorGecmisi,
+              ...(nextPrompt ? { sonraki_gorev: nextPrompt } : {}),
               sonuc: `Kayıtlı hasta bulundu.\nDoktor geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son işlem: ${d.son_tedavi})`).join(', ')}`,
             }
           }
-          await syncFlowLookup(false, null)
-          return { kayitli: false, sonuc: 'Bu numara ile kayıtlı hasta bulunamadı. Hastadan ad ve soyadını sor.' }
+          const nextPrompt = await syncFlowLookup(false, null, false)
+          return {
+            kayitli: false,
+            ...(nextPrompt ? { sonraki_gorev: nextPrompt } : {}),
+            sonuc: 'Bu numara ile kayıtlı hasta bulunamadı. Hastadan ad ve soyadını sor.',
+          }
         }
         
         const info: string[] = []
@@ -498,11 +556,12 @@ export async function createLiveSession(
         if (doktorGecmisi.length > 0) {
           info.push(`Doktor Geçmişi: ${doktorGecmisi.map(d => `${d.doktor_adi} (son: ${d.son_tedavi})`).join(', ')}`)
         }
-        await syncFlowLookup(true, customer.name)
+        const nextPrompt = await syncFlowLookup(true, customer.name, upcomingAppointments.length > 0)
         return {
           kayitli: true,
           musteri_adi: customer.name,
           doktor_gecmisi: doktorGecmisi.length > 0 ? doktorGecmisi : undefined,
+          ...(nextPrompt ? { sonraki_gorev: nextPrompt } : {}),
           sonuc: info.join('\n'),
         }
       } catch (err) {

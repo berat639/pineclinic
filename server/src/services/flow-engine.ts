@@ -5,6 +5,7 @@ import { isRemovedWebhookAction } from './flow-validation'
 import {
   evaluateConditionNode,
   getActiveFlow,
+  getTransferPromptConfig,
   injectFlowSystemVariables,
   renderFlowTemplate,
   validateConversationFlow,
@@ -99,6 +100,34 @@ export function buildFlowNodePrompt(
     if (act === 'switch_prompt') {
       return renderFlowTemplate(node.data.promptInstruction || node.data.message || '', fields)
     }
+    if (act === 'transfer_call' || act === 'transfer') {
+      const { target, requiresConfirmation, questionInstruction } = getTransferPromptConfig(node.data as Record<string, unknown>)
+      if (requiresConfirmation) {
+        return `Önce kullanıcıya ${questionInstruction} ve müşterinin cevabını bekle. Açıkça olumlu cevap gelirse aramaAktar aracını "hedef": "${target || 'resepsiyon'}" parametresiyle çağır.`
+      }
+      return `Şimdi aramaAktar aracını "hedef": "${target || 'resepsiyon'}" parametresiyle çağır ve aramayı yetkili birime aktar.`
+    }
+    if (act === 'save_appointment_pending' || act === 'randevuOlustur') {
+      return 'Tüm randevu bilgileri tamamlandı. Şimdi randevuOlustur aracını çağırarak randevuyu kaydet.'
+    }
+    if (act === 'save_patient_note' || act === 'notBirak') {
+      return 'Şimdi hastaNotKaydet aracını çağırarak hastanın notunu veya mesajını kaydet.'
+    }
+    if (act === 'send_wa_location') {
+      return 'Şimdi whatsappKonumGonder aracını çağırarak kliniğin konumunu arayan numaraya WhatsApp üzerinden gönder.'
+    }
+    if (act === 'send_wa_message') {
+      const msg = renderFlowTemplate(String(node.data.message || ''), fields)
+      return msg ? `Hastaya şu mesajı ilet: "${msg}".` : 'Hastaya bilgilendirme mesajını ilet.'
+    }
+    if (act === 'send_sms') {
+      const msg = renderFlowTemplate(String(node.data.message || ''), fields)
+      return msg ? `Hastaya "${msg}" içerikli bilgilendirme SMS'inin gönderildiğini belirt.` : 'Hastaya bilgilendirme SMS\'inin gönderildiğini belirt.'
+    }
+    if (act === 'end_call') {
+      const msg = renderFlowTemplate(String(node.data.message || ''), fields)
+      return `${msg ? `"${msg}" diyerek ` : ''}cagriySonlandir aracını çağır ve görüşmeyi sonlandır.`
+    }
   }
   return undefined
 }
@@ -112,14 +141,35 @@ export class FlowEngine {
   private state: StoredState
   private revision = 0
   private chain: Promise<unknown> = Promise.resolve()
+  private skipPersist = false
   readonly id: string
   readonly mode: FlowRuntimeMode
   readonly channel: FlowChannel
   readonly direction: string
   readonly clinicId: string
 
-  private constructor(args: { id: string; state: StoredState; mode: FlowRuntimeMode; channel: FlowChannel; direction: string; clinicId: string }) {
-    this.id = args.id; this.state = args.state; this.mode = args.mode; this.channel = args.channel; this.direction = args.direction; this.clinicId = args.clinicId
+  private constructor(args: { id: string; state: StoredState; mode: FlowRuntimeMode; channel: FlowChannel; direction: string; clinicId: string; skipPersist?: boolean }) {
+    this.id = args.id; this.state = args.state; this.mode = args.mode; this.channel = args.channel; this.direction = args.direction; this.clinicId = args.clinicId; this.skipPersist = Boolean(args.skipPersist)
+  }
+
+  static fromMemory(flow: ConversationFlow, opts?: { direction?: string; channel?: FlowChannel; mode?: FlowRuntimeMode; initialFields?: Record<string, unknown> }) {
+    const direction = opts?.direction || 'inbound'
+    const channel = opts?.channel || 'phone'
+    const mode = opts?.mode || 'active'
+    const start = flow.nodes.find(node => node.type === 'START')
+    const initialWithSys = injectFlowSystemVariables(cleanFields(opts?.initialFields), {
+      direction,
+      channel,
+    })
+    return new FlowEngine({
+      id: randomUUID(),
+      mode,
+      channel,
+      direction,
+      clinicId: 'memory',
+      skipPersist: true,
+      state: { flow: structuredClone(flow), currentNodeId: start?.id, fields: initialWithSys, handledEvents: {}, completedActions: [] },
+    })
   }
 
   static async create(args: { clinicId: string; direction: string; channel: FlowChannel; mode?: FlowRuntimeMode; initialFields?: Record<string, unknown> }) {
@@ -143,6 +193,7 @@ export class FlowEngine {
   }
 
   private async persist(status = 'active') {
+    if (this.skipPersist) return
     const expiresAt = new Date(Date.now() + 35 * 60_000)
     await db.insert(flowSessions).values({
       id: this.id, clinicId: this.clinicId, direction: this.direction, channel: this.channel, flowId: this.state.flow.id,
@@ -218,7 +269,7 @@ export class FlowEngine {
             this.next(outEdge)
             continue
           }
-          if (act === 'wait_reprompt' || act === 'wait') {
+          if (act === 'wait_reprompt' || act === 'wait' || act === 'send_sms' || act === 'send_wa_message') {
             this.state.completedActions.push(node.id)
             return {
               success: true,
@@ -228,8 +279,8 @@ export class FlowEngine {
             }
           }
         }
-        if (this.mode === 'observe') return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type }, message: 'Akış bu adımda bir işlem yapacaktı.' }
-        if (!this.state.completedActions.includes(node.id)) return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type } }
+        if (this.mode === 'observe') return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) }, message: 'Akış bu adımda bir işlem yapacaktı.' }
+        if (!this.state.completedActions.includes(node.id)) return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }
         this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue
       }
       if (node.type === 'END') return { success: true, revision: this.revision, fields: this.state.fields, completed: true, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }
@@ -264,10 +315,10 @@ export class FlowEngine {
     return queued
   }
 
-  async completeAction(nodeId: string, success: boolean, message?: string) {
+  async completeAction(nodeId: string, success: boolean, message?: string): Promise<FlowEngineResult> {
     const node = this.node()
-    if (!node || node.id !== nodeId || node.type !== 'ACTION') return { success: false, message: 'Bu işlem görüşmenin mevcut adımına ait değil.' }
-    if (!success) return { success: false, message: message || 'İşlem tamamlanamadı.' }
+    if (!node || node.id !== nodeId || node.type !== 'ACTION') return { success: false, revision: this.revision, fields: this.state.fields, message: 'Bu işlem görüşmenin mevcut adımına ait değil.' }
+    if (!success) return { success: false, revision: this.revision, fields: this.state.fields, message: message || 'İşlem tamamlanamadı.' }
     if (!this.state.completedActions.includes(nodeId)) this.state.completedActions.push(nodeId)
     this.next(edgesFrom(this.state.flow.edges, node.id)[0])
     const result = await this.advance(); this.revision += 1; await this.persist(result.completed ? 'completed' : 'active')

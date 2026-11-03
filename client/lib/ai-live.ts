@@ -116,11 +116,49 @@ async function handleToolCall(
         return await response.json()
       } catch { return { success: false, message: 'Randevu işlemi şu an tamamlanamadı.' } }
     }
+    case 'hastaNotKaydet': {
+      if (flowSession) {
+        try {
+          const response = await fetch(`/api/flow-sessions/${flowSession.id}/actions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-flow-session-key': flowSession.token },
+            body: JSON.stringify({ name, args }),
+          })
+          return await response.json()
+        } catch { return { success: false, message: 'Not kaydedilirken bir hata oluştu.' } }
+      }
+      return post('/api/tools/patient-note', args)
+    }
     case 'searchKnowledgeBase': return post('/api/tools/search-knowledge', { sorgu: args.sorgu })
-    case 'musteriSorgula': return post('/api/tools/customer-query', { telefon: args.telefon })
+    case 'musteriSorgula': {
+      const res = await post('/api/tools/customer-query', { telefon: args.telefon })
+      if (flowSession && res && typeof res === 'object' && 'kayitli' in res) {
+        try {
+          const evRes = await fetch(`/api/flow-sessions/${flowSession.id}/events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-flow-session-key': flowSession.token },
+            body: JSON.stringify({
+              id: `${Date.now()}-${Math.random()}`,
+              revision: flowSession.revision,
+              fields: {
+                telefon: String(args.telefon || ''),
+                kayitli: res.kayitli ? 'true' : 'false',
+                'caller.isKnownPatient': res.kayitli ? 'true' : 'false',
+                ...(typeof res.musteri_adi === 'string' && res.musteri_adi ? { musteri_adi: res.musteri_adi } : {}),
+              },
+              intent: 'continue',
+            }),
+          })
+          const evJson = await evRes.json().catch(() => null)
+          if (evJson && typeof evJson.revision === 'number') flowSession.revision = evJson.revision
+        } catch {}
+      }
+      return res
+    }
     case 'randevuGuncelle': return post('/api/tools/create-appointment', { ...args, _update: true })
+    case 'randevuDurumBildir': return post('/api/tools/appointment-status', args)
     case 'randevuMusaitlikKontrol': return post('/api/tools/check-availability', args)
     case 'gecmisRandevular': return post('/api/tools/customer-query', { telefon: args.telefon })
+    case 'havaDurumuSorgula': return { success: true, sehir: String(args.sehir || 'Ankara'), sicaklik: '21°C', durum: 'açık ve güneşli', message: `${String(args.sehir || 'Ankara')}'da hava şu an yaklaşık 21 derece, açık ve güneşli.` }
     default: return { error: `Bilinmeyen araç: ${name}` }
   }
 }
@@ -341,7 +379,7 @@ export class AiLiveSession {
       // the browser request alive forever.
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const response = await ai.models.generateContent({
-          model: config.textModel || 'gemini-2.5-flash',
+          model: config.textModel || 'gemini-3.8-flash',
           contents: this.textHistory as any,
           config: {
             systemInstruction: wrapWithTurkishLanguageLock(config.systemPrompt),

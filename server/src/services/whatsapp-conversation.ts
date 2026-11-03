@@ -146,7 +146,7 @@ async function processWhatsAppConversationInTenant(conversationId: string) {
           ])
           replyText = await generateWhatsAppReply({
             model: liveModel,
-            textModel: textModelSetting || process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
+            textModel: textModelSetting || process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
             useLiveAudio: useLiveSetting === 'true',
             text: message.text,
             systemPrompt: `${prompt}${flowStepInstruction}

@@ -11,7 +11,7 @@ export type SimulatorVoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaki
 export const SIMULATOR_NO_AI_MESSAGE = 'Bu klinik için yapay zeka bağlantısı tanımlı değil.'
 
 export interface SimulatorVoiceOptions {
-  direction: 'inbound' | 'outbound'
+  direction: 'inbound' | 'outbound' | 'web' | 'whatsapp'
   /** Taslak akış (editördeki hâli). Yayındaki akışa dokunulmaz. */
   nodes: Array<{ id: string; type?: string; position?: unknown; data?: unknown }>
   edges: Array<{ id: string; source: string; target: string; sourceHandle?: string | null; label?: unknown }>
@@ -63,6 +63,62 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: { neden: { type: Type.STRING, description: 'Kapanış nedeni' } },
+    },
+  },
+  {
+    name: 'aramaAktar',
+    description: 'Aramayı aktif Flow Builder işlem düğümünde tanımlanan yetkili hedefe aktarır.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        hedef: { type: Type.STRING, description: 'Aktarılacak hedef numara veya birim adı' },
+        sebep: { type: Type.STRING, description: 'Aktarım sebebi' },
+      },
+      required: ['hedef'],
+    },
+  },
+  {
+    name: 'randevuOlustur',
+    description: 'Toplanan bilgilerle randevu talebi oluşturur.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        musteri_adi: { type: Type.STRING, description: 'Hasta adı ve soyadı' },
+        telefon: { type: Type.STRING, description: 'Telefon numarası' },
+        tarih: { type: Type.STRING, description: 'Randevu tarihi (YYYY-MM-DD)' },
+        saat: { type: Type.STRING, description: 'Randevu saati (HH:MM)' },
+        sikayet: { type: Type.STRING, description: 'Şikayet veya işlem talebi' },
+      },
+    },
+  },
+  {
+    name: 'hastaNotKaydet',
+    description: 'Hastanın bıraktığı notu veya mesajı bankoya iletmek üzere kaydeder.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        telefon: { type: Type.STRING, description: 'Telefon numarası' },
+        not: { type: Type.STRING, description: 'Not veya mesaj metni' },
+        hasta_adi: { type: Type.STRING, description: 'Hasta adı soyadı' },
+      },
+    },
+  },
+  {
+    name: 'whatsappKonumGonder',
+    description: 'Arayan numaraya kliniğin WhatsApp konumunu gönderir.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+    },
+  },
+  {
+    name: 'musteriSorgula',
+    description: 'Telefon numarasına göre hastanın kayıtlı olup olmadığını sorgular.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        telefon: { type: Type.STRING, description: 'Sorgulanacak telefon numarası' },
+      },
     },
   },
 ]
@@ -227,6 +283,54 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         }, 4500)
         return { success: true, mesaj: 'Görüşme sonlandırılıyor.' }
       }
+      if (name === 'aramaAktar') {
+        const hedef = String(args.hedef || 'Resepsiyon')
+        return {
+          success: true,
+          mesaj: `Simülasyon: Arama ${hedef} hedefine başarıyla aktarılıyor. Hastaya aramanın aktarıldığını söyle.`,
+        }
+      }
+      if (name === 'randevuOlustur') {
+        const clean: Record<string, string> = {}
+        for (const [k, v] of Object.entries(args)) {
+          const text = String(v ?? '').trim()
+          if (text) clean[k] = text
+        }
+        const step = await advance(clean)
+        return {
+          success: true,
+          mesaj: `Simülasyon: Randevu talebi başarıyla oluşturuldu. ${step.nextInstruction || 'Hastaya randevusunun oluşturulduğunu söyleyip veda et.'}`,
+          tamamlandi: Boolean(step.completed),
+        }
+      }
+      if (name === 'hastaNotKaydet') {
+        const clean: Record<string, string> = {}
+        if (args.telefon) clean.telefon = String(args.telefon)
+        if (args.not) clean.hastaNotu = String(args.not)
+        if (args.hasta_adi) clean.musteri_adi = String(args.hasta_adi)
+        await advance(clean)
+        return {
+          success: true,
+          mesaj: 'Simülasyon: Hasta notu başarıyla kaydedildi ve bankoya iletildi. Hastaya notunun alındığını söyle.',
+        }
+      }
+      if (name === 'whatsappKonumGonder') {
+        return {
+          success: true,
+          mesaj: 'Simülasyon: Klinik konumu WhatsApp üzerinden gönderildi. Hastaya konumun gönderildiğini söyle.',
+        }
+      }
+      if (name === 'musteriSorgula') {
+        const isKnown = optsRef.current.callerProfile.kayitli === 'true'
+        await advance({ kayitli: isKnown ? 'true' : 'false' })
+        return {
+          kayitli: isKnown,
+          musteri_adi: isKnown ? 'Demo Kayıtlı Hasta' : null,
+          sonuc: isKnown
+            ? 'Hasta sistemde kayıtlı (Demo Kayıtlı Hasta).'
+            : 'Bu numara ile kayıtlı hasta bulunamadı.',
+        }
+      }
       // Randevu, not vb. gerçek işlemler simülasyonda yürütülmez.
       return { success: true, mesaj: 'Simülasyon: bu işlem gerçekten kaydedilmedi.' }
     } catch (err) {
@@ -297,7 +401,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         thinkingLevel: voice.thinkingLevel || 'LOW',
         turnDetectionMode: voice.turnDetectionMode || 'semantic',
         noiseFilterMode: voice.noiseFilterMode || 'rnnoise',
-        textModel: 'gemini-2.5-flash',
+        textModel: 'gemini-3.8-flash',
         greeting: voice.greeting || '',
         branding: { title: '', subtitle: '', logoUrl: '' },
         toolHandler: handleTool,

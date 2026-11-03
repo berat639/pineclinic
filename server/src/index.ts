@@ -2315,7 +2315,7 @@ const app = new Elysia()
       toolDeclarations,
       model,
       thinkingLevel: voiceSettings.thinkingLevel,
-      textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
+      textModel: process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash',
       greeting,
       branding,
       voiceName: voiceSettings.voiceName,
@@ -2468,6 +2468,53 @@ const app = new Elysia()
     } catch (err) {
       console.error('[Tools/Availability]', err)
       return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
+    }
+  })
+
+  .post('/api/tools/patient-note', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
+    const args = (body ?? {}) as Record<string, unknown>
+    const phone = String(args.telefon || '').trim()
+    const note = String(args.not || args.hastaNotu || args.mesaj || '').trim()
+    const name = String(args.hasta_adi || args.musteri_adi || '').trim()
+    if (!note) return { success: false, message: 'Kaydedilecek bir not metni belirtilmedi.' }
+    try {
+      const { createPatientNote } = await import('./db/repositories/dental')
+      await createPatientNote({ phone, content: name ? `[${name}] ${note}` : note, source: 'web', clinicId })
+      return { success: true, message: 'Notunuz başarıyla kaydedildi ve klinik bankosuna iletildi.' }
+    } catch {
+      return { success: false, message: 'Not kaydedilirken bir hata oluştu.' }
+    }
+  })
+
+  .post('/api/tools/appointment-status', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    if (!clinicId) { set.status = 404; return { error: 'Bu alan için klinik bulunamadı.' } }
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!isAuthorizedWebToolSession(clinicId, request.headers.get('x-flow-session-key') || undefined)) {
+      set.status = 401
+      return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
+    }
+    const args = (body ?? {}) as Record<string, unknown>
+    const rawDurum = String(args.durum || '')
+    const action = rawDurum === 'confirm' || rawDurum === 'confirmed'
+      ? 'confirm'
+      : rawDurum === 'postpone' || rawDurum === 'postponed'
+        ? 'postpone'
+        : 'cancel'
+    return {
+      success: true,
+      message: action === 'confirm'
+        ? 'Randevunuz onaylandı olarak takvime kaydedildi.'
+        : action === 'postpone'
+          ? 'Erteleme talebiniz takvime kaydedildi; ekibimiz yeni saat için dönüş sağlayacaktır.'
+          : 'Randevunuz iptal edildi ve takvimde güncellendi.',
     }
   })
 

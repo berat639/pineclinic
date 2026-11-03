@@ -16,7 +16,7 @@ export interface WhatsAppLiveInput {
   onUsage?: (usage: { promptTokens: number; responseTokens: number; totalTokens: number; model: string }) => void
 }
 
-const DEFAULT_WHATSAPP_TEXT_MODEL = 'gemini-2.5-flash'
+const DEFAULT_WHATSAPP_TEXT_MODEL = 'gemini-3.8-flash'
 const DEFAULT_WHATSAPP_LIVE_RULES =
   'Kısa Türkçe yanıtlar ver. Randevu işleminden önce kullanıcıdan tarih/saat ve isim için açık onay al. Araç başarı sonucunu almadan işlem yapıldı deme. Her kullanıcı mesajında en fazla bir randevu oluştur. Başka numaralara ait kişisel bilgi sorgulama. Personel istendiğinde insanaAktar kullan.'
 

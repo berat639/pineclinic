@@ -243,14 +243,18 @@ export function evaluateConditionRule(
       return items.includes(actualLow)
     }
     case 'notEquals': {
-      if (expectedLow === 'true') return !['true', 'evet', '1'].includes(actualLow)
-      if (expectedLow === 'false') return !['false', 'hayır', 'hayir', '0'].includes(actualLow)
+      const truthy = ['true', 'evet', '1', 'var']
+      const falsy = ['false', 'hayır', 'hayir', '0', 'yok']
+      if (truthy.includes(expectedLow)) return !truthy.includes(actualLow)
+      if (falsy.includes(expectedLow)) return !falsy.includes(actualLow)
       return actualLow !== expectedLow
     }
     case 'equals':
     default: {
-      if (expectedLow === 'true' && (actualLow === 'true' || actualLow === 'evet' || actualLow === '1')) return true
-      if (expectedLow === 'false' && (actualLow === 'false' || actualLow === 'hayır' || actualLow === 'hayir' || actualLow === '0')) return true
+      const truthy = ['true', 'evet', '1', 'var']
+      const falsy = ['false', 'hayır', 'hayir', '0', 'yok']
+      if (truthy.includes(expectedLow) && truthy.includes(actualLow)) return true
+      if (falsy.includes(expectedLow) && falsy.includes(actualLow)) return true
       return actualLow === expectedLow
     }
   }
@@ -321,7 +325,7 @@ function normalizeFlowNodes(nodes: FlowNode[]): { nodes: FlowNode[]; changed: bo
   return { nodes: normalized, changed }
 }
 
-function getTransferPromptConfig(data: Record<string, unknown>) {
+export function getTransferPromptConfig(data: Record<string, unknown>) {
   const target = String(data.transferNumber || '')
   const keywords = String(data.triggerKeywords || '')
   const keywordList = keywords.split(/[,;|\n]+/).map(value => value.trim()).filter(Boolean)

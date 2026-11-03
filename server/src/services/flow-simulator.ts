@@ -25,7 +25,7 @@ export interface SimulationMessage {
 }
 
 export interface FlowSimulationRequest {
-  direction?: 'inbound' | 'outbound' | 'whatsapp'
+  direction?: 'inbound' | 'outbound' | 'whatsapp' | 'web'
   nodes: FlowNode[]
   edges: FlowEdge[]
   currentNodeId?: string | null
@@ -103,7 +103,7 @@ function evaluateDeterministicCondition(
 ): boolean {
   return evaluateConditionNode(node, fields, intentMatchedByAi, {
     direction: direction || 'inbound',
-    channel: direction === 'whatsapp' ? 'whatsapp' : 'phone',
+    channel: direction === 'whatsapp' ? 'whatsapp' : direction === 'web' ? 'web_direct' : 'phone',
   })
 }
 
@@ -255,12 +255,13 @@ async function runStep(req: FlowSimulationRequest, clinicId: string | undefined)
   const usedKnowledgeTitles: string[] = []
 
   const ai = await getGeminiClient(clinicId).catch(() => null)
-  const modelName = process.env.GEMINI_SIMULATION_MODEL || 'gemini-2.5-flash'
+  const modelName = process.env.GEMINI_SIMULATION_MODEL || 'gemini-3.8-flash'
 
   const userMessage = (req.userMessage || '').trim()
   let currId: string | null = req.currentNodeId ?? nodes.find(n => n.type === 'START')?.id ?? null
 
   // 1. Check Global Keyword Triggers first if user sent a message
+  let matchedGlobalFound = false
   if (userMessage) {
     const lowMsg = userMessage.toLocaleLowerCase('tr-TR')
     const matchedGlobal = nodes.find(n => {
@@ -271,6 +272,7 @@ async function runStep(req: FlowSimulationRequest, clinicId: string | undefined)
     })
 
     if (matchedGlobal) {
+      matchedGlobalFound = true
       currId = matchedGlobal.id
       if (!visitedNodeIds.includes(matchedGlobal.id)) visitedNodeIds.push(matchedGlobal.id)
       const actLabel = ACTION_LABELS[String(matchedGlobal.data.action || '')] || matchedGlobal.data.label || 'İşlem'
@@ -285,7 +287,7 @@ async function runStep(req: FlowSimulationRequest, clinicId: string | undefined)
   let ragContext = ''
   let aiIntentMatched: boolean | undefined = undefined
 
-  if (userMessage) {
+  if (userMessage && !matchedGlobalFound) {
     try {
       const docs = await retrieveTopK(userMessage, 3, direction)
       if (docs.length > 0) {
@@ -416,6 +418,8 @@ Görev:
   // 4. Advance through the flow graph
   let completed = false
   let stoppedNode: FlowNode | undefined = undefined
+  const triggeredActions: FlowNode[] = []
+  const prevVisitedSet = new Set(req.visitedNodeIds || [])
   const greetingText = await resolveGreeting(direction)
 
   let startedFromStartNode = false
@@ -498,6 +502,15 @@ Görev:
         fields[node.data.variableName] = varVal
         extractedFields[node.data.variableName] = varVal
       }
+      if (act === 'switch_prompt') {
+        const instr = renderFlowTemplate(String(node.data.promptInstruction || node.data.message || ''), fields)
+        if (instr) fields.activePromptOverride = instr
+      }
+      if ((act === 'wait_reprompt' || act === 'wait') && !prevVisitedSet.has(node.id)) {
+        stoppedNode = node
+        break
+      }
+      triggeredActions.push(node)
       const actTitle = ACTION_LABELS[act] || node.data.label || act
       logs.push({
         role: 'action',
@@ -532,16 +545,46 @@ Görev:
     updatedAt: '',
   })
 
+  const buildActionOutcomeText = (actionNode: FlowNode): string => {
+    const act = String(actionNode.data.action || '')
+    const target = String(actionNode.data.transferNumber || 'Resepsiyon')
+    const msg = renderFlowTemplate(String(actionNode.data.message || ''), fields)
+    if (act === 'transfer_call' || act === 'transfer') {
+      return `Aramanızı ${target} yetkili hattına aktarıyorum, lütfen hattan ayrılmayın.`
+    }
+    if (act === 'save_appointment_pending' || act === 'randevuOlustur') {
+      return `Randevu talebiniz (${fields.tarih || 'belirtilen tarih'} ${fields.saat || ''}) başarıyla oluşturuldu.`
+    }
+    if (act === 'save_patient_note' || act === 'notBirak') {
+      return 'Notunuz kaydedildi ve klinik bankosuna iletildi.'
+    }
+    if (act === 'send_wa_location') {
+      return 'Klinik konumumuz WhatsApp üzerinden telefonunuza gönderildi.'
+    }
+    if (act === 'send_wa_message' || act === 'send_sms') {
+      return msg || 'Bilgilendirme mesajınız gönderildi.'
+    }
+    if (act === 'end_call') {
+      return msg || 'Görüşmemizi sonlandırıyorum, sağlıklı günler dileriz.'
+    }
+    return `${ACTION_LABELS[act] || act} işlemi tamamlandı.`
+  }
+
+  const triggeredActionSummary = triggeredActions.map(buildActionOutcomeText).filter(Boolean).join(' ')
+
   let stepInstruction = ''
   if (stoppedNode?.type === 'START') {
     stepInstruction = `Yalnızca şu karşılama mesajını söyle: "${greetingText}". Karşılamayı söyledikten sonra DUR ve müşterinin konuşmasını bekle; başka soru sorma.`
   } else if (stoppedNode?.type === 'FIELD') {
-    stepInstruction = `Şu anki akış adımında hastadan YALNIZCA "${stoppedNode.data.fieldName}" bilgisini istemelisin. Sorulacak soru: "${stoppedNode.data.description || stoppedNode.data.fieldName}". Bu tek soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; başka adımın sorusunu peşine ekleme.`
+    stepInstruction = `${triggeredActionSummary ? `Önce şu işlemin gerçekleştiğini belirt: "${triggeredActionSummary}". Ardından ` : ''}Şu anki akış adımında hastadan YALNIZCA "${stoppedNode.data.fieldName}" bilgisini istemelisin. Sorulacak soru: "${stoppedNode.data.description || stoppedNode.data.fieldName}". Bu tek soruyu sorduktan sonra DUR ve müşterinin konuşmasını/cevabını bekle; başka adımın sorusunu peşine ekleme.`
   } else if (stoppedNode?.type === 'CONDITION') {
     stepInstruction = `Şu anki adımda hastanın niyetini ("${stoppedNode.data.conditionValue}") anlamak için nasıl yardımcı olabileceğini sor ve müşterinin konuşmasını bekle.`
+  } else if (stoppedNode?.type === 'ACTION' && (stoppedNode.data.action === 'wait_reprompt' || stoppedNode.data.action === 'wait')) {
+    const waitMsg = renderFlowTemplate(String(stoppedNode.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'), fields)
+    stepInstruction = `Hastaya "${waitMsg}" cümlesini söyle ve konuşmasını bekle.`
   } else if (stoppedNode?.type === 'END' || completed) {
     const closeMsg = stoppedNode?.data?.message || 'Görüşmeyi nazikçe tamamla ve sağlıklı günler dile.'
-    stepInstruction = `Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
+    stepInstruction = `${triggeredActionSummary ? `Gerçekleşen işlem bilgisini hastaya söyle: "${triggeredActionSummary}". ` : ''}Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
   }
 
   if (req.skipReply) {
@@ -628,10 +671,22 @@ SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
   if (startedFromStartNode && !userMessage) {
     logs.push({ role: 'ai', text: `▶ Karşılama: "${greetingText}"` })
   }
+  if (triggeredActionSummary) {
+    logs.push({
+      role: 'ai',
+      text: `🤖 AI Asistan: ${triggeredActionSummary}`,
+    })
+  }
   if (stoppedNode?.type === 'FIELD') {
     logs.push({
       role: 'ai',
       text: `🤖 AI Sorusu (${stoppedNode.data.fieldName}): "${stoppedNode.data.description || `${stoppedNode.data.fieldName} bilgisini paylaşır mısınız?`}"`,
+    })
+  } else if (stoppedNode?.type === 'ACTION' && (stoppedNode.data.action === 'wait_reprompt' || stoppedNode.data.action === 'wait')) {
+    const waitMsg = renderFlowTemplate(String(stoppedNode.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'), fields)
+    logs.push({
+      role: 'ai',
+      text: `🤖 AI Asistan: "${waitMsg}"`,
     })
   } else if (stoppedNode?.type === 'END') {
     logs.push({

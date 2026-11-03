@@ -236,7 +236,7 @@ async function callGeminiWithTimeout(
   })
 
   try {
-    const modelName = process.env.GEMINI_SIMULATION_MODEL || process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash'
+    const modelName = process.env.GEMINI_SIMULATION_MODEL || process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash'
     const genPromise = ai.models.generateContent({
       model: modelName,
       contents: [{ role: 'user', parts: [{ text: buildUserPrompt(summary) }] }],
