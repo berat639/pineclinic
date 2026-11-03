@@ -22,7 +22,7 @@ import { AudioSocketParser, FrameChunker, encodeAudioFrame, AS_FRAME_BYTES, enco
 import { downsample24to8, upsample8to16 } from './resample'
 import { buildAutomaticTransferRules, type AutomaticTransferRule } from '../services/transfer-triggers'
 import { getGeminiClient } from '../services/gemini-client'
-import { resolveVoiceSettings } from '../services/voice-settings'
+import { buildOffTopicPromptRule, resolveVoiceSettings } from '../services/voice-settings'
 import {
   analyzePcmFrameCharacteristics,
   analyzeTurkishTurnCompleteness,
@@ -31,6 +31,31 @@ import {
   type TurnDetectionMode,
 } from '../services/turn-detector'
 import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
+
+function isPhoneConversationFarewell(text: string, customCloseMessage?: string): boolean {
+  const normalize = (value: string) =>
+    value
+      .toLocaleLowerCase('tr-TR')
+      .replace(/[.,!?;:()[\]{}"']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const normalized = normalize(text)
+  if (!normalized) return false
+
+  if (customCloseMessage) {
+    const customNorm = normalize(customCloseMessage)
+    if (customNorm.length >= 10 && normalized.includes(customNorm)) {
+      return true
+    }
+  }
+
+  return [
+    /\bgörüş(?:meyi|memizi)\s+sonlandır/,
+    /\bsüremiz\s+doldu.*sonlandır/,
+    /\bklinik\s+işleminiz\s+(?:yoksa|olmadığı\s+için).*sonlandır/,
+  ].some(pattern => pattern.test(normalized))
+}
 
 // ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
 //
@@ -690,9 +715,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               console.warn(`[${shortId}] Flow durumu okunamadı; maksimum görüşme süresi korunuyor`, e)
             }
 
-            const flowPriorityInstructions = `\n\n${renderPromptTemplate(flowPriorityTpl, {})}`
+            const flowPriorityInstructions = `\n\n${renderPromptTemplate(flowPriorityTpl, {})}\n\n${buildOffTopicPromptRule(voiceSettings.offTopicMaxStrikes, voiceSettings.offTopicCloseMessage)}`
             const systemPrompt = systemPromptBase + ragContext + phoneInstructions + flowPriorityInstructions
-            console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, minimalFlow: ${minimalGreetingEndFlow}, wait: ${startWaitSec}s`)
+            console.log(`[${shortId}] , voice: ${voiceName}, isVip: ${isVip}, silenceWarn: ${state.silenceWarnMs}ms, silenceClose: ${state.silenceCloseMs}ms, maxCall: ${maxCallSeconds}s, offTopicStrikes: ${voiceSettings.offTopicMaxStrikes}, minimalFlow: ${minimalGreetingEndFlow}, wait: ${startWaitSec}s`)
 
             const pendingSession = createLiveSession(
                 clinicAi,
@@ -779,6 +804,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     if (tailFrame) state.audioQueue.push(tailFrame)
                     state.outChunker = new FrameChunker()
                     state.outputTurnComplete = true
+                    if (!state.hangupPending && !state.interactionInProgress && isPhoneConversationFarewell(state.outputTranscript, voiceSettings.offTopicCloseMessage)) {
+                      console.log(`[${shortId}] Konu dışı / kapanış veda cümlesi algılandı — ses kuyruğu bitince hat kapatılacak`)
+                      state.hangupPending = true
+                      state.micEnabled = false
+                      state.micBuffer = []
+                      clearSilenceTimers(state)
+                    }
                     if (state.greetingTimeoutTimer) {
                       clearTimeout(state.greetingTimeoutTimer)
                       state.greetingTimeoutTimer = undefined

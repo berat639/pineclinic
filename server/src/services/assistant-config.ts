@@ -113,10 +113,23 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
         'KONUŞMA DIŞI SESLER (ÖKSÜRÜK / HAPŞIRIK / GÜRÜLTÜ): Karşı tarafın öksürmesi, hapşırması, boğaz temizlemesi, nefes sesi veya ortam gürültüsü kapsam dışı bir istek DEĞİLDİR; böyle seslerde ASLA "Bu konuda yardımcı olamıyorum" deme. Öksürük veya hapşırıkta kısaca "Çok geçmiş olsun" deyip kaldığın yerden devam et.',
       )
     }
-    if (!joined.includes('KONU DIŞI ISRAR')) {
-      parts.push(
-        'KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI: Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk seferde nazikçe klinik/randevu konusuna yönlendir. Karşı taraf uyarıya rağmen ikinci kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve hemen cagriySonlandir aracını çağır.',
-      )
+    try {
+      const { buildOffTopicPromptRule, DEFAULT_OFF_TOPIC_CLOSE_MESSAGE } = await import('./voice-settings')
+      const [strikesRaw, closeMsgRaw] = await Promise.all([
+        getSetting('ai.off_topic_max_strikes'),
+        getSetting('ai.off_topic_close_message'),
+      ])
+      const strikes = Number.isInteger(Number(strikesRaw)) && Number(strikesRaw) >= 1 && Number(strikesRaw) <= 5
+        ? Number(strikesRaw)
+        : 2
+      const closeMsg = closeMsgRaw?.trim() || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE
+      parts.push(buildOffTopicPromptRule(strikes, closeMsg))
+    } catch {
+      if (!joined.includes('KONU DIŞI ISRAR')) {
+        parts.push(
+          'KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI: Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk seferde nazikçe klinik/randevu konusuna yönlendir. Karşı taraf uyarıya rağmen ikinci kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve hemen cagriySonlandir aracını çağır.',
+        )
+      }
     }
   }
 

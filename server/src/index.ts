@@ -2330,6 +2330,8 @@ const app = new Elysia()
       callSilenceTimeout: voiceSettings.callSilenceTimeout,
       callSilenceCloseTimeout: voiceSettings.callSilenceCloseTimeout,
       callMaxDuration: voiceSettings.callMaxDuration,
+      offTopicMaxStrikes: voiceSettings.offTopicMaxStrikes,
+      offTopicCloseMessage: voiceSettings.offTopicCloseMessage,
       sessionKey,
     }
   })

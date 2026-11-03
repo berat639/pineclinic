@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { validateVoiceSettings, VOICE_SETTINGS_DEFAULTS } from './voice-settings'
+import {
+  buildOffTopicPromptRule,
+  DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
+  validateVoiceSettings,
+  VOICE_SETTINGS_DEFAULTS,
+} from './voice-settings'
 import { renderPromptTemplate } from '../prompts/registry'
 import { PROMPT_SECTIONS } from '../data/default-prompts'
 
 describe('voice-settings validation & prompt registry', () => {
-  test('accepts valid voice settings', () => {
+  test('accepts valid voice settings including offTopicMaxStrikes and offTopicCloseMessage', () => {
     const res = validateVoiceSettings({
       model: 'gemini-3.8-live-extended-thinking',
       thinkingLevel: 'HIGH',
@@ -14,6 +19,8 @@ describe('voice-settings validation & prompt registry', () => {
       callSilenceCloseTimeout: 10,
       callMaxDuration: 480,
       maxActivePhoneCalls: 4,
+      offTopicMaxStrikes: 2,
+      offTopicCloseMessage: DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
     })
     expect(res.valid).toBe(true)
     expect(res.error).toBeUndefined()
@@ -25,11 +32,25 @@ describe('voice-settings validation & prompt registry', () => {
       voiceName: 'InvalidVoiceName',
       startWaitSeconds: 5,
       callMaxDuration: 60,
+      offTopicMaxStrikes: 9,
+      offTopicCloseMessage: 'kısa',
     })
     expect(res.valid).toBe(false)
     expect(res.fieldErrors.voiceName).toBeDefined()
     expect(res.fieldErrors.startWaitSeconds).toBeDefined()
     expect(res.fieldErrors.callMaxDuration).toBeDefined()
+    expect(res.fieldErrors.offTopicMaxStrikes).toBeDefined()
+    expect(res.fieldErrors.offTopicCloseMessage).toBeDefined()
+  })
+
+  test('builds off-topic prompt rule from configured strikes and closing message', () => {
+    const rule2 = buildOffTopicPromptRule(2, DEFAULT_OFF_TOPIC_CLOSE_MESSAGE)
+    expect(rule2).toContain('SINIR: 2. KEZ')
+    expect(rule2).toContain(DEFAULT_OFF_TOPIC_CLOSE_MESSAGE)
+
+    const rule1 = buildOffTopicPromptRule(1, 'Görüşmemizi sonlandırıyorum, iyi günler.')
+    expect(rule1).toContain('SINIR: 1 KEZ')
+    expect(rule1).toContain('Görüşmemizi sonlandırıyorum, iyi günler.')
   })
 
   test('renders prompt template variables and includes all Faz 6 prompt keys', () => {

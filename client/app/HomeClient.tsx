@@ -36,12 +36,23 @@ const STATUS_ICON: Record<VoiceStatus, string> = {
 
 type TranscriptEntry = { id: string; role: 'user' | 'model'; text: string }
 
-function isWebConversationFarewell(text: string): boolean {
-  const normalized = text
-    .toLocaleLowerCase('tr-TR')
-    .replace(/[.,!?;:()[\]{}"']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+function isWebConversationFarewell(text: string, customCloseMessage?: string): boolean {
+  const normalize = (value: string) =>
+    value
+      .toLocaleLowerCase('tr-TR')
+      .replace(/[.,!?;:()[\]{}"']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const normalized = normalize(text)
+  if (!normalized) return false
+
+  if (customCloseMessage) {
+    const customNorm = normalize(customCloseMessage)
+    if (customNorm.length >= 10 && normalized.includes(customNorm)) {
+      return true
+    }
+  }
 
   return [
     /\bhoşça\s*kalın\b/,
@@ -314,7 +325,7 @@ export default function Home() {
         if (modelText.length > 0) {
           addTranscript('model', modelText)
           textBufferRef.current = ''
-          if (webClosingRef.current || (!session.interactionInProgress && isWebConversationFarewell(modelText))) {
+          if (webClosingRef.current || (!session.interactionInProgress && isWebConversationFarewell(modelText, liveConfig.offTopicCloseMessage))) {
             stopAfterPlayback()
             return
           }

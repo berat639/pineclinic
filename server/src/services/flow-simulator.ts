@@ -50,6 +50,8 @@ export interface SimulatorVoiceConfig {
   turnDetectionMode?: 'semantic' | 'standard'
   noiseFilterMode?: 'rnnoise' | 'off'
   callMaxDuration?: number
+  offTopicMaxStrikes?: number
+  offTopicCloseMessage?: string
   systemPrompt?: string
   greeting?: string
 }
@@ -194,13 +196,16 @@ async function buildVoiceConfig(req: FlowSimulationRequest, clinicId: string | u
     const docs = await retrieveTopK('kliniğin genel bilgileri, çalışma saatleri, hizmetler', 5, direction)
     if (docs.length > 0) ragContext = await buildRagPrompt(docs)
   } catch { /* bilgi bankası isteğe bağlı */ }
+  const offTopicRule = voiceSettings
+    ? (await import('./voice-settings')).buildOffTopicPromptRule(voiceSettings.offTopicMaxStrikes, voiceSettings.offTopicCloseMessage)
+    : ''
   const systemPrompt = `BUGÜNÜN TARİHİ: ${getTodayIso()}. Bu bir SİMÜLASYONDUR; hiçbir kayıt gerçekten oluşturulmaz.
 
 ${instructions}
 
 ${flowPrompt}
 
-${voiceFlowRules}${ragContext}`
+${voiceFlowRules}${offTopicRule ? `\n\n${offTopicRule}` : ''}${ragContext}`
   return {
     available: true,
     apiKey,
@@ -210,6 +215,8 @@ ${voiceFlowRules}${ragContext}`
     turnDetectionMode: voiceSettings?.turnDetectionMode || 'semantic',
     noiseFilterMode: voiceSettings?.noiseFilterMode || 'rnnoise',
     callMaxDuration: voiceSettings?.callMaxDuration || 600,
+    offTopicMaxStrikes: voiceSettings?.offTopicMaxStrikes || 2,
+    offTopicCloseMessage: voiceSettings?.offTopicCloseMessage,
     systemPrompt,
     greeting,
   }

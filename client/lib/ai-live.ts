@@ -49,6 +49,8 @@ export type SessionConfig = {
   callSilenceTimeout?: number
   callSilenceCloseTimeout?: number
   callMaxDuration?: number
+  offTopicMaxStrikes?: number
+  offTopicCloseMessage?: string
   flowSession?: { id: string; token: string; revision?: number }
   sessionKey?: string
   /**

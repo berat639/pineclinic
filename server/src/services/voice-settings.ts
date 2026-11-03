@@ -1,6 +1,9 @@
 import { isLiveModel, normalizeThinkingLevel, type ThinkingLevel } from './live-model-profile'
 import type { NoiseFilterMode, TurnDetectionMode } from './turn-detector'
 
+export const DEFAULT_OFF_TOPIC_CLOSE_MESSAGE =
+  'Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.'
+
 export interface VoiceSettings {
   model: 'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'
   thinkingLevel: ThinkingLevel
@@ -12,6 +15,8 @@ export interface VoiceSettings {
   callSilenceCloseTimeout: number
   callMaxDuration: number
   maxActivePhoneCalls: number
+  offTopicMaxStrikes: number
+  offTopicCloseMessage: string
 }
 
 export const VOICE_SETTINGS_DEFAULTS: VoiceSettings = {
@@ -25,6 +30,22 @@ export const VOICE_SETTINGS_DEFAULTS: VoiceSettings = {
   callSilenceCloseTimeout: 15,
   callMaxDuration: 600,
   maxActivePhoneCalls: 3,
+  offTopicMaxStrikes: 2,
+  offTopicCloseMessage: DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
+}
+
+export function buildOffTopicPromptRule(
+  maxStrikes: number = VOICE_SETTINGS_DEFAULTS.offTopicMaxStrikes,
+  closeMessage: string = VOICE_SETTINGS_DEFAULTS.offTopicCloseMessage,
+): string {
+  const strikes = Math.min(5, Math.max(1, Math.round(Number(maxStrikes) || 2)))
+  const msg = (closeMessage || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE).trim() || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE
+  if (strikes === 1) {
+    return `KONU DIŞI OTOMATİK VEDA VE KAPATMA KURALI (SINIR: 1 KEZ): Karşı taraf klinik veya randevu dışında alakasız bir konu açar ya da konuyu dağıtırsa sohbeti KESİNLİKLE sürdürme; doğrudan "${msg}" de ve cagriySonlandir aracını çağır.`
+  }
+  return `KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI (SINIR: ${strikes}. KEZ):
+1. Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk ${strikes - 1} seferde konuyu açıklamadan nazikçe klinik/randevu işlemine yönlendir: "Bu konuda yardımcı olamıyorum, ancak kliniğimiz veya randevu işlemleriniz konusunda yardımcı olabilirim."
+2. Karşı taraf uyarıya rağmen ${strikes}. kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; aynen "${msg}" de ve hemen cagriySonlandir aracını çağır.`
 }
 
 export const ALLOWED_VOICES = [
@@ -51,6 +72,8 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     silenceCloseRaw,
     maxDurationRaw,
     maxCallsRaw,
+    offTopicStrikesRaw,
+    offTopicMsgRaw,
   ] = await Promise.all([
     resolveLiveModel(),
     getSetting('ai.thinking_level', clinicId),
@@ -62,6 +85,8 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     getSetting('ai.call_silence_close_timeout', clinicId),
     getSetting('ai.call_max_duration', clinicId),
     getSetting('ai.max_active_phone_calls', clinicId),
+    getSetting('ai.off_topic_max_strikes', clinicId),
+    getSetting('ai.off_topic_close_message', clinicId),
   ])
 
   const startWaitNum = Number(startWaitRaw)
@@ -69,6 +94,8 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
   const silenceCloseNum = Number(silenceCloseRaw)
   const maxDurationNum = Number(maxDurationRaw)
   const maxCallsNum = Number(maxCallsRaw)
+  const offTopicStrikesNum = Number(offTopicStrikesRaw)
+  const offTopicMsgClean = offTopicMsgRaw?.trim() || ''
 
   return {
     model: (isLiveModel(model) ? model : VOICE_SETTINGS_DEFAULTS.model) as VoiceSettings['model'],
@@ -95,6 +122,12 @@ export async function resolveVoiceSettings(clinicId?: string): Promise<VoiceSett
     maxActivePhoneCalls: Number.isInteger(maxCallsNum) && maxCallsNum >= 2 && maxCallsNum <= 5
       ? maxCallsNum
       : VOICE_SETTINGS_DEFAULTS.maxActivePhoneCalls,
+    offTopicMaxStrikes: Number.isInteger(offTopicStrikesNum) && offTopicStrikesNum >= 1 && offTopicStrikesNum <= 5
+      ? offTopicStrikesNum
+      : VOICE_SETTINGS_DEFAULTS.offTopicMaxStrikes,
+    offTopicCloseMessage: offTopicMsgClean.length >= 10 && offTopicMsgClean.length <= 240
+      ? offTopicMsgClean
+      : VOICE_SETTINGS_DEFAULTS.offTopicCloseMessage,
   }
 }
 
@@ -150,6 +183,18 @@ export function validateVoiceSettings(input: Record<string, unknown>): {
       fieldErrors.maxActivePhoneCalls = 'Aktif telefon çağrısı kapasitesi 2 ile 5 arasında olmalıdır'
     }
   }
+  if (input.offTopicMaxStrikes !== undefined) {
+    const n = Number(input.offTopicMaxStrikes)
+    if (!Number.isInteger(n) || n < 1 || n > 5) {
+      fieldErrors.offTopicMaxStrikes = 'Konu dışı ısrar sınırı 1 ile 5 arasında olmalıdır'
+    }
+  }
+  if (input.offTopicCloseMessage !== undefined) {
+    const msg = String(input.offTopicCloseMessage ?? '').trim()
+    if (msg.length < 10 || msg.length > 240) {
+      fieldErrors.offTopicCloseMessage = 'Konu dışı kapanış mesajı 10 ile 240 karakter arasında olmalıdır'
+    }
+  }
 
   const firstError = Object.values(fieldErrors)[0]
   return {
@@ -175,6 +220,10 @@ export async function saveVoiceSettings(input: Record<string, unknown>, clinicId
   if (input.callSilenceCloseTimeout !== undefined) await setSetting('ai.call_silence_close_timeout', String(Number(input.callSilenceCloseTimeout)), clinicId)
   if (input.callMaxDuration !== undefined) await setSetting('ai.call_max_duration', String(Number(input.callMaxDuration)), clinicId)
   if (input.maxActivePhoneCalls !== undefined) await setSetting('ai.max_active_phone_calls', String(Number(input.maxActivePhoneCalls)), clinicId)
+  if (input.offTopicMaxStrikes !== undefined) await setSetting('ai.off_topic_max_strikes', String(Number(input.offTopicMaxStrikes)), clinicId)
+  if (input.offTopicCloseMessage !== undefined) {
+    await setSetting('ai.off_topic_close_message', String(input.offTopicCloseMessage).trim() || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE, clinicId)
+  }
 
   return resolveVoiceSettings(clinicId)
 }

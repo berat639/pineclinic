@@ -5,6 +5,24 @@ import InfoTooltip from './ui/InfoTooltip'
 import { checkBrowserAudioSupport, runMicrophoneTest, type BrowserAudioSupport } from '../../../lib/browser-audio-support'
 import { evaluateLiveKitTurkishTurn } from '../../../lib/turn-detector'
 
+const DEFAULT_OFF_TOPIC_CLOSE_MESSAGE =
+  'Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.'
+
+const OFF_TOPIC_MESSAGE_PRESETS: Array<[string, string]> = [
+  [
+    'Standart Klinik Veda (Önerilen)',
+    DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
+  ],
+  [
+    'Kısa ve Net Kapanış',
+    'Klinik veya randevu dışında yardımcı olamadığım için görüşmemizi sonlandırıyorum, iyi günler dilerim.',
+  ],
+  [
+    'Resmi Kurumsal Kapanış',
+    'Hattımızı bekleyen hastalarımız için yalnızca klinik işlemlerinde tutabiliyoruz; görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+  ],
+]
+
 type Tab = 'model' | 'voice' | 'conversation' | 'telephony'
 type VoiceSettings = {
   model: 'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'
@@ -17,6 +35,8 @@ type VoiceSettings = {
   callSilenceCloseTimeout: number
   callMaxDuration: number
   maxActivePhoneCalls: number
+  offTopicMaxStrikes: number
+  offTopicCloseMessage: string
 }
 
 const DEFAULTS: VoiceSettings = {
@@ -24,6 +44,8 @@ const DEFAULTS: VoiceSettings = {
   startWaitSeconds: 0.4, turnDetectionMode: 'semantic', noiseFilterMode: 'rnnoise',
   callSilenceTimeout: 30, callSilenceCloseTimeout: 15,
   callMaxDuration: 600, maxActivePhoneCalls: 3,
+  offTopicMaxStrikes: 2,
+  offTopicCloseMessage: DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
 }
 
 const VOICES: Array<[string, string]> = [
@@ -41,6 +63,7 @@ const FIELD_TAB: Record<string, Tab> = {
   model: 'model', thinkingLevel: 'model', voiceName: 'voice',
   startWaitSeconds: 'conversation', turnDetectionMode: 'conversation', noiseFilterMode: 'conversation',
   callSilenceTimeout: 'telephony', callSilenceCloseTimeout: 'telephony', callMaxDuration: 'telephony', maxActivePhoneCalls: 'telephony',
+  offTopicMaxStrikes: 'telephony', offTopicCloseMessage: 'telephony',
 }
 
 const card = { background: 'var(--card-bg)', border: '1.5px solid var(--input-border)', borderRadius: 14, boxShadow: 'var(--pc-neo-card)' }
@@ -343,26 +366,85 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
       </div>
     </div>}
 
-    {tab === 'telephony' && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-      {([
-        ['callSilenceTimeout', 'Sessizlik uyarısı (saniye)', '5 – 120 saniye arası (varsayılan: 30 sn)'],
-        ['callSilenceCloseTimeout', 'Uyarı sonrası kapanış (saniye)', '5 – 120 saniye arası (varsayılan: 15 sn)'],
-      ] as const).map(([name, label, hint]) => <label key={name} style={labelStyle}>{label}
-        <div style={{ position: 'relative', marginTop: 6 }}>
-          <input type="number" min="5" max="120" value={settings[name]} onChange={event => patch({ [name]: Number(event.target.value) })} style={{ ...inputStyle, paddingRight: 38 }} />
-          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 700, color: 'var(--foreground-3)', pointerEvents: 'none' }}>sn</span>
+    {tab === 'telephony' && <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        {([
+          ['callSilenceTimeout', 'Sessizlik uyarısı (saniye)', '5 – 120 saniye arası (varsayılan: 30 sn)'],
+          ['callSilenceCloseTimeout', 'Uyarı sonrası kapanış (saniye)', '5 – 120 saniye arası (varsayılan: 15 sn)'],
+        ] as const).map(([name, label, hint]) => <label key={name} style={labelStyle}>{label}
+          <div style={{ position: 'relative', marginTop: 6 }}>
+            <input type="number" min="5" max="120" value={settings[name]} onChange={event => patch({ [name]: Number(event.target.value) })} style={{ ...inputStyle, paddingRight: 38 }} />
+            <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 700, color: 'var(--foreground-3)', pointerEvents: 'none' }}>sn</span>
+          </div>
+          <span style={{ display: 'block', marginTop: 4, fontSize: 10, color: 'var(--foreground-3)' }}>{hint}</span>
+          <FieldError name={name} />
+        </label>)}
+        <label style={labelStyle}>Maksimum görüşme süresi
+          <select value={settings.callMaxDuration} onChange={event => patch({ callMaxDuration: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{Array.from({ length: 13 }, (_, i) => i + 3).map(minutes => <option key={minutes} value={minutes * 60}>{minutes} dakika</option>)}</select>
+          <FieldError name="callMaxDuration" />
+        </label>
+        <label style={labelStyle}>Telefon yapay zeka kapasitesi
+          <select value={settings.maxActivePhoneCalls} onChange={event => patch({ maxActivePhoneCalls: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{[2, 3, 4, 5].map(count => <option key={count} value={count}>{count} aktif çağrı</option>)}</select>
+          <FieldError name="maxActivePhoneCalls" />
+        </label>
+      </div>
+
+      <div style={{ ...subCard, padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Konu Dışı Israr (Otomatik Veda ve Kapatma)</strong>
+            <InfoTooltip title="Konu dışı otomatik kapatma nasıl çalışır?">Arayan kişi klinik veya randevu dışında sohbet açıp konuyu dağıttığında asistan önce nazikçe klinik işlemine yönlendirir. Seçtiğiniz sınırda konu dışına çıkmakta ısrar ederse aşağıdaki veda cümlesini söyleyip görüşmeyi (hem telefonda hem webde) otomatik sonlandırır.</InfoTooltip>
+          </div>
+          <span style={{ padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'var(--pc-tint, #e0f2fe)', color: 'var(--pc-tint-fg, #0369a1)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-clay-pale)' }}>
+            {settings.offTopicMaxStrikes === 1 ? '1. konu dışında anında kapatır' : `${settings.offTopicMaxStrikes}. konu dışında veda edip kapatır`}
+          </span>
         </div>
-        <span style={{ display: 'block', marginTop: 4, fontSize: 10, color: 'var(--foreground-3)' }}>{hint}</span>
-        <FieldError name={name} />
-      </label>)}
-      <label style={labelStyle}>Maksimum görüşme süresi
-        <select value={settings.callMaxDuration} onChange={event => patch({ callMaxDuration: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{Array.from({ length: 13 }, (_, i) => i + 3).map(minutes => <option key={minutes} value={minutes * 60}>{minutes} dakika</option>)}</select>
-        <FieldError name="callMaxDuration" />
-      </label>
-      <label style={labelStyle}>Telefon yapay zeka kapasitesi
-        <select value={settings.maxActivePhoneCalls} onChange={event => patch({ maxActivePhoneCalls: Number(event.target.value) })} style={{ ...inputStyle, marginTop: 6 }}>{[2, 3, 4, 5].map(count => <option key={count} value={count}>{count} aktif çağrı</option>)}</select>
-        <FieldError name="maxActivePhoneCalls" />
-      </label>
+
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label style={labelStyle}>Kaçıncı konu dışı ısrarda otomatik kapatılsın?
+            <select
+              value={settings.offTopicMaxStrikes}
+              onChange={event => patch({ offTopicMaxStrikes: Number(event.target.value) })}
+              style={{ ...inputStyle, marginTop: 6 }}
+            >
+              <option value={1}>1. kez konu dışına çıkarsa — Uyarmadan anında veda et ve kapat</option>
+              <option value={2}>2. kez konu dışına çıkarsa — 1 kez uyar, 2. kez veda et ve kapat (Önerilen)</option>
+              <option value={3}>3. kez konu dışına çıkarsa — 2 kez uyar, 3. kez veda et ve kapat</option>
+              <option value={4}>4. kez konu dışına çıkarsa — 3 kez uyar, 4. kez veda et ve kapat</option>
+              <option value={5}>5. kez konu dışına çıkarsa — 4 kez uyar, 5. kez veda et ve kapat</option>
+            </select>
+            <FieldError name="offTopicMaxStrikes" />
+          </label>
+
+          <div>
+            <label style={labelStyle}>Otomatik veda ve kapanış cümlesi
+              <input
+                type="text"
+                maxLength={240}
+                value={settings.offTopicCloseMessage}
+                onChange={event => patch({ offTopicCloseMessage: event.target.value })}
+                placeholder={DEFAULT_OFF_TOPIC_CLOSE_MESSAGE}
+                style={{ ...inputStyle, marginTop: 6 }}
+              />
+              <FieldError name="offTopicCloseMessage" />
+            </label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {OFF_TOPIC_MESSAGE_PRESETS.map(([presetLabel, presetText]) => (
+                <button
+                  key={presetLabel}
+                  type="button"
+                  onClick={() => patch({ offTopicCloseMessage: presetText })}
+                  style={settings.offTopicCloseMessage === presetText
+                    ? { ...primaryBtn, padding: '4px 9px', fontSize: 10, cursor: 'pointer' }
+                    : { ...clayBtn, padding: '4px 9px', fontSize: 10, cursor: 'pointer' }}
+                >
+                  {presetLabel}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>}
 
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
