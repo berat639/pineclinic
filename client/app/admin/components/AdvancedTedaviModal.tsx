@@ -47,9 +47,22 @@ const DEFAULT_PROCEDURE_COLORS: Record<string, string> = {
   'Zirkonyum Kuron': '#d97706',
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUuid = (val: unknown): val is string => typeof val === 'string' && UUID_PATTERN.test(val);
+
 export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinicId, doctors, shifts = [], doctorLeaves = [], onClose, onSaved, editingGroup }: any) {
   const toothDetailsBackdropDismiss = useBackdropDismiss(() => setSelectedToothForDetails(null));
   const contextMenuBackdropDismiss = useBackdropDismiss(() => setContextMenu(null));
+  const [resolvedPatientId, setResolvedPatientId] = useState<string | null>(() =>
+    isValidUuid(selectedEvent?.patientId) ? selectedEvent.patientId : isValidUuid(patientInfo?.id) ? patientInfo.id : null
+  );
+  useEffect(() => {
+    if (isValidUuid(selectedEvent?.patientId)) {
+      setResolvedPatientId(selectedEvent.patientId);
+    } else if (isValidUuid(patientInfo?.id)) {
+      setResolvedPatientId(patientInfo.id);
+    }
+  }, [selectedEvent?.patientId, patientInfo?.id]);
   const [fetchedLeaves, setFetchedLeaves] = useState<any[]>([]);
   const effectiveDoctorLeaves = Array.isArray(doctorLeaves) && doctorLeaves.length > 0 ? doctorLeaves : fetchedLeaves;
   const [toothDrafts, setToothDrafts] = useState<Record<string, DraftItem[]>>({})
@@ -151,6 +164,90 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [indicationIds, setIndicationIds] = useState<Record<string, string>>({});
   const prevProcColorsRef = useRef<Record<string, string>>({});
 
+  const ensurePatientId = async (signal?: AbortSignal): Promise<string | null> => {
+    if (isValidUuid(resolvedPatientId)) return resolvedPatientId;
+    if (isValidUuid(selectedEvent?.patientId)) {
+      setResolvedPatientId(selectedEvent.patientId);
+      return selectedEvent.patientId;
+    }
+    if (isValidUuid(patientInfo?.id)) {
+      setResolvedPatientId(patientInfo.id);
+      return patientInfo.id;
+    }
+    try {
+      const rawName = (
+        patientInfo?.name ||
+        selectedEvent?.intakePatientName ||
+        (typeof selectedEvent?.title === 'string' ? selectedEvent.title.split(' - ')[0] : '') ||
+        ''
+      ).trim();
+      const rawPhone = (
+        contactOverride?.phone ||
+        patientInfo?.phone ||
+        selectedEvent?.intakePatientPhone ||
+        ''
+      ).trim();
+      const rawEmail = (
+        contactOverride?.email ||
+        patientInfo?.email ||
+        ''
+      ).trim();
+
+      const listRes = await fetch('/api/dental/patients', { signal });
+      if (listRes.ok) {
+        const allPatients = await listRes.json().catch(() => []);
+        if (Array.isArray(allPatients)) {
+          const phoneDigits = rawPhone.replace(/\D/g, '').slice(-10);
+          const matched = allPatients.find((p: any) => {
+            if (!isValidUuid(p?.id)) return false;
+            if (phoneDigits.length === 10 && String(p.phone || '').replace(/\D/g, '').endsWith(phoneDigits)) return true;
+            if (rawName && String(p.name || '').trim().toLocaleLowerCase('tr-TR') === rawName.toLocaleLowerCase('tr-TR')) return true;
+            return false;
+          });
+          if (matched?.id) {
+            setResolvedPatientId(matched.id);
+            if (isValidUuid(selectedEvent?.id)) {
+              void fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patientId: matched.id }),
+              }).catch(() => {});
+            }
+            return matched.id;
+          }
+        }
+      }
+
+      const createRes = await fetch('/api/dental/patients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          name: rawName || 'Misafir Hasta',
+          phone: rawPhone || undefined,
+          email: rawEmail || undefined,
+        }),
+      });
+      if (createRes.ok) {
+        const created = await createRes.json().catch(() => null);
+        if (isValidUuid(created?.id)) {
+          setResolvedPatientId(created.id);
+          if (isValidUuid(selectedEvent?.id)) {
+            void fetch(`/api/dental/appointments/${selectedEvent.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ patientId: created.id }),
+            }).catch(() => {});
+          }
+          return created.id;
+        }
+      }
+    } catch {
+      // Ignore abort or network errors here; caller handles null
+    }
+    return null;
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     setBaseDataLoading(true); setBaseDataError(null);
@@ -159,24 +256,29 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       if (!response.ok) throw new Error('Veriler yüklenemedi');
       return response.json();
     };
-    Promise.all([
-      read(`/api/dental/patients/${selectedEvent.patientId}/consultations`),
-      read('/api/dental/inventory'), read('/api/dental/treatment-catalog'),
-      clinicId ? read(`/api/dental/clinics/${clinicId}/consultations/autocomplete`) : Promise.resolve({ consultationNotes: [], diseaseNotes: [] }),
-      (!Array.isArray(doctorLeaves) || doctorLeaves.length === 0)
-        ? fetch('/api/dental/doctors/leaves', { signal: controller.signal }).then(r => r.ok ? r.json() : []).catch(() => [])
-        : Promise.resolve([]),
-      !editingGroup?.id
-        ? fetch(`/api/dental/patients/${selectedEvent.patientId}/attachments`, { signal: controller.signal }).then(r => r.ok ? r.json() : []).catch(() => [])
-        : Promise.resolve(null),
-    ]).then(([notes, stock, catalog, completion, leavesResp, patientAtts]) => {
+    (async () => {
+      const targetPatientId = await ensurePatientId(controller.signal);
+      const [notes, stock, catalog, completion, leavesResp, patientAtts] = await Promise.all([
+        targetPatientId
+          ? fetch(`/api/dental/patients/${targetPatientId}/consultations`, { signal: controller.signal }).then(r => r.ok ? r.json() : []).catch(() => [])
+          : Promise.resolve([]),
+        read('/api/dental/inventory'),
+        read('/api/dental/treatment-catalog'),
+        clinicId ? read(`/api/dental/clinics/${clinicId}/consultations/autocomplete`).catch(() => ({ consultationNotes: [], diseaseNotes: [] })) : Promise.resolve({ consultationNotes: [], diseaseNotes: [] }),
+        (!Array.isArray(doctorLeaves) || doctorLeaves.length === 0)
+          ? fetch('/api/dental/doctors/leaves', { signal: controller.signal }).then(r => r.ok ? r.json() : []).catch(() => [])
+          : Promise.resolve([]),
+        (!editingGroup?.id && targetPatientId)
+          ? fetch(`/api/dental/patients/${targetPatientId}/attachments`, { signal: controller.signal }).then(r => r.ok ? r.json() : []).catch(() => [])
+          : Promise.resolve(null),
+      ]);
       if (!Array.isArray(notes) || !Array.isArray(stock) || !Array.isArray(catalog)) throw new Error('Veriler geçersiz');
       if (Array.isArray(leavesResp) && leavesResp.length > 0) setFetchedLeaves(leavesResp);
-      if (Array.isArray(patientAtts) && !editingGroup?.id) {
+      if (Array.isArray(patientAtts) && !editingGroup?.id && targetPatientId) {
         setPlanAttachments(patientAtts);
         const rad = patientAtts.find((item: any) => item.kind === 'radiology');
         if (rad) {
-          setSavedDcmUrl(`/api/dental/patients/${encodeURIComponent(selectedEvent.patientId)}/attachments/${rad.id}/files/0`);
+          setSavedDcmUrl(`/api/dental/patients/${encodeURIComponent(targetPatientId)}/attachments/${rad.id}/files/0`);
         }
         initialSnapshot.current = null;
       }
@@ -194,11 +296,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       setIndTemplates(indications.map((entry: any) => entry.name));
       setIndicationIds(Object.fromEntries(indications.map((entry: any) => [entry.name, entry.id])));
       setBaseDataLoading(false);
-    }).catch(error => {
+    })().catch(error => {
       if (error.name !== 'AbortError') { setBaseDataError('Hasta, stok veya katalog verileri yüklenemedi.'); setBaseDataLoading(false); }
     });
     return () => controller.abort();
-  }, [selectedEvent.patientId, clinicId, loadAttempt]);
+  }, [selectedEvent?.patientId, patientInfo?.id, clinicId, loadAttempt]);
 
   useEffect(() => {
     if (!editingGroup?.id) return;
@@ -301,8 +403,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         setNotificationChanged(false);
         const loadedAttachments = Array.isArray(plan.attachments) ? plan.attachments : [];
         const radAttachment = loadedAttachments.find((item: any) => item.kind === 'radiology');
-        const fallbackDcmUrl = radAttachment
-          ? `/api/dental/patients/${encodeURIComponent(selectedEvent.patientId)}/attachments/${radAttachment.id}/files/0`
+        const effectivePlanPatientId = plan.patientId || resolvedPatientId || selectedEvent?.patientId;
+        if (isValidUuid(plan.patientId) && !isValidUuid(resolvedPatientId)) {
+          setResolvedPatientId(plan.patientId);
+        }
+        const fallbackDcmUrl = (radAttachment && isValidUuid(effectivePlanPatientId))
+          ? `/api/dental/patients/${encodeURIComponent(effectivePlanPatientId)}/attachments/${radAttachment.id}/files/0`
           : null;
         setSavedDcmUrl((plan.treatments || []).find((item: any) => item.dcmUrl)?.dcmUrl || fallbackDcmUrl);
         setPlanAttachments(loadedAttachments);
@@ -1851,8 +1957,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     savingRef.current = true;
     setSaving(true);
     try {
+      const targetPatientId = await ensurePatientId();
+      if (!targetPatientId) throw new Error('Hasta kaydı oluşturulamadı veya doğrulanamadı.');
       if (notifyPatient && (missingPhone.trim() || missingEmail.trim())) {
-        const response = await fetch(`/api/dental/patients/${selectedEvent.patientId}`, {
+        const response = await fetch(`/api/dental/patients/${targetPatientId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone: missingPhone.trim() || undefined, email: missingEmail.trim() || undefined }),
         });
@@ -1901,13 +2009,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       }));
       if (!idempotencyKey.current) idempotencyKey.current = crypto.randomUUID();
       const payload = {
-        name: groupName, patientId: selectedEvent.patientId, appointmentId: selectedEvent.id || undefined,
+        name: groupName, patientId: targetPatientId, appointmentId: selectedEvent?.id || undefined,
         expectedVersion: planIdentity?.version, idempotencyKey: idempotencyKey.current,
         consultationNote: planNote, discountPercentBps: Math.round(discount * 100),
         discountFixedMinor: Math.round(discountFixed * 100),
         metadata: { toothSurfaces, toothSections, defectMarkers, defaultDoctorId, isPeriodic, periodDays: effectivePrimaryPeriodDays, periodDaysList: normalizedPeriodDaysList, notificationChannels: notifyPatient ? notificationChannels(notificationType) : [] }, attachmentIds: planAttachments.map(item => item.id), treatments,
       };
-      const response = await fetch(planIdentity ? `/api/dental/treatment-groups/${planIdentity.id}/full` : `/api/dental/patients/${selectedEvent.patientId}/treatments/bulk`, {
+      const response = await fetch(planIdentity ? `/api/dental/treatment-groups/${planIdentity.id}/full` : `/api/dental/patients/${targetPatientId}/treatments/bulk`, {
         method: planIdentity ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
@@ -2000,18 +2108,23 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const handleAttachmentSaved = (nextAttachments: PlanAttachment[], uploaded?: PlanAttachment) => {
     setPlanAttachments(nextAttachments);
     const rad = uploaded?.kind === 'radiology' ? uploaded : nextAttachments.find(item => item.kind === 'radiology');
-    const nextDcmUrl = rad
-      ? `/api/dental/patients/${encodeURIComponent(selectedEvent.patientId)}/attachments/${rad.id}/files/0`
+    const activePid = resolvedPatientId || selectedEvent?.patientId;
+    const nextDcmUrl = (rad && isValidUuid(activePid))
+      ? `/api/dental/patients/${encodeURIComponent(activePid)}/attachments/${rad.id}/files/0`
       : null;
     setSavedDcmUrl(nextDcmUrl);
     updateSnapshotAfterSave.current = true;
   };
 
+  const effectiveEvent = resolvedPatientId && selectedEvent?.patientId !== resolvedPatientId
+    ? { ...selectedEvent, patientId: resolvedPatientId }
+    : selectedEvent;
+
   if (!advancedView) {
     return (
       <>
         <PineTreatmentPlanView
-          identity={planIdentity} patient={{ ...patientInfo, ...contactOverride }} event={selectedEvent} doctors={doctors} shifts={shifts} doctorLeaves={effectiveDoctorLeaves}
+          identity={planIdentity} patient={{ ...patientInfo, ...contactOverride }} event={effectiveEvent} onEnsurePatient={() => ensurePatientId()} doctors={doctors} shifts={shifts} doctorLeaves={effectiveDoctorLeaves}
           attachments={planAttachments} setAttachments={setPlanAttachments} setUploading={setMediaUploading} onAttachmentSaved={handleAttachmentSaved}
           drafts={toothDrafts} setDrafts={setToothDrafts} selected={selectedTeeth} setSelected={setSelectedTeeth}
           procedures={procTemplates} setProcedures={setProcTemplates} indications={indTemplates} setIndications={setIndTemplates} indicationIds={indicationIds} setIndicationIds={setIndicationIds} inventory={inventory}
@@ -2588,9 +2701,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           {/* LEFT COLUMN */}
           <div style={{ flex: '2.5 1 640px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', paddingRight: 8 }}>
 
-            <PatientConsentPanel patientId={selectedEvent.patientId} />
+            <PatientConsentPanel patientId={resolvedPatientId || undefined} onEnsurePatient={() => ensurePatientId()} />
 
-            <PlanMediaPanel patientId={selectedEvent.patientId} groupId={planIdentity?.id} attachments={planAttachments} onChange={setPlanAttachments} onUploadingChange={setMediaUploading} onAttachmentSaved={handleAttachmentSaved} />
+            <PlanMediaPanel patientId={resolvedPatientId || ''} onEnsurePatient={() => ensurePatientId()} groupId={planIdentity?.id} attachments={planAttachments} onChange={setPlanAttachments} onUploadingChange={setMediaUploading} onAttachmentSaved={handleAttachmentSaved} />
 
             {/* DICOM / Tedavi Görüntüleri Kartı (Akordeon & Kompakt Tasarım) */}
             <div style={{
@@ -3653,25 +3766,30 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <button
                         disabled={!newConsultation.trim() && !newDisease.trim()}
                         onClick={async () => {
+                          const targetPid = await ensurePatientId();
+                          if (!targetPid) {
+                            toast.error('Hasta kaydı doğrulanamadı.');
+                            return;
+                          }
                           if (editingConsultationId) {
                             const res = await fetch(`/api/dental/consultations/${editingConsultationId}`, {
                               method: 'PUT', headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ consultationNote: newConsultation.trim(), diseaseNote: newDisease.trim() })
                             });
                             if (res.ok) {
-                              const updated = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json());
+                              const updated = await fetch(`/api/dental/patients/${targetPid}/consultations`).then(r => r.json());
                               setConsultations(updated);
                               setEditingConsultationId(null);
                               setNewConsultation('');
                               setNewDisease('');
                             }
                           } else {
-                            const res = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`, {
+                            const res = await fetch(`/api/dental/patients/${targetPid}/consultations`, {
                               method: 'POST', headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ clinicId: clinicId || undefined, doctorId: selectedEvent.doctorId, consultationNote: newConsultation.trim(), diseaseNote: newDisease.trim() })
                             });
                             if (res.ok) {
-                              const updated = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json());
+                              const updated = await fetch(`/api/dental/patients/${targetPid}/consultations`).then(r => r.json());
                               setConsultations(updated);
                               setNewConsultation('');
                               setNewDisease('');
@@ -3714,8 +3832,13 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                                     variant: 'danger',
                                     onConfirm: async () => {
                                       await fetch(`/api/dental/consultations/${c.id}`, { method: 'DELETE' });
-                                      const updated = await fetch(`/api/dental/patients/${selectedEvent.patientId}/consultations`).then(r => r.json());
-                                      setConsultations(updated);
+                                      const targetPid = await ensurePatientId();
+                                      if (targetPid) {
+                                        const updated = await fetch(`/api/dental/patients/${targetPid}/consultations`).then(r => r.json());
+                                        setConsultations(updated);
+                                      } else {
+                                        setConsultations(prev => prev.filter(item => item.id !== c.id));
+                                      }
                                     }
                                   });
                                 }} style={{ background: 'var(--card-bg)', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}><Trash2 size={14} /></button>

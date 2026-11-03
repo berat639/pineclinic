@@ -33,6 +33,7 @@ import {
 import { FlowEngine } from './services/flow-engine'
 import { isThinkingModel, normalizeThinkingLevel, prepareLiveToolDeclarations, type ThinkingLevel } from './services/live-model-profile'
 import {
+  buildRealtimeDetectionConfig,
   ENGLISH_INTERCEPT_RECOVERY_PROMPT,
   isEnglishResponseDetected,
   SEMANTIC_TURN_PROMPT_INSTRUCTION,
@@ -54,6 +55,23 @@ export function validateLiveCustomerIdentity(customerName: string | undefined, p
   const digits = tel.replace(/\D/g, '')
   if (digits.length < 10) return 'Telefon en az 10 hane olmalı; müşteriden numarayı tekrar söylemesini iste ve onaylat.'
   return null
+}
+
+/** Modelin bu turda veya hemen önceki turda veda cümlesini zaten söyleyip söylemediğini kontrol eder. */
+export function hasModelSpokenFarewell(text: string): boolean {
+  const normalized = String(text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[.,!?;:()[\]{}"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return false
+  return [
+    /\bsağlıklı\s+günler\b/u,
+    /\biyi\s+günler\b/u,
+    /\bhoşça\s*kalın\b/u,
+    /\bgörüşmek\s+üzere\b/u,
+    /\bgörüş(?:meyi|memizi)\s+sonlandır/u,
+  ].some(re => re.test(normalized))
 }
 
 /**
@@ -104,6 +122,11 @@ export async function createLiveSession(
   let automaticTransferTranscript = ''
   let transferConfirmationTranscript = ''
   let confirmedTransferRuleId: string | null = null
+  let recentUserTranscript = ''
+  let currentModelTurnTranscript = ''
+  let lastModelTurnTranscript = ''
+  let knowledgeCallsInTurn = 0
+  let hangupToolCalled = false
   let pendingTransferConfirmation: {
     ruleId: string
     target: string
@@ -152,7 +175,16 @@ export async function createLiveSession(
 
     if (name === 'akisBilgisiGuncelle') {
       if (!flowEngine) return { success: false, message: 'Akışla çalışma bu görüşmede açık değil.' }
-      const fields = (args.bilgiler && typeof args.bilgiler === 'object') ? args.bilgiler as Record<string, unknown> : {}
+      const rawFields = (args.bilgiler && typeof args.bilgiler === 'object') ? args.bilgiler as Record<string, unknown> : {}
+      const fields: Record<string, unknown> = { ...rawFields }
+      if (!fields.saat && recentUserTranscript) {
+        const { extractSpokenTurkishTime } = await import('./services/assistant-appointments')
+        const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
+        if (extractedTime) {
+          fields.saat = extractedTime
+          console.log(`[akisBilgisiGuncelle] Kullanıcı konuşmasından saat otomatik tamamlandı: ${extractedTime}`)
+        }
+      }
       const result = await flowEngine.accept({ fields, intent: args.yeni_kisi === true ? 'new_person' : 'continue' })
       return {
         success: result.success,
@@ -168,6 +200,13 @@ export async function createLiveSession(
       }
       if (!args.musteri_adi && initialFields?.musteri_adi) {
         args.musteri_adi = initialFields.musteri_adi
+      }
+      if (!args.saat && recentUserTranscript) {
+        const { extractSpokenTurkishTime } = await import('./services/assistant-appointments')
+        const extractedTime = extractSpokenTurkishTime(recentUserTranscript)
+        if (extractedTime) {
+          args.saat = extractedTime
+        }
       }
       let flowActionId: string | undefined
       if (flowEngine) {
@@ -462,8 +501,16 @@ export async function createLiveSession(
     }
     if (name === 'searchKnowledgeBase') {
       const sorgu = (args.sorgu as string) ?? ''
-      console.log(`[Knowledge] searchKnowledgeBase sorgu: "${sorgu}"`)
+      knowledgeCallsInTurn++
+      console.log(`[Knowledge] searchKnowledgeBase sorgu (#${knowledgeCallsInTurn}): "${sorgu}"`)
       try {
+        if (knowledgeCallsInTurn >= 2) {
+          const { buildClinicRosterAndHoursText } = await import('./services/knowledge')
+          const liveRoster = await buildClinicRosterAndHoursText(options.clinicId)
+          return {
+            sonuc: `${liveRoster ? `${liveRoster}\n\n` : ''}Bu konuşma turunda bilgi tabanı araması zaten tamamlandı. Tekrar searchKnowledgeBase aracını ÇAĞIRMA; mevcut bilgilerinle müşteriye hemen yanıt ver.`,
+          }
+        }
         const results = await searchKnowledge(sorgu, {
           limit: 5,
           direction: options.direction || 'inbound',
@@ -471,15 +518,19 @@ export async function createLiveSession(
         })
         console.log(`[Knowledge] Sonuç sayısı: ${results.length}${results.length > 0 ? ` → ${results.map(r => r.documentName).join(', ')}` : ''}`)
         if (results.length === 0) {
-          return { sonuc: 'Bilgi tabanında ilgili bilgi bulunamadı.' }
+          return {
+            sonuc: 'Bilgi tabanında bu konuda ek kayıt bulunamadı. Aynı soru için searchKnowledgeBase aracını tekrar ÇAĞIRMA; mevcut bilgilerinle müşteriye doğrudan ve nazikçe yanıt ver.',
+          }
         }
         const content = results
           .map((r, i) => `[${i + 1}] (${r.documentName})\n${r.chunkText}`)
           .join('\n\n---\n\n')
-        return { sonuc: content }
+        return {
+          sonuc: `${content}\n\n[Not: Arama tamamlandı; aynı soru için searchKnowledgeBase aracını tekrar çağırmadan müşteriye yanıt ver.]`,
+        }
       } catch (err) {
         console.error('[Knowledge] Arama hatası:', err)
-        return { sonuc: 'Bilgi tabanı şu an kullanılamıyor.' }
+        return { sonuc: 'Bilgi tabanı şu an kullanılamıyor. Tekrar arama yapmadan müşteriye yanıt ver.' }
       }
     }
     if (name === 'musteriSorgula') {
@@ -625,33 +676,25 @@ export async function createLiveSession(
       const tarih = args.tarih as string | undefined
       const from = args.baslangic_tarih as string | undefined
       const to = args.bitis_tarih as string | undefined
-      // En az bir geçerli tarih parametresi zorunlu
+      const { getClinicAvailabilityReport, normalizeAppointmentDate } = await import('./services/assistant-appointments')
+      const normTarih = tarih ? normalizeAppointmentDate(tarih) : undefined
+      const normFrom = from ? normalizeAppointmentDate(from) : undefined
+      const normTo = to ? normalizeAppointmentDate(to) : undefined
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/
-      const hasValidDate = (tarih && dateRegex.test(tarih)) || (from && dateRegex.test(from))
+      const hasValidDate = (normTarih && dateRegex.test(normTarih)) || (normFrom && dateRegex.test(normFrom))
       if (!hasValidDate) {
         console.log(`[DB] randevuMusaitlikKontrol: geçersiz/eksik tarih (tarih=${tarih} from=${from} to=${to})`)
         return { sonuc: 'Geçerli bir tarih belirtilmedi. Müşteriye hangi tarihte müsait olduğunu sor ve YYYY-MM-DD formatında tarih ile tekrar çağır.' }
       }
-      console.log(`[DB] randevuMusaitlikKontrol: tarih=${tarih} from=${from} to=${to}`)
+      console.log(`[DB] randevuMusaitlikKontrol: tarih=${normTarih} from=${normFrom} to=${normTo}`)
       try {
-        const result = await getAppointmentsByDateRange({
-          date: tarih,
-          from: from,
-          to: to || from,
+        const report = await getClinicAvailabilityReport({
+          clinicId: options.clinicId,
+          date: normTarih,
+          from: normFrom,
+          to: normTo || normFrom,
         })
-        const count = result.length
-        if (count === 0) {
-          return { sonuc: `${tarih || `${from} - ${to}`} tarihinde henüz randevu yok — müsait.` }
-        }
-        const TYPE_LABELS: Record<string, string> = {
-          service: 'Tedavi', test_drive: 'Muayene', gallery_visit: 'Kontrol', other: 'Randevu',
-        }
-        const summary = result
-          .map((a, i) => `[${i + 1}] ${a.date} ${a.time || '?'} — ${a.issueOrRequest || TYPE_LABELS[a.type] || a.type || 'Randevu'}`)
-          .join('\n')
-        return {
-          sonuc: `${tarih || `${from} - ${to}`} tarihinde ${count} randevu mevcut:\n${summary}\n\nNot: Mevcut randevu sayısına göre müsaitlik değerlendir.`,
-        }
+        return { sonuc: report.sonuc }
       } catch (err) {
         console.error('[DB] randevuMusaitlikKontrol exception:', err)
         return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
@@ -690,7 +733,9 @@ export async function createLiveSession(
       return { success: true, sehir, sicaklik: '20°C', durum: 'açık', message: `${sehir}'da hava şu an gayet güzel ve ılıman görünüyor.` }
     }
     if (name === 'cagriySonlandir') {
+      const alreadyClosing = hangupToolCalled
       closingSession = true
+      hangupToolCalled = true
       if (flowEngine) {
         const expected = flowEngine.expectedAction()
         if (expected && expected.action === 'end_call') {
@@ -698,9 +743,19 @@ export async function createLiveSession(
         }
       }
       callbacks.onHangup?.()
+      const alreadySpokeFarewell =
+        alreadyClosing ||
+        hasModelSpokenFarewell(currentModelTurnTranscript) ||
+        hasModelSpokenFarewell(lastModelTurnTranscript)
+      if (alreadySpokeFarewell) {
+        return {
+          success: true,
+          _skipToolResponse: true,
+        }
+      }
       return {
         success: true,
-        message: 'Görüşme sonlandırılıyor. Eğer veda cümleni henüz söylemediysen yalnızca kısa bir veda cümlesi söyle ve dur.',
+        message: 'Görüşme sonlandırılıyor. Yalnızca tek bir kısa veda cümlesi ("Sağlıklı günler dilerim, hoşça kalın.") söyle ve başka araç çağırmadan dur.',
       }
     }
     return { success: false, message: 'Bilinmeyen araç çağrısı. Yalnızca Türkçe yanıt ver.' }
@@ -725,6 +780,7 @@ export async function createLiveSession(
    */
   function sendToolResponseWithRetry(fcName: string, fcId: string | undefined, result: Record<string, unknown>, attempt = 0): void {
     if (closedByUser) return
+    if (result._skipToolResponse === true) return
     if (closingSession && fcName !== 'cagriySonlandir') return
     const payload = {
       ...result,
@@ -791,7 +847,10 @@ export async function createLiveSession(
     ...(isThinkingModel(options.model) ? {
       thinkingConfig: { thinkingLevel: normalizeThinkingLevel(options.thinkingLevel).toLowerCase() },
     } : {}),
-    ...(options.realtimeInputConfig ? { realtimeInputConfig: options.realtimeInputConfig } : {}),
+    realtimeInputConfig: options.realtimeInputConfig ?? buildRealtimeDetectionConfig(
+      options.turnDetectionMode ?? 'semantic',
+      options.telephonyChannel ? 'phone' : 'web',
+    ),
   }
 
   const tools: any[] = []
@@ -836,7 +895,6 @@ export async function createLiveSession(
     let lastReportedPrompt = 0
     let lastReportedResponse = 0
     let lastReportedTotal = 0
-    let currentModelTurnTranscript = ''
     let englishInterceptedInTurn = false
     let englishRecoveryCount = 0
 
@@ -880,7 +938,7 @@ export async function createLiveSession(
         if (msg.toolCall?.functionCalls?.length) {
           for (const fc of msg.toolCall.functionCalls) {
             const fcName = fc.name ?? ''
-            if (closingSession && fcName !== 'cagriySonlandir') {
+            if (closingSession && (fcName !== 'cagriySonlandir' || hangupToolCalled)) {
               console.log(`[Tool ${fcName}] Kapanış aşamasında olduğu için araç çağrısı yoksayıldı`)
               continue
             }
@@ -966,6 +1024,8 @@ export async function createLiveSession(
         // de iletebilmek için boş text'leri filtreliyoruz.
         if (content.inputTranscription?.text) {
           const transcript = content.inputTranscription.text
+          recentUserTranscript = `${recentUserTranscript} ${transcript}`.trim().slice(-400)
+          knowledgeCallsInTurn = 0
           callbacks.onTranscript('user', transcript)
 
           let confirmationHandled = false
@@ -1047,6 +1107,9 @@ export async function createLiveSession(
 
         if (content.turnComplete) {
           const wasEnglishBlocked = englishInterceptedInTurn
+          if (currentModelTurnTranscript.trim()) {
+            lastModelTurnTranscript = currentModelTurnTranscript.trim()
+          }
           currentModelTurnTranscript = ''
           englishInterceptedInTurn = false
           automaticTransferTranscript = ''

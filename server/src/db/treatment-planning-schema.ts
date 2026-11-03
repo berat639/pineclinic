@@ -37,6 +37,7 @@ export const treatmentPlanningDDL = [
     active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE treatment_catalog ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#0284c7'`,
   `CREATE UNIQUE INDEX IF NOT EXISTS treatment_catalog_active_name_idx
     ON treatment_catalog(clinic_id, kind, name_key) WHERE active = true`,
   `CREATE TABLE IF NOT EXISTS patient_consent_requests (
@@ -71,6 +72,7 @@ export const treatmentPlanningDDL = [
     kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', request_key TEXT NOT NULL,
     total_bytes BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE plan_attachments ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES treatment_groups(id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS plan_attachment_request_idx ON plan_attachments(clinic_id, request_key)`,
   `CREATE TABLE IF NOT EXISTS plan_attachment_files (
     attachment_id UUID NOT NULL REFERENCES plan_attachments(id) ON DELETE CASCADE,

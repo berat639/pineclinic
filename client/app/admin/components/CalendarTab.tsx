@@ -705,10 +705,20 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     let targetPatientId = event.patientId;
     if (!targetPatientId && patients.length > 0) {
       const candidateName = (event.intakePatientName || event.title?.split(' - ')[0] || '').trim().toLocaleLowerCase('tr-TR');
-      const matched = patients.find((p: any) => p?.name?.trim().toLocaleLowerCase('tr-TR') === candidateName);
+      const phoneDigits = String(event.intakePatientPhone || '').replace(/\D/g, '').slice(-10);
+      const matched = patients.find((p: any) => {
+        if (phoneDigits.length === 10 && String(p?.phone || '').replace(/\D/g, '').endsWith(phoneDigits)) return true;
+        return candidateName && p?.name?.trim().toLocaleLowerCase('tr-TR') === candidateName;
+      });
       if (matched?.id) {
         targetPatientId = matched.id;
         setSelectedEvent(prev => prev && prev.id === event.id && !prev.patientId ? { ...prev, patientId: matched.id } : prev);
+        setEvents(prev => prev.map((ev: any) => ev.id === event.id && !ev.patientId ? { ...ev, patientId: matched.id } : ev));
+        void fetch(`/api/dental/appointments/${event.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patientId: matched.id }),
+        }).catch(() => {});
       }
     }
     if (!targetPatientId) return;

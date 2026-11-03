@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import PlanDialog from './PlanDialog'
 import styles from './PineTreatmentPlan.module.css'
 
-export default function PlanHistoryDialog({ patientId, entries, onChange, onClose }: { patientId: string; entries: any[]; onChange: (value: any[]) => void; onClose: () => void }) {
+export default function PlanHistoryDialog({ patientId, onEnsurePatient, entries, onChange, onClose }: { patientId?: string | null; onEnsurePatient?: () => Promise<string | null>; entries: any[]; onChange: (value: any[]) => void; onClose: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [disease, setDisease] = useState('')
@@ -12,9 +12,11 @@ export default function PlanHistoryDialog({ patientId, entries, onChange, onClos
     event.preventDefault(); if (busy) return
     setBusy(true); setError('')
     try {
-      const response = await fetch(editingId ? `/api/dental/consultations/${editingId}` : `/api/dental/patients/${patientId}/consultations`, { method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consultationNote: note.trim(), diseaseNote: disease.trim() }) })
+      const targetPid = (patientId && patientId !== 'null' ? patientId : await onEnsurePatient?.()) || ''
+      if (!targetPid) throw new Error('Hasta kaydı doğrulanamadı.')
+      const response = await fetch(editingId ? `/api/dental/consultations/${editingId}` : `/api/dental/patients/${targetPid}/consultations`, { method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consultationNote: note.trim(), diseaseNote: disease.trim() }) })
       if (!response.ok) throw new Error('Geçmiş notu kaydedilemedi.')
-      const refreshed = await fetch(`/api/dental/patients/${patientId}/consultations`)
+      const refreshed = await fetch(`/api/dental/patients/${targetPid}/consultations`)
       if (!refreshed.ok) throw new Error('Geçmiş yenilenemedi. Pencereyi yeniden açın.')
       onChange(await refreshed.json()); setNote(''); setDisease(''); setEditingId(null)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Kayıt başarısız.') }

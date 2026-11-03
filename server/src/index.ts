@@ -604,6 +604,7 @@ const app = new Elysia()
     const b = body as Record<string, unknown>
     try {
       const updated = await updateDentalAppointment(params.id, {
+        patientId: b.patientId !== undefined ? (b.patientId as string | null) : undefined,
         doctorId: b.doctorId !== undefined ? (b.doctorId as string | null) : undefined,
         timeConfirmed: b.timeConfirmed !== undefined ? (b.timeConfirmed as boolean) : undefined,
         status: b.status as string | undefined,
@@ -2454,17 +2455,21 @@ const app = new Elysia()
       return { error: 'Yetkisiz araç çağrısı: geçerli oturum anahtarı gerekli.' }
     }
     const args = (body ?? {}) as { tarih?: string; baslangic_tarih?: string; bitis_tarih?: string }
+    const { getClinicAvailabilityReport, normalizeAppointmentDate } = await import('./services/assistant-appointments')
+    const normTarih = args.tarih ? normalizeAppointmentDate(args.tarih) : undefined
+    const normFrom = args.baslangic_tarih ? normalizeAppointmentDate(args.baslangic_tarih) : undefined
+    const normTo = args.bitis_tarih ? normalizeAppointmentDate(args.bitis_tarih) : undefined
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/
-    const hasValidDate = (args.tarih && dateRegex.test(args.tarih)) || (args.baslangic_tarih && dateRegex.test(args.baslangic_tarih))
+    const hasValidDate = (normTarih && dateRegex.test(normTarih)) || (normFrom && dateRegex.test(normFrom))
     if (!hasValidDate) return { sonuc: 'Geçerli bir tarih belirtilmedi.' }
     try {
-      const result = await getAppointmentsByDateRange({
-        date: args.tarih,
-        from: args.baslangic_tarih,
-        to: args.bitis_tarih || args.baslangic_tarih,
+      const report = await getClinicAvailabilityReport({
+        clinicId,
+        date: normTarih,
+        from: normFrom,
+        to: normTo || normFrom,
       })
-      if (result.length === 0) return { sonuc: `${args.tarih || `${args.baslangic_tarih} - ${args.bitis_tarih}`} tarihinde henüz randevu yok — müsait.` }
-      return { sonuc: `${result.length} randevu mevcut.`, count: result.length }
+      return { sonuc: report.sonuc, count: report.count }
     } catch (err) {
       console.error('[Tools/Availability]', err)
       return { sonuc: 'Müsaitlik kontrol servisi şu an kullanılamıyor.' }
@@ -2643,11 +2648,11 @@ app.ws('/ws', {
     if (message instanceof Buffer || message instanceof Uint8Array) {
       const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
       info.session.sendRealtimeInput({
-        media: {
+        audio: {
           mimeType: 'audio/pcm;rate=16000',
           data: buf.toString('base64'),
         }
-      } as any)
+      })
       info.userAudioChunks.push({ buffer: buf, offsetMs: Date.now() - info.startedAtMs })
         // Ses geldi — idle timer'ı sıfırla
         ; (ws.data as any).touchActivity?.()

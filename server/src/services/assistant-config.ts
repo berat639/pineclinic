@@ -77,6 +77,20 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     }
   } catch {}
 
+  // Inject live clinic doctor roster and working hours from DB so the assistant
+  // immediately knows active doctors, their specialties, and clinic hours.
+  if (!minimalFlow) {
+    try {
+      const { buildClinicRosterAndHoursText } = await import('./knowledge')
+      const rosterText = await buildClinicRosterAndHoursText()
+      if (rosterText) {
+        parts.push(
+          `KLİNİK HEKİM KADROSU VE MESAİ BİLGİLERİ (CANLI VERİTABANI):\n${rosterText}\nNot: Müşteri hekimlerimiz, uzmanlık alanları veya çalışma saatlerimiz hakkında soru sorduğunda doğrudan bu bilgileri doğal konuşma dilinde aktar; zaten burada yer alan hekim bilgisi için tekrar tekrar searchKnowledgeBase çağırma.`,
+        )
+      }
+    } catch {}
+  }
+
   // Inject optional per-clinic AI behavior preferences (tone, length, language, KB strictness)
   try {
     const [tonePreset, responseLength, languagePref, unknownFallback, kbStrictness] = await Promise.all([

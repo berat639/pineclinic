@@ -322,7 +322,8 @@ export default function PineTreatmentPlanView(p: any) {
           aria-label="Bildirim ayarları"
         >
           <PatientConsentPanel
-            patientId={p.event.patientId}
+            patientId={p.event?.patientId || undefined}
+            onEnsurePatient={p.onEnsurePatient}
             selectedChannels={p.notificationChannels}
             onChannelsChange={p.setNotificationChannels}
             onContactChange={p.onContactChange}
@@ -502,7 +503,7 @@ export default function PineTreatmentPlanView(p: any) {
       {(p.listening || p.analyzing || p.voiceError) && <div className={styles.hint} aria-live="polite">{p.voiceError || (p.analyzing ? 'Komut analiz ediliyor…' : p.transcript || 'Dinleniyor…')}</div>}
     </header>
     <main className={styles.content}>
-      <PlanMediaPanel patientId={p.event.patientId} groupId={p.identity?.id} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} onAttachmentSaved={p.onAttachmentSaved} />
+      <PlanMediaPanel patientId={p.event?.patientId} onEnsurePatient={p.onEnsurePatient} groupId={p.identity?.id} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} onAttachmentSaved={p.onAttachmentSaved} />
       <section className={styles.section} aria-label="Odontogram">
         <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.</span>
           <div className={styles.chartActions}>
@@ -873,7 +874,7 @@ export default function PineTreatmentPlanView(p: any) {
         })
       })}
     />
-    {historyOpen && <PlanHistoryDialog patientId={p.event.patientId} entries={p.consultations} onChange={p.setConsultations} onClose={() => setHistoryOpen(false)} />}
+    {historyOpen && <PlanHistoryDialog patientId={p.event?.patientId} onEnsurePatient={p.onEnsurePatient} entries={p.consultations} onChange={p.setConsultations} onClose={() => setHistoryOpen(false)} />}
     {p.showClose && (
       <PlanDialog title="Kaydedilmemiş Değişiklikler" onClose={() => p.setShowClose(false)}>
         <p className={styles.dialogDescription} style={{ margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.55 }}>

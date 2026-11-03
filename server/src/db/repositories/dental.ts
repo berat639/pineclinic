@@ -596,6 +596,70 @@ export async function checkDoctorLeaveConflict(
   }
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function isValidUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_REGEX.test(value)
+}
+
+async function ensureAppointmentPatient(
+  clinicId: string,
+  appt: {
+    id: string
+    patientId?: string | null
+    intakePatientName?: string | null
+    intakePatientPhone?: string | null
+    title?: string | null
+    status?: string | null
+  }
+): Promise<string | null> {
+  if (isValidUuid(appt.patientId)) return appt.patientId
+  if (!isValidUuid(appt.id) || appt.status === 'cancelled') return null
+  try {
+    const rawName = (appt.intakePatientName || (typeof appt.title === 'string' ? appt.title.split(' - ')[0] : '') || '').trim()
+    const rawPhone = (appt.intakePatientPhone || '').trim()
+    let resolvedId: string | null = null
+
+    if (rawPhone) {
+      const byPhone = await findPatientByPhone(rawPhone, clinicId)
+      if (byPhone?.id) resolvedId = byPhone.id
+    }
+
+    if (!resolvedId && rawName) {
+      const [byName] = await db
+        .select({ id: patients.id })
+        .from(patients)
+        .where(and(eq(patients.clinicId, clinicId), eq(patients.isArchived, false), ilike(patients.name, rawName)))
+        .limit(1)
+      if (byName?.id) resolvedId = byName.id
+    }
+
+    if (!resolvedId) {
+      const [created] = await db
+        .insert(patients)
+        .values({
+          clinicId,
+          name: rawName || 'Misafir Hasta',
+          phone: rawPhone || null,
+          balance: 0,
+        })
+        .returning({ id: patients.id })
+      if (created?.id) resolvedId = created.id
+    }
+
+    if (resolvedId) {
+      await db
+        .update(dentalAppointments)
+        .set({ patientId: resolvedId, updatedAt: new Date() })
+        .where(and(eq(dentalAppointments.id, appt.id), eq(dentalAppointments.clinicId, clinicId)))
+      appt.patientId = resolvedId
+    }
+    return resolvedId
+  } catch (err) {
+    console.warn('[DentalRepo] Could not self-heal appointment patientId:', err)
+    return null
+  }
+}
+
 // ── Dental Appointments ──────────────────────────────────────────────────────
 
 export async function listDentalAppointments(dateStr?: string) {
@@ -616,6 +680,13 @@ export async function listDentalAppointments(dateStr?: string) {
   }
   
   if (appts.length === 0) return appts;
+
+  // Self-healing: patientId eksik olan aktif randevulara otomatik hasta kaydı bağla
+  for (const a of appts) {
+    if (!isValidUuid(a.patientId) && a.status !== 'cancelled') {
+      await ensureAppointmentPatient(clinicId, a)
+    }
+  }
 
   // Self-healing: Eğer gelecekteki aktif bir randevunun hekimi dondurulmuş (active = false) ise otomatik boşa çıkar
   try {
@@ -745,6 +816,7 @@ export async function deleteDentalAppointment(id: string): Promise<boolean> {
 // ── Patients ─────────────────────────────────────────────────────────────────
 
 export async function getPatient(id: string) {
+  if (!isValidUuid(id)) return null
   const clinicId = requireClinicId()
   const [row] = await db.select().from(patients).where(and(eq(patients.id, id), eq(patients.clinicId, clinicId))).limit(1)
   return row ?? null
@@ -769,6 +841,7 @@ export async function findPatientByPhone(phone: string, explicitClinicId?: strin
 }
 
 export async function getPatientFullProfile(patientId: string) {
+  if (!isValidUuid(patientId)) return null
   await ensureAiAppointmentReviewSchema()
   await ensurePatientArchiveSchema()
   await ensurePatientActivityLogsTable()
@@ -1131,6 +1204,7 @@ async function enrichTreatmentDoctorIds(plans: Array<typeof treatmentPlans.$infe
 }
 
 export async function getPatientTreatmentGroups(patientId: string) {
+  if (!isValidUuid(patientId)) return { groups: [], ungrouped: [] }
   const clinicId = requireClinicId()
   const groups = await db.select({
     id: treatmentGroups.id,
@@ -1203,6 +1277,7 @@ export async function getPatientTreatmentGroups(patientId: string) {
 }
 
 export async function getAppointmentTreatments(appointmentId: string) {
+  if (!isValidUuid(appointmentId)) return []
   const clinicId = requireClinicId()
   return await db.select({
     id: appointmentTreatments.id,
@@ -1322,6 +1397,7 @@ export async function deleteTreatmentGroup(id: string): Promise<boolean> {
 // ── Treatment Plans ──────────────────────────────────────────────────────────
 
 export async function getPatientTreatments(patientId: string) {
+  if (!isValidUuid(patientId)) return []
   const clinicId = requireClinicId()
   const plans = await db.select().from(treatmentPlans).where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'))).orderBy(desc(treatmentPlans.createdAt))
 
@@ -1453,6 +1529,7 @@ export async function deleteTreatmentPlan(id: string): Promise<boolean> {
 // ── Payments ─────────────────────────────────────────────────────────────────
 
 export async function getPatientPayments(patientId: string) {
+  if (!isValidUuid(patientId)) return []
   await ensurePatientArchiveSchema()
   return db.select().from(patientPayments).where(and(eq(patientPayments.clinicId, requireClinicId()), eq(patientPayments.patientId, patientId), eq(patientPayments.isActive, true))).orderBy(desc(patientPayments.createdAt))
 }
@@ -1585,6 +1662,7 @@ export async function deletePayment(id: string): Promise<boolean> {
 // ── Completed Works ──────────────────────────────────────────────────────────
 
 export async function getPatientCompletedWorks(patientId: string) {
+  if (!isValidUuid(patientId)) return []
   return db.select().from(completedWorks).where(and(eq(completedWorks.clinicId, requireClinicId()), eq(completedWorks.patientId, patientId))).orderBy(desc(completedWorks.createdAt))
 }
 
@@ -1741,6 +1819,7 @@ export async function getPatientDoctorHistory(phone: string, explicitClinicId?: 
 export async function updateDentalAppointment(
   id: string,
   data: {
+    patientId?: string | null
     doctorId?: string | null
     timeConfirmed?: boolean
     status?: string
@@ -1756,6 +1835,8 @@ export async function updateDentalAppointment(
   const clinicId = requireClinicId()
   const [existing] = await db.select({
     patientId: dentalAppointments.patientId,
+    intakePatientName: dentalAppointments.intakePatientName,
+    intakePatientPhone: dentalAppointments.intakePatientPhone,
     status: dentalAppointments.status,
     reviewStatus: dentalAppointments.reviewStatus,
     startTime: dentalAppointments.startTime,
@@ -1780,6 +1861,19 @@ export async function updateDentalAppointment(
     }
   }
   const values: Record<string, unknown> = {}
+  if (data.patientId !== undefined && isValidUuid(data.patientId)) {
+    values.patientId = data.patientId
+  } else if (!isValidUuid(existing.patientId) && data.status !== 'cancelled') {
+    const healedPatientId = await ensureAppointmentPatient(clinicId, {
+      id,
+      patientId: existing.patientId,
+      intakePatientName: existing.intakePatientName,
+      intakePatientPhone: existing.intakePatientPhone,
+      title: existing.title,
+      status: data.status ?? existing.status,
+    })
+    if (healedPatientId) values.patientId = healedPatientId
+  }
   if (data.doctorId !== undefined) values.doctorId = data.doctorId
   if (data.timeConfirmed !== undefined) values.timeConfirmed = data.timeConfirmed
   if (data.status !== undefined) {
@@ -1962,9 +2056,9 @@ export async function approveAiAppointment(id: string, data: {
     const [appointment] = await tx.select().from(dentalAppointments)
       .where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).for('update')
     if (!appointment) throw new Error('Randevu bulunamadı.')
-    if (appointment.status !== 'pending_review' || appointment.reviewStatus !== 'pending') throw new Error('Bu AI talebi zaten sonuçlandırılmış.')
+    if (appointment.status === 'cancelled' || appointment.reviewStatus === 'rejected') throw new Error('Bu AI talebi zaten sonuçlandırılmış.')
 
-    let patientId = data.patientId
+    let patientId = data.patientId || (!data.patient?.name?.trim() && isValidUuid(appointment.patientId) ? appointment.patientId : undefined)
     if (patientId) {
       const [patient] = await tx.select({ id: patients.id }).from(patients)
         .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId))).limit(1)
@@ -1975,6 +2069,13 @@ export async function approveAiAppointment(id: string, data: {
           ...(data.patientUpdate.phone !== undefined ? { phone: data.patientUpdate.phone.trim() || null } : {}),
         }).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
       }
+    } else if (isValidUuid(appointment.patientId) && data.patient?.name?.trim()) {
+      // Auto-healed patient record already exists on this appointment; update it in place instead of creating a duplicate
+      patientId = appointment.patientId
+      await tx.update(patients).set({
+        name: data.patient.name.trim(),
+        ...(data.patient.phone !== undefined ? { phone: data.patient.phone.trim() || null } : {}),
+      }).where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
     } else {
       const [patient] = await tx.insert(patients).values({
         clinicId, name: data.patient!.name.trim(), phone: data.patient!.phone?.trim() || null, balance: 0,
@@ -2004,7 +2105,7 @@ export async function approveAiAppointment(id: string, data: {
       status: data.doctorId ? 'scheduled' : 'pending_assignment', type: 'kontrol', timeConfirmed: true,
       reviewStatus: 'approved', reviewedBy: data.reviewedBy, reviewedAt: new Date(), rejectionReason: null,
       title: `${appointment.intakePatientName || appointment.title.split(' - ')[0]} - kontrol`, updatedAt: new Date(),
-    }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.reviewStatus, 'pending'))).returning()
+    }).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).returning()
     if (!updated) throw new Error('Randevu aynı anda başka bir kullanıcı tarafından işlendi.')
     return updated
   }).then(updated => {
@@ -2038,6 +2139,7 @@ export async function deleteConsultation(id: string) {
 // ── Diseases (Hastalıklar) ───────────────────────────────────────────────────
 
 export async function getPatientDiseases(patientId: string) {
+  if (!isValidUuid(patientId)) return []
   const { patientDiseases } = await import('../schema')
   return db.select().from(patientDiseases).where(and(eq(patientDiseases.clinicId, requireClinicId()), eq(patientDiseases.patientId, patientId))).orderBy(desc(patientDiseases.createdAt))
 }
@@ -2078,6 +2180,7 @@ export async function createConsultation(data: {
 }
 
 export async function getPatientConsultations(patientId: string) {
+  if (!isValidUuid(patientId)) return []
   const clinicId = requireClinicId()
   return await db.query.consultations.findMany({
     where: and(eq(consultations.clinicId, clinicId), eq(consultations.patientId, patientId)),

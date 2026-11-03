@@ -34,8 +34,13 @@ export function normalizeThinkingLevel(value: string | null | undefined): Thinki
     : DEFAULT_THINKING_LEVEL
 }
 
-/** Extended Thinking only accepts asynchronous tool declarations. */
+/**
+ * Extended Thinking requires NON_BLOCKING tool declarations.
+ * Standard gemini-3.8-live defaults to NON_BLOCKING when behavior is omitted,
+ * which adds multi-second filler turns before/after fast DB tools; explicitly
+ * set BLOCKING on gemini-3.8-live for instant single-turn tool execution.
+ */
 export function prepareLiveToolDeclarations<T extends object>(model: string, declarations: T[]): T[] {
-  if (!isThinkingModel(model)) return declarations
-  return declarations.map(declaration => ({ ...declaration, behavior: 'NON_BLOCKING' }) as T)
+  const behavior = isThinkingModel(model) ? 'NON_BLOCKING' : 'BLOCKING'
+  return declarations.map(declaration => ({ ...declaration, behavior }) as T)
 }

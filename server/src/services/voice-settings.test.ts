@@ -119,9 +119,9 @@ describe('voice-settings validation & prompt registry', () => {
     expect(isEnglishResponseDetected("I'm sorry, I cannot help with that.")).toBe(true)
 
     const phoneCfg = buildRealtimeDetectionConfig('semantic', 'phone')
-    expect(phoneCfg.automaticActivityDetection?.silenceDurationMs).toBe(380)
+    expect(phoneCfg.automaticActivityDetection?.silenceDurationMs).toBe(280)
     const webCfg = buildRealtimeDetectionConfig('semantic', 'web')
-    expect(webCfg.automaticActivityDetection?.silenceDurationMs).toBe(420)
+    expect(webCfg.automaticActivityDetection?.silenceDurationMs).toBe(350)
   })
 
   test('buildFlowNodePrompt combines consecutive musteri_adi+telefon and tarih+saat into single natural questions', async () => {

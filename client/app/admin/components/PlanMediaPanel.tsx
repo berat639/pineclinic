@@ -24,14 +24,20 @@ export default function PlanMediaPanel({
   onChange,
   onUploadingChange,
   onAttachmentSaved,
+  onEnsurePatient,
 }: {
-  patientId: string
+  patientId?: string | null
   groupId?: string | null
   attachments: PlanAttachment[]
   onChange: (items: PlanAttachment[]) => void
   onUploadingChange: (value: boolean) => void
   onAttachmentSaved?: (items: PlanAttachment[], uploaded?: PlanAttachment) => void
+  onEnsurePatient?: () => Promise<string | null>
 }) {
+  const [resolvedPid, setResolvedPid] = useState<string>(patientId && patientId !== 'null' ? patientId : '')
+  useEffect(() => {
+    if (patientId && patientId !== 'null') setResolvedPid(patientId)
+  }, [patientId])
   const [job, setJob] = useState<UploadJob | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -64,8 +70,10 @@ export default function PlanMediaPanel({
     return () => { mounted.current = false; uploadAbort.current?.abort() }
   }, [])
 
-  const base = `/api/dental/patients/${encodeURIComponent(patientId)}/attachments`
-  const fileUrl = (id: string, index: number) => `${base}/${id}/files/${index}`
+  const activePid = (patientId && patientId !== 'null' ? patientId : resolvedPid) || ''
+  const baseFor = (pid: string) => `/api/dental/patients/${encodeURIComponent(pid)}/attachments`
+  const base = activePid ? baseFor(activePid) : ''
+  const fileUrl = (id: string, index: number, pid = activePid) => `${baseFor(pid)}/${id}/files/${index}`
   async function json(response: Response) {
     const result = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(result.error || 'Dosya işlemi tamamlanamadı.')
@@ -78,10 +86,20 @@ export default function PlanMediaPanel({
     const controller = new AbortController(); uploadAbort.current = controller
     let completed = false
     try {
+      let targetPid = activePid
+      if (!targetPid && onEnsurePatient) {
+        const ensured = await onEnsurePatient()
+        if (ensured && ensured !== 'null') {
+          targetPid = ensured
+          setResolvedPid(ensured)
+        }
+      }
+      if (!targetPid) throw new Error('Hasta kaydı doğrulanamadı.')
+      const targetBase = baseFor(targetPid)
       let state = current.id
-        ? await json(await fetch(`${base}/${current.id}`, { signal: controller.signal }))
+        ? await json(await fetch(`${targetBase}/${current.id}`, { signal: controller.signal }))
         : await json(
-          await fetch(base, {
+          await fetch(targetBase, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
@@ -104,7 +122,7 @@ export default function PlanMediaPanel({
           if (offset > file.size) throw new Error('Yükleme konumu geçersiz.')
           setProgress(Math.round((finishedBytes + offset) / total * 100))
           while (offset < file.size) {
-            const response = await fetch(`${fileUrl(id, index)}?offset=${offset}`, {
+            const response = await fetch(`${fileUrl(id, index, targetPid)}?offset=${offset}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/octet-stream' },
               body: file.slice(offset, offset + CHUNK),
@@ -120,7 +138,7 @@ export default function PlanMediaPanel({
           finishedBytes += file.size
         }
         state = await json(
-          await fetch(`${base}/${id}/finish`, {
+          await fetch(`${targetBase}/${id}/finish`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ groupId: groupIdRef.current || undefined }),
@@ -133,7 +151,7 @@ export default function PlanMediaPanel({
       if (replaceSet.size > 0) {
         for (const oldId of replaceSet) {
           if (oldId !== id) {
-            void fetch(`${base}/${oldId}`, { method: 'DELETE' }).catch(() => { })
+            void fetch(`${targetBase}/${oldId}`, { method: 'DELETE' }).catch(() => { })
           }
         }
       }
@@ -148,7 +166,7 @@ export default function PlanMediaPanel({
         setActiveDicom((prev) =>
           prev
             ? { ...prev, attachmentId: id, saved: true }
-            : { file: current.files[0] || null, dcmUrl: fileUrl(id, 0), fileName: current.files[0]?.name || 'görüntü.dcm', attachmentId: id, saved: true }
+            : { file: current.files[0] || null, dcmUrl: fileUrl(id, 0, targetPid), fileName: current.files[0]?.name || 'görüntü.dcm', attachmentId: id, saved: true }
         )
       }
       completed = true

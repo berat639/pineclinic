@@ -32,7 +32,11 @@ import {
 } from '../services/turn-detector'
 import { getPromptTemplate, renderPromptTemplate } from '../prompts/registry'
 
-function isPhoneConversationFarewell(text: string, customCloseMessage?: string): boolean {
+function isPhoneConversationFarewell(
+  text: string,
+  customCloseMessage?: string,
+  lastUserText?: string,
+): boolean {
   const normalize = (value: string) =>
     value
       .toLocaleLowerCase('tr-TR')
@@ -50,11 +54,31 @@ function isPhoneConversationFarewell(text: string, customCloseMessage?: string):
     }
   }
 
-  return [
+  if ([
     /\bgörüş(?:meyi|memizi)\s+sonlandır/,
     /\bsüremiz\s+doldu.*sonlandır/,
     /\bklinik\s+işleminiz\s+(?:yoksa|olmadığı\s+için).*sonlandır/,
-  ].some(pattern => pattern.test(normalized))
+  ].some(pattern => pattern.test(normalized))) {
+    return true
+  }
+
+  // Karşı taraf teşekkür/veda ettiyse ve asistan soru sormadan veda cümlesi kurduysa
+  const hasQuestion =
+    text.includes('?') ||
+    /\b(?:var\s+mı|miyim|misiniz|mısınız|musunuz|müsünüz|ister\s+misiniz|nasıl\s+yardımcı)\b/iu.test(normalized)
+
+  if (!hasQuestion && lastUserText) {
+    const normUser = normalize(lastUserText)
+    const userSaidDoneOrThanks =
+      /\b(?:teşekkür\w*|sağ\s*ol\w*|iyi\s+günler|iyi\s+akşamlar|hoşça\s*kal\w*|görüşürüz|başka\s+(?:bir\s+)?(?:şey|konu|sorum|isteğim)\s+yok|yok\s+teşekkür\w*|bu\s+kadar|kolay\s+gelsin)\b/iu.test(normUser)
+    const aiSaidGoodbye =
+      /\b(?:sağlıklı\s+günler\s+diler\w*|iyi\s+günler\s+diler\w*|iyi\s+akşamlar\s+diler\w*|hoşça\s*kalın|görüşmek\s+üzere)\b/iu.test(normalized)
+    if (userSaidDoneOrThanks && aiSaidGoodbye) {
+      return true
+    }
+  }
+
+  return false
 }
 
 // ── Noise gate (telefon kanalı) ──────────────────────────────────────────────
@@ -76,27 +100,36 @@ function isPhoneConversationFarewell(text: string, customCloseMessage?: string):
 const PHONE_FRAME_MS = 20
 const RAG_BOOTSTRAP_TIMEOUT_MS = 350
 const SESSION_CONNECT_TIMEOUT_MS = 20_000
-const DEFAULT_OUTPUT_START_BUFFER_MS = 160
-const DEFAULT_OUTPUT_REBUFFER_MS = 240
-const MIN_OUTPUT_BUFFER_MS = 100
-const MAX_OUTPUT_BUFFER_MS = 4_000
+const DEFAULT_OUTPUT_START_BUFFER_MS = 120
+const DEFAULT_OUTPUT_REBUFFER_MS = 200
+const MIN_OUTPUT_BUFFER_MS = 80
+const MAX_OUTPUT_START_BUFFER_MS = 240
+const MAX_OUTPUT_REBUFFER_MS = 360
 const GREETING_HARD_TIMEOUT_MS = 30_000
 const GREETING_TRANSCRIPT_IDLE_COMPLETE_MS = 1_800
 
-function clampOutputBufferMs(value: number, fallback: number): number {
+function clampOutputBufferMs(value: number, fallback: number, maxMs: number): number {
   return Number.isFinite(value)
-    ? Math.min(MAX_OUTPUT_BUFFER_MS, Math.max(MIN_OUTPUT_BUFFER_MS, value))
+    ? Math.min(maxMs, Math.max(MIN_OUTPUT_BUFFER_MS, value))
     : fallback
 }
 
 function readOutputBufferFrames(): { start: number; rebuffer: number } {
+  const rawStart = Number.parseInt(process.env.PHONE_OUTPUT_START_BUFFER_MS || '', 10)
+  const rawRebuffer = Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10)
+  // Eski 700ms / 1200ms varsayılanları yüksek gecikmeye yol açtığı için yeni düşük gecikmeli varsayılana çekilir
+  const effectiveStart = rawStart === 700 ? DEFAULT_OUTPUT_START_BUFFER_MS : rawStart
+  const effectiveRebuffer = rawRebuffer === 1200 ? DEFAULT_OUTPUT_REBUFFER_MS : rawRebuffer
+
   const startMs = clampOutputBufferMs(
-    Number.parseInt(process.env.PHONE_OUTPUT_START_BUFFER_MS || '', 10),
+    effectiveStart,
     DEFAULT_OUTPUT_START_BUFFER_MS,
+    MAX_OUTPUT_START_BUFFER_MS,
   )
   const rebufferMs = Math.max(startMs, clampOutputBufferMs(
-    Number.parseInt(process.env.PHONE_OUTPUT_BUFFER_MS || '', 10),
+    effectiveRebuffer,
     DEFAULT_OUTPUT_REBUFFER_MS,
+    MAX_OUTPUT_REBUFFER_MS,
   ))
   return {
     start: Math.ceil(startMs / PHONE_FRAME_MS),
@@ -106,7 +139,8 @@ function readOutputBufferFrames(): { start: number; rebuffer: number } {
 
 function readVadSilenceDurationMs(): number {
   const configured = Number.parseInt(process.env.PHONE_VAD_SILENCE_MS || '', 10)
-  return Number.isFinite(configured) ? Math.min(1_000, Math.max(200, configured)) : 300
+  if (!Number.isFinite(configured) || configured === 300) return 260
+  return Math.min(800, Math.max(200, configured))
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -146,6 +180,7 @@ class NoiseGate {
   private lastLogAtFrame = 0
   private filterMode: NoiseFilterMode = 'rnnoise'
   private suppressedImpulses = 0
+  private noiseFloor = 140
 
   constructor(
     readonly threshold: number,
@@ -171,37 +206,38 @@ class NoiseGate {
     if (rms > this.rmsMax) this.rmsMax = rms
 
     // Gürültü ve öksürük süzgeci açıkken anlık darbe/öksürük/tıklama patlamalarını süz
-    if (this.filterMode === 'rnnoise' && chars.isImpulseLike && this.highStreak < 6) {
+    if (this.filterMode === 'rnnoise' && chars.isImpulseLike && this.highStreak < 5) {
       this.suppressedImpulses++
       const silence = Buffer.alloc(frame.length, 0)
-      if (this.threshold === 0) {
-        return { frames: [silence], justClosed: false, speechStarted: false }
-      }
       this.pushPreRoll(silence)
       return { frames: [], justClosed: false, speechStarted: false }
     }
 
-    const isHigh = this.threshold > 0 && rms >= this.threshold
+    // threshold === 0 iken adaptif konuşma eşiği kullan:
+    // Böylece hat dip gürültüsü (RMS ~100-180) AI konuşurken kesinti (barge-in) yaratmaz
+    // ve kullanıcı konuşmayı bitirdiğinde justClosed -> audioStreamEnd tetiklenerek
+    // Gemini'nin saniyelerce beklemeden anında yanıt vermesi sağlanır.
+    const openThreshold = this.threshold > 0
+      ? this.threshold
+      : Math.max(280, Math.min(460, Math.round(this.noiseFloor * 2.2)))
+    const sustainThreshold = Math.max(185, Math.round(openThreshold * 0.65))
+    const activeThreshold = this.wasOpen ? sustainThreshold : openThreshold
+
+    const isHigh = rms >= activeThreshold
     if (isHigh) this.highFrames++
 
     this.maybeLog()
 
-    if (this.threshold === 0) {
-      const speechStarted = !this.wasOpen
-      this.wasOpen = true
-      return { frames: [frame], justClosed: false, speechStarted }
-    }
-
     if (isHigh) {
       this.highStreak++
-      // Tekil hat parazitlerini konuşma kabul etme. 10 ardışık 20 ms
-      // karesi (yaklaşık 200 ms) gerçek ses başlangıcı için gerekir.
-      // Böylece kısa hat darbeleri sessizlik zamanlayıcısını sıfırlamaz.
-      if (!this.wasOpen && this.highStreak < 10) {
+      // 3 ardışık 20 ms karesi (60 ms) gerçek ses başlangıcı için yeterlidir;
+      // preRoll (120 ms) sayesinde ilk hece hiç kaybolmaz.
+      const requiredStreak = 3
+      if (!this.wasOpen && this.highStreak < requiredStreak) {
         this.pushPreRoll(frame)
         return { frames: [], justClosed: false, speechStarted: false }
       }
-      this.trailingFrames = this.trailingFramesMax
+      this.trailingFrames = Math.max(8, this.trailingFramesMax)
       if (!this.wasOpen) {
         const flushed = this.preRoll
         this.preRoll = []
@@ -213,12 +249,16 @@ class NoiseGate {
     }
 
     this.highStreak = 0
+    if (rms < 340) {
+      this.noiseFloor = 0.97 * this.noiseFloor + 0.03 * rms
+    }
+
     if (this.trailingFrames > 0) {
       this.trailingFrames--
       if (this.trailingFrames === 0) {
         this.pushPreRoll(frame)
         this.wasOpen = false
-        // Konuşma bitti (trailing sonu)
+        // Konuşma bitti (trailing sonu) -> Hybrid VAD audioStreamEnd tetikler
         return { frames: [frame], justClosed: true, speechStarted: false }
       }
       this.wasOpen = true
@@ -231,9 +271,9 @@ class NoiseGate {
   }
 
   private pushPreRoll(frame: Buffer): void {
-    if (this.preRollMax <= 0) return
+    const maxFrames = Math.max(6, this.preRollMax)
     this.preRoll.push(frame)
-    if (this.preRoll.length > this.preRollMax) this.preRoll.shift()
+    if (this.preRoll.length > maxFrames) this.preRoll.shift()
   }
 
   private maybeLog(): void {
@@ -252,15 +292,12 @@ class NoiseGate {
 }
 
 function readGateConfig(): { threshold: number; trailingFrames: number; preRollFrames: number } {
-  // Varsayılan olarak PCM'i kesmeden Gemini'nin yerleşik VAD'ine gönder.
-  // Sabit bir RMS eşiği, gürültülü GSM hatlarında gerçek konuşmayı kesip
-  // input transcription ve turn detection'ın hiç oluşmamasına yol açabiliyor.
-  // Gereken hatlarda bu filtre env üzerinden ayrıca etkinleştirilebilir.
   const envVal = process.env.PHONE_NOISE_GATE_RMS
   const parsedThreshold = Number.parseInt(envVal || '', 10)
   const threshold = Number.isFinite(parsedThreshold) ? Math.max(0, parsedThreshold) : 0
-  const trailingMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '250', 10) || 250)
-  const preRollMs = Math.max(0, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '80', 10) || 80)
+  const rawTrailingMs = parseInt(process.env.PHONE_NOISE_GATE_TRAILING_MS || '220', 10) || 220
+  const trailingMs = rawTrailingMs === 300 ? 220 : Math.max(160, Math.min(400, rawTrailingMs))
+  const preRollMs = Math.max(120, parseInt(process.env.PHONE_NOISE_GATE_PREROLL_MS || '120', 10) || 120)
   return {
     threshold,
     trailingFrames: Math.round(trailingMs / PHONE_FRAME_MS),
@@ -351,12 +388,14 @@ interface CallState {
   outputTranscript: string
   lastCompletedAiTranscript: string
   userTranscript: string
+  lastUserTranscript: string
   turnDetectionMode: TurnDetectionMode
   semanticTurnHoldTimer?: ReturnType<typeof setTimeout>
   lastAiAudioAt: number
   lastAudioFrameAt: number
   hangupRequestedAt: number
   greetingAudioStarted: boolean
+  greetingCompleted: boolean
   startWaitMs: number
   micOpenTimer?: ReturnType<typeof setTimeout>
   greetingTimeoutTimer?: ReturnType<typeof setTimeout>
@@ -497,17 +536,19 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           outputTranscript: '',
           lastCompletedAiTranscript: '',
           userTranscript: '',
+          lastUserTranscript: '',
           turnDetectionMode: 'semantic',
           lastAiAudioAt: 0,
           lastAudioFrameAt: 0,
           hangupRequestedAt: 0,
           greetingAudioStarted: false,
+          greetingCompleted: false,
           startWaitMs: 400,
         }
         socket.data = state
 
         const openMicrophoneAfterGreeting = (reason: string) => {
-          if (state.closed || state.micEnabled || state.micOpenTimer) return
+          if (state.closed || state.hangupPending || state.maxLimitReached || state.greetingCompleted || state.micEnabled || state.micOpenTimer) return
           if (state.greetingTimeoutTimer) {
             clearTimeout(state.greetingTimeoutTimer)
             state.greetingTimeoutTimer = undefined
@@ -515,7 +556,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
           const enableMicrophone = () => {
             state.micOpenTimer = undefined
-            if (state.closed || state.micEnabled) return
+            if (state.closed || state.hangupPending || state.maxLimitReached || state.greetingCompleted || state.micEnabled) return
+            state.greetingCompleted = true
             state.micEnabled = true
             console.log(`[${shortId}] ${reason} — mikrofon açıldı`)
             startSilenceWatch(state, socket)
@@ -539,9 +581,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           state.aiSpeaking = false
           state.outputTranscript = ''
           state.lastAiAudioAt = 0
-          if (!state.micEnabled) {
+          if (state.hangupPending || state.maxLimitReached) {
+            state.interactionInProgress = false
+            return
+          }
+          if (!state.greetingCompleted && !state.micEnabled) {
             openMicrophoneAfterGreeting('Greeting sesi tamamen oynatıldı')
-          } else {
+          } else if (state.micEnabled) {
             startSilenceWatch(state, socket)
           }
         }
@@ -595,12 +641,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               state.outputUnderruns++
               console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
               try { socket.write(silenceFrame); scheduleFrame() } catch { }
-            } else if (state.hangupPending && !state.outputTurnActive && !state.interactionInProgress) {
+            } else if (state.hangupPending && !state.outputTurnActive) {
               const sinceHangupMs = state.hangupRequestedAt > 0 ? Date.now() - state.hangupRequestedAt : 9999
               const sinceLastAudioMs = state.lastAudioFrameAt > 0 ? Date.now() - state.lastAudioFrameAt : 9999
-              // cagriySonlandir sonrasındaki olası veda sesinin başlaması için en az 900ms
-              // ve son ses karesinin Asterisk RTP tamponundan çıkması için 650ms sessizlik karesi bekle.
-              if (sinceHangupMs < 900 || sinceLastAudioMs < 650) {
+              // cagriySonlandir sonrasındaki olası veda sesinin başlaması için en az 700ms
+              // ve son ses karesinin Asterisk RTP tamponundan çıkması için 550ms sessizlik karesi bekle.
+              if (sinceHangupMs < 700 || sinceLastAudioMs < 550) {
                 try { socket.write(silenceFrame); scheduleFrame() } catch { }
               } else {
                 console.log(`[${shortId}] Ses kuyruğu ve RTP tamponu boşaldı, bağlantı kapatılıyor`)
@@ -774,6 +820,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     if (role === 'user') {
                       clearSilenceTimers(state)
                       state.userTranscript = `${state.userTranscript} ${trimmed}`.trim().slice(-500)
+                      state.lastUserTranscript = state.userTranscript
                     }
                     if (role === 'model' && state.userSpeechEndTime) {
                       const responseTime = Date.now() - state.userSpeechEndTime
@@ -815,6 +862,10 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     state.hangupRequestedAt = Date.now()
                     state.micEnabled = false
                     state.micBuffer = []
+                    if (state.micOpenTimer) {
+                      clearTimeout(state.micOpenTimer)
+                      state.micOpenTimer = undefined
+                    }
                     clearSilenceTimers(state)
                   },
                   onTurnComplete: () => {
@@ -822,12 +873,20 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     if (tailFrame) state.audioQueue.push(tailFrame)
                     state.outChunker = new FrameChunker()
                     state.outputTurnComplete = true
-                    if (!state.hangupPending && !state.interactionInProgress && isPhoneConversationFarewell(state.outputTranscript, voiceSettings.offTopicCloseMessage)) {
-                      console.log(`[${shortId}] Konu dışı / kapanış veda cümlesi algılandı — ses kuyruğu bitince hat kapatılacak`)
+                    if (
+                      !state.hangupPending &&
+                      isPhoneConversationFarewell(
+                        state.outputTranscript,
+                        voiceSettings.offTopicCloseMessage,
+                        state.lastUserTranscript,
+                      )
+                    ) {
+                      console.log(`[${shortId}] Kapanış / veda cümlesi algılandı — ses kuyruğu bitince hat kapatılacak`)
                       state.hangupPending = true
                       state.hangupRequestedAt = state.hangupRequestedAt || Date.now()
                       state.micEnabled = false
                       state.micBuffer = []
+                      state.info.session?.beginClosing?.()
                       clearSilenceTimers(state)
                     }
                     if (state.greetingTimeoutTimer) {
@@ -836,8 +895,11 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     }
                     // Hiç ses üretilmeyen bir turda oynatma kuyruğu yoktur.
                     if (!state.outputTurnActive) {
-                      if (!state.micEnabled) openMicrophoneAfterGreeting('Greeting turn sessiz tamamlandı')
-                      else startSilenceWatch(state, socket)
+                      if (!state.greetingCompleted && !state.micEnabled && !state.hangupPending) {
+                        openMicrophoneAfterGreeting('Greeting turn sessiz tamamlandı')
+                      } else if (state.micEnabled && !state.hangupPending) {
+                        startSilenceWatch(state, socket)
+                      }
                     }
                   },
                   onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
@@ -1124,8 +1186,8 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
               }
             }
 
-            // 5 frame (100ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder (1011 hatasını önlemek için)
-            if (state.micBuffer.length >= 5 || (justClosed && state.micBuffer.length > 0)) {
+            // 3 frame (60ms) biriktirince veya konuşma bittiğinde bekleyen sesi hemen gönder
+            if (state.micBuffer.length >= 3 || (justClosed && state.micBuffer.length > 0)) {
               const combined = Buffer.concat(state.micBuffer)
               state.micBuffer = []
               if (!state.firstAudioSent) {
@@ -1157,7 +1219,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   state.lastCompletedAiTranscript,
                 )
                 if (analysis.status === 'incomplete') {
-                  const holdMs = Math.max(400, analysis.recommendedSilenceMs - 300)
+                  const holdMs = Math.min(450, Math.max(220, analysis.recommendedSilenceMs - 350))
                   if (state.semanticTurnHoldTimer) clearTimeout(state.semanticTurnHoldTimer)
                   state.semanticTurnHoldTimer = setTimeout(sendStreamEnd, holdMs)
                 } else {

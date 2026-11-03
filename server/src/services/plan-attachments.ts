@@ -213,7 +213,7 @@ export async function finishPlanAttachment(clinicId: string, patientId: string, 
 
 export async function listPatientAttachments(clinicId: string, patientId: string) {
   await ensureTreatmentPlanningSchema()
-  if (!UUID.test(patientId)) throw new TreatmentPlanError('Hasta kimliği geçersiz')
+  if (!UUID.test(patientId)) return []
   return db.select().from(planAttachments).where(and(
     eq(planAttachments.clinicId, clinicId),
     eq(planAttachments.patientId, patientId),

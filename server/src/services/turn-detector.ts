@@ -547,20 +547,20 @@ export function buildRealtimeDetectionConfig(
         disabled: false,
         startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-        prefixPaddingMs: 120,
-        silenceDurationMs: customSilenceMs ?? 300,
+        prefixPaddingMs: 100,
+        silenceDurationMs: customSilenceMs ?? 260,
       },
     }
   }
 
-  const defaultSilence = channel === 'phone' ? 380 : 420
+  const defaultSilence = channel === 'phone' ? 280 : 350
   return {
     automaticActivityDetection: {
       disabled: false,
       startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-      prefixPaddingMs: 160,
-      silenceDurationMs: customSilenceMs ? Math.max(350, customSilenceMs) : defaultSilence,
+      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+      prefixPaddingMs: 120,
+      silenceDurationMs: customSilenceMs ? Math.max(220, customSilenceMs) : defaultSilence,
     },
   }
 }

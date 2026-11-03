@@ -232,10 +232,17 @@ export async function saveTreatmentPlan(input: SavePlanInput, clinicId: string, 
         .where(and(eq(patients.id, input.patientId), eq(patients.clinicId, clinicId))).limit(1)
       if (!patient) throw new TreatmentPlanError('Hasta bulunamadı', 404)
       if (input.appointmentId) {
-        const [appointment] = await tx.select({ id: dentalAppointments.id }).from(dentalAppointments).where(and(
-          eq(dentalAppointments.id, input.appointmentId), eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.patientId, input.patientId),
+        const [appointment] = await tx.select({ id: dentalAppointments.id, patientId: dentalAppointments.patientId }).from(dentalAppointments).where(and(
+          eq(dentalAppointments.id, input.appointmentId), eq(dentalAppointments.clinicId, clinicId),
         )).limit(1)
-        if (!appointment) throw new TreatmentPlanError('Randevu bu hastaya ait değil', 400)
+        if (!appointment || (appointment.patientId && appointment.patientId !== input.patientId)) {
+          throw new TreatmentPlanError('Randevu bu hastaya ait değil', 400)
+        }
+        if (!appointment.patientId) {
+          await tx.update(dentalAppointments)
+            .set({ patientId: input.patientId, updatedAt: new Date() })
+            .where(and(eq(dentalAppointments.id, input.appointmentId), eq(dentalAppointments.clinicId, clinicId)))
+        }
       }
       const doctorIds = [...new Set(normalized.flatMap(item => item.doctorIds && item.doctorIds.length ? item.doctorIds : (item.doctorId ? [item.doctorId] : [])))]
       if (doctorIds.length) {

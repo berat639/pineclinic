@@ -76,12 +76,12 @@ describe('Turkish Semantic Turn Detector', () => {
   test('builds semantic vs standard realtime detection configs accurately', () => {
     const semanticWeb = buildRealtimeDetectionConfig('semantic', 'web')
     expect(semanticWeb.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
-      StartSensitivity.START_SENSITIVITY_LOW,
+      StartSensitivity.START_SENSITIVITY_HIGH,
     )
     expect(semanticWeb.automaticActivityDetection?.endOfSpeechSensitivity).toBe(
-      EndSensitivity.END_SENSITIVITY_LOW,
+      EndSensitivity.END_SENSITIVITY_HIGH,
     )
-    expect(semanticWeb.automaticActivityDetection?.silenceDurationMs).toBe(650)
+    expect(semanticWeb.automaticActivityDetection?.silenceDurationMs).toBe(350)
 
     const standardPhone = buildRealtimeDetectionConfig('standard', 'phone', 300)
     expect(standardPhone.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
@@ -140,6 +140,23 @@ describe('Turkish Semantic Turn Detector', () => {
     const wrapped = wrapWithTurkishLanguageLock('Örnek sistem talimatı')
     expect(wrapped.startsWith('MUTLAK TÜRKÇE DİL KİLİDİ')).toBe(true)
     expect(wrapped.endsWith('lütfen tekrar eder misiniz?" de.')).toBe(true)
+  })
+
+  test('extracts spoken Turkish time expressions and sets BLOCKING tool behavior on gemini-3.8-live', async () => {
+    const { extractSpokenTurkishTime } = await import('./assistant-appointments')
+    const { prepareLiveToolDeclarations } = await import('./live-model-profile')
+
+    expect(extractSpokenTurkishTime('Dedim ya sabah 8 diye.')).toBe('08:00')
+    expect(extractSpokenTurkishTime('Yarın sabah sekiz buçuk uygun mu?')).toBe('08:30')
+    expect(extractSpokenTurkishTime('Öğleden sonra 3 buçuk olsun')).toBe('15:30')
+    expect(extractSpokenTurkishTime('Saat 14:15 için istiyorum')).toBe('14:15')
+    expect(extractSpokenTurkishTime('4 Kasım Çarşamba günü')).toBeNull()
+
+    const liveTools = prepareLiveToolDeclarations('gemini-3.8-live', [{ name: 'randevuOlustur' }])
+    expect((liveTools[0] as any).behavior).toBe('BLOCKING')
+
+    const thinkingTools = prepareLiveToolDeclarations('gemini-3.8-live-extended-thinking', [{ name: 'randevuOlustur' }])
+    expect((thinkingTools[0] as any).behavior).toBe('NON_BLOCKING')
   })
 })
 
