@@ -1,86 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchBackend } from '@/lib/backend-request'
 import { getTenantForwardingHeaders } from '@/lib/forwarded-request'
+import {
+  DEFAULT_DENTAL_INDICATIONS,
+  DEFAULT_DENTAL_PROCEDURES,
+  extractAllFdiTeethInOrder,
+  extractDentalSurfaces,
+  matchSpokenMaterials,
+  mergeBufferedTeethWithCommand,
+  parseStructuredOrLocalDentalCommand,
+  repairTurkishDentalPhonetics,
+  resolveAutoLinkedIndications,
+} from '@/lib/dental-voice-parser'
 
 const requestWindows = new Map<string, { count: number; until: number }>()
-
-// Türkçe yazıyla söylenen diş numaralarını ve bitişik/kırpılmış FDI serilerini normalize eder
-function normalizeDentalSpeechInput(rawText: string): string {
-  if (!rawText) return ''
-  let text = rawText.trim()
-
-  // 1. Türkçe onlar ve birler basamağı kombinasyonlarını rakama çevir ("on altı" -> "16", "yirmi sekiz" -> "28")
-  const tensMap: Record<string, number> = {
-    'on': 10,
-    'yirmi': 20,
-    'otuz': 30,
-    'kırk': 40,
-    'kirk': 40,
-  }
-  const onesMap: Record<string, number> = {
-    'bir': 1,
-    'iki': 2,
-    'üç': 3,
-    'uc': 3,
-    'dört': 4,
-    'dort': 4,
-    'beş': 5,
-    'bes': 5,
-    'altı': 6,
-    'alti': 6,
-    'yedi': 7,
-    'sekiz': 8,
-  }
-
-  // Bitişik veya ayrı yazılmış Türkçe FDI sayıları ("onaltı", "on altı", "yirmibir" vb.)
-  for (const [tenWord, tenVal] of Object.entries(tensMap)) {
-    for (const [oneWord, oneVal] of Object.entries(onesMap)) {
-      const fdi = String(tenVal + oneVal)
-      const pattern = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${tenWord}\\s*${oneWord}(?=$|[\\s,.;:!?()\\-])`, 'gi')
-      text = text.replace(pattern, fdi)
-    }
-  }
-
-  // Tek başına yazıyla kalmış birler basamağı ("altı 17 18" -> "6 17 18")
-  for (const [oneWord, oneVal] of Object.entries(onesMap)) {
-    const singleBeforeFdi = new RegExp(`(?<=^|[\\s,.;:!?()\\-])${oneWord}(?=\\s+[1-4][1-8](?=$|[\\s,.;:!?()\\-]))`, 'gi')
-    text = text.replace(singleBeforeFdi, String(oneVal))
-  }
-
-  // 2. Bitişik yazılmış FDI diş numaralarını ayır ("1617 18" -> "16 17 18", "161718" -> "16 17 18")
-  // FDI diş numaraları yalnızca [1-4][1-8] aralığındadır (içinde 0 veya 9 bulunmaz, bu yüzden 1500 gibi fiyatlarla çakışmaz)
-  text = text.replace(/\b((?:[1-4][1-8]){2,8})\b/g, (match) => {
-    const pairs: string[] = []
-    for (let i = 0; i < match.length; i += 2) {
-      pairs.push(match.slice(i, i + 2))
-    }
-    return pairs.join(' ')
-  })
-
-  // 3. Başlangıçta onlar basamağı yutulmuş ardışık diş serisini tamamla ("6 17 18" -> "16 17 18", "5 26 27" -> "25 26 27")
-  text = text.replace(/\b([1-8])\s+(([1-4])([1-8]))\b/g, (full, firstDigitStr, secondFdi, quadrantStr, secondUnitStr) => {
-    const firstDigit = Number(firstDigitStr)
-    const secondUnit = Number(secondUnitStr)
-    if (Math.abs(firstDigit - secondUnit) === 1) {
-      return `${quadrantStr}${firstDigit} ${secondFdi}`
-    }
-    return full
-  })
-
-  // 4. İlk FDI diş numarasından sonra sadece birler basamağı söylenmiş ardışık serileri tamamla ("16 7 8" -> "16 17 18")
-  for (let pass = 0; pass < 3; pass++) {
-    text = text.replace(/\b(([1-4])([1-8]))\s+([1-8])\b(?!\s*(?:tl|lira|₺|bin|yüz|kanal|yüzey))/gi, (full, firstFdi, quadrantStr, firstUnitStr, nextDigitStr) => {
-      const firstUnit = Number(firstUnitStr)
-      const nextDigit = Number(nextDigitStr)
-      if (Math.abs(nextDigit - firstUnit) === 1) {
-        return `${firstFdi} ${quadrantStr}${nextDigit}`
-      }
-      return full
-    })
-  }
-
-  return text
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -100,26 +33,97 @@ export async function POST(req: NextRequest) {
     else if (window.count >= 30) return NextResponse.json({ error: 'Çok fazla istek. Bir dakika sonra tekrar deneyin.' }, { status: 429 })
     else window.count++
     if (requestWindows.size > 1000) for (const [entry, value] of requestWindows) if (value.until <= now) requestWindows.delete(entry)
-    const { text: rawText, procNames = [], indNames = [], diseaseNames = [], consultationNames = [] } = await req.json()
-    const lists = [procNames, indNames, diseaseNames, consultationNames]
-    if (typeof rawText !== 'string' || !rawText.trim() || rawText.length > 2000 || lists.some(list =>
-      !Array.isArray(list) || list.length > 200 || list.some(value => typeof value !== 'string' || value.length > 120)))
+
+    const body = await req.json().catch(() => ({}))
+    const {
+      text: rawText = '',
+      procNames = [],
+      indNames = [],
+      diseaseNames = [],
+      consultationNames = [],
+      materialNames = [],
+      inventory = [],
+      indicationLinks = {},
+      bufferedTeeth = [],
+      audioBase64,
+      audioMimeType,
+    } = body || {}
+
+    const hasAudio = typeof audioBase64 === 'string' && audioBase64.trim().length > 0
+    const lists = [procNames, indNames, diseaseNames, consultationNames, materialNames]
+    if (
+      typeof rawText !== 'string' ||
+      (!rawText.trim() && !hasAudio) ||
+      rawText.length > 2000 ||
+      lists.some(
+        (list) =>
+          !Array.isArray(list) ||
+          list.length > 300 ||
+          list.some((value) => typeof value !== 'string' || value.length > 150)
+      )
+    ) {
       return NextResponse.json({ error: 'Komut veya katalog verisi geçersiz' }, { status: 400 })
-    const text = normalizeDentalSpeechInput(String(rawText))
+    }
+
+    const safeIndicationLinks: Record<string, string | string[]> =
+      indicationLinks && typeof indicationLinks === 'object' && !Array.isArray(indicationLinks)
+        ? indicationLinks
+        : {}
+
+    const safeBufferedTeeth: string[] = Array.isArray(bufferedTeeth)
+      ? bufferedTeeth.filter((t): t is string => typeof t === 'string')
+      : []
+
+    const activeProcs: string[] = procNames.length > 0 ? procNames : DEFAULT_DENTAL_PROCEDURES
+    const activeInds: string[] = indNames.length > 0 ? indNames : DEFAULT_DENTAL_INDICATIONS
+
+    const effectiveInventory =
+      Array.isArray(inventory) && inventory.length > 0
+        ? inventory
+        : Array.isArray(materialNames)
+          ? materialNames
+              .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
+              .map((name, idx) => ({ id: `mat-${idx}`, name: name.trim() }))
+          : []
+
+    const mergedInput =
+      safeBufferedTeeth.length > 0
+        ? mergeBufferedTeethWithCommand(safeBufferedTeeth, String(rawText))
+        : String(rawText)
+
+    const text = repairTurkishDentalPhonetics(mergedInput)
+
+    const localParsed = parseStructuredOrLocalDentalCommand(text, {
+      procNames: activeProcs,
+      indNames: activeInds,
+      inventory: effectiveInventory,
+      materialNames,
+      indicationLinks: safeIndicationLinks,
+      bufferedTeeth: safeBufferedTeeth,
+      diseaseNames,
+      consultationNames,
+    })
+
+    // Madde 5.1 yapılandırılmış formatı ("Endikasyonu: ... Tedavi: ... Yüzeyler ...") deterministik olarak tam eşleşirse anında döndür
+    if (localParsed.isStructured51 && localParsed.treatments.length > 0) {
+      return NextResponse.json({ result: localParsed })
+    }
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
+      if (localParsed.matched) {
+        return NextResponse.json({ result: localParsed })
+      }
       return NextResponse.json({ error: 'Yapay zeka API anahtarı yapılandırılmamış' }, { status: 500 })
     }
 
-    const defaultProcs = ["Kompozit Dolgu", "Kanal Tedavisi", "Çekim", "Detertraj", "İmplant"]
-    const defaultInds = ["Derin Çürük", "Kırık", "Apikal Lezyon", "Kök Kırığı", "Ağrı"]
+    const activeMaterialNames =
+      materialNames.length > 0
+        ? materialNames
+        : effectiveInventory.map((item: any) => item?.name).filter(Boolean)
 
-    const activeProcs = procNames.length > 0 ? procNames : defaultProcs
-    const activeInds = indNames.length > 0 ? indNames : defaultInds
-
-const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli veya yazılı olarak söylediği komutlardan tedavi işlemlerini, diş seçim komutlarını, anatomik yüzey ve bölümleri, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
-Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesnesi döndür. Asla markdown \`\`\`json ekleme, SADECE JSON nesnesi döndür.
+    const systemPrompt = `Sen bir diş hekimi asistanısın. Görevin hekimin sesli veya yazılı olarak söylediği komutlardan tedavi işlemlerini, diş seçim komutlarını, anatomik yüzey ve bölümleri, malzemeleri, konsültasyon taleplerini ve hasta hastalıklarını (anamnez) çıkarmaktır.
+Kullanıcının cümlesini (ve varsa ekli ses kaydını) analiz et ve aşağıdaki formata sahip bir JSON nesnesi döndür. Asla markdown \`\`\`json ekleme, SADECE JSON nesnesi döndür.
 
 ÖNEMLİ KURALLAR:
 1. SEÇİM NİYETLERİ (selectIntent):
@@ -137,30 +141,36 @@ Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesn
    - Sadece diş seçimi belirtildiyse (örn: "21'i seç", "16 ve 26 numarayı işaretle") -> "selectIntent": "SELECT_TEETH"
    - Eğer seçim odaklı bir cümle değilse -> "selectIntent": "NONE"
 
-2. YÜZEY VE ANATOMİK BÖLÜM ÇIKARMA:
-   Kullanıcı işlem söylerken yüzey veya bölüm belirtiyorsa treatments içine ekle:
+2. YÜZEY, ANATOMİK BÖLÜM VE MALZEME ÇIKARMA:
+   Kullanıcı işlem söylerken yüzey, bölüm veya malzeme belirtiyorsa treatments içine ekle:
    - Yüzeyler (surfaces):
-     * "oklüzal", "çiğneme" -> ["O"]
-     * "mezyal", "ön arayüz" -> ["M"]
-     * "distal", "arka arayüz" -> ["D"]
-     * "bukkal", "vestibüler", "yanak", "dudak" -> ["B"]
+     * "oklüzal", "okluzal", "okul", "çiğneme" -> ["O"]
+     * "mezyal", "mezial", "mezar", "mesai", "ön arayüz" -> ["M"]
+     * "distal", "dijital", "destan", "arka arayüz" -> ["D"]
+     * "bukkal", "bukal", "bakkal", "vestibüler", "yanak", "dudak" -> ["B"]
      * "lingual", "palatinal", "dil", "damak" -> ["L"]
-     * "MOD", "mezyo-oklüzo-distal" -> ["M", "O", "D"]
-     * "MO", "mezyo-oklüzal" -> ["M", "O"]
-     * "DO", "disto-oklüzal" -> ["D", "O"]
+     * "MOD", "em o de", "m o d", "mezyo-oklüzo-distal", "Mezial, Okluzal, Distal" -> ["M", "O", "D"]
+     * "MO", "em o", "m o", "mezyo-oklüzal" -> ["M", "O"]
+     * "DO", "de o", "d o", "disto-oklüzal" -> ["D", "O"]
    - Anatomik Bölüm (section):
      * "kuron", "kron", "taç" -> "crown"
      * "kole", "boyun", "diş boynu", "sement" -> "cervical"
      * "kök", "kök ucu", "apeks" -> "root"
+   - Malzemeler (materials: string[]):
+     * Kullanıcı komutta malzeme söylediyse (veya "Malzeme: ..." belirttiyse) Kabul Edilen Malzemeler listesinden eşleşen malzeme adlarını "materials" dizisine ekle; söylenmediyse [] bırak.
 
-3. İŞLEM EŞLEŞTİRME:
+3. İŞLEM EŞLEŞTİRME VE FONETİK DÜZELTME:
    Kullanıcının söylediği işlemleri aşağıdaki "Sık Kullanılan İşlemler" listesi ile eşleştir ve listedeki TAM ADINI kullan.
-   - Kullanıcı "dolgu" veya "dolgu ekle" dediyse -> listedeki en uygun dolgu işleminin ("Kompozit Dolgu (Tek Yüzey)" vb.) tam adını seç.
+   - Tarayıcı STT fonetik hatalarını düzelt:
+     * "koyun ekmek", "koyun ekle", "zirkon ekmek" -> "zirkonyum ekle" ("Zirkonyum Kuron")
+     * "koyun", "zirkon", "sirkonyum", "zirkonya" -> "Zirkonyum Kuron"
+     * "komplo", "kompozisyon", "kompozit dolgu", "dolgu" -> "Kompozit Dolgu (Tek Yüzey)"
+     * "ekmek", "ekli", "ekler" (cümle sonunda) -> "ekle" ("intent": "ADD")
    - Kullanıcı "kanal" veya "kanal tedavisi" dediyse -> listedeki "Kanal Tedavisi (Tek Kanal)" vb. tam adını seç.
    - Kullanıcı "çekim" veya "çek" dediyse -> listedeki "Diş Çekimi" tam adını seç.
    - Kullanıcı "implant" dediyse -> listedeki "İmplant (Yerli)" tam adını seç.
-   - Kullanıcı "zirkonyum" veya "kaplama" dediyse -> listedeki "Zirkonyum Kuron" tam adını seç.
-   - Kullanıcı açıkça bir işlem adı söylemediyse (örneğin sadece "18'i sil" veya "18 çürük"), procedureName alanını null bırakabilirsin.
+   - Kullanıcı açıkça bir işlem adı söylemediyse (örneğin sadece "18'i sil" veya "36 sil"), procedureName alanını null bırakabilirsin.
+   - Serbest sesli komutlarda kullanıcı "Endikasyonu: ..." kalıbını açıkça söylemediyse indication alanını uydurma (null bırak), çünkü bağlı endikasyonlar sistem tarafından otomatik bağlanır. Yalnızca 5.1 şablonunda ("Endikasyonu: Çürük, Tedavi: ...") açıkça söylendiyse indication alanına yaz.
 
 4. İNTENT (EYLEM TÜRÜ):
    - "ekle", "eklensin", "yap", "yapılsın", "yaz", "koy", "olsun" veya doğrudan işlem belirtildiyse -> "intent": "ADD"
@@ -169,22 +179,19 @@ Kullanıcının cümlesini analiz et ve aşağıdaki formata sahip bir JSON nesn
    - "onayla", "kaydet", "işlemleri kaydet", "bitir", "tamamla" -> "globalIntent": "CONFIRM"
 
 5. DİŞ NUMARALARI (FDI Standart - HİÇBİR DİŞİ ATLAMA):
-   - "16 17 18", "18-17 16", "18 17 16", "18, 17 ve 16", "on altı on yedi on sekiz", "alt 36", "sağ üst 16", "11 den 15 e kadar" gibi ifadelerde söylenen TÜM diş numaralarını eksiksiz olarak string dizi şeklinde (örn: ["16", "17", "18"]) çıkar. Cümlenin en başındaki ilk diş numarasını (örn: "16") ASLA atlama.
-   - Ses tanıma (STT) bazen çoklu diş sıralamalarında ilk dişin onlar basamağını yutabilir (örn: "16 17 18" yerine "6 17 18" veya "altı 17 18") ya da sonraki dişlerin onlar basamağını yutabilir (örn: "16 7 8"). Tek basamaklı bir rakam (1-8) hemen yanındaki FDI diş numarasıyla (örn: 17, 18) ardışık bir seri oluşturuyorsa, onu aynı kadrandaki FDI diş numarası ("16", "17", "18") olarak tamamla.
+   - "15 16 17", "36, 37 38", "16 17 18", "on beş on altı on yedi" gibi ifadelerde söylenen TÜM diş numaralarını eksiksiz ve sırasıyla string dizi şeklinde (örn: ["15", "16", "17"]) çıkar. Cümlenin en başındaki ilk diş numaralarını ASLA atlama.
    - Eğer aralık belirtildiyse (örn: "11-14 arası") aralıktaki tüm dişleri tek tek ["11", "12", "13", "14"] şeklinde ekle.
    - Çene belirtildiyse (örn: "tüm üst çene dolgu"):
      * Üst çene: ["11","12","13","14","15","16","17","18","21","22","23","24","25","26","27","28"]
      * Alt çene: ["31","32","33","34","35","36","37","38","41","42","43","44","45","46","47","48"]
-   - Yalnızca genel ağız içi bir işlem açıkça söylendiyse (örn: "detertraj ekle", "diş taşı temizliği ekle") ve diş numarası belirtilmediyse "toothNumbers": ["general"] yap.
+   - Yalnızca genel ağız içi bir işlem açıkça söylendiyse (örn: "detertraj ekle") ve diş numarası belirtilmediyse "toothNumbers": ["general"] yap.
 
-6. ORTAM KONUŞMASI VE GÜRÜLTÜ FİLTRELEME (ÇOK ÖNEMLİ):
-   - Mikrofon açıkken ortamda hasta-hekim sohbeti, nezaket ifadeleri veya arka plan konuşmaları ("ağzınızı açın", "geçmiş olsun", "ağrınız ne zamandır var", "şöyle yapalım", "bir bakalım", "tamam birazdan bitiriyoruz" vb.) duyulabilir.
-   - Eğer metin yalnızca günlük sohbet veya alakasız ortam konuşması içeriyorsa ve açık bir dental tedavi, diş seçimi, hastalık veya konsültasyon komutu İÇERMİYORSA: kesinlikle işlem uydurma, "globalIntent": "NONE", "selectIntent": "NONE", "targetTeeth": [], "treatments": [], "diseases": [], "consultations": [] döndür.
-   - Eğer metnin başında veya ortasında ortam sohbeti var ama devamında gerçek bir dental komut verildiyse (örn: "ağzınızı açın bakalım 16 17 18 kompozit dolgu ekle"), sohbet kısmını tamamen yoksay ve SADECE kullanıcının verdiği dental komutu ("16 17 18 kompozit dolgu ekle") ayrıştır.
-   - "bitir", "tamamla", "olsun", "yapalım" gibi kelimeler günlük sohbette geçtiğinde ASLA "globalIntent": "CONFIRM" döndürme; "CONFIRM" yalnızca açıkça "tedaviyi kaydet", "planı kaydet", "işlemleri kaydet", "planı onayla" gibi doğrudan kayıt/onay komutu verildiğinde kullanılmalıdır.
+6. ORTAM KONUŞMASI VE GÜRÜLTÜ FİLTRELEME:
+   - Eğer metin yalnızca günlük sohbet içeriyorsa ve açık bir dental komut İÇERMİYORSA: "globalIntent": "NONE", "selectIntent": "NONE", "targetTeeth": [], "treatments": [], "diseases": [], "consultations": [] döndür.
 
 Sık Kullanılan İşlemler: ${activeProcs.map((p: string) => `"${p}"`).join(', ')}
 Sık Kullanılan Endikasyonlar: ${activeInds.map((i: string) => `"${i}"`).join(', ')}
+Kabul Edilen Malzemeler (Stok): ${activeMaterialNames.length > 0 ? activeMaterialNames.map((m: string) => `"${m}"`).join(', ') : 'Belirtilmedi'}
 Kabul Edilen Hastalıklar (Anamnez): ${diseaseNames.length > 0 ? diseaseNames.map((d: string) => `"${d}"`).join(', ') : '"Diyabet", "Hipertansiyon", "Astım", "Alerji"'}
 Kabul Edilen Konsültasyonlar: ${consultationNames.length > 0 ? consultationNames.map((c: string) => `"${c}"`).join(', ') : '"Kardiyoloji", "Ortodonti", "Endodonti"'}
 
@@ -200,41 +207,39 @@ Format:
       "indication": "Endikasyon", // veya null
       "surfaces": ["M", "O", "D"], // veya []
       "section": "crown", // "crown", "cervical", "root" veya null
+      "materials": [], // string[] (varsa malzeme adları)
       "cost": 1500,
       "intent": "ADD" // "ADD", "DELETE" veya "UPDATE"
     }
   ],
-  "diseases": [
-    {
-      "name": "Diyabet",
-      "intent": "ADD"
-    }
-  ],
-  "consultations": [
-    {
-      "name": "Kardiyoloji Konsültasyonu",
-      "intent": "ADD"
-    }
-  ]
+  "diseases": [],
+  "consultations": []
 }
 
-Örnek 1: "16 17 18 kompozit dolgu ekle"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["16","17","18"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["16","17","18"],"surfaces":[],"section":null,"intent":"ADD"}]}
+Örnek 1 (Madde 5): "15 16 17 zirkonyum ekle" (veya STT "15 16 17 koyun ekmek")
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["15","16","17"],"treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["15","16","17"],"indication":null,"surfaces":[],"section":null,"materials":[],"intent":"ADD"}]}
 
-Örnek 2: "36 MOD kompozit dolgu ekle"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["36"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"surfaces":["M","O","D"],"section":"crown","intent":"ADD"}]}
+Örnek 2 (Madde 5.1): "36, 37 38 Endikasyonu: Çürük, Tedavi: Kompozit Dolgu, Yüzeyler Mezial, Okluzal, Distal"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["36","37","38"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36","37","38"],"indication":"Çürük","surfaces":["M","O","D"],"section":"crown","materials":[],"intent":"ADD"}]}
 
-Örnek 3: "tüm üst çeneyi seç"
-{"globalIntent":"NONE","selectIntent":"SELECT_MAXILLA","targetTeeth":[],"treatments":[]}
+Örnek 3 (Madde 5.1): "36, Endikasyonu: Çürük, Tedavi: Kompozit Dolgu, Yüzeyler MOD"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["36"],"treatments":[{"procedureName":"Kompozit Dolgu (Tek Yüzey)","toothNumbers":["36"],"indication":"Çürük","surfaces":["M","O","D"],"section":"crown","materials":[],"intent":"ADD"}]}
 
-Örnek 4: "21 kuron zirkonyum kaplama"
-{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["21"],"treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["21"],"section":"crown","surfaces":[],"intent":"ADD"}]}
+Örnek 4 (Silme): "15 16 zirkonyum sil"
+{"globalIntent":"NONE","selectIntent":"SELECT_TEETH","targetTeeth":["15","16"],"treatments":[{"procedureName":"Zirkonyum Kuron","toothNumbers":["15","16"],"indication":null,"surfaces":[],"section":null,"materials":[],"intent":"DELETE"}]}`
 
-Örnek 5: "seçimleri temizle"
-{"globalIntent":"NONE","selectIntent":"CLEAR_SELECTION","targetTeeth":[],"treatments":[]}
-
-Örnek 6: "ağzınızı biraz açın geçmiş olsun şöyle yapalım"
-{"globalIntent":"NONE","selectIntent":"NONE","targetTeeth":[],"treatments":[],"diseases":[],"consultations":[]}`
+    const userParts: any[] = [{ text: text || 'Ekli ses kaydındaki dental komutu çözümle.' }]
+    if (hasAudio) {
+      const cleanBase64 = audioBase64.includes(',') ? audioBase64.split(',')[1].trim() : audioBase64.trim()
+      if (cleanBase64) {
+        userParts.push({
+          inlineData: {
+            mimeType: typeof audioMimeType === 'string' && audioMimeType.trim() ? audioMimeType.trim() : 'audio/webm',
+            data: cleanBase64,
+          },
+        })
+      }
+    }
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
     let data: any
@@ -254,7 +259,7 @@ Format:
           body: JSON.stringify({
             contents: [{
               role: 'user',
-              parts: [{ text: text }]
+              parts: userParts
             }],
             systemInstruction: {
               role: 'system',
@@ -283,26 +288,90 @@ Format:
     }
 
     if (!data || data.error) {
+      if (localParsed.matched) {
+        return NextResponse.json({ result: localParsed })
+      }
       console.error('AI API Error:', data?.error || fetchError)
       return NextResponse.json({ error: 'AI API Hatası', details: data?.error || 'Unknown error' }, { status: 500 })
     }
 
     const contentText = data.candidates?.[0]?.content?.parts?.[0]?.text
     if (!contentText) {
+      if (localParsed.matched) {
+        return NextResponse.json({ result: localParsed })
+      }
       return NextResponse.json({ result: [] })
     }
 
-    let parsed = []
+    let parsed: any = null
     try {
       parsed = JSON.parse(contentText)
     } catch (e) {
-      console.error('AI JSON Parse Error')
-      // markdown temizlemeyi deneyelim
       try {
         const cleaned = contentText.replace(/```json/g, '').replace(/```/g, '').trim()
         parsed = JSON.parse(cleaned)
       } catch (e2) {
+        if (localParsed.matched) {
+          return NextResponse.json({ result: localParsed })
+        }
         return NextResponse.json({ error: 'Komut ayrıştırılamadı' }, { status: 422 })
+      }
+    }
+
+    // Gemini çıktısını deterministik diş numarası koruma, yüzey/malzeme ve bağlı endikasyon (indicationLinks) kurallarıyla zenginleştir
+    const deterministicTeeth = extractAllFdiTeethInOrder(text)
+    const deterministicSurfaces = extractDentalSurfaces(text)
+    const deterministicMaterials = matchSpokenMaterials(text, effectiveInventory)
+
+    if (parsed && Array.isArray(parsed.treatments)) {
+      parsed.treatments = parsed.treatments.map((t: any) => {
+        const intent = t.intent || 'ADD'
+        const toothNumbers =
+          deterministicTeeth.length > 0 &&
+          (!Array.isArray(t.toothNumbers) || t.toothNumbers.length < deterministicTeeth.length)
+            ? deterministicTeeth
+            : Array.isArray(t.toothNumbers) && t.toothNumbers.length > 0
+              ? t.toothNumbers.map(String)
+              : ['general']
+
+        const surfaces =
+          Array.isArray(t.surfaces) && t.surfaces.length > 0
+            ? t.surfaces
+            : deterministicSurfaces
+
+        const explicitInd = localParsed.isStructured51 ? (t.indication || localParsed.indication) : null
+        const resolvedInds =
+          intent === 'ADD'
+            ? resolveAutoLinkedIndications(t.procedureName, safeIndicationLinks, explicitInd)
+            : explicitInd
+              ? [explicitInd]
+              : []
+
+        const aiMatStrings = Array.isArray(t.materials)
+          ? t.materials.filter((m: unknown): m is string => typeof m === 'string')
+          : []
+        const aiMatchedMats =
+          aiMatStrings.length > 0
+            ? matchSpokenMaterials(aiMatStrings.join(' '), effectiveInventory)
+            : []
+        const finalMaterials =
+          deterministicMaterials.length > 0 ? deterministicMaterials : aiMatchedMats
+
+        return {
+          ...t,
+          toothNumbers,
+          surfaces,
+          surface: surfaces.length > 0 ? surfaces.join('') : t.surface,
+          indication: explicitInd || (resolvedInds.length > 0 ? resolvedInds[0] : null),
+          indications: resolvedInds,
+          materials: finalMaterials.length > 0 ? finalMaterials : (Array.isArray(t.materials) ? t.materials : []),
+          materialNames: finalMaterials.length > 0 ? finalMaterials.map((m) => m.name) : aiMatStrings,
+          intent,
+        }
+      })
+
+      if (deterministicTeeth.length > 0 && (!Array.isArray(parsed.targetTeeth) || parsed.targetTeeth.length < deterministicTeeth.length)) {
+        parsed.targetTeeth = deterministicTeeth
       }
     }
 

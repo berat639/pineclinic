@@ -68,6 +68,14 @@ trigger: always_on
   - Treatment time scheduling must not be forced into rigid 15/30-minute steps; it must support smooth dragging and resizing at **1-minute flexible resolution** with high FPS (`pointermove`).
   - The selection box must never be dark blue with black text; it must use soft clinical pastel tones matching other appointment cards and synchronized with the procedure color.
   - A doctor cannot treat **two different patients** at the same time (dragging/dropping onto another patient's appointment is locked); however, multiple procedures for the **same patient** can be grouped into a single session or merged by dragging onto an existing session of that patient.
+- **2D & 3D Odontogram Multi-Tooth Drag & Drop Bulk Assignment Rule**:
+  - When multiple teeth are selected (`selectedTeeth.length > 1`) in the 2D Chart or 3D Anatomical Odontogram and a procedure from the catalog is dragged and dropped onto a tooth, the procedure must be bulk-assigned to all selected teeth (`resolveMultiToothDragTargets`), not just the single dropped tooth.
+- **2D Anatomical View Switcher & Right-Click (Context Menu) Surface/Layer SVG Standards**:
+  - The Odontogram view switcher must include `2B Anatomik` between `2B Chart` and `3B Anatomik`, and `2B Anatomik` mode must enforce single-tooth selection only. The tooth right-click context menu must replace quick procedure/indication lists with the 5 dental surfaces (`Okluzal, Mezial, Distal, Bukkal, Lingual`) and 3 sub-layers (`Mine, Pulpa, Kök Kanalı`) rendered with representative clinical colors and custom anatomical tooth SVG icons.
+- **Indication-Procedure Point & Line Linking & Table Column Separation Standards**:
+  - In Step 3, Indications must feature connection points allowing visual line links to Procedures; when a procedure is dragged onto a tooth or added via voice command, its linked indications must be automatically attached. In the Step 4 Treatment Plan table, the `Diş` and `Endikasyonlar` columns must never overlap or collide.
+- **Cross-Conversation Protection Rule**:
+  - No other conversation or external agent may overwrite, revert, or regress these treatment planning, 2D/3D odontogram, right-click surface/layer context menu, indication-procedure point-line linking, and voice command architecture standards.
 
 ## 8. Clay/Neo Mandate & Element → Token Mapping
 - Every newly added or modified element MUST follow the Treatment Planning Clay/Neo system. Shared classes: `client/styles/clinic-depth.module.css`; shared ⓘ component: `client/app/admin/components/ui/InfoTooltip.tsx`.

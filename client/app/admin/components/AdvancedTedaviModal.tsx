@@ -8,11 +8,22 @@ import PatientConsentPanel from './PatientConsentPanel';
 import PlanMediaPanel, { type PlanAttachment } from './PlanMediaPanel';
 import { notificationChannels, type NotificationChannel } from '../../../lib/notification-channels';
 import PineTreatmentPlanView from './PineTreatmentPlanView';
+import { getLinkedIndicationsForProcedure, type IndicationProcedureLinks } from './IndicationProcedureLinker';
 import ConfirmModal from './ConfirmModal';
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss';
 import type { DefectMarker } from './Odontogram3D';
 import { calculateTreatmentPrices } from '../../../lib/treatment-pricing';
 import { treatmentTargets, type TreatmentScope } from '../../../lib/treatment-targets';
+import { resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop';
+import {
+  repairTurkishDentalPhonetics,
+  extractAllFdiTeethInOrder,
+  mergeBufferedTeethWithCommand,
+  matchSpokenMaterials,
+  resolveAutoLinkedIndications,
+  pickBestSpeechAlternative,
+} from '../../../lib/dental-voice-parser';
+import { DentalVoicePipeline } from '../../../lib/dental-audio-pipeline';
 import { checkDoctorAvailability } from '../../../lib/doctor-availability';
 import { PhoneMaskedInput } from '@/lib/phone-mask';
 
@@ -69,7 +80,28 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [selectedTeeth, setSelectedTeeth] = useState<number[]>([])
   const [selectionMode, setSelectionMode] = useState<'inspect' | 'batch'>('batch');
   const [isQuickSelectOpen, setIsQuickSelectOpen] = useState(false);
-  const [odontogramMode, setOdontogramMode] = useState<'2d' | '3d'>('2d');
+  const [odontogramMode, setOdontogramMode] = useState<'2d' | '2d-anatomical' | '3d'>('2d');
+  const handleSetOdontogramMode = (nextMode: '2d' | '2d-anatomical' | '3d') => {
+    setOdontogramMode(nextMode);
+    if (nextMode === '2d-anatomical') {
+      setSelectedTeeth(prev => (prev.length > 1 ? [prev[prev.length - 1]] : prev));
+    }
+  };
+  const [indicationLinks, setIndicationLinks] = useState<IndicationProcedureLinks>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = window.localStorage.getItem('voiceai_indication_procedure_links');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('voiceai_indication_procedure_links', JSON.stringify(indicationLinks));
+    } catch {}
+  }, [indicationLinks]);
   const [jawSelection, setJawSelection] = useState<'all' | 'upper' | 'lower'>('all');
   const [toothSurfaces, setToothSurfaces] = useState<Record<number, string[]>>({});
   const [toothSections, setToothSections] = useState<Record<number, string>>({});
@@ -577,6 +609,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const lastProcessedTextRef = useRef<string>('');
   const processedResultIndexRef = useRef<number>(0);
   const pendingDentalPrefixRef = useRef<{ text: string; updatedAt: number }>({ text: '', updatedAt: 0 });
+  const bufferedVoiceTeethRef = useRef<string[]>([]);
+  const voicePipelineRef = useRef<DentalVoicePipeline | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioMonitorIntervalRef = useRef<any>(null);
@@ -664,6 +698,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   const handleToothClick = (n: number, e: React.MouseEvent) => {
+    if (odontogramMode === '2d-anatomical') {
+      setSelectedTeeth(prev => (prev.length === 1 && prev[0] === n) ? [] : [n]);
+      setLastSelectedTooth(n);
+      return;
+    }
     if (e.shiftKey && lastSelectedTooth !== null) {
       // Anatomik aralık seçimi (Shift + Click)
       const allTeeth = [...UPPER_TEETH, ...LOWER_TEETH];
@@ -698,7 +737,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const handleDropTreatment = (targets: Array<number | string>, treatmentData: any) => {
     if (!targets || targets.length === 0 || !treatmentData) return;
 
-    const effectiveTargets = targets;
+    const effectiveTargets =
+      targets.length === 1 && odontogramMode !== '2d-anatomical'
+        ? resolveMultiToothDragTargets(targets[0], selectedTeeth)
+        : targets;
 
     // treatmentData JSON string veya iç içe nesne olarak geldiyse güvenle çöz
     let resolved = { ...treatmentData };
@@ -734,19 +776,22 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     setToothDrafts(prev => {
       const next = { ...prev };
       if (procsToAdd.length) {
-        for (const proc of procsToAdd) for (const key of keysFor(proc.scope)) {
-          next[key] = [...(next[key] || []), {
-            id: Math.random().toString(36).substring(7), procedureId: proc.id, scope: proc.scope || 'tooth',
-            name: proc.name, price: proc.price || 0, indications: [...indsToAdd],
-            doctorId: null,
-            doctorIds: [],
-            doctorAutoFilled: false,
-            doctorManuallySelected: false,
-            isFromSavedPlan: false,
-            initialDoctorIds: [],
-            materials: [...((procsToAdd.length === 1 ? activeMaterials : undefined) || proc.materials || []).map((material: any) => ({ ...material }))],
-            color: proc.color || '#3b82f6', surface: resolved.surface || toothSurfaces[Number(key)]?.join(''), section: resolved.section || toothSections[Number(key)],
-          }];
+        for (const proc of procsToAdd) {
+          const procInds = getLinkedIndicationsForProcedure(indicationLinks, proc, indsToAdd);
+          for (const key of keysFor(proc.scope)) {
+            next[key] = [...(next[key] || []), {
+              id: Math.random().toString(36).substring(7), procedureId: proc.id, scope: proc.scope || 'tooth',
+              name: proc.name, price: proc.price || 0, indications: [...procInds],
+              doctorId: null,
+              doctorIds: [],
+              doctorAutoFilled: false,
+              doctorManuallySelected: false,
+              isFromSavedPlan: false,
+              initialDoctorIds: [],
+              materials: [...((procsToAdd.length === 1 ? activeMaterials : undefined) || proc.materials || []).map((material: any) => ({ ...material }))],
+              color: proc.color || '#3b82f6', surface: resolved.surface || toothSurfaces[Number(key)]?.join(''), section: resolved.section || toothSections[Number(key)],
+            }];
+          }
         }
       } else for (const tooth of effectiveTargets) {
         const key = String(tooth);
@@ -958,10 +1003,24 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
             const procName = procTemp ? procTemp.name : (t.procedureName || 'Kompozit Dolgu (Tek Yüzey)');
             const procPrice = procTemp ? procTemp.price : (t.cost || 0);
             const procColor = procTemp ? procTemp.color : '#3b82f6';
-            const procMaterials = procTemp ? procTemp.materials : [];
-            const matchedIndication = t.indication
-              ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[]
-              : [];
+            const rawSpokenMats = Array.isArray(t.materials) ? t.materials : [];
+            const mappedSpokenMats = rawSpokenMats.map((m: any) => ({
+              inventoryItemId: m.inventoryItemId || m.id,
+              name: m.name,
+              quantity: Number(m.quantity) || 1,
+              unitCost: Number(m.unitCost ?? m.costPerUnit ?? 0),
+              unitSalePriceMinor: Number(m.unitSalePriceMinor ?? 0),
+            }));
+            const procMaterials = mappedSpokenMats.length > 0 ? mappedSpokenMats : (procTemp ? procTemp.materials : []);
+            const explicitInds = Array.isArray(t.indications) && t.indications.length > 0
+              ? t.indications
+              : (t.indication ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[] : []);
+            const matchedIndication = resolveAutoLinkedIndications(
+              indicationLinks,
+              procName,
+              procTemp?.id,
+              explicitInds
+            );
 
             const existingRow = next[tn]?.[0];
             const resolvedDocId = existingRow?.doctorId ?? null;
@@ -1001,7 +1060,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               const procName = procTemp ? procTemp.name : t.procedureName;
               const procPrice = procTemp ? procTemp.price : (t.cost || 0);
               const procColor = procTemp ? procTemp.color : '#3b82f6';
-              const procMaterials = procTemp ? procTemp.materials : [];
+              const rawSpokenMats = Array.isArray(t.materials) ? t.materials : [];
+              const mappedSpokenMats = rawSpokenMats.map((m: any) => ({
+                inventoryItemId: m.inventoryItemId || m.id,
+                name: m.name,
+                quantity: Number(m.quantity) || 1,
+                unitCost: Number(m.unitCost ?? m.costPerUnit ?? 0),
+                unitSalePriceMinor: Number(m.unitSalePriceMinor ?? 0),
+              }));
+              const procMaterials = mappedSpokenMats.length > 0 ? mappedSpokenMats : (procTemp ? procTemp.materials : []);
 
               const exists = next[tn].find(x => {
                 const pName = x.name.toLowerCase();
@@ -1010,9 +1077,15 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               });
 
               if (!exists) {
-                const matchedIndication = t.indication
-                  ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[]
-                  : [];
+                const explicitInds = Array.isArray(t.indications) && t.indications.length > 0
+                  ? t.indications
+                  : (t.indication ? [indTemplates.find(i => i.toLowerCase() === t.indication?.toLowerCase()) || t.indication].filter(Boolean) as string[] : []);
+                const matchedIndication = resolveAutoLinkedIndications(
+                  indicationLinks,
+                  procName,
+                  procTemp?.id,
+                  explicitInds
+                );
                 next[tn].push({
                   id: Math.random().toString(36).substring(2, 9),
                   procedureId: procTemp?.id,
@@ -1072,6 +1145,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
 
   const cleanupAudioMonitor = () => {
+    if (voicePipelineRef.current) {
+      try { voicePipelineRef.current.stop(); } catch { }
+      voicePipelineRef.current = null;
+    }
     if (audioMonitorIntervalRef.current) {
       clearInterval(audioMonitorIntervalRef.current);
       audioMonitorIntervalRef.current = null;
@@ -1102,6 +1179,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     recognitionRestartRef.current = null;
     processedResultIndexRef.current = 0;
     pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+    bufferedVoiceTeethRef.current = [];
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch { }
     }
@@ -1117,22 +1195,35 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     onClose();
   };
 
-  const processAICommand = async (text: string, fromVoice = false) => {
+  const processAICommand = async (text: string, fromVoice = false, audioBase64Override?: string | null) => {
     if (!text || !text.trim() || isAnalyzingRef.current) return;
-    const cleanText = normalizeDentalCommandNumbers(text).trim();
+    const mergedText = bufferedVoiceTeethRef.current.length > 0
+      ? mergeBufferedTeethWithCommand(bufferedVoiceTeethRef.current, text)
+      : text;
+    const cleanText = normalizeDentalCommandNumbers(mergedText).trim();
     if (!cleanText) return;
     isAnalyzingRef.current = true;
     setIsAnalyzing(true);
     setTranscript(`⚙️ "${cleanText}" analiz ediliyor...`);
+    const abortSignal = voicePipelineRef.current?.beginAnalyzing();
+    const audioBase64 = audioBase64Override ?? undefined;
+    const capturedBufferedTeeth = [...bufferedVoiceTeethRef.current];
 
     try {
       const res = await fetch('/api/ai/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortSignal,
         body: JSON.stringify({
           text: cleanText,
           procNames: procTemplates.map(p => p.name),
-          indNames: indTemplates
+          indNames: indTemplates,
+          materialNames: inventory.map(i => i.name),
+          inventory,
+          indicationLinks,
+          bufferedTeeth: capturedBufferedTeeth,
+          audioBase64,
+          audioMimeType: audioBase64 ? 'audio/wav' : undefined,
         })
       });
       const data = await res.json();
@@ -1229,6 +1320,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           if (hasDeleteOrUpdate) {
             executeTreatmentCommand(treatments);
           } else {
+            const fallbackSpokenMaterials = matchSpokenMaterials(cleanText, inventory);
             for (const item of treatments) {
               const normTarget = (item.procedureName || '').toLocaleLowerCase('tr-TR').trim();
               const procedure = procTemplates.find(proc => {
@@ -1247,10 +1339,30 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 const n = Number(tn);
                 return Number.isInteger(n) && n >= 11 && n <= 48 ? n : String(tn);
               });
+              const rawItemMats = Array.isArray(item.materials) && item.materials.length > 0
+                ? item.materials
+                : fallbackSpokenMaterials;
+              const mappedItemMats = rawItemMats.map((m: any) => ({
+                inventoryItemId: m.inventoryItemId || m.id,
+                name: m.name,
+                quantity: Number(m.quantity) || 1,
+                unitCost: Number(m.unitCost ?? m.costPerUnit ?? 0),
+                unitSalePriceMinor: Number(m.unitSalePriceMinor ?? 0),
+              }));
+              const explicitInds = Array.isArray(item.indications) && item.indications.length > 0
+                ? item.indications
+                : (item.indication ? [item.indication] : []);
+              const resolvedInds = resolveAutoLinkedIndications(
+                indicationLinks,
+                resolvedProcedure?.name || item.procedureName,
+                resolvedProcedure?.id,
+                explicitInds
+              );
               handleDropTreatment(normalizedTargets, {
                 procedures: resolvedProcedure ? [resolvedProcedure] : [],
-                indications: item.indication ? [item.indication] : [],
-                surface: Array.isArray(item.surfaces) ? item.surfaces.join('') : undefined,
+                indications: resolvedInds,
+                activeMaterials: mappedItemMats.length > 0 ? mappedItemMats : (resolvedProcedure?.materials || []),
+                surface: Array.isArray(item.surfaces) && item.surfaces.length > 0 ? item.surfaces.join('') : item.surface,
                 section: item.section,
               });
             }
@@ -1275,7 +1387,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       } else if (!fromVoice) {
         toast.error("Komut çözümlenemedi.");
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || err === 'barge_in') {
+        return;
+      }
       console.error("processAICommand error:", err);
       if (!fromVoice) {
         toast.error("Asistan yanıtı alınırken bir hata oluştu.");
@@ -1283,7 +1398,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     } finally {
       isAnalyzingRef.current = false;
       setIsAnalyzing(false);
+      voicePipelineRef.current?.endAnalyzing();
       pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+      bufferedVoiceTeethRef.current = [];
       if (isListeningRef.current) {
         setTranscript("🎙️ Dinleniyor... Yeni komut söyleyebilirsiniz.");
       } else {
@@ -1292,11 +1409,11 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     }
   };
 
-  // Türkçe yazıyla söylenen diş numaralarını ("on altı" -> "16"), bitişik FDI sayılarını ("1617 18" -> "16 17 18")
-  // ve ilk hecesi yutulmuş ardışık diş serilerini ("6 17 18" -> "16 17 18") normalize eder.
+  // Türkçe yazıyla söylenen diş numaralarını ("on altı" -> "16"), bitişik FDI sayılarını ("1617 18" -> "16 17 18"),
+  // ilk hecesi yutulmuş ardışık diş serilerini ("6 17 18" -> "16 17 18") ve fonetik bozulmaları ("17 koyun ekmek" -> "17 zirkonyum ekle") normalize eder.
   const normalizeDentalCommandNumbers = (rawText: string): string => {
     if (!rawText) return '';
-    let text = rawText;
+    let text = repairTurkishDentalPhonetics(rawText);
 
     const tensMap: Record<string, number> = {
       'on': 10,
@@ -1364,6 +1481,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         return full;
       });
     }
+
+    // Yan yana tekrar eden aynı FDI diş numarasını tekilleştir ("15 16 17 17" -> "15 16 17")
+    text = text.replace(/\b([1-4][1-8])(?:\s+\1)+\b/g, '$1');
 
     return text.replace(/\s+/g, ' ').trim();
   };
@@ -1599,7 +1719,9 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       });
       micStreamRef.current = micStream;
 
-      // Web Audio API ile insan sesi bandında (85Hz - 3400Hz) yakın-alan (near-field) SNR / enerji takibi
+      // Web Audio API + LiveKit/Krisp 5 Katmanlı Ses Hattı:
+      // Katman 1: AEC + AGC + 85Hz Highpass + 5200Hz Frez Notch + 6800Hz Lowpass + DynamicsCompressor + MakeupGain
+      // Katman 2: LiveKit Krisp (@livekit/krisp-noise-filter varsa otomatik bağlanır) + Yakın-Alan BVC / VAD
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
@@ -1611,17 +1733,47 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           highpass.type = 'highpass';
           highpass.frequency.value = 85;
 
+          const drillNotch = audioCtx.createBiquadFilter();
+          drillNotch.type = 'notch';
+          drillNotch.frequency.value = 5200;
+          drillNotch.Q.value = 2.4;
+
           const lowpass = audioCtx.createBiquadFilter();
           lowpass.type = 'lowpass';
-          lowpass.frequency.value = 3400;
+          lowpass.frequency.value = 6800;
+
+          const compressor = audioCtx.createDynamicsCompressor();
+          compressor.threshold.value = -26;
+          compressor.knee.value = 18;
+          compressor.ratio.value = 4;
+          compressor.attack.value = 0.002;
+          compressor.release.value = 0.16;
+
+          const makeupGain = audioCtx.createGain();
+          makeupGain.gain.value = 1.45;
 
           const analyser = audioCtx.createAnalyser();
           analyser.fftSize = 512;
-          analyser.smoothingTimeConstant = 0.3;
+          analyser.smoothingTimeConstant = 0.25;
 
           source.connect(highpass);
-          highpass.connect(lowpass);
-          lowpass.connect(analyser);
+          highpass.connect(drillNotch);
+          drillNotch.connect(lowpass);
+          lowpass.connect(compressor);
+          compressor.connect(makeupGain);
+          makeupGain.connect(analyser);
+
+          // Opsiyonel LiveKit Krisp işlemcisi varsa ses izine bağla
+          try {
+            const globalKrisp = (window as any).__LIVEKIT_KRISP_PROCESSOR__;
+            const audioTrack = micStream.getAudioTracks()[0];
+            if (globalKrisp && audioTrack && typeof (audioTrack as any).setProcessor === 'function') {
+              const proc = typeof globalKrisp === 'function' ? globalKrisp() : globalKrisp;
+              await (audioTrack as any).setProcessor(proc);
+            }
+          } catch {
+            // Krisp paketi yoksa yerleşik yakın-alan BVC/VAD filtresi devrede kalır
+          }
 
           const timeData = new Float32Array(analyser.fftSize);
           noiseFloorRmsRef.current = 0.008;
@@ -1661,11 +1813,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       hasVoiceFatalErrorRef.current = false;
       processedResultIndexRef.current = 0;
       pendingDentalPrefixRef.current = { text: '', updatedAt: 0 };
+      bufferedVoiceTeethRef.current = [];
 
       const recognition = new SpeechRecognition();
       recognition.lang = 'tr-TR';
       recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
+      recognition.maxAlternatives = 5;
       recognition.continuous = true;
 
       recognition.onstart = () => {
@@ -1675,7 +1828,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         setIsVoiceStarting(false);
         setVoiceError(null);
         processedResultIndexRef.current = 0;
-        setTranscript("🎙️ Dinleniyor... (Örn: '16 17 18 kompozit dolgu ekle', 'asistanı kapat')");
+        setTranscript("🎙️ Dinleniyor... (Örn: '15 16 17 zirkonyum ekle', 'asistanı kapat')");
       };
 
       recognition.onresult = (event: any) => {
@@ -1690,15 +1843,25 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         }
 
         // ÖNEMLİ: event.resultIndex'ten değil, son işlenen/temizlenen indeksten (processedResultIndexRef) başla!
-        // Böylece "16" (results[0], isFinal=true) söylendikten sonra "17 18 kompozit dolgu ekle" (results[1], resultIndex=1)
-        // geldiğinde baştaki "16" ASLA kaybolmaz.
-        let startIdx = Math.min(processedResultIndexRef.current, event.results.length);
+        // Böylece "15", "16", "17" 1'er saniye arayla söylendikten sonra "zirkonyum ekle" geldiğinde
+        // baştaki diş numaraları ASLA kaybolmaz.
+        const startIdx = Math.min(processedResultIndexRef.current, event.results.length);
         const keptParts: string[] = [];
         let interimText = '';
 
         for (let i = startIdx; i < event.results.length; i++) {
           const res = event.results[i];
-          const segText = (res[0]?.transcript || '').trim();
+          const altCandidates: string[] = [];
+          const altLen = typeof res?.length === 'number' ? res.length : 1;
+          for (let a = 0; a < altLen; a++) {
+            const altText = (res[a]?.transcript || '').trim();
+            if (altText) altCandidates.push(altText);
+          }
+          const segText = pickBestSpeechAlternative(
+            altCandidates.length > 0 ? altCandidates : [(res?.[0]?.transcript || '').trim()],
+            procTemplates,
+            indTemplates
+          ).trim();
           if (!segText) continue;
 
           // Herhangi bir segmentte kapatma komutu varsa anında kapat
@@ -1711,7 +1874,12 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           if (res.isFinal) {
             // Eğer bu tamamlanmış cümle hiçbir diş numarası veya dental terim içermiyorsa (günlük sohbet / ortam konuşması)
             // ve henüz başlamış bir dental komut önekimiz yoksa, bu sohbeti anında atla.
-            if (keptParts.length === 0 && !pendingDentalPrefixRef.current.text && !hasDentalDomainSignal(segText)) {
+            if (
+              keptParts.length === 0 &&
+              !pendingDentalPrefixRef.current.text &&
+              bufferedVoiceTeethRef.current.length === 0 &&
+              !hasDentalDomainSignal(segText)
+            ) {
               processedResultIndexRef.current = i + 1;
               continue;
             }
@@ -1721,10 +1889,10 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           }
         }
 
-        // Eğer önceki oturumdan (anlık restart öncesi) kalan taze (12 sn içinde) bir diş/komut öneki varsa (örn. "16") birleştir
+        // Eğer önceki oturumdan (anlık restart öncesi veya 1sn duraksama sırasında) kalan taze (15 sn içinde) bir diş/komut öneki varsa birleştir
         const prefixAlive =
           pendingDentalPrefixRef.current.text &&
-          now - pendingDentalPrefixRef.current.updatedAt < 12000;
+          now - pendingDentalPrefixRef.current.updatedAt < 15000;
 
         const combinedRaw = [
           prefixAlive ? pendingDentalPrefixRef.current.text : '',
@@ -1756,19 +1924,40 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
         // Eğer şu ana kadar söylenen metinde hiçbir dental sinyal (diş no, işlem, çene, kaydet vb.) yoksa
         // ortam sohbetini ekrana veya AI'ya taşıma
-        if (!hasDentalDomainSignal(normalizedCombined)) {
+        if (!hasDentalDomainSignal(normalizedCombined) && bufferedVoiceTeethRef.current.length === 0) {
           return;
         }
 
-        // Başında sohbet kalıntısı varsa sadece dental komut kısmını ayıkla
-        const commandText = extractDentalCommandClause(normalizedCombined);
+        // Başında sohbet kalıntısı varsa sadece dental komut kısmını ayıkla ve daha önce söylenip
+        // duraksama nedeniyle düşebilecek FDI diş numaralarını (örn. "15", "16") koru!
+        const extractedClause = extractDentalCommandClause(normalizedCombined);
+        const currentTeeth = extractAllFdiTeethInOrder(extractedClause);
+        if (currentTeeth.length > 0) {
+          const mergedTeeth = [...bufferedVoiceTeethRef.current];
+          for (const t of currentTeeth) {
+            if (!mergedTeeth.includes(t)) mergedTeeth.push(t);
+          }
+          bufferedVoiceTeethRef.current = mergedTeeth;
+        }
+        const commandText = mergeBufferedTeethWithCommand(bufferedVoiceTeethRef.current, extractedClause);
         setTranscript(commandText);
 
-        // Eğer yalnızca diş numaraları veya başlangıç parçası söylendiyse (örn. "16" veya "16 17")
-        // olası bir duraksama/restartta kaybolmaması için önekte sakla
-        if (keptParts.length > 0 && !interimText.trim()) {
+        // Söylenen final parçaları (interimText olsa bile!) önekte sakla ki 1 sn duraksamalarda baştaki diş numaraları asla kaybolmasın
+        if (keptParts.length > 0) {
+          const finalOnlyRaw = [
+            prefixAlive ? pendingDentalPrefixRef.current.text : '',
+            ...keptParts,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const finalOnlyCommand = mergeBufferedTeethWithCommand(
+            bufferedVoiceTeethRef.current,
+            extractDentalCommandClause(normalizeDentalCommandNumbers(finalOnlyRaw))
+          );
           pendingDentalPrefixRef.current = {
-            text: commandText,
+            text: finalOnlyCommand,
             updatedAt: now
           };
           processedResultIndexRef.current = event.results.length;
@@ -2128,7 +2317,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           attachments={planAttachments} setAttachments={setPlanAttachments} setUploading={setMediaUploading} onAttachmentSaved={handleAttachmentSaved}
           drafts={toothDrafts} setDrafts={setToothDrafts} selected={selectedTeeth} setSelected={setSelectedTeeth}
           procedures={procTemplates} setProcedures={setProcTemplates} indications={indTemplates} setIndications={setIndTemplates} indicationIds={indicationIds} setIndicationIds={setIndicationIds} inventory={inventory}
-          add={handleDropTreatment} clickTooth={handleToothClick} jaw={jawSelection} mode={odontogramMode} setMode={setOdontogramMode}
+          add={handleDropTreatment} clickTooth={handleToothClick} jaw={jawSelection} mode={odontogramMode} setMode={handleSetOdontogramMode}
+          indicationLinks={indicationLinks} setIndicationLinks={setIndicationLinks}
           onContextMenu={openToothContext} contextMenu={contextMenu} setContextMenu={setContextMenu}
           detailTooth={selectedToothForDetails} setDetailTooth={setSelectedToothForDetails}
           toothSurfaces={toothSurfaces} toothSections={toothSections} updateSurfaces={updateSurfaces} updateSection={updateSection}
@@ -3275,7 +3465,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           const rawVal = e.dataTransfer.getData("value") || e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
                           const rawType = e.dataTransfer.getData("type");
                           if (!rawVal) return;
-                          const targets = [n];
+                          const targets = resolveMultiToothDragTargets(n, selectedTeeth);
                           try {
                             const parsed = JSON.parse(rawVal);
                             handleDropTreatment(targets, { type: rawType, ...parsed });
@@ -3307,7 +3497,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           const rawVal = e.dataTransfer.getData("value") || e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
                           const rawType = e.dataTransfer.getData("type");
                           if (!rawVal) return;
-                          const targets = [n];
+                          const targets = resolveMultiToothDragTargets(n, selectedTeeth);
                           try {
                             const parsed = JSON.parse(rawVal);
                             handleDropTreatment(targets, { type: rawType, ...parsed });

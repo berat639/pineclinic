@@ -11,7 +11,22 @@ import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
 import TableToothGroupCell, { formatTargetPlainName, groupTreatmentDraftRows, type GroupedToothEntry } from './TableToothGroupCell'
 import { HideableColumnHeader, TreatmentTableColumnBar, useTreatmentTableColumns } from './TreatmentTableColumnManager'
 import OdontogramSelectionBar from './OdontogramSelectionBar'
+import ToothAnatomy2D from './ToothAnatomy2D'
+import {
+  IndicationPortButton,
+  ProcedurePortButton,
+  IndicationProcedureLinkOverlay,
+  getLinkedIndicationsForProcedure,
+  toggleIndicationProcedureLink,
+  removeIndicationProcedureLink,
+  removeIndicationFromLinks,
+  renameIndicationInLinks,
+  removeProcedureFromLinks,
+  getProcedureLinkKey,
+  type IndicationProcedureLinks,
+} from './IndicationProcedureLinker'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
+import { parseDraggedTreatmentPayload, resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop'
 import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
 import styles from './PineTreatmentPlan.module.css'
@@ -72,6 +87,31 @@ export default function PineTreatmentPlanView(p: any) {
   const procedureListRef = useRef<HTMLDivElement>(null)
   const indicationAddRef = useRef<HTMLButtonElement>(null)
   const procedureAddRef = useRef<HTMLButtonElement>(null)
+  const workgridRef = useRef<HTMLDivElement>(null)
+  const [activeSourceIndication, setActiveSourceIndication] = useState<string | null>(null)
+  const [localIndicationLinks, setLocalIndicationLinks] = useState<IndicationProcedureLinks>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = window.localStorage.getItem('voiceai_indication_procedure_links')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+  const indicationLinks: IndicationProcedureLinks = p.indicationLinks || localIndicationLinks
+  const updateIndicationLinks = (updater: (prev: IndicationProcedureLinks) => IndicationProcedureLinks) => {
+    if (typeof p.setIndicationLinks === 'function') {
+      p.setIndicationLinks(updater)
+    } else {
+      setLocalIndicationLinks(prev => {
+        const next = updater(prev)
+        try {
+          window.localStorage.setItem('voiceai_indication_procedure_links', JSON.stringify(next))
+        } catch {}
+        return next
+      })
+    }
+  }
   const [materialRow, setMaterialRow] = useState<{ target: string; id: string; entries?: GroupedToothEntry[] } | null>(null)
   const selectedProcedure = p.procedures.find((item: any) => item.id === procedureId)
   const resolveProcColor = (item: any) =>
@@ -188,7 +228,8 @@ export default function PineTreatmentPlanView(p: any) {
     })
   }
   const apply = (targets: (number | string)[], proc = selectedProcedure, inds = indications, mats = materials) => {
-    if (!proc && !inds.length) { toast.error('Tedavi veya endikasyon seçin.'); return }
+    const mergedInds = proc ? getLinkedIndicationsForProcedure(indicationLinks, proc, inds) : inds
+    if (!proc && !mergedInds.length) { toast.error('Tedavi veya endikasyon seçin.'); return }
     let resolvedTargets: (number | string)[] = targets
     if (proc?.scope === 'mouth') {
       resolvedTargets = ['general']
@@ -196,7 +237,7 @@ export default function PineTreatmentPlanView(p: any) {
       resolvedTargets = [p.jaw === 'lower' ? 'lower' : 'upper']
     }
     if (!resolvedTargets.length) { toast.error('Önce hedef diş seçin.'); return }
-    p.add(resolvedTargets, { procedures: proc ? [proc] : [], indications: inds, activeMaterials: mats })
+    p.add(resolvedTargets, { procedures: proc ? [proc] : [], indications: mergedInds, activeMaterials: mats })
   }
   const selectProcedure = (proc: any) => {
     setProcedureId(proc.id); setMaterials((proc.materials || []).map((item: any) => ({ ...item })))
@@ -265,6 +306,9 @@ export default function PineTreatmentPlanView(p: any) {
         if (oldName && oldName !== result.name) delete next[oldName]
         return next
       })
+      if (oldName && oldName !== result.name) {
+        updateIndicationLinks(prev => renameIndicationInLinks(prev, oldName, result.name))
+      }
       setIndications(previous => {
         const cleaned = oldName ? previous.filter(name => name !== oldName) : previous
         return cleaned.includes(result.name) ? cleaned : [...cleaned, result.name]
@@ -284,10 +328,13 @@ export default function PineTreatmentPlanView(p: any) {
       }
       if (kind === 'procedure') {
         p.setProcedures((previous: any[]) => previous.filter(item => item.id !== id))
+        updateIndicationLinks(prev => removeProcedureFromLinks(prev, id, name))
         if (procedureId === id) { setProcedureId(''); setMaterials([]) }
       } else {
         p.setIndications((previous: string[]) => previous.filter(item => item !== name))
         setIndications(previous => previous.filter(item => item !== name))
+        updateIndicationLinks(prev => removeIndicationFromLinks(prev, name))
+        if (activeSourceIndication === name) setActiveSourceIndication(null)
       }
       toast.success(`${name} katalogdan kaldırıldı.`)
     } catch (reason) {
@@ -505,11 +552,15 @@ export default function PineTreatmentPlanView(p: any) {
     <main className={styles.content}>
       <PlanMediaPanel patientId={p.event?.patientId} onEnsurePatient={p.onEnsurePatient} groupId={p.identity?.id} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} onAttachmentSaved={p.onAttachmentSaved} />
       <section className={styles.section} aria-label="Odontogram">
-        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.</span>
+        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>{p.mode === '2d-anatomical' ? 'Tek diş ve tek anatomik katman seçin · Sağ tık ile yüzey/katman açın.' : 'Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.'}</span>
           <div className={styles.chartActions}>
             <button className={`${styles.button} ${styles.small}`} type="button" onClick={() => p.setSelected([])}>Seçimi temizle</button>
             <select className={styles.select} value={p.jaw} aria-label="Çene seçimi" onChange={event => p.changeJaw(event.target.value)}><option value="all">Tüm ağız</option><option value="upper">Üst çene</option><option value="lower">Alt çene</option></select>
-            <div className={styles.segment}><button type="button" className={`${styles.button} ${p.mode === '2d' ? styles.primary : ''}`} aria-pressed={p.mode === '2d'} onClick={() => p.setMode('2d')}>2B Chart</button><button type="button" className={`${styles.button} ${p.mode === '3d' ? styles.primary : ''}`} aria-pressed={p.mode === '3d'} onClick={() => p.setMode('3d')}>3B Anatomik</button></div>
+            <div className={styles.segment}>
+              <button type="button" className={`${styles.button} ${p.mode === '2d' ? styles.primary : ''}`} aria-pressed={p.mode === '2d'} onClick={() => p.setMode('2d')}>2B Chart</button>
+              <button type="button" className={`${styles.button} ${p.mode === '2d-anatomical' ? styles.primary : ''}`} aria-pressed={p.mode === '2d-anatomical'} onClick={() => p.setMode('2d-anatomical')}>2B Anatomik</button>
+              <button type="button" className={`${styles.button} ${p.mode === '3d' ? styles.primary : ''}`} aria-pressed={p.mode === '3d'} onClick={() => p.setMode('3d')}>3B Anatomik</button>
+            </div>
           </div>
         </div>
         <OdontogramSelectionBar
@@ -521,11 +572,63 @@ export default function PineTreatmentPlanView(p: any) {
           onToothClick={p.clickTooth}
           onToothContextMenu={p.onContextMenu}
         />
-        {p.mode === '2d' ? <div className={styles.chart}>{[UPPER_TEETH, LOWER_TEETH].map((teeth, index) => <div className={styles.teeth} key={index}>{teeth.map(tooth => <ToothChip key={tooth} number={tooth} selected={p.selected.includes(tooth)} hasDraft={!!p.drafts[tooth]?.length} colors={(p.drafts[tooth] || []).map((d: any) => resolveProcColor(d)).filter(Boolean)} onContextMenu={(event: React.MouseEvent) => p.onContextMenu(tooth, event)} onDoubleClick={() => p.setDetailTooth(String(tooth))} onClick={(event: React.MouseEvent) => p.clickTooth(tooth, event)} onDragOver={(event: React.DragEvent) => event.preventDefault()} onDrop={(event: React.DragEvent) => { event.preventDefault(); try { const data = JSON.parse(event.dataTransfer.getData('value') || event.dataTransfer.getData('application/json') || event.dataTransfer.getData('text/plain')); p.add([tooth], data) } catch { toast.error('Tedavi sürükleme verisi geçersiz.') } }} />)}</div>)}</div> : p.odontogram3d}
+        {p.mode === '2d' ? (
+          <div className={styles.chart}>
+            {[UPPER_TEETH, LOWER_TEETH].map((teeth, index) => (
+              <div className={styles.teeth} key={index}>
+                {teeth.map(tooth => (
+                  <ToothChip
+                    key={tooth}
+                    number={tooth}
+                    selected={p.selected.includes(tooth)}
+                    multiSelected={p.selected.length > 1 && p.selected.includes(tooth)}
+                    hasDraft={!!p.drafts[tooth]?.length}
+                    colors={(p.drafts[tooth] || []).map((d: any) => resolveProcColor(d)).filter(Boolean)}
+                    onContextMenu={(event: React.MouseEvent) => p.onContextMenu(tooth, event)}
+                    onDoubleClick={() => p.setDetailTooth(String(tooth))}
+                    onClick={(event: React.MouseEvent) => p.clickTooth(tooth, event)}
+                    onDragOver={(event: React.DragEvent) => event.preventDefault()}
+                    onDrop={(event: React.DragEvent) => {
+                      event.preventDefault()
+                      const data = parseDraggedTreatmentPayload(event.dataTransfer)
+                      if (!data) {
+                        toast.error('Tedavi sürükleme verisi geçersiz.')
+                        return
+                      }
+                      const dropTargets = resolveMultiToothDragTargets(tooth, p.selected)
+                      p.add(dropTargets, data)
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : p.mode === '2d-anatomical' ? (
+          <ToothAnatomy2D
+            selected={p.selected}
+            setSelected={p.setSelected}
+            drafts={p.drafts}
+            setDrafts={p.setDrafts}
+            toothSections={p.toothSections}
+            updateSection={p.updateSection}
+            toothSurfaces={p.toothSurfaces}
+            updateSurfaces={p.updateSurfaces}
+            add={p.add}
+            jaw={p.jaw}
+            procedures={p.procedures}
+            resolveProcColor={resolveProcColor}
+            selectedProcedure={selectedProcedure}
+            selectedIndications={selectedProcedure ? getLinkedIndicationsForProcedure(indicationLinks, selectedProcedure, indications) : indications}
+            selectedMaterials={materials}
+            onContextMenu={p.onContextMenu}
+          />
+        ) : (
+          p.odontogram3d
+        )}
       </section>
       <div className={styles.bottom}>
         <section className={styles.section} aria-label="Tedavi Tanım ve Atama"><div className={styles.sectionHeading}><span className={styles.step}>3</span><h2>Tedavi Tanım ve Atama</h2><button type="button" className={`${styles.button} ${styles.pale} ${styles.small}`} style={{ marginLeft: 'auto' }} onClick={() => apply(p.selected)}><Plus size={14} /> {selectedProcedure?.scope === 'mouth' ? 'Tüm Ağza Ekle' : selectedProcedure?.scope === 'jaw' && !p.selected.length ? (p.jaw === 'lower' ? 'Alt Çeneye Ekle' : 'Üst Çeneye Ekle') : 'Seçilenleri Ekle'}</button></div>
-          <div className={styles.workgrid}>
+          <div className={styles.workgrid} ref={workgridRef}>
             <div className={styles.box}>
               <div className={styles.boxhead}><h3>Endikasyonlar</h3><div className={styles.wrapActions}>
                 {selectedIndicationName && selectedIndicationId && <>
@@ -537,7 +640,30 @@ export default function PineTreatmentPlanView(p: any) {
               <div className={styles.searchBox}><Search size={13} aria-hidden="true" /><input className={styles.search} placeholder="Endikasyon ara..." aria-label="Endikasyon ara" value={indicationSearch} onChange={event => setIndicationSearch(event.target.value)} /></div>
               {indicationEditor !== null && <InlineCatalogForm key={editingIndication?.id || 'new-indication'} kind="indication" initialName={indicationEditor} editingItem={editingIndication} onCreated={entry => catalogCreated('indication', entry)} onCancel={() => closeCatalogEditor('indication')} />}
               <div className={styles.list} ref={indicationListRef}>
-                {filteredIndications.map((name: string) => <button type="button" key={p.indicationIds[name] || name} className={`${styles.listItem} ${indications.includes(name) ? styles.listItemSelected : ''}`} aria-pressed={indications.includes(name)} onClick={() => setIndications(previous => previous.includes(name) ? previous.filter(value => value !== name) : [...previous, name])}><IndicationIcon />{name}</button>)}
+                {filteredIndications.map((name: string) => (
+                  <button
+                    type="button"
+                    key={p.indicationIds[name] || name}
+                    className={`${styles.listItem} ${indications.includes(name) ? styles.listItemSelected : ''}`}
+                    aria-pressed={indications.includes(name)}
+                    onClick={() => setIndications(previous => previous.includes(name) ? previous.filter(value => value !== name) : [...previous, name])}
+                  >
+                    <IndicationIcon />
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                    <IndicationPortButton
+                      indicationName={name}
+                      activeSourceIndication={activeSourceIndication}
+                      links={indicationLinks}
+                      onToggleConnectSource={indName => setActiveSourceIndication(prev => (prev === indName ? null : indName))}
+                      onStartDragLink={indName => setActiveSourceIndication(indName)}
+                      onEndDragLink={() => setActiveSourceIndication(null)}
+                      onDropProcedureLink={(procKey, indName) => {
+                        updateIndicationLinks(prev => toggleIndicationProcedureLink(prev, procKey, indName))
+                        setActiveSourceIndication(null)
+                      }}
+                    />
+                  </button>
+                ))}
                 {!filteredIndications.length && <div className={styles.catalogEmpty}><p className={styles.hint}>{indicationSearch.trim() ? 'Eşleşen endikasyon bulunamadı.' : 'Katalogda endikasyon bulunmuyor.'}</p>{indicationSearch.trim() && indicationEditor === null && <button type="button" className={styles.catalogCreate} onClick={() => { setEditingIndication(null); setIndicationEditor(indicationSearch.trim().slice(0, 120)) }}><Plus size={14} /><span>“{indicationSearch.trim()}” ile yeni kayıt oluştur</span></button>}</div>}
               </div>
             </div>
@@ -552,11 +678,79 @@ export default function PineTreatmentPlanView(p: any) {
               <div className={styles.searchBox}><Search size={13} aria-hidden="true" /><input className={styles.search} placeholder="Tedavi ara..." aria-label="Tedavi ara" value={procedureSearch} onChange={event => setProcedureSearch(event.target.value)} /></div>
               {procedureEditor !== null && <InlineCatalogForm key={editingProcedure?.id || 'new-procedure'} kind="procedure" initialName={procedureEditor} editingItem={editingProcedure} replacingMaterials={!editingProcedure && materials.length > 0} onCreated={entry => catalogCreated('procedure', entry)} onCancel={() => closeCatalogEditor('procedure')} />}
               <div className={styles.list} ref={procedureListRef}>
-                {filteredProcedures.map((item: any) => <button type="button" key={item.id} draggable className={`${styles.listItem} ${procedureId === item.id ? styles.listItemSelected : ''}`} aria-pressed={procedureId === item.id} onClick={() => selectProcedure(item)} onDoubleClick={() => apply(p.selected, item, indications, procedureId === item.id ? materials : item.materials || [])} onDragStart={event => event.dataTransfer.setData('value', JSON.stringify({ procedures: [item], indications: procedureId === item.id ? indications : [], activeMaterials: procedureId === item.id ? materials : item.materials || [] }))}><GripVertical size={14} aria-hidden="true" className={styles.listGrip} /><span className={styles.procColorDot} style={{ width: 10, height: 10, borderRadius: '50%', background: resolveProcColor(item), flexShrink: 0 }} aria-hidden="true" /><span style={{ flex: 1 }}>{item.name}</span><span>{money(Math.round(item.price * 100))}</span></button>)}
+                {filteredProcedures.map((item: any) => {
+                  const procKey = getProcedureLinkKey(item)
+                  const dragIndications = getLinkedIndicationsForProcedure(
+                    indicationLinks,
+                    item,
+                    procedureId === item.id ? indications : []
+                  )
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      draggable
+                      className={`${styles.listItem} ${procedureId === item.id ? styles.listItemSelected : ''}`}
+                      aria-pressed={procedureId === item.id}
+                      onClick={() => {
+                        if (activeSourceIndication) {
+                          updateIndicationLinks(prev => toggleIndicationProcedureLink(prev, procKey, activeSourceIndication))
+                          setActiveSourceIndication(null)
+                          return
+                        }
+                        selectProcedure(item)
+                      }}
+                      onDoubleClick={() => apply(p.selected, item, dragIndications, procedureId === item.id ? materials : item.materials || [])}
+                      onDragStart={event =>
+                        event.dataTransfer.setData(
+                          'value',
+                          JSON.stringify({
+                            procedures: [item],
+                            indications: dragIndications,
+                            activeMaterials: procedureId === item.id ? materials : item.materials || [],
+                          })
+                        )
+                      }
+                    >
+                      <ProcedurePortButton
+                        procKey={procKey}
+                        procedureName={item.name}
+                        procedureColor={resolveProcColor(item)}
+                        links={indicationLinks}
+                        activeSourceIndication={activeSourceIndication}
+                        onConnectOrToggle={(targetProcKey, sourceInd) => {
+                          const ind = sourceInd || activeSourceIndication
+                          if (ind) {
+                            updateIndicationLinks(prev => toggleIndicationProcedureLink(prev, targetProcKey, ind))
+                            setActiveSourceIndication(null)
+                          }
+                        }}
+                        onRemoveLink={(targetProcKey, indName) =>
+                          updateIndicationLinks(prev => removeIndicationProcedureLink(prev, targetProcKey, indName))
+                        }
+                      />
+                      <GripVertical size={14} aria-hidden="true" className={styles.listGrip} />
+                      <span className={styles.procColorDot} style={{ width: 10, height: 10, borderRadius: '50%', background: resolveProcColor(item), flexShrink: 0 }} aria-hidden="true" />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                      <span>{money(Math.round(item.price * 100))}</span>
+                    </button>
+                  )
+                })}
                 {!filteredProcedures.length && <div className={styles.catalogEmpty}><p className={styles.hint}>{procedureSearch.trim() ? 'Eşleşen tedavi bulunamadı.' : 'Katalogda tedavi bulunmuyor.'}</p>{procedureSearch.trim() && procedureEditor === null && <button type="button" className={styles.catalogCreate} onClick={() => { setEditingProcedure(null); setProcedureEditor(procedureSearch.trim().slice(0, 120)) }}><Plus size={14} /><span>“{procedureSearch.trim()}” ile yeni kayıt oluştur</span></button>}</div>}
               </div>
               <div className={styles.materialBox}><h4>Malzeme <span className={styles.description}>(opsiyonel · seçili tedavi için)</span></h4><div className={styles.materialLine}><select className={styles.select} aria-label="Malzeme seç" value={materialId} onChange={event => setMaterialId(event.target.value)} disabled={!selectedProcedure}><option value="">Malzeme seç...</option>{p.inventory.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button type="button" className={`${styles.button} ${styles.primary} ${styles.small}`} onClick={addMaterial} disabled={!materialId || !selectedProcedure}>+ Ekle</button></div>{materials.map((item, index) => <div className={styles.materialLine} key={item.inventoryItemId}><span>{item.name}</span><input className={styles.input} aria-label={`${item.name} miktarı`} type="number" min="1" style={{ width: 54 }} value={item.quantity} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} /><input className={styles.input} aria-label={`${item.name} satış fiyatı`} type="number" min="0" step="0.01" style={{ width: 70 }} value={(item.unitSalePriceMinor || 0) / 100} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value))} /><button type="button" className={`${styles.button} ${styles.small}`} aria-label={`${item.name} kaldır`} onClick={() => syncProcedureMaterials(materials.filter((_, i) => i !== index))}>×</button></div>)}</div>
             </div>
+            <IndicationProcedureLinkOverlay
+              workgridRef={workgridRef}
+              indicationListRef={indicationListRef}
+              procedureListRef={procedureListRef}
+              links={indicationLinks}
+              activeSourceIndication={activeSourceIndication}
+              procedures={p.procedures}
+              resolveProcColor={resolveProcColor}
+              onRemoveLink={(procKey, indName) => updateIndicationLinks(prev => removeIndicationProcedureLink(prev, procKey, indName))}
+              onCancelConnect={() => setActiveSourceIndication(null)}
+            />
           </div><div className={styles.note}><div className={styles.noteHead}><strong><FileText size={15} /> Konsültasyon Notu</strong><div className={styles.wrapActions}><button type="button" className={`${styles.button} ${styles.small}`} onClick={() => setHistoryOpen(true)}>Hasta geçmişi</button><button type="button" className={`${styles.button} ${styles.pale} ${styles.small}`} disabled={p.saving} onClick={() => p.save({ closeAfter: false, allowEmpty: true })}>Notu kaydet</button></div></div><textarea className={styles.textarea} aria-label="Plan konsültasyon notu" placeholder="Konsültasyon notu ekleyin..." value={p.note} onChange={event => p.setNote(event.target.value)} /></div>
         </section>
         <section className={styles.section} aria-label="Tedavi planı"><div className={styles.sectionHeading}><span className={styles.step}>4</span><h2>Tedavi planı</h2></div>
@@ -728,15 +922,30 @@ export default function PineTreatmentPlanView(p: any) {
                                 onChange={event => {
                                   const replacement = p.procedures.find((value: any) => value.id === event.target.value)
                                   if (!replacement || replacement.id === item.procedureId) return
-                                  updateGroupEntries(entries, row => ({
-                                    ...row,
-                                    name: replacement.name,
-                                    procedureId: replacement.id,
-                                    scope: replacement.scope,
-                                    price: replacement.price,
-                                    color: replacement.color || row.color,
-                                    materials: (replacement.materials || []).map((value: any) => ({ ...value })),
-                                  }))
+                                  updateGroupEntries(entries, row => {
+                                    const oldLinked = getLinkedIndicationsForProcedure(indicationLinks, {
+                                      id: row.procedureId,
+                                      name: row.name,
+                                    })
+                                    const manualRemaining = (row.indications || []).filter(
+                                      (ind: string) => !oldLinked.includes(ind)
+                                    )
+                                    const nextIndications = getLinkedIndicationsForProcedure(
+                                      indicationLinks,
+                                      replacement,
+                                      manualRemaining
+                                    )
+                                    return {
+                                      ...row,
+                                      name: replacement.name,
+                                      procedureId: replacement.id,
+                                      scope: replacement.scope,
+                                      price: replacement.price,
+                                      color: replacement.color || row.color,
+                                      indications: nextIndications,
+                                      materials: (replacement.materials || []).map((value: any) => ({ ...value })),
+                                    }
+                                  })
                                 }}
                               >
                                 <option value={p.procedures.some((value: any) => value.id === item.procedureId) ? '' : item.procedureId || ''}>
@@ -847,6 +1056,13 @@ export default function PineTreatmentPlanView(p: any) {
     <PlanToothTools
       {...p}
       drafts={p.drafts}
+      selectedProcedure={selectedProcedure}
+      selectedIndications={selectedProcedure ? getLinkedIndicationsForProcedure(indicationLinks, selectedProcedure, indications) : indications}
+      selectedMaterials={materials}
+      toothSurfaces={p.toothSurfaces}
+      updateSurfaces={p.updateSurfaces}
+      toothSections={p.toothSections}
+      updateSection={p.updateSection}
       openMaterials={setMaterialRow}
       onRemoveDraft={p.onRemoveDraft || ((teeth: number[], draftId?: string, procName?: string) => {
         p.setDrafts((prev: any) => {

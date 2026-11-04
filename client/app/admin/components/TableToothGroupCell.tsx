@@ -238,7 +238,17 @@ export default function TableToothGroupCell({
     : `${allLabels[0]} (${procedureName}) · İşlemi kaldırmak için sağ tıklayın veya tıklayın`
 
   return (
-    <>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        width: '100%',
+        maxWidth: '100%',
+        minWidth: 0,
+        overflow: 'hidden',
+        boxSizing: 'border-box',
+      }}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -271,6 +281,9 @@ export default function TableToothGroupCell({
           alignItems: 'center',
           gap: 3,
           maxWidth: '100%',
+          minWidth: 0,
+          overflow: 'hidden',
+          boxSizing: 'border-box',
           padding: isMulti ? '3px 5px' : '3px 7px',
           borderRadius: 8,
           border: `1px solid ${menuPos ? 'var(--pc-blue, #0284c7)' : 'var(--pc-border, var(--input-border, #cbd5e1))'}`,
@@ -287,21 +300,31 @@ export default function TableToothGroupCell({
         }}
       >
         {!isMulti ? (
-          <span>{formatTargetLabel(entries[0].target)}</span>
+          <span
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {formatTargetLabel(entries[0].target)}
+          </span>
         ) : (
           <>
             <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 2,
+                display: 'inline-block',
                 minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
               {visibleEntries.map((entry, idx) => (
                 <span key={`${entry.target}-${idx}`}>
                   {formatTargetLabel(entry.target)}
-                  {idx < visibleEntries.length - 1 ? ',' : ''}
+                  {idx < visibleEntries.length - 1 ? ', ' : ''}
                 </span>
               ))}
             </span>
@@ -592,6 +615,6 @@ export default function TableToothGroupCell({
           </div>,
           document.body
         )}
-    </>
+    </div>
   )
 }

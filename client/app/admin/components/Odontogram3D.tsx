@@ -26,6 +26,7 @@ import {
   getAnatomicalDepthRatio,
   projectOnToothAxis,
 } from './dentalAnatomy';
+import { resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop';
 
 // ── Türk Standart FDI Diş İsimleri Sözlüğü ──────────────────────────────────
 export const TOOTH_NAMES: Record<number, string> = {
@@ -303,7 +304,7 @@ export default function Odontogram3D({
       if (!mat) return;
 
       // Drag over hedefi veya hover durumunda parlama
-      if (dropTargetTooth === fdi) {
+      if (dropTargetTooth === fdi || (dropTargetTooth !== null && selectedTeeth.length > 1 && isSelected)) {
         mat.emissive.set('#10b981'); // Hedeflenen diş canlı zümrüt yeşili parlar
         mat.emissiveIntensity = 0.75;
       } else if (isHovered) {
@@ -1004,7 +1005,10 @@ export default function Odontogram3D({
     }
 
     if (targetFdi) {
-      onDropTreatment([targetFdi], dropPayload);
+      const targets = resolveMultiToothDragTargets(targetFdi, selectedTeeth)
+        .map(Number)
+        .filter(Boolean);
+      onDropTreatment(targets, dropPayload);
     }
 
     setDropTargetTooth(null);
@@ -1117,8 +1121,16 @@ export default function Odontogram3D({
           pointerEvents: 'none',
           border: '1px solid #34d399',
         }}>
-          <span>🎯 Diş #{dropTargetTooth} Hedeflendi</span>
-          <span style={{ opacity: 0.9, fontWeight: 500 }}>(Atamak için Bırakın)</span>
+          {selectedTeeth.length > 1 ? (
+            <span>
+              🎯 Seçili {selectedTeeth.includes(dropTargetTooth) ? selectedTeeth.length : selectedTeeth.length + 1} Diş Hedeflendi (Toplu Atamak için Bırakın)
+            </span>
+          ) : (
+            <>
+              <span>🎯 Diş #{dropTargetTooth} Hedeflendi</span>
+              <span style={{ opacity: 0.9, fontWeight: 500 }}>(Atamak için Bırakın)</span>
+            </>
+          )}
         </div>
       )}
 

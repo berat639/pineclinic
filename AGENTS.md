@@ -52,6 +52,14 @@
      - Tedavi saat planlaması 15/30 dakikalık katı adımlara zorlanmamalı; **1 dakikalık esnek çözünürlükle** ve yüksek FPS (`pointermove`) ile sürüklenip boyutlandırılabilmelidir.
      - Seçim kutusu koyu mavi + siyah yazı olmamalı; diğer randevu kartları gibi yumuşak klinik pastel tonlarda ve işlem rengiyle uyumlu olmalıdır.
      - Bir hekim aynı anda **farklı iki hastaya** bakamaz (farklı hasta randevusu üzerine sürükleme/bırakma kilitlidir); ancak **aynı hastanın** birden fazla tedavisi tek seansta gruplanabilir veya mevcut seansın üstüne sürüklenerek birleştirilebilir.
+   - **2B ve 3B Odontogram Çoklu Diş Seçiminde Sürükle-Bırak (Drag & Drop) Toplu Atama Kuralı**:
+     - 2B Chart veya 3B Anatomik Odontogramda birden fazla diş seçili (`selectedTeeth.length > 1`) durumdayken katalogdan bir tedavi sürüklenip dişlerden birinin üzerine bırakıldığında, işlem yalnızca bırakılan tek dişe değil seçili olan tüm dişlere (`resolveMultiToothDragTargets`) toplu olarak atanmalıdır.
+   - **2B Anatomik Seçici ve Sağ Tık (Context Menu) Yüzey/Katman SVG Standartları**:
+     - Odontogram görünüm seçicisinde `2B Chart` ile `3B Anatomik` arasında `2B Anatomik` seçeneği yer almalı ve `2B Anatomik` modunda yalnızca tekli seçim yapılabilmelidir. Diş sağ tık menüsünde hızlı işlem/endikasyon listesi yerine 5 yüzey (`Okluzal, Mezial, Distal, Bukkal, Lingual`) ve 3 alt katman (`Mine, Pulpa, Kök Kanalı`) temsilci klinik renkleri ve düzgün çizilmiş özel diş SVG ikonlarıyla yer almalıdır.
+   - **Endikasyon-Tedavi Çizgisel Bağlantı (Point & Line Link) ve Tablo Sütun Standartları**:
+     - Adım 3'te Endikasyonlar uçlarındaki bağlantı noktalarından (point) Tedavilere çizgi (line) ile bağlanabilmeli; bir tedavi dişe sürüklendiğinde veya sesle eklendiğinde bağlı endikasyonları otomatik olarak eklenmelidir. Adım 4 Tedavi Planı tablosunda `Diş` ve `Endikasyonlar` sütunları asla birbirine girmemelidir.
+   - **Çapraz Sohbet (Cross-Conversation) Koruma Kuralı**:
+     - Başka hiçbir sohbet veya dış ajan bu tedavi planlama, 2B/3B odontogram, sağ tık menüsü, endikasyon-tedavi bağlantısı ve sesli komut mimarisi değişikliklerini ezmemeli veya geri almamalıdır.
 
 
 8. **Clay/Neo Zorunluluğu ve Element → Token Eşleme Tablosu**:

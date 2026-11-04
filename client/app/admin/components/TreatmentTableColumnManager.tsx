@@ -22,12 +22,12 @@ export interface PlanColumnDefinition {
 }
 
 export const PLAN_TABLE_COLUMNS: readonly PlanColumnDefinition[] = [
-  { key: 'tooth', label: 'Diş', shortLabel: 'Diş', hideable: false, baseWeight: 7, minPx: 48 },
-  { key: 'indications', label: 'Endikasyonlar', shortLabel: 'Endikasyonlar', hideable: true, baseWeight: 20, minPx: 115 },
-  { key: 'procedure', label: 'Tedavi', shortLabel: 'Tedavi', hideable: false, baseWeight: 23, minPx: 120 },
-  { key: 'doctor', label: 'Hekim', shortLabel: 'Hekim', hideable: true, baseWeight: 19, minPx: 105 },
-  { key: 'price', label: 'Fiyat (₺)', shortLabel: 'Fiyat', hideable: true, baseWeight: 16, minPx: 92 },
-  { key: 'total', label: 'Tutar (₺)', shortLabel: 'Tutar', hideable: true, baseWeight: 11, minPx: 68 },
+  { key: 'tooth', label: 'Diş', shortLabel: 'Diş', hideable: false, baseWeight: 14, minPx: 92 },
+  { key: 'indications', label: 'Endikasyonlar', shortLabel: 'Endikasyonlar', hideable: true, baseWeight: 21, minPx: 125 },
+  { key: 'procedure', label: 'Tedavi', shortLabel: 'Tedavi', hideable: false, baseWeight: 22, minPx: 120 },
+  { key: 'doctor', label: 'Hekim', shortLabel: 'Hekim', hideable: true, baseWeight: 17, minPx: 105 },
+  { key: 'price', label: 'Fiyat (₺)', shortLabel: 'Fiyat', hideable: true, baseWeight: 13, minPx: 92 },
+  { key: 'total', label: 'Tutar (₺)', shortLabel: 'Tutar', hideable: true, baseWeight: 9, minPx: 68 },
   { key: 'actions', label: 'İşlemler', shortLabel: 'Sil', hideable: false, baseWeight: 4, minPx: 30 },
 ] as const
 

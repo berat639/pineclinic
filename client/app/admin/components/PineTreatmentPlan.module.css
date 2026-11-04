@@ -143,7 +143,7 @@
 .chartHelpActions { display:flex; gap:5px; }
 .chartHelpActions .button { min-height:25px; padding:4px 7px; font-size:12px; }
 .bottom { min-width:0; display:grid; grid-template-columns:minmax(0,1.02fr) minmax(0,.98fr); gap:11px; align-items:start; }
-.workgrid { display:grid; grid-template-columns:minmax(0,.91fr) minmax(0,1.38fr); gap:10px; min-height:0; }
+.workgrid { position:relative; display:grid; grid-template-columns:minmax(0,.91fr) minmax(0,1.38fr); gap:10px; min-height:0; }
 .box { min-width:0; padding:8px 9px; border:1px solid var(--pc-border); border-radius:12px; background:var(--card-bg); box-shadow:var(--pc-neo-subcard); }
 .boxhead { min-height:24px; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
 .boxhead h3 { margin:0; font-size:13px; }
@@ -169,14 +169,14 @@
 .textarea { width:100%; min-height:44px; padding:7px 9px; resize:vertical; font-size:12px; }
 .tableWrap { width:100%; max-height:240px; overflow:auto; border:1px solid var(--pc-border); border-radius:11px; box-shadow:var(--pc-neo-inset); }
 .table { width:100%; min-width:600px; table-layout:fixed; border-collapse:collapse; font-size:12px; }
-.table th, .table td { padding:5px; border-bottom:1px solid var(--pc-border); text-align:left; vertical-align:middle; }
+.table th, .table td { padding:5px; border-bottom:1px solid var(--pc-border); text-align:left; vertical-align:middle; overflow:hidden; min-width:0; }
 .table td { height:52px; }
 .table td:last-child, .table th:last-child { padding:2px; }
 .table th { padding:8px 5px; background:var(--pc-tint); color:var(--pc-muted); font-size:12px; font-weight:650; white-space:nowrap; }
 .table tbody tr:last-child td { border-bottom:0; }
 .table .select, .table .input { width:100%; padding:5px; font-size:12px; }
 .toothId { color:var(--pc-tint-fg); font-weight:700; white-space:nowrap; }
-.indicationChips { display:flex; flex-wrap:wrap; align-items:center; gap:3px; max-width:145px; }
+.indicationChips { display:flex; flex-wrap:wrap; align-items:center; gap:3px; max-width:100%; width:100%; min-width:0; }
 .indicationChip { display:inline-flex; align-items:center; gap:3px; padding:4px 6px; border-radius:7px; background:var(--pc-tint); color:var(--pc-tint-fg); font-size:12px; white-space:nowrap; box-shadow:var(--pc-clay-pale); }
 .indicationChip button { padding:0; border:0; background:var(--pc-tint); color:var(--pc-tint-fg); font-size:12px; cursor:pointer; }
 .addIndication { width:25px; height:22px; padding:0; appearance:none; border:1px dashed var(--accent); border-radius:6px; background:var(--card-bg); color:var(--pc-tint-fg); font:inherit; font-weight:700; text-align:center; cursor:pointer; box-shadow:var(--pc-clay-btn); }
@@ -305,15 +305,15 @@
 
 .modal, .dialog { box-shadow:0 20px 60px -18px var(--modal-shadow); }
 
-.inlineCatalog { position:relative; margin-top:9px; padding:28px 8px 8px; border:1px solid var(--pc-border); border-radius:10px; background:var(--pc-tint); box-shadow:var(--pc-clay-pale); }
-.inlineCatalog fieldset { min-width:0; padding:0; margin:0; border:0; }
-.inlineCatalog .input, .inlineCatalog .select { padding:7px 6px; font-size:12px; }
-.catalogFields { display:grid; grid-template-columns:minmax(140px, 1.3fr) 92px auto 128px; align-items:center; gap:6px; overflow-x:auto; }
-.catalogFields:not(:has(> :nth-child(3))) { grid-template-columns:minmax(140px, 1fr) auto; }
-.catalogName { flex:1 0 90px; width:100%; min-width:90px; }
-.catalogPrice { position:relative; flex:0 0 92px; width:100%; min-width:92px; }
-.inlineCatalog .catalogPrice input { width:100%; padding-right:25px; text-align:right; }
-.catalogPrice > span { position:absolute; right:7px; top:50%; transform:translateY(-50%); color:var(--foreground-2); font-size:11px; pointer-events:none; }
+.inlineCatalog { position:relative; margin-top:9px; padding:24px 7px 7px; border:1px solid var(--pc-border); border-radius:10px; background:var(--pc-tint); box-shadow:var(--pc-clay-pale); overflow-x:hidden; max-width:100%; }
+.inlineCatalog fieldset { min-width:0; width:100%; max-width:100%; padding:0; margin:0; border:0; }
+.inlineCatalog .input, .inlineCatalog .select { padding:4px 8px; font-size:11.5px; }
+.catalogFields { display:grid; grid-template-columns:minmax(88px, 1fr) 76px 28px auto; align-items:center; gap:5px; overflow-x:hidden; width:100%; }
+.catalogFields:not(:has(> :nth-child(3))) { grid-template-columns:minmax(96px, 1fr) auto; }
+.catalogName { flex:1 0 88px; width:100%; min-width:0; }
+.catalogPrice { position:relative; flex:0 0 76px; width:76px; min-width:76px; }
+.inlineCatalog .catalogPrice input { width:100%; padding-right:22px; text-align:right; }
+.catalogPrice > span { position:absolute; right:6px; top:50%; transform:translateY(-50%); color:var(--foreground-2); font-size:10.5px; pointer-events:none; }
 .catalogScope { flex:0 0 83px; width:83px; }
 .catalogFields > button { flex-shrink:0; }
 .catalogClose { position:absolute; top:2px; right:3px; display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border:0; border-radius:4px; background:var(--pc-tint); color:var(--danger); cursor:pointer; }

@@ -12,8 +12,6 @@ export type EditingCatalogItem = {
   id: string; name: string; scope?: 'tooth' | 'jaw' | 'mouth'; price?: number; color?: string; defaultMaterials?: any[]
 }
 
-const CLINICAL_COLOR_SWATCHES = ['#0284c7', '#8b5cf6', '#ef4444', '#0d9488', '#d97706', '#16a34a', '#ec4899', '#6366f1'] as const
-
 function formatPriceFromTl(tl?: number): string {
   if (!tl || !Number.isFinite(tl) || tl <= 0) return '0,00'
   const minor = Math.round(tl * 100)
@@ -85,9 +83,22 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
     } finally { pending.current = false; setBusy(false) }
   }
 
-  return <form id={`pine-create-${kind}`} className={styles.inlineCatalog} aria-label={isProcedure ? 'Yeni tedavi ekle' : 'Yeni endikasyon ekle'} aria-busy={busy} onSubmit={submit} onKeyDown={event => {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!pending.current) onCancel() }
-  }}>
+  return <form
+    id={`pine-create-${kind}`}
+    className={styles.inlineCatalog}
+    aria-label={isProcedure ? 'Yeni tedavi ekle' : 'Yeni endikasyon ekle'}
+    aria-busy={busy}
+    style={{
+      padding: isProcedure ? '24px 7px 7px' : '8px 7px',
+      overflowX: 'hidden',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+    }}
+    onSubmit={submit}
+    onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!pending.current) onCancel() }
+    }}
+  >
     {isProcedure && <>
       <svg aria-hidden="true" focusable="false" className={styles.spriteDefs}>
         <symbol id="pc-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -104,87 +115,122 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
       <span className="price-link-wrap"><a className="base-price-link" href="https://tdb.org.tr/dishekimleri/tedavi-ucretleri/tarife" target="_blank" rel="noopener noreferrer" aria-describedby="basePriceTip" title="TDB güncel rehber tedavi ücret tarifesini yeni sekmede görüntüle"><svg className="ui-icon sm" aria-hidden="true" focusable="false"><use href="#pc-external"></use></svg> Baz Fiyat <svg className="ui-icon sm" aria-hidden="true" focusable="false"><use href="#pc-info"></use></svg></a><span className="price-tip" id="basePriceTip" role="tooltip">Türk Dişhekimleri Birliği&apos;nin güncel rehber ücret tarifesini yeni sekmede açar. Buradaki tutarlar bilgi ve karşılaştırma amaçlıdır; kendi tedavi fiyatınızı alana manuel olarak girebilirsiniz.</span></span>
     </>}
     <button type="button" className={styles.catalogClose} aria-label="Eklemeyi iptal et" title="Kapat" disabled={busy} onClick={onCancel}><X size={16} /></button>
-    <fieldset disabled={busy}>
-      <div className={styles.catalogFields}>
-        <input autoFocus id={`${id}-name`} className={`${styles.input} ${styles.catalogName}`} aria-label={isProcedure ? 'Tedavi adı' : 'Endikasyon adı'} placeholder={isProcedure ? 'Tedavi adı' : 'Endikasyon adı'} required maxLength={120} autoComplete="off" value={name} onChange={event => setName(event.target.value)} aria-describedby={error ? `${id}-error` : undefined} />
+    <fieldset disabled={busy} style={{ minWidth: 0, width: '100%', maxWidth: '100%', margin: 0, padding: 0, border: 0 }}>
+      <div
+        className={styles.catalogFields}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isProcedure ? 'minmax(88px, 1fr) 76px 28px auto' : 'minmax(96px, 1fr) auto',
+          alignItems: 'center',
+          gap: 5,
+          overflowX: 'hidden',
+          width: '100%',
+        }}
+      >
+        <input
+          autoFocus
+          id={`${id}-name`}
+          className={`${styles.input} ${styles.catalogName}`}
+          aria-label={isProcedure ? 'Tedavi adı' : 'Endikasyon adı'}
+          placeholder={isProcedure ? 'Tedavi adı' : 'Endikasyon adı'}
+          required
+          maxLength={120}
+          autoComplete="off"
+          value={name}
+          onChange={event => setName(event.target.value)}
+          aria-describedby={error ? `${id}-error` : undefined}
+          style={{
+            height: 28,
+            minHeight: 28,
+            padding: '4px 8px',
+            fontSize: 11.5,
+            minWidth: 0,
+            width: '100%',
+          }}
+        />
         {isProcedure && <>
-          <div className={styles.catalogPrice}>
-            <input id={`${id}-price`} className={styles.input} aria-label="Fiyat (TL)" title="Fiyat (TL)" placeholder="0,00" type="text" inputMode="decimal" autoComplete="off" required value={price} onFocus={event => { if (price === '0,00') event.target.select() }} onChange={event => {
-              const input = event.target
-              const masked = maskTlPrice(input.value)
-              if (masked === null) return
-              const position = (input.value.slice(0, input.selectionStart ?? input.value.length).match(/[\d,]/g) || []).length
-              setPrice(masked)
-              requestAnimationFrame(() => {
-                let cursor = 0, count = 0
-                while (cursor < masked.length && count < position) { if (/[\d,]/.test(masked[cursor])) count++; cursor++ }
-                if (document.activeElement === input) input.setSelectionRange(cursor, cursor)
-              })
-            }} onBlur={() => {
-              if (price) { const [whole, fraction = ''] = price.split(','); setPrice(`${whole},${fraction.padEnd(2, '0')}`) }
-            }} />
-            <span aria-hidden="true">TL</span>
-          </div>
           <div
-            role="group"
-            aria-label="Tedavi rengi"
+            className={styles.catalogPrice}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 8px',
-              borderRadius: 8,
-              background: 'var(--input-bg)',
-              border: '1px solid var(--input-border)',
-              boxShadow: 'var(--pc-neo-inset)',
+              width: 76,
+              minWidth: 76,
+              flex: '0 0 76px',
             }}
           >
-            {CLINICAL_COLOR_SWATCHES.map(swatch => {
-              const isSelected = color.toLowerCase() === swatch.toLowerCase()
-              return (
-                <button
-                  key={swatch}
-                  type="button"
-                  aria-label={`Renk ${swatch}`}
-                  aria-pressed={isSelected}
-                  title={`Renk seç: ${swatch}`}
-                  onClick={() => setColor(swatch)}
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: '50%',
-                    background: swatch,
-                    border: isSelected ? '2px solid var(--foreground)' : '1.5px solid var(--input-border)',
-                    padding: 0,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                    transform: isSelected ? 'scale(1.12)' : 'scale(1)',
-                    transition: 'transform 0.12s ease, border-color 0.12s ease',
-                  }}
-                />
-              )
-            })}
             <input
-              id={`${id}-color`}
-              type="color"
-              aria-label="Özel tedavi rengi"
-              title="Özel renk seç"
-              value={color}
-              onChange={event => setColor(event.target.value)}
+              id={`${id}-price`}
+              className={styles.input}
+              aria-label="Fiyat (TL)"
+              title="Fiyat (TL)"
+              placeholder="0,00"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              required
+              value={price}
+              onFocus={event => { if (price === '0,00') event.target.select() }}
+              onChange={event => {
+                const input = event.target
+                const masked = maskTlPrice(input.value)
+                if (masked === null) return
+                const position = (input.value.slice(0, input.selectionStart ?? input.value.length).match(/[\d,]/g) || []).length
+                setPrice(masked)
+                requestAnimationFrame(() => {
+                  let cursor = 0, count = 0
+                  while (cursor < masked.length && count < position) { if (/[\d,]/.test(masked[cursor])) count++; cursor++ }
+                  if (document.activeElement === input) input.setSelectionRange(cursor, cursor)
+                })
+              }}
+              onBlur={() => {
+                if (price) { const [whole, fraction = ''] = price.split(','); setPrice(`${whole},${fraction.padEnd(2, '0')}`) }
+              }}
               style={{
-                width: 22,
-                height: 22,
-                padding: 0,
-                border: '1px solid var(--input-border)',
-                borderRadius: 6,
-                background: 'var(--input-bg)',
-                cursor: 'pointer',
-                flexShrink: 0,
+                height: 28,
+                minHeight: 28,
+                padding: '4px 22px 4px 6px',
+                fontSize: 11.5,
+                width: '100%',
               }}
             />
+            <span aria-hidden="true" style={{ fontSize: 10.5, right: 6 }}>TL</span>
           </div>
+          <input
+            id={`${id}-color`}
+            type="color"
+            aria-label="Tedavi rengi"
+            title="Tedavi rengi seç"
+            value={color}
+            onChange={event => setColor(event.target.value)}
+            style={{
+              width: 28,
+              height: 28,
+              padding: 2,
+              borderRadius: 7,
+              border: '1px solid var(--input-border)',
+              background: 'var(--input-bg)',
+              boxShadow: 'var(--pc-neo-inset)',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          />
         </>}
-        <button type="submit" className={`${styles.button} ${styles.primary} ${styles.small}`} disabled={!name.trim()} title={isProcedure && replacingMaterials ? 'Yeni tedavi seçildiğinde önceki malzeme seçimi temizlenir.' : undefined}>{isEditing ? (busy ? 'Kaydediliyor…' : 'Kaydet') : (busy ? 'Ekleniyor…' : 'Ekle')}</button>
+        <button
+          type="submit"
+          className={`${styles.button} ${styles.primary} ${styles.small}`}
+          disabled={!name.trim()}
+          title={isProcedure && replacingMaterials ? 'Yeni tedavi seçildiğinde önceki malzeme seçimi temizlenir.' : undefined}
+          style={{
+            height: 28,
+            minHeight: 28,
+            padding: '4px 10px',
+            fontSize: 11.5,
+            fontWeight: 700,
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {isEditing ? (busy ? 'Kaydediliyor…' : 'Kaydet') : (busy ? 'Ekleniyor…' : 'Ekle')}
+        </button>
       </div>
       {error && <p id={`${id}-error`} className={styles.catalogError} role="alert">{error}</p>}
     </fieldset>
