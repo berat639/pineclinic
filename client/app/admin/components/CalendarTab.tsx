@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast'
 import { Plus, X, Search, Filter, Calendar, CalendarOff, Clock, User, Phone, PhoneCall, Link2, LogOut, LayoutDashboard, CalendarDays, Users, Stethoscope, BriefcaseMedical, Settings, ChevronLeft, ChevronRight, Pencil, Trash2, FolderKanban, ChevronDown, ChevronUp, ArrowUpRight, AlertTriangle } from 'lucide-react'
 import ShiftContextMenu from "./ShiftContextMenu"
 import DoctorLeaveModal, { DoctorLeaveItem } from './DoctorLeaveModal'
-import DentalCalendar from './DentalCalendar'
+import DentalCalendar, { UpcomingStatusBucket, UpcomingStatusBarItem } from './DentalCalendar'
 import { ToothChip, inputStyle } from './ToothChip'
 import PatientSidePanel from './PatientSidePanel'
 import AdvancedTedaviModal from './AdvancedTedaviModal';
@@ -138,79 +138,47 @@ interface CalendarEvent {
   patientResponseChannel?: string | null
 }
 
-type CalendarStatusBucket =
-  | 'scheduled'
-  | 'confirmed'
-  | 'waiting_in_clinic'
-  | 'in_progress'
-  | 'completed'
-  | 'postponed'
-  | 'pending_assignment'
-  | 'cancelled_no_show'
-
-const DEFAULT_STATUS_FILTERS: CalendarStatusBucket[] = [
-  'scheduled',
-  'confirmed',
-  'waiting_in_clinic',
-  'in_progress',
-  'completed',
-  'postponed',
-  'pending_assignment',
-]
-
-const STATUS_FILTER_OPTIONS: Array<{
-  id: CalendarStatusBucket
+const UPCOMING_STATUS_OPTIONS: Array<{
+  id: UpcomingStatusBucket
+  icon: string
   label: string
+  popoverTitle: string
   color: string
-  description: string
 }> = [
   {
+    id: 'pending_assignment',
+    icon: '⚠️',
+    label: 'Atama bekliyor',
+    popoverTitle: '⚠️ Atama Bekleyen Randevular',
+    color: '#ea580c',
+  },
+  {
     id: 'scheduled',
-    label: 'Planlandı (Teyit Bekliyor)',
+    icon: '📅',
+    label: 'Teyit bekliyor',
+    popoverTitle: '📅 Teyit Bekleyen Randevular',
     color: '#3b82f6',
-    description: 'Planlanan ve henüz teyit edilmemiş randevular',
   },
   {
     id: 'confirmed',
-    label: 'Gelecek (Onaylandı)',
+    icon: '✅',
+    label: 'Gelecek (Onaylı)',
+    popoverTitle: '✅ Gelecek (Onaylı) Randevular',
     color: '#10b981',
-    description: 'Geleceği hasta veya klinik tarafından onaylanan randevular',
-  },
-  {
-    id: 'waiting_in_clinic',
-    label: 'Klinikte Bekliyor / Geldi',
-    color: '#0ea5e9',
-    description: 'Kliniğe gelmiş ve sırasını bekleyen hastalar',
-  },
-  {
-    id: 'in_progress',
-    label: 'Devam Ediyor (Tedavide)',
-    color: '#f59e0b',
-    description: 'Şu anda muayenesi veya tedavisi devam eden randevular',
-  },
-  {
-    id: 'completed',
-    label: 'Tamamlandı',
-    color: '#059669',
-    description: 'Muayenesi veya tedavi seansı tamamlanmış randevular',
   },
   {
     id: 'postponed',
-    label: 'Ertelendi / Erteleme Talebi',
+    icon: '⏳',
+    label: 'Erteleme talebi',
+    popoverTitle: '⏳ Erteleme Talebi Randevular',
     color: '#d97706',
-    description: 'Hasta tarafından erteleme talep edilen veya ertelenmiş randevular',
   },
   {
-    id: 'pending_assignment',
-    label: 'Atama / Doğrulama Bekliyor',
-    color: '#ea580c',
-    description: 'Henüz hekim atanmamış veya doğrulama bekleyen randevular',
-  },
-  {
-    id: 'cancelled_no_show',
-    label: 'İptal / Gelmedi',
-    color: '#ef4444',
-    description: 'İptal edilen veya hastanın gelmediği randevular',
+    id: 'pending_review',
+    icon: '🤖',
+    label: 'Doğrulama bekliyor',
+    popoverTitle: '🤖 Doğrulama Bekleyen Randevular',
+    color: '#0284c7',
   },
 ]
 
@@ -297,7 +265,8 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
   const [eventContextMenu, setEventContextMenu] = useState<{ x: number, y: number, event: any, doctorId: string, date: string, startTime: string, endTime: string } | null>(null)
   const [doctorLeaves, setDoctorLeaves] = useState<DoctorLeaveItem[]>([])
   const [leaveModalState, setLeaveModalState] = useState<{ isOpen: boolean; doctorId?: string; date?: string }>({ isOpen: false })
-  const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number } | null>(null)
+  const [unassignedListMenu, setUnassignedListMenu] = useState<{ x: number, y: number, bucket: UpcomingStatusBucket } | null>(null)
+  const [activeUpcomingStatusFilter, setActiveUpcomingStatusFilter] = useState<UpcomingStatusBucket | null>(null)
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -328,7 +297,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
 
   const [selectedDcmUrl, setSelectedDcmUrl] = useState<string | null>(null)
   const [view, setView] = useState<'day' | 'week' | 'month'>('day')
-  const [statusFilters, setStatusFilters] = useState<CalendarStatusBucket[]>(() => [...DEFAULT_STATUS_FILTERS])
   const [patientTreatments, setPatientTreatments] = useState<any[]>([])
   const [treatmentGroups, setTreatmentGroups] = useState<any[]>([])
   const [patientPayments, setPatientPayments] = useState<any[]>([])
@@ -395,25 +363,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
         setSelectedEvent(targetEvt);
         if (targetEvt.doctorId) {
           setSelectedDoctorIds(prev => prev.includes(targetEvt.doctorId!) ? prev : [...prev, targetEvt.doctorId!]);
-        }
-        const st = (targetEvt.status || 'scheduled').toLowerCase();
-        const rp = (targetEvt.patientResponseStatus || '').toLowerCase();
-        if (st === 'cancelled' || st === 'no_show' || rp === 'cancelled') {
-          setStatusFilters(prev => prev.includes('cancelled_no_show') ? prev : [...prev, 'cancelled_no_show']);
-        } else if (st === 'completed') {
-          setStatusFilters(prev => prev.includes('completed') ? prev : [...prev, 'completed']);
-        } else if (st === 'in_progress') {
-          setStatusFilters(prev => prev.includes('in_progress') ? prev : [...prev, 'in_progress']);
-        } else if (st === 'waiting_in_clinic' || st === 'arrived_unconfirmed') {
-          setStatusFilters(prev => prev.includes('waiting_in_clinic') ? prev : [...prev, 'waiting_in_clinic']);
-        } else if (st === 'postponed' || rp === 'postponed' || rp === 'reschedule_requested') {
-          setStatusFilters(prev => prev.includes('postponed') ? prev : [...prev, 'postponed']);
-        } else if (!targetEvt.doctorId || st === 'pending_assignment' || st === 'pending_review' || targetEvt.reviewStatus === 'pending_review' || !doctors.some(d => d.id === targetEvt.doctorId)) {
-          setStatusFilters(prev => prev.includes('pending_assignment') ? prev : [...prev, 'pending_assignment']);
-        } else if (st === 'confirmed' || rp === 'confirmed') {
-          setStatusFilters(prev => prev.includes('confirmed') ? prev : [...prev, 'confirmed']);
-        } else {
-          setStatusFilters(prev => prev.includes('scheduled') ? prev : [...prev, 'scheduled']);
         }
       }
 
@@ -1180,32 +1129,36 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     })
     : events;
 
-  const getEventStatusBucket = useCallback((ev: CalendarEvent): CalendarStatusBucket => {
+  const getUpcomingActionableBucket = useCallback((ev: CalendarEvent): UpcomingStatusBucket | null => {
+    const endMs = new Date(ev.endTime || ev.startTime).getTime()
+    if (isNaN(endMs) || endMs < Date.now()) {
+      return null // Geçmişteki randevuları filtreleme / bekleyen listesine alma
+    }
     const status = (ev.status || 'scheduled').toLowerCase()
     const resp = (ev.patientResponseStatus || '').toLowerCase()
-    if (status === 'cancelled' || status === 'no_show' || resp === 'cancelled') {
-      return 'cancelled_no_show'
-    }
-    if (status === 'completed') {
-      return 'completed'
-    }
-    if (status === 'in_progress') {
-      return 'in_progress'
-    }
-    if (status === 'waiting_in_clinic' || status === 'arrived_unconfirmed') {
-      return 'waiting_in_clinic'
-    }
-    if (status === 'postponed' || resp === 'postponed' || resp === 'reschedule_requested') {
-      return 'postponed'
+    if (
+      status === 'completed' ||
+      status === 'in_progress' ||
+      status === 'waiting_in_clinic' ||
+      status === 'arrived_unconfirmed' ||
+      status === 'cancelled' ||
+      status === 'no_show' ||
+      resp === 'cancelled'
+    ) {
+      return null // Gelmiş olanları ve iptal/geçmiş durumları filtreleme
     }
     if (
       !ev.doctorId ||
       status === 'pending_assignment' ||
-      status === 'pending_review' ||
-      ev.reviewStatus === 'pending_review' ||
       !doctors.some(d => d.id === ev.doctorId)
     ) {
       return 'pending_assignment'
+    }
+    if (status === 'pending_review' || ev.reviewStatus === 'pending_review') {
+      return 'pending_review'
+    }
+    if (status === 'postponed' || resp === 'postponed' || resp === 'reschedule_requested') {
+      return 'postponed'
     }
     if (status === 'confirmed' || resp === 'confirmed') {
       return 'confirmed'
@@ -1213,59 +1166,54 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     return 'scheduled'
   }, [doctors])
 
+  const upcomingStatusGroups = useMemo(() => {
+    const groups: Record<UpcomingStatusBucket, CalendarEvent[]> = {
+      pending_assignment: [],
+      scheduled: [],
+      confirmed: [],
+      postponed: [],
+      pending_review: [],
+    }
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+    )
+    for (const ev of sorted) {
+      const matchesDoc = !ev.doctorId || !doctors.some(d => d.id === ev.doctorId) || selectedDoctorIds.includes(ev.doctorId)
+      if (!matchesDoc) continue
+      const bucket = getUpcomingActionableBucket(ev)
+      if (bucket) {
+        groups[bucket].push(ev)
+      }
+    }
+    return groups
+  }, [events, doctors, selectedDoctorIds, getUpcomingActionableBucket])
+
+  const statusBarItems = useMemo<UpcomingStatusBarItem[]>(() => {
+    return UPCOMING_STATUS_OPTIONS.filter(
+      opt => opt.id !== 'pending_review' || upcomingStatusGroups.pending_review.length > 0
+    ).map(opt => ({
+      id: opt.id,
+      icon: opt.icon,
+      label: opt.label,
+      count: upcomingStatusGroups[opt.id]?.length || 0,
+      color: opt.color,
+    }))
+  }, [upcomingStatusGroups])
+
   const combinatorialFilteredEvents = useMemo(() => {
     return filteredEvents.filter(ev => {
+      if (ev.status === 'cancelled' || ev.status === 'no_show' || ev.patientResponseStatus === 'cancelled') {
+        return false
+      }
       const matchesDoc = !ev.doctorId || !doctors.some(d => d.id === ev.doctorId) || selectedDoctorIds.includes(ev.doctorId)
       if (!matchesDoc) return false
-      const bucket = getEventStatusBucket(ev)
-      return statusFilters.includes(bucket)
+      if (!activeUpcomingStatusFilter) return true
+      const bucket = getUpcomingActionableBucket(ev)
+      // Gelmiş olanları ve geçmişteki randevuları (bucket === null) filtreleme, sadece gelecekteki bekleyen durumları filtrele
+      if (bucket === null) return true
+      return bucket === activeUpcomingStatusFilter
     })
-  }, [filteredEvents, doctors, selectedDoctorIds, statusFilters, getEventStatusBucket])
-
-  const periodStats = useMemo(() => {
-    const periodAllEvents = events.filter(ev =>
-      isEventInCalendarPeriod(ev.startTime, view, currentDate) &&
-      (!ev.doctorId || !doctors.some(d => d.id === ev.doctorId) || selectedDoctorIds.includes(ev.doctorId))
-    )
-
-    const bucketCounts: Record<CalendarStatusBucket, number> = {
-      scheduled: 0,
-      confirmed: 0,
-      waiting_in_clinic: 0,
-      in_progress: 0,
-      completed: 0,
-      postponed: 0,
-      pending_assignment: 0,
-      cancelled_no_show: 0,
-    }
-
-    for (const ev of periodAllEvents) {
-      const bucket = getEventStatusBucket(ev)
-      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1
-    }
-
-    return {
-      totalAll: periodAllEvents.length,
-      bucketCounts,
-    }
-  }, [events, view, currentDate, doctors, selectedDoctorIds, getEventStatusBucket])
-
-  const isDefaultStatusSelection = useMemo(() => {
-    if (statusFilters.length !== DEFAULT_STATUS_FILTERS.length) return false
-    return DEFAULT_STATUS_FILTERS.every(s => statusFilters.includes(s))
-  }, [statusFilters])
-
-  const toggleStatusBucket = useCallback((bucket: CalendarStatusBucket, isolate = false) => {
-    if (isolate) {
-      setStatusFilters([bucket])
-      return
-    }
-    setStatusFilters(prev =>
-      prev.includes(bucket)
-        ? prev.filter(item => item !== bucket)
-        : [...prev, bucket]
-    )
-  }, [])
+  }, [filteredEvents, doctors, selectedDoctorIds, activeUpcomingStatusFilter, getUpcomingActionableBucket])
 
   return (
     <div className="cal-root-container">
@@ -1910,126 +1858,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             })}
           </div>
         </div>
-
-        {/* Randevu Durumları (Durum Filtresi — Hekimlerim altındaki gibi) */}
-        <div style={{ marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--input-border)', position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Durumları</h4>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {!isDefaultStatusSelection && (
-                <button
-                  type="button"
-                  onClick={() => setStatusFilters([...DEFAULT_STATUS_FILTERS])}
-                  style={{ background: 'transparent', border: 'none', fontSize: '0.73rem', color: 'var(--foreground-3)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
-                  title="İptal edilenler hariç tüm aktif durumları seç"
-                >
-                  Varsayılan
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (statusFilters.length === STATUS_FILTER_OPTIONS.length) {
-                    setStatusFilters([])
-                  } else {
-                    setStatusFilters(STATUS_FILTER_OPTIONS.map(o => o.id))
-                  }
-                }}
-                style={{ background: 'transparent', border: 'none', fontSize: '0.73rem', color: 'var(--brand)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
-              >
-                {statusFilters.length === STATUS_FILTER_OPTIONS.length ? 'Temizle' : 'Tümünü Seç'}
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {STATUS_FILTER_OPTIONS.map(opt => {
-              const isSelected = statusFilters.includes(opt.id)
-              const count = periodStats.bucketCounts[opt.id] || 0
-              return (
-                <div
-                  key={opt.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                  }}
-                >
-                  <label
-                    onClick={(e) => {
-                      e.preventDefault()
-                      toggleStatusBucket(opt.id, e.altKey || e.shiftKey)
-                    }}
-                    title={opt.description}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      cursor: 'pointer',
-                      fontSize: '0.86rem',
-                      color: isSelected ? 'var(--foreground)' : 'var(--foreground-3)',
-                      userSelect: 'none',
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: `2px solid ${opt.color}`,
-                        background: isSelected ? opt.color : 'var(--calendar-checkbox-bg)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.2s',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {isSelected && (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                      )}
-                    </div>
-                    <span
-                      style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                      title={opt.label}
-                    >
-                      {opt.label}
-                    </span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (statusFilters.length === 1 && statusFilters[0] === opt.id) {
-                        setStatusFilters([...DEFAULT_STATUS_FILTERS])
-                      } else {
-                        setStatusFilters([opt.id])
-                      }
-                    }}
-                    title={`Yalnızca "${opt.label}" durumundaki randevuları göster`}
-                    style={{
-                      padding: '2px 7px',
-                      borderRadius: 6,
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      background: count > 0 ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-inner)',
-                      border: count > 0 ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
-                      color: count > 0 ? 'var(--badge-clinic-text, #0369a1)' : 'var(--foreground-3)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {count}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        </div>
       </div>
 
       {/* Right Content */}
@@ -2132,13 +1960,19 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           doctorLeaves={doctorLeaves}
           workingHours={workingHours}
           currentDate={currentDate}
+          statusBarItems={statusBarItems}
+          activeStatusFilter={activeUpcomingStatusFilter}
+          onStatusBarItemClick={(e, bucket) => {
+            setUnassignedListMenu({ x: e.clientX, y: e.clientY, bucket })
+          }}
+          onClearStatusFilter={() => setActiveUpcomingStatusFilter(null)}
           onHeaderContextMenu={(e, doctorId) => {
             e.preventDefault()
             setShiftContextMenu({ x: e.clientX, y: e.clientY, doctorId, date: currentDate })
           }}
           onUnassignedHeaderContextMenu={(e) => {
             e.preventDefault()
-            setUnassignedListMenu({ x: e.clientX, y: e.clientY })
+            setUnassignedListMenu({ x: e.clientX, y: e.clientY, bucket: 'pending_assignment' })
           }}
           onEventContextMenu={(e, event) => {
             console.log("Event right clicked!", event.title)
@@ -4156,67 +3990,142 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
         </div>
       )}
 
-      {unassignedListMenu && (
-        <div
-          {...unassignedBackdropDismiss}
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }}
-        >
+      {unassignedListMenu && (() => {
+        const activeOpt = UPCOMING_STATUS_OPTIONS.find(o => o.id === unassignedListMenu.bucket) || UPCOMING_STATUS_OPTIONS[0]
+        const bucketEvents = upcomingStatusGroups[unassignedListMenu.bucket] || []
+        const isFilterActiveForBucket = activeUpcomingStatusFilter === unassignedListMenu.bucket
+        return (
           <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              position: 'fixed', top: Math.min(unassignedListMenu.y, window.innerHeight - 340), left: Math.min(unassignedListMenu.x, window.innerWidth - 280), zIndex: 9999,
-              background: 'var(--card-bg, #ffffff)', border: '1px solid var(--glass-border)',
-              borderRadius: 10, padding: 14, boxShadow: '0 12px 30px rgba(0,0,0,0.25)', width: 280, maxHeight: 340, overflowY: 'auto'
-            }}
+            {...unassignedBackdropDismiss}
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }}
           >
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>⚠️ Bekleyen Randevular</span>
-              <button onClick={() => setUnassignedListMenu(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px' }}>✕</button>
-            </div>
-            {events.filter(e => !e.doctorId).length === 0 ? (
-              <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', textAlign: 'center', padding: '12px 0' }}>Bekleyen randevu yok.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {events.filter(e => !e.doctorId).map(e => {
-                  const apptDate = new Date(e.startTime);
-                  const isInvalidDate = isNaN(apptDate.getTime());
-                  const dateStr = isInvalidDate ? '' : apptDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
-                  const timeStr = isInvalidDate ? '' : apptDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                top: Math.min(unassignedListMenu.y, window.innerHeight - 380),
+                left: Math.min(unassignedListMenu.x, window.innerWidth - 320),
+                zIndex: 9999,
+                background: 'var(--card-bg, #ffffff)',
+                border: '1.5px solid var(--input-border, #cbd5e1)',
+                borderRadius: 12,
+                padding: 14,
+                boxShadow: 'var(--pc-modal-shadow, 0 12px 30px rgba(0,0,0,0.25))',
+                width: 310,
+                maxHeight: 380,
+                overflowY: 'auto',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{activeOpt.popoverTitle}</span>
+                <button onClick={() => setUnassignedListMenu(null)} style={{ background: 'transparent', border: 'none', color: 'var(--foreground-3)', cursor: 'pointer', fontSize: '1rem', padding: '2px 6px' }}>✕</button>
+              </div>
 
+              {/* Hızlı Durum Seçici Sekmeler (Sadece gelecekteki ve henüz gelmemiş durumlar) */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
+                {UPCOMING_STATUS_OPTIONS.filter(
+                  opt => opt.id !== 'pending_review' || upcomingStatusGroups.pending_review.length > 0
+                ).map(opt => {
+                  const isTabActive = unassignedListMenu.bucket === opt.id
+                  const cnt = upcomingStatusGroups[opt.id]?.length || 0
                   return (
-                    <div
-                      key={e.id}
-                      onClick={() => {
-                        focusAppointmentOnCalendar(e.id, e.startTime, true);
-                        setUnassignedListMenu(null);
-                        toast.success(`📅 ${e.title} (${dateStr} ${timeStr}) randevusuna gidildi`);
-                      }}
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setUnassignedListMenu(prev => prev ? { ...prev, bucket: opt.id } : null)}
                       style={{
-                        padding: '9px 12px', borderRadius: 8, border: '1px solid var(--glass-border)',
-                        background: 'var(--input-bg)', cursor: 'pointer', fontSize: '0.8rem',
-                        transition: 'all 0.15s ease'
-                      }}
-                      onMouseEnter={ev => {
-                        ev.currentTarget.style.background = 'var(--glass-bg-hover, rgba(37,99,235,0.08))';
-                        ev.currentTarget.style.borderColor = 'var(--accent, #3b82f6)';
-                      }}
-                      onMouseLeave={ev => {
-                        ev.currentTarget.style.background = 'var(--input-bg)';
-                        ev.currentTarget.style.borderColor = 'var(--glass-border)';
+                        padding: '3px 8px',
+                        borderRadius: 999,
+                        border: isTabActive ? `1.5px solid ${opt.color}` : '1px solid var(--input-border)',
+                        background: isTabActive ? 'var(--card-inner)' : 'var(--input-bg)',
+                        color: isTabActive ? 'var(--foreground)' : 'var(--foreground-2)',
+                        fontSize: '0.7rem',
+                        fontWeight: isTabActive ? 700 : 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
                       }}
                     >
-                      <div style={{ fontWeight: 700, color: 'var(--foreground)', marginBottom: 2 }}>{e.title}</div>
-                      <div style={{ color: 'var(--foreground-3)', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span>🕒 {dateStr} {timeStr}</span>
-                      </div>
-                    </div>
-                  );
+                      <span>{opt.icon} {opt.label}</span>
+                      <span style={{ fontWeight: 800, color: cnt > 0 ? opt.color : 'var(--foreground-3)' }}>({cnt})</span>
+                    </button>
+                  )
                 })}
               </div>
-            )}
+
+              {/* Takvimde Filtreleme Butonu */}
+              <div style={{ marginBottom: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveUpcomingStatusFilter(prev => prev === unassignedListMenu.bucket ? null : unassignedListMenu.bucket)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    border: isFilterActiveForBucket ? '1px solid var(--danger, #ef4444)' : '1px solid #1d4ed8',
+                    background: isFilterActiveForBucket ? 'var(--input-bg)' : 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                    color: isFilterActiveForBucket ? 'var(--danger, #ef4444)' : '#ffffff',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ color: isFilterActiveForBucket ? 'var(--danger, #ef4444)' : '#ffffff' }}>
+                    {isFilterActiveForBucket
+                      ? '✕ Takvim Filtresini Kaldır (Tümünü Göster)'
+                      : `🔍 Takvimde Sadece "${activeOpt.label}" Olanları Filtrele`}
+                  </span>
+                </button>
+              </div>
+
+              {bucketEvents.length === 0 ? (
+                <div style={{ fontSize: '0.8rem', color: 'var(--foreground-3)', textAlign: 'center', padding: '12px 0' }}>
+                  Gelecek tarihte bu durumda randevu yok.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {bucketEvents.map(e => {
+                    const apptDate = new Date(e.startTime)
+                    const isInvalidDate = isNaN(apptDate.getTime())
+                    const dateStr = isInvalidDate ? '' : apptDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
+                    const timeStr = isInvalidDate ? '' : apptDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+                    const doc = doctors.find(d => d.id === e.doctorId)
+
+                    return (
+                      <div
+                        key={e.id}
+                        onClick={() => {
+                          focusAppointmentOnCalendar(e.id, e.startTime, true)
+                          setUnassignedListMenu(null)
+                          toast.success(`📅 ${e.title} (${dateStr} ${timeStr}) randevusuna gidildi`)
+                        }}
+                        style={{
+                          padding: '9px 12px',
+                          borderRadius: 8,
+                          border: '1px solid var(--input-border)',
+                          background: 'var(--input-bg)',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: 'var(--foreground)', marginBottom: 2 }}>{e.title}</div>
+                        <div style={{ color: 'var(--foreground-3)', fontSize: '0.72rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span>🕒 {dateStr} {timeStr}</span>
+                          {doc && <span style={{ color: 'var(--foreground-2)', fontWeight: 600 }}>Dr. {doc.name}</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {(!showTedaviForm && shiftContextMenu) && (() => {
         const activeDoctorShift = shiftContextMenu.doctorId

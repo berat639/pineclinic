@@ -49,6 +49,21 @@ export interface ClinicWorkingHours {
   slotEndHour: number
 }
 
+export type UpcomingStatusBucket =
+  | 'pending_assignment'
+  | 'scheduled'
+  | 'confirmed'
+  | 'postponed'
+  | 'pending_review'
+
+export interface UpcomingStatusBarItem {
+  id: UpcomingStatusBucket
+  icon: string
+  label: string
+  count: number
+  color: string
+}
+
 interface Props {
   doctors: Doctor[]
   events: CalendarEvent[]
@@ -61,6 +76,10 @@ interface Props {
   onHeaderContextMenu?: (e: React.MouseEvent, doctorId: string) => void
   onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void
   onEventUpdate?: (updatedEvent: CalendarEvent, options?: { requiresAssignmentConfirmation?: boolean; keepUnassigned?: boolean }) => void
+  statusBarItems?: UpcomingStatusBarItem[]
+  activeStatusFilter?: UpcomingStatusBucket | null
+  onStatusBarItemClick?: (e: React.MouseEvent, bucket: UpcomingStatusBucket) => void
+  onClearStatusFilter?: () => void
 }
 
 const STATUS_COLORS: Record<string, { bg: string; border: string }> = {
@@ -282,7 +301,7 @@ function getLocalYMD(dateStrOrObj: string | Date): string {
   }
 }
 
-export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], workingHours, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
+export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], workingHours, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect, statusBarItems = [], activeStatusFilter = null, onStatusBarItemClick, onClearStatusFilter }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -754,7 +773,128 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
   const isEventUnassigned = (e: CalendarEvent) =>
     !e.doctorId || e.status === 'pending_assignment' || !doctors.some((d) => d.id === e.doctorId)
 
-  const globalUnassigned = events.filter((e) => isEventUnassigned(e))
+  const isEventPastOrArrived = (e: CalendarEvent) => {
+    const endMs = new Date(e.endTime || e.startTime).getTime()
+    if (isNaN(endMs) || endMs < Date.now()) return true
+    const st = (e.status || 'scheduled').toLowerCase()
+    const rp = (e.patientResponseStatus || '').toLowerCase()
+    return (
+      st === 'completed' ||
+      st === 'in_progress' ||
+      st === 'waiting_in_clinic' ||
+      st === 'arrived_unconfirmed' ||
+      st === 'cancelled' ||
+      st === 'no_show' ||
+      rp === 'cancelled'
+    )
+  }
+
+  const globalUnassigned = events.filter((e) => isEventUnassigned(e) && !isEventPastOrArrived(e))
+
+  const renderStatusHeaderRow = () => {
+    if (!statusBarItems || statusBarItems.length === 0) return null
+    return (
+      <>
+        <div
+          className="rc-corner"
+          style={{
+            borderTop: '1px solid var(--input-border, rgba(0,0,0,0.06))',
+            backgroundColor: 'var(--card-inner, #f8fafc)',
+          }}
+        />
+        <div
+          className="rc-col-head"
+          style={{
+            gridColumn: '2 / -1',
+            borderTop: '1px solid var(--input-border, rgba(0,0,0,0.06))',
+            backgroundColor: 'var(--card-inner, #f8fafc)',
+            borderBottomColor: activeStatusFilter ? '#2563eb' : '#9ca3af',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: '5px 10px',
+          }}
+        >
+          {statusBarItems.map((item) => {
+            const isActive = activeStatusFilter === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onStatusBarItemClick) onStatusBarItemClick(e, item.id)
+                  else if (item.id === 'pending_assignment' && onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (onStatusBarItemClick) onStatusBarItemClick(e, item.id)
+                  else if (item.id === 'pending_assignment' && onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e)
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  border: isActive ? `1.5px solid ${item.color}` : '1px solid var(--input-border, #cbd5e1)',
+                  background: isActive ? 'var(--card-bg, #ffffff)' : 'var(--input-bg, #ffffff)',
+                  color: 'var(--foreground)',
+                  fontSize: '0.76rem',
+                  fontWeight: isActive ? 700 : 600,
+                  cursor: 'pointer',
+                  boxShadow: isActive ? `0 0 0 2px ${item.color}22` : 'none',
+                }}
+                title={`${item.label} (${item.count} gelecek randevu) — Görüntülemek ve filtrelemek için tıklayın`}
+              >
+                <span style={{ color: 'var(--foreground)' }}>{item.icon} {item.label}</span>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    background: item.count > 0 ? `${item.color}18` : 'var(--card-inner)',
+                    color: item.count > 0 ? item.color : 'var(--foreground-3)',
+                    border: `1px solid ${item.count > 0 ? `${item.color}40` : 'var(--input-border)'}`,
+                  }}
+                >
+                  {item.count} bekliyor
+                </span>
+              </button>
+            )
+          })}
+          {activeStatusFilter && onClearStatusFilter && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onClearStatusFilter()
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 9px',
+                borderRadius: 999,
+                border: '1px solid var(--danger, #ef4444)',
+                background: 'var(--card-bg, #ffffff)',
+                color: 'var(--danger, #ef4444)',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Filtreyi Kaldır
+            </button>
+          )}
+        </div>
+      </>
+    )
+  }
 
   // ── DAY VIEW ──
   if (view === 'day') {
@@ -788,19 +928,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               </div>
             )
           })}
-          {hasUnassigned && (
-            <>
-              <div className="rc-corner" style={{ borderTop: '1px solid rgba(0,0,0,0.05)', backgroundColor: 'rgba(255,255,255,0.02)' }} />
-              <div className="rc-col-head" 
-                style={{ gridColumn: '2 / -1', borderTop: '1px solid rgba(0,0,0,0.05)', backgroundColor: 'rgba(255,255,255,0.02)', borderBottomColor: '#9ca3af', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '4px', cursor: 'pointer' }}
-                onContextMenu={(e) => { e.preventDefault(); if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
-                onClick={(e) => { if (onUnassignedHeaderContextMenu) onUnassignedHeaderContextMenu(e); }}
-              >
-                <div className="rc-col-title" style={{ color: 'var(--foreground-2)', fontSize: '0.8rem', margin: 0 }}>⚠️ Atama bekliyor</div>
-                <div className="rc-col-sub" style={{ margin: 0 }}>({globalUnassigned.length} bekliyor · Shift/Alt: atamasız taşı)</div>
-              </div>
-            </>
-          )}
+          {renderStatusHeaderRow()}
         </div>
         <div className="rc-body">
           <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }} onDoubleClick={(e) => {
@@ -1107,6 +1235,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
               })}
             </div>
           ))}
+          {renderStatusHeaderRow()}
         </div>
         <div className="rc-body">
           <div className="rc-grid" ref={gridRef} style={{ gridTemplateColumns: `56px repeat(7, 1fr)` }} onDoubleClick={(e) => {
