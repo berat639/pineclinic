@@ -6,7 +6,6 @@ import InlineCatalogForm, { type CreatedCatalogEntry, type EditingCatalogItem } 
 import PlanHistoryDialog from './PlanHistoryDialog'
 import PlanToothTools from './PlanToothTools'
 import PatientConsentPanel from './PatientConsentPanel'
-import OfficialDentalConsentModal from './OfficialDentalConsentModal'
 import PlanMediaPanel from './PlanMediaPanel'
 import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
 import TableToothGroupCell, { formatTargetPlainName, groupTreatmentDraftRows, type GroupedToothEntry } from './TableToothGroupCell'
@@ -28,6 +27,7 @@ import {
 } from './IndicationProcedureLinker'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
 import { parseDraggedTreatmentPayload, resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop'
+import { printOfficialDentalConsent } from '../../../lib/official-dental-consent'
 import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
 import {
@@ -65,10 +65,6 @@ export default function PineTreatmentPlanView(p: any) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [reminderOpen, setReminderOpen] = useState(false)
   const [consentDropdownOpen, setConsentDropdownOpen] = useState(false)
-  const [officialConsentModal, setOfficialConsentModal] = useState<{
-    open: boolean
-    mode: 'preview' | 'save-warning'
-  }>({ open: false, mode: 'save-warning' })
   const [doctorWarning, setDoctorWarning] = useState<string | null>(null)
   const patientDropdownRef = useRef<HTMLDivElement>(null)
   const reminderDropdownRef = useRef<HTMLDivElement>(null)
@@ -1783,22 +1779,16 @@ export default function PineTreatmentPlanView(p: any) {
             <button
               type="button"
               className={styles.button}
-              title="T.C. Sağlık Bakanlığı Uyumlu Aydınlatılmış Onam (Rıza) Belgesi PDF İndir ve Yazdır"
-              onClick={() => setOfficialConsentModal({ open: true, mode: 'preview' })}
+              title="T.C. Sağlık Bakanlığı Aydınlatılmış Rıza Belgesi (PDF) Yazdır"
+              onClick={() => printOfficialDentalConsent()}
             >
-              <FileText size={15} /> Resmi Onam Formu (PDF / Yazdır)
+              <FileText size={15} /> Onam Formu Yazdır
             </button>
             <button
               type="button"
               className={`${styles.button} ${styles.primary}`}
               disabled={p.saving}
-              onClick={() => {
-                if (groupedRows.length > 0) {
-                  setOfficialConsentModal({ open: true, mode: 'save-warning' })
-                } else {
-                  p.save()
-                }
-              }}
+              onClick={() => p.save()}
             >
               <Save size={15} /> {p.saving ? 'Kaydediliyor…' : 'Planı Kaydet'}
             </button>
@@ -1806,28 +1796,6 @@ export default function PineTreatmentPlanView(p: any) {
         </section>
       </div>
     </main>
-    <OfficialDentalConsentModal
-      open={officialConsentModal.open}
-      mode={officialConsentModal.mode}
-      patientName={patientName}
-      patient={p.patient}
-      event={p.event}
-      doctors={p.doctors}
-      groupedRows={groupedRows}
-      subtotalFormatted={p.pricing ? money(p.pricing.subtotalMinor) : money(effectiveSubtotalMinor)}
-      discountFormatted={
-        p.pricing
-          ? money((p.pricing.percentageDiscountMinor || 0) + (p.pricing.fixedDiscountMinor || 0))
-          : money(computedPercentageDiscountMinor + Math.round((Number(p.discountFixed) || 0) * 100))
-      }
-      totalFormatted={p.pricing ? money(p.pricing.totalMinor) : money(Math.max(0, effectiveSubtotalMinor - computedPercentageDiscountMinor - Math.round((Number(p.discountFixed) || 0) * 100)))}
-      saving={p.saving}
-      onClose={() => setOfficialConsentModal(prev => ({ ...prev, open: false }))}
-      onConfirmAndSave={() => {
-        setOfficialConsentModal(prev => ({ ...prev, open: false }))
-        p.save()
-      }}
-    />
     <PlanToothTools
       {...p}
       drafts={p.drafts}
