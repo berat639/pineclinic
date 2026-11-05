@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Bell, CalendarDays, ChevronDown, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarDays, ChevronDown, Download, FileText, GripVertical, Mic, MicOff, Pencil, Plus, Printer, Save, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import PlanDialog from './PlanDialog'
 import InlineCatalogForm, { type CreatedCatalogEntry, type EditingCatalogItem } from './InlineCatalogForm'
@@ -27,7 +27,7 @@ import {
 } from './IndicationProcedureLinker'
 import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
 import { parseDraggedTreatmentPayload, resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop'
-import { printOfficialDentalConsent } from '../../../lib/official-dental-consent'
+import { downloadOfficialDentalConsentPdf } from '../../../lib/official-dental-consent'
 import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
 import {
@@ -1779,10 +1779,13 @@ export default function PineTreatmentPlanView(p: any) {
             <button
               type="button"
               className={styles.button}
-              title="T.C. Sağlık Bakanlığı Aydınlatılmış Rıza Belgesi (PDF) Yazdır"
-              onClick={() => printOfficialDentalConsent()}
+              title="T.C. Sağlık Bakanlığı Aydınlatılmış Rıza Belgesi (PDF) İndir"
+              onClick={() => {
+                downloadOfficialDentalConsentPdf()
+                toast.success('Sağlık Bakanlığı onam formu indirildi.')
+              }}
             >
-              <FileText size={15} /> Onam Formu Yazdır
+              <Download size={15} /> Onam Formu İndir
             </button>
             <button
               type="button"
