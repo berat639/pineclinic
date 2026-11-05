@@ -140,102 +140,78 @@ interface CalendarEvent {
 
 type CalendarStatusBucket =
   | 'scheduled'
+  | 'confirmed'
+  | 'waiting_in_clinic'
   | 'in_progress'
   | 'completed'
-  | 'pending_assignment'
   | 'postponed'
+  | 'pending_assignment'
   | 'cancelled_no_show'
-
-type CalendarConfirmationFilter = 'all' | 'confirmed' | 'pending' | 'reschedule' | 'pending_review'
-type CalendarTreatmentFilter = 'all' | 'with_treatment' | 'without_treatment'
-type CalendarSourceFilter = 'all' | 'ai' | 'manual'
 
 const DEFAULT_STATUS_FILTERS: CalendarStatusBucket[] = [
   'scheduled',
+  'confirmed',
+  'waiting_in_clinic',
   'in_progress',
   'completed',
-  'pending_assignment',
   'postponed',
+  'pending_assignment',
 ]
 
 const STATUS_FILTER_OPTIONS: Array<{
   id: CalendarStatusBucket
   label: string
-  shortLabel: string
   color: string
   description: string
 }> = [
   {
     id: 'scheduled',
-    label: 'Planlandı / Bekliyor',
-    shortLabel: 'Planlandı',
+    label: 'Planlandı (Teyit Bekliyor)',
     color: '#3b82f6',
-    description: 'Planlanan, teyit bekleyen veya onaylanmış aktif randevular',
+    description: 'Planlanan ve henüz teyit edilmemiş randevular',
+  },
+  {
+    id: 'confirmed',
+    label: 'Gelecek (Onaylandı)',
+    color: '#10b981',
+    description: 'Geleceği hasta veya klinik tarafından onaylanan randevular',
+  },
+  {
+    id: 'waiting_in_clinic',
+    label: 'Klinikte Bekliyor / Geldi',
+    color: '#0ea5e9',
+    description: 'Kliniğe gelmiş ve sırasını bekleyen hastalar',
   },
   {
     id: 'in_progress',
-    label: 'Tedavide / İşlemde',
-    shortLabel: 'Tedavide',
+    label: 'Devam Ediyor (Tedavide)',
     color: '#f59e0b',
-    description: 'Şu anda tedavisi / işlemi devam eden randevular',
+    description: 'Şu anda muayenesi veya tedavisi devam eden randevular',
   },
   {
     id: 'completed',
     label: 'Tamamlandı',
-    shortLabel: 'Tamamlandı',
-    color: '#10b981',
+    color: '#059669',
     description: 'Muayenesi veya tedavi seansı tamamlanmış randevular',
   },
   {
-    id: 'pending_assignment',
-    label: 'Hekim Ataması Bekleyenler',
-    shortLabel: 'Atama Bekleyen',
-    color: '#ea580c',
-    description: 'Henüz hekim atanmamış veya hekimi ayrıldığı için boşa çıkan randevular',
-  },
-  {
     id: 'postponed',
-    label: 'Ertelenenler',
-    shortLabel: 'Ertelenen',
+    label: 'Ertelendi / Erteleme Talebi',
     color: '#d97706',
     description: 'Hasta tarafından erteleme talep edilen veya ertelenmiş randevular',
   },
   {
+    id: 'pending_assignment',
+    label: 'Atama / Doğrulama Bekliyor',
+    color: '#ea580c',
+    description: 'Henüz hekim atanmamış veya doğrulama bekleyen randevular',
+  },
+  {
     id: 'cancelled_no_show',
-    label: 'İptal Edilenler & Gelmeyenler',
-    shortLabel: 'İptal / Gelmeyenler',
+    label: 'İptal / Gelmedi',
     color: '#ef4444',
     description: 'İptal edilen veya hastanın gelmediği randevular',
   },
-]
-
-const CONFIRMATION_FILTER_OPTIONS: Array<{
-  id: CalendarConfirmationFilter
-  label: string
-}> = [
-  { id: 'all', label: 'Tümü' },
-  { id: 'confirmed', label: '✓ Geleceğini Onaylayanlar' },
-  { id: 'pending', label: '⏳ Onay / Teyit Bekleyenler' },
-  { id: 'reschedule', label: '📅 Erteleme İsteyenler' },
-  { id: 'pending_review', label: '🤖 Yapay Zeka Onayı Bekleyenler' },
-]
-
-const TREATMENT_FILTER_OPTIONS: Array<{
-  id: CalendarTreatmentFilter
-  label: string
-}> = [
-  { id: 'all', label: 'Tümü' },
-  { id: 'with_treatment', label: '🦷 Tedavi Planı Olanlar' },
-  { id: 'without_treatment', label: '📋 Yalnızca Muayene / Planı Olmayanlar' },
-]
-
-const SOURCE_FILTER_OPTIONS: Array<{
-  id: CalendarSourceFilter
-  label: string
-}> = [
-  { id: 'all', label: 'Tümü' },
-  { id: 'ai', label: '🤖 Yapay Zeka / Sesli Asistan' },
-  { id: 'manual', label: '🏥 Klinik / Manuel Kayıt' },
 ]
 
 function getCalLocalYMD(dateStrOrObj: string | Date): string {
@@ -353,10 +329,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
   const [selectedDcmUrl, setSelectedDcmUrl] = useState<string | null>(null)
   const [view, setView] = useState<'day' | 'week' | 'month'>('day')
   const [statusFilters, setStatusFilters] = useState<CalendarStatusBucket[]>(() => [...DEFAULT_STATUS_FILTERS])
-  const [confirmationFilter, setConfirmationFilter] = useState<CalendarConfirmationFilter>('all')
-  const [treatmentFilter, setTreatmentFilter] = useState<CalendarTreatmentFilter>('all')
-  const [sourceFilter, setSourceFilter] = useState<CalendarSourceFilter>('all')
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   const [patientTreatments, setPatientTreatments] = useState<any[]>([])
   const [treatmentGroups, setTreatmentGroups] = useState<any[]>([])
   const [patientPayments, setPatientPayments] = useState<any[]>([])
@@ -432,10 +404,14 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           setStatusFilters(prev => prev.includes('completed') ? prev : [...prev, 'completed']);
         } else if (st === 'in_progress') {
           setStatusFilters(prev => prev.includes('in_progress') ? prev : [...prev, 'in_progress']);
+        } else if (st === 'waiting_in_clinic' || st === 'arrived_unconfirmed') {
+          setStatusFilters(prev => prev.includes('waiting_in_clinic') ? prev : [...prev, 'waiting_in_clinic']);
         } else if (st === 'postponed' || rp === 'postponed' || rp === 'reschedule_requested') {
           setStatusFilters(prev => prev.includes('postponed') ? prev : [...prev, 'postponed']);
-        } else if (!targetEvt.doctorId || st === 'pending_assignment' || !doctors.some(d => d.id === targetEvt.doctorId)) {
+        } else if (!targetEvt.doctorId || st === 'pending_assignment' || st === 'pending_review' || targetEvt.reviewStatus === 'pending_review' || !doctors.some(d => d.id === targetEvt.doctorId)) {
           setStatusFilters(prev => prev.includes('pending_assignment') ? prev : [...prev, 'pending_assignment']);
+        } else if (st === 'confirmed' || rp === 'confirmed') {
+          setStatusFilters(prev => prev.includes('confirmed') ? prev : [...prev, 'confirmed']);
         } else {
           setStatusFilters(prev => prev.includes('scheduled') ? prev : [...prev, 'scheduled']);
         }
@@ -1204,229 +1180,80 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     })
     : events;
 
-  const classifyEventStatus = useCallback((ev: CalendarEvent) => {
+  const getEventStatusBucket = useCallback((ev: CalendarEvent): CalendarStatusBucket => {
     const status = (ev.status || 'scheduled').toLowerCase()
     const resp = (ev.patientResponseStatus || '').toLowerCase()
-    const isCancelledOrNoShow = status === 'cancelled' || status === 'no_show' || resp === 'cancelled'
-    const isCompleted = !isCancelledOrNoShow && status === 'completed'
-    const isInProgress = !isCancelledOrNoShow && status === 'in_progress'
-    const isPostponed = !isCancelledOrNoShow && (status === 'postponed' || resp === 'postponed' || resp === 'reschedule_requested')
-    const isUnassigned = !isCancelledOrNoShow && !isCompleted && (
+    if (status === 'cancelled' || status === 'no_show' || resp === 'cancelled') {
+      return 'cancelled_no_show'
+    }
+    if (status === 'completed') {
+      return 'completed'
+    }
+    if (status === 'in_progress') {
+      return 'in_progress'
+    }
+    if (status === 'waiting_in_clinic' || status === 'arrived_unconfirmed') {
+      return 'waiting_in_clinic'
+    }
+    if (status === 'postponed' || resp === 'postponed' || resp === 'reschedule_requested') {
+      return 'postponed'
+    }
+    if (
       !ev.doctorId ||
       status === 'pending_assignment' ||
+      status === 'pending_review' ||
+      ev.reviewStatus === 'pending_review' ||
       !doctors.some(d => d.id === ev.doctorId)
-    )
-    const isScheduled = !isCancelledOrNoShow && !isCompleted && !isInProgress && !isPostponed && !isUnassigned
-
-    return {
-      isCancelledOrNoShow,
-      isCompleted,
-      isInProgress,
-      isPostponed,
-      isUnassigned,
-      isScheduled,
+    ) {
+      return 'pending_assignment'
     }
+    if (status === 'confirmed' || resp === 'confirmed') {
+      return 'confirmed'
+    }
+    return 'scheduled'
   }, [doctors])
-
-  const matchesStatusBuckets = useCallback((ev: CalendarEvent, activeBuckets: CalendarStatusBucket[]): boolean => {
-    if (activeBuckets.length === 0) return false
-    const c = classifyEventStatus(ev)
-    if (c.isCancelledOrNoShow) {
-      return activeBuckets.includes('cancelled_no_show')
-    }
-    if (c.isUnassigned) {
-      if (activeBuckets.includes('pending_assignment')) return true
-      if (c.isPostponed && activeBuckets.includes('postponed') && activeBuckets.length === 1) return true
-      return false
-    }
-    if (c.isPostponed) return activeBuckets.includes('postponed')
-    if (c.isInProgress) return activeBuckets.includes('in_progress')
-    if (c.isCompleted) return activeBuckets.includes('completed')
-    if (c.isScheduled) return activeBuckets.includes('scheduled')
-    return false
-  }, [classifyEventStatus])
-
-  const matchesSecondaryFilters = useCallback((
-    ev: CalendarEvent,
-    confFilter: CalendarConfirmationFilter,
-    treatFilter: CalendarTreatmentFilter,
-    srcFilter: CalendarSourceFilter
-  ): boolean => {
-    const status = (ev.status || 'scheduled').toLowerCase()
-    const resp = (ev.patientResponseStatus || '').toLowerCase()
-
-    // 1. Hasta Teyit / Onay Durumu Filtresi (VE)
-    if (confFilter !== 'all') {
-      if (confFilter === 'confirmed') {
-        const isConfirmed = resp === 'confirmed' || status === 'confirmed'
-        if (!isConfirmed) return false
-      } else if (confFilter === 'pending') {
-        const isPending =
-          (!resp || resp === 'pending') &&
-          status !== 'confirmed' &&
-          status !== 'completed' &&
-          status !== 'cancelled' &&
-          status !== 'no_show' &&
-          status !== 'postponed'
-        if (!isPending) return false
-      } else if (confFilter === 'reschedule') {
-        const isReschedule =
-          resp === 'reschedule_requested' ||
-          resp === 'postponed' ||
-          status === 'postponed' ||
-          Boolean(ev.patientPreferredDate)
-        if (!isReschedule) return false
-      } else if (confFilter === 'pending_review') {
-        const isPendingReview =
-          ev.reviewStatus === 'pending_review' ||
-          status === 'pending_review' ||
-          ev.timeConfirmed === false
-        if (!isPendingReview) return false
-      }
-    }
-
-    // 2. İçerik / Tedavi Planı Filtresi (VE)
-    if (treatFilter !== 'all') {
-      const hasTreat = Boolean(ev.hasTreatment || ev.type === 'Tedavi' || ev.type === 'tedavi')
-      if (treatFilter === 'with_treatment' && !hasTreat) return false
-      if (treatFilter === 'without_treatment' && hasTreat) return false
-    }
-
-    // 3. Kanal / Kaynak Filtresi (VE)
-    if (srcFilter !== 'all') {
-      const rawSource = (ev.intakeSource || '').trim().toLowerCase()
-      const isAi =
-        Boolean(rawSource && !['manual', 'desk', 'admin'].includes(rawSource)) ||
-        ev.reviewStatus === 'pending_review' ||
-        status === 'pending_review' ||
-        ev.timeConfirmed === false
-      if (srcFilter === 'ai' && !isAi) return false
-      if (srcFilter === 'manual' && isAi) return false
-    }
-
-    return true
-  }, [])
 
   const combinatorialFilteredEvents = useMemo(() => {
     return filteredEvents.filter(ev => {
-      // Doctor filter (AND)
       const matchesDoc = !ev.doctorId || !doctors.some(d => d.id === ev.doctorId) || selectedDoctorIds.includes(ev.doctorId)
       if (!matchesDoc) return false
-      // Status filter (OR within selected buckets, AND with other categories)
-      if (!matchesStatusBuckets(ev, statusFilters)) return false
-      // Confirmation + Treatment + Source filters (AND)
-      if (!matchesSecondaryFilters(ev, confirmationFilter, treatmentFilter, sourceFilter)) return false
-      return true
+      const bucket = getEventStatusBucket(ev)
+      return statusFilters.includes(bucket)
     })
-  }, [filteredEvents, doctors, selectedDoctorIds, statusFilters, confirmationFilter, treatmentFilter, sourceFilter, matchesStatusBuckets, matchesSecondaryFilters])
+  }, [filteredEvents, doctors, selectedDoctorIds, statusFilters, getEventStatusBucket])
 
   const periodStats = useMemo(() => {
     const periodAllEvents = events.filter(ev =>
       isEventInCalendarPeriod(ev.startTime, view, currentDate) &&
       (!ev.doctorId || !doctors.some(d => d.id === ev.doctorId) || selectedDoctorIds.includes(ev.doctorId))
     )
-    const periodVisibleEvents = combinatorialFilteredEvents.filter(ev =>
-      isEventInCalendarPeriod(ev.startTime, view, currentDate)
-    )
 
     const bucketCounts: Record<CalendarStatusBucket, number> = {
       scheduled: 0,
+      confirmed: 0,
+      waiting_in_clinic: 0,
       in_progress: 0,
       completed: 0,
-      pending_assignment: 0,
       postponed: 0,
+      pending_assignment: 0,
       cancelled_no_show: 0,
     }
-    let confirmedCount = 0
-    let pendingConfCount = 0
-    let rescheduleCount = 0
-    let pendingReviewCount = 0
-    let withTreatmentCount = 0
-    let withoutTreatmentCount = 0
-    let aiSourceCount = 0
-    let manualSourceCount = 0
 
     for (const ev of periodAllEvents) {
-      const c = classifyEventStatus(ev)
-      if (c.isCancelledOrNoShow) bucketCounts.cancelled_no_show++
-      else if (c.isUnassigned) bucketCounts.pending_assignment++
-      else if (c.isPostponed) bucketCounts.postponed++
-      else if (c.isInProgress) bucketCounts.in_progress++
-      else if (c.isCompleted) bucketCounts.completed++
-      else if (c.isScheduled) bucketCounts.scheduled++
-
-      if (!c.isCancelledOrNoShow) {
-        if (matchesSecondaryFilters(ev, 'confirmed', 'all', 'all')) confirmedCount++
-        if (matchesSecondaryFilters(ev, 'pending', 'all', 'all')) pendingConfCount++
-        if (matchesSecondaryFilters(ev, 'reschedule', 'all', 'all')) rescheduleCount++
-        if (matchesSecondaryFilters(ev, 'pending_review', 'all', 'all')) pendingReviewCount++
-        if (matchesSecondaryFilters(ev, 'all', 'with_treatment', 'all')) withTreatmentCount++
-        if (matchesSecondaryFilters(ev, 'all', 'without_treatment', 'all')) withoutTreatmentCount++
-        if (matchesSecondaryFilters(ev, 'all', 'all', 'ai')) aiSourceCount++
-        if (matchesSecondaryFilters(ev, 'all', 'all', 'manual')) manualSourceCount++
-      }
+      const bucket = getEventStatusBucket(ev)
+      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1
     }
-
-    const defaultActiveTotal =
-      bucketCounts.scheduled +
-      bucketCounts.in_progress +
-      bucketCounts.completed +
-      bucketCounts.pending_assignment +
-      bucketCounts.postponed
 
     return {
       totalAll: periodAllEvents.length,
-      defaultActiveTotal,
-      visibleCount: periodVisibleEvents.length,
       bucketCounts,
-      confirmedCount,
-      pendingConfCount,
-      rescheduleCount,
-      pendingReviewCount,
-      withTreatmentCount,
-      withoutTreatmentCount,
-      aiSourceCount,
-      manualSourceCount,
     }
-  }, [events, combinatorialFilteredEvents, view, currentDate, doctors, selectedDoctorIds, classifyEventStatus, matchesSecondaryFilters])
+  }, [events, view, currentDate, doctors, selectedDoctorIds, getEventStatusBucket])
 
   const isDefaultStatusSelection = useMemo(() => {
     if (statusFilters.length !== DEFAULT_STATUS_FILTERS.length) return false
     return DEFAULT_STATUS_FILTERS.every(s => statusFilters.includes(s))
   }, [statusFilters])
-
-  const isCustomFilterActive = useMemo(() => {
-    return (
-      !isDefaultStatusSelection ||
-      confirmationFilter !== 'all' ||
-      treatmentFilter !== 'all' ||
-      sourceFilter !== 'all' ||
-      patientSearchQuery.trim() !== '' ||
-      (doctors.length > 0 && selectedDoctorIds.length < doctors.length)
-    )
-  }, [isDefaultStatusSelection, confirmationFilter, treatmentFilter, sourceFilter, patientSearchQuery, doctors.length, selectedDoctorIds.length])
-
-  const activeCustomFilterDimensionCount = useMemo(() => {
-    let count = 0
-    if (!isDefaultStatusSelection) count++
-    if (confirmationFilter !== 'all') count++
-    if (treatmentFilter !== 'all') count++
-    if (sourceFilter !== 'all') count++
-    if (patientSearchQuery.trim() !== '') count++
-    if (doctors.length > 0 && selectedDoctorIds.length < doctors.length) count++
-    return count
-  }, [isDefaultStatusSelection, confirmationFilter, treatmentFilter, sourceFilter, patientSearchQuery, doctors.length, selectedDoctorIds.length])
-
-  const resetAllCalendarFilters = useCallback(() => {
-    setStatusFilters([...DEFAULT_STATUS_FILTERS])
-    setConfirmationFilter('all')
-    setTreatmentFilter('all')
-    setSourceFilter('all')
-    setPatientSearchQuery('')
-    if (doctors.length > 0) {
-      setSelectedDoctorIds(doctors.map(d => d.id))
-    }
-  }, [doctors])
 
   const toggleStatusBucket = useCallback((bucket: CalendarStatusBucket, isolate = false) => {
     if (isolate) {
@@ -1439,63 +1266,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
         : [...prev, bucket]
     )
   }, [])
-
-  const handleConfirmationFilterChange = useCallback((nextConf: CalendarConfirmationFilter) => {
-    setConfirmationFilter(nextConf)
-    if (nextConf === 'reschedule') {
-      setStatusFilters(prev => prev.includes('postponed') ? prev : [...prev, 'postponed'])
-    } else if (nextConf === 'pending_review') {
-      setStatusFilters(prev => {
-        const next = new Set(prev)
-        next.add('pending_assignment')
-        next.add('scheduled')
-        return Array.from(next)
-      })
-    } else if (nextConf === 'confirmed' || nextConf === 'pending') {
-      setStatusFilters(prev => prev.includes('scheduled') ? prev : [...prev, 'scheduled'])
-    }
-  }, [])
-
-  const applyCalendarPreset = useCallback((preset: 'default' | 'active_today' | 'awaiting_confirmation' | 'completed_only' | 'with_cancelled') => {
-    if (preset === 'default') {
-      setStatusFilters([...DEFAULT_STATUS_FILTERS])
-      setConfirmationFilter('all')
-      setTreatmentFilter('all')
-      setSourceFilter('all')
-    } else if (preset === 'active_today') {
-      setStatusFilters(['scheduled', 'in_progress', 'pending_assignment'])
-      setConfirmationFilter('all')
-      setTreatmentFilter('all')
-      setSourceFilter('all')
-    } else if (preset === 'awaiting_confirmation') {
-      setStatusFilters(['scheduled', 'pending_assignment', 'postponed'])
-      setConfirmationFilter('pending')
-      setTreatmentFilter('all')
-      setSourceFilter('all')
-    } else if (preset === 'completed_only') {
-      setStatusFilters(['completed'])
-      setConfirmationFilter('all')
-      setTreatmentFilter('all')
-      setSourceFilter('all')
-    } else if (preset === 'with_cancelled') {
-      setStatusFilters([...DEFAULT_STATUS_FILTERS, 'cancelled_no_show'])
-      setConfirmationFilter('all')
-      setTreatmentFilter('all')
-      setSourceFilter('all')
-    }
-  }, [])
-
-  const activePresetId = useMemo(() => {
-    if (treatmentFilter !== 'all' || sourceFilter !== 'all') return null
-    const hasSame = (arr: CalendarStatusBucket[]) =>
-      statusFilters.length === arr.length && arr.every(s => statusFilters.includes(s))
-    if (confirmationFilter === 'all' && hasSame(DEFAULT_STATUS_FILTERS)) return 'default'
-    if (confirmationFilter === 'all' && hasSame(['scheduled', 'in_progress', 'pending_assignment'])) return 'active_today'
-    if (confirmationFilter === 'pending') return 'awaiting_confirmation'
-    if (confirmationFilter === 'all' && hasSame(['completed'])) return 'completed_only'
-    if (confirmationFilter === 'all' && hasSame([...DEFAULT_STATUS_FILTERS, 'cancelled_no_show'])) return 'with_cancelled'
-    return null
-  }, [statusFilters, confirmationFilter, treatmentFilter, sourceFilter])
 
   return (
     <div className="cal-root-container">
@@ -2141,90 +1911,40 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           </div>
         </div>
 
-        {/* Kombinasyonlu Durum & Akıllı Filtreler (Sol Yan Panel) */}
-        <div
-          style={{
-            marginTop: 4,
-            padding: 12,
-            borderRadius: 11,
-            background: 'var(--card-bg)',
-            border: '1px solid var(--input-border)',
-            boxShadow: 'var(--pc-neo-subcard)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Filter size={14} color="var(--accent, #2563eb)" />
-              <h4 style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
-                Akıllı Filtreler
-              </h4>
-            </div>
-            {isCustomFilterActive ? (
-              <button
-                type="button"
-                onClick={resetAllCalendarFilters}
-                title="Tüm kombinasyonlu filtreleri varsayılan haline sıfırla"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  fontSize: '0.72rem',
-                  color: 'var(--danger, #ef4444)',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  padding: 0,
-                }}
-              >
-                Sıfırla
-              </button>
-            ) : (
-              <span style={{
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                padding: '2px 7px',
-                borderRadius: 999,
-                background: 'var(--badge-clinic-bg, #e0f2fe)',
-                border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                color: 'var(--badge-clinic-text, #0369a1)',
-              }}>
-                {periodStats.visibleCount}/{periodStats.totalAll}
-              </span>
-            )}
-          </div>
-
-          {/* 1. Randevu Durumu (Çoklu Seçim) */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2)' }}>
-                Randevu Durumu
-              </span>
+        {/* Randevu Durumları (Durum Filtresi — Hekimlerim altındaki gibi) */}
+        <div style={{ marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--input-border)', position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Randevu Durumları</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {!isDefaultStatusSelection && (
+                <button
+                  type="button"
+                  onClick={() => setStatusFilters([...DEFAULT_STATUS_FILTERS])}
+                  style={{ background: 'transparent', border: 'none', fontSize: '0.73rem', color: 'var(--foreground-3)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
+                  title="İptal edilenler hariç tüm aktif durumları seç"
+                >
+                  Varsayılan
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   if (statusFilters.length === STATUS_FILTER_OPTIONS.length) {
-                    setStatusFilters([...DEFAULT_STATUS_FILTERS])
+                    setStatusFilters([])
                   } else {
                     setStatusFilters(STATUS_FILTER_OPTIONS.map(o => o.id))
                   }
                 }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  fontSize: '0.68rem',
-                  color: 'var(--brand, #2563eb)',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  padding: 0,
-                }}
+                style={{ background: 'transparent', border: 'none', fontSize: '0.73rem', color: 'var(--brand)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
               >
-                {statusFilters.length === STATUS_FILTER_OPTIONS.length ? 'Varsayılan' : 'Tümünü Aç'}
+                {statusFilters.length === STATUS_FILTER_OPTIONS.length ? 'Temizle' : 'Tümünü Seç'}
               </button>
             </div>
+          </div>
 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {STATUS_FILTER_OPTIONS.map(opt => {
-              const isChecked = statusFilters.includes(opt.id)
+              const isSelected = statusFilters.includes(opt.id)
               const count = periodStats.bucketCounts[opt.id] || 0
               return (
                 <div
@@ -2233,7 +1953,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: 6,
+                    gap: 8,
                   }}
                 >
                   <label
@@ -2241,15 +1961,14 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                       e.preventDefault()
                       toggleStatusBucket(opt.id, e.altKey || e.shiftKey)
                     }}
-                    title={`${opt.description} (Tek başına seçmek için Shift/Alt + Tık)`}
+                    title={opt.description}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
+                      gap: 10,
                       cursor: 'pointer',
-                      fontSize: '0.79rem',
-                      color: isChecked ? 'var(--foreground)' : 'var(--foreground-3)',
-                      fontWeight: isChecked ? 600 : 500,
+                      fontSize: '0.86rem',
+                      color: isSelected ? 'var(--foreground)' : 'var(--foreground-3)',
                       userSelect: 'none',
                       flex: 1,
                       minWidth: 0,
@@ -2257,40 +1976,50 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                   >
                     <div
                       style={{
-                        width: 16,
-                        height: 16,
+                        width: 18,
+                        height: 18,
                         borderRadius: 4,
                         border: `2px solid ${opt.color}`,
-                        background: isChecked ? opt.color : 'var(--calendar-checkbox-bg, var(--input-bg))',
+                        background: isSelected ? opt.color : 'var(--calendar-checkbox-bg)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        transition: 'all 0.2s',
                         flexShrink: 0,
                       }}
                     >
-                      {isChecked && (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                      {isSelected && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
                       )}
                     </div>
-                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span
+                      style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      title={opt.label}
+                    >
                       {opt.label}
                     </span>
                   </label>
                   <button
                     type="button"
-                    onClick={() => toggleStatusBucket(opt.id, true)}
+                    onClick={() => {
+                      if (statusFilters.length === 1 && statusFilters[0] === opt.id) {
+                        setStatusFilters([...DEFAULT_STATUS_FILTERS])
+                      } else {
+                        setStatusFilters([opt.id])
+                      }
+                    }}
                     title={`Yalnızca "${opt.label}" durumundaki randevuları göster`}
                     style={{
-                      padding: '1px 6px',
-                      borderRadius: 999,
-                      border: '1px solid var(--input-border)',
-                      background: 'var(--input-bg)',
-                      color: count > 0 ? 'var(--foreground-2)' : 'var(--foreground-3)',
-                      fontSize: '0.67rem',
+                      padding: '2px 7px',
+                      borderRadius: 6,
+                      fontSize: '0.68rem',
                       fontWeight: 700,
                       cursor: 'pointer',
+                      background: count > 0 ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-inner)',
+                      border: count > 0 ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
+                      color: count > 0 ? 'var(--badge-clinic-text, #0369a1)' : 'var(--foreground-3)',
                       flexShrink: 0,
                     }}
                   >
@@ -2299,90 +2028,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                 </div>
               )
             })}
-          </div>
-
-          {/* 2. Hasta Teyit / Yanıt Durumu */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 6, borderTop: '1px solid var(--input-border)' }}>
-            <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2)' }}>
-              Hasta Teyit / Yanıt Durumu
-            </label>
-            <select
-              value={confirmationFilter}
-              onChange={(e) => handleConfirmationFilterChange(e.target.value as CalendarConfirmationFilter)}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                borderRadius: 7,
-                border: confirmationFilter !== 'all' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.76rem',
-                fontWeight: confirmationFilter !== 'all' ? 700 : 500,
-                boxShadow: 'var(--pc-neo-inset)',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              {CONFIRMATION_FILTER_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 3. İçerik / Tedavi Planı Filtresi */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2)' }}>
-              Tedavi & İçerik Durumu
-            </label>
-            <select
-              value={treatmentFilter}
-              onChange={(e) => setTreatmentFilter(e.target.value as CalendarTreatmentFilter)}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                borderRadius: 7,
-                border: treatmentFilter !== 'all' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.76rem',
-                fontWeight: treatmentFilter !== 'all' ? 700 : 500,
-                boxShadow: 'var(--pc-neo-inset)',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              {TREATMENT_FILTER_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 4. Kanal / Kaynak Filtresi */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2)' }}>
-              Kayıt Kanalı / Kaynak
-            </label>
-            <select
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value as CalendarSourceFilter)}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                borderRadius: 7,
-                border: sourceFilter !== 'all' ? '1.5px solid #2563eb' : '1px solid var(--input-border)',
-                background: 'var(--input-bg)',
-                color: 'var(--foreground)',
-                fontSize: '0.76rem',
-                fontWeight: sourceFilter !== 'all' ? 700 : 500,
-                boxShadow: 'var(--pc-neo-inset)',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              {SOURCE_FILTER_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
           </div>
         </div>
       </div>
@@ -2478,485 +2123,6 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
               </button>
             </div>
           </div>
-        </div>
-
-        {/* ── Kombinasyonlu Akıllı Takvim Filtreleme Çubuğu (Üst Araç Çubuğu) ── */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            marginBottom: 12,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 8,
-              padding: '8px 12px',
-              borderRadius: 11,
-              background: 'var(--card-bg)',
-              border: '1px solid var(--input-border)',
-              boxShadow: 'var(--pc-neo-subcard)',
-            }}
-          >
-            {/* Sol: Detaylı Filtre Aç/Kapat + Hızlı Kombinasyon Ön-Ayarları */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
-              <button
-                type="button"
-                onClick={() => setFilterPanelOpen(prev => !prev)}
-                style={{
-                  padding: '6px 11px',
-                  borderRadius: 8,
-                  border: filterPanelOpen || isCustomFilterActive ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                  background: filterPanelOpen || isCustomFilterActive
-                    ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
-                    : 'var(--input-bg)',
-                  color: filterPanelOpen || isCustomFilterActive ? '#ffffff' : 'var(--foreground)',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  boxShadow: filterPanelOpen || isCustomFilterActive ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <Filter size={13} color={filterPanelOpen || isCustomFilterActive ? '#ffffff' : 'var(--accent, #2563eb)'} />
-                <span style={{ color: filterPanelOpen || isCustomFilterActive ? '#ffffff' : 'var(--foreground)' }}>
-                  Kombinasyonlu Filtreler
-                </span>
-                {activeCustomFilterDimensionCount > 0 && (
-                  <span
-                    style={{
-                      padding: '1px 6px',
-                      borderRadius: 999,
-                      background: '#ffffff',
-                      color: '#1d4ed8',
-                      fontSize: '0.68rem',
-                      fontWeight: 800,
-                    }}
-                  >
-                    {activeCustomFilterDimensionCount}
-                  </span>
-                )}
-                {filterPanelOpen ? (
-                  <ChevronUp size={13} color={filterPanelOpen || isCustomFilterActive ? '#ffffff' : 'var(--foreground-2)'} />
-                ) : (
-                  <ChevronDown size={13} color={filterPanelOpen || isCustomFilterActive ? '#ffffff' : 'var(--foreground-2)'} />
-                )}
-              </button>
-
-              {/* Hızlı Kombinasyon Ön-Ayarları (Tek Tık Akıllı Filtre Çipleri) */}
-              {([
-                {
-                  id: 'default' as const,
-                  label: 'Tümü (Varsayılan Aktifler)',
-                  count: periodStats.defaultActiveTotal,
-                },
-                {
-                  id: 'active_today' as const,
-                  label: 'İşlem Bekleyenler (Planlandı + Tedavide)',
-                  count:
-                    periodStats.bucketCounts.scheduled +
-                    periodStats.bucketCounts.in_progress +
-                    periodStats.bucketCounts.pending_assignment,
-                },
-                {
-                  id: 'awaiting_confirmation' as const,
-                  label: 'Teyit Bekleyen Randevular',
-                  count: periodStats.pendingConfCount,
-                },
-                {
-                  id: 'completed_only' as const,
-                  label: 'Tamamlanan Seanslar',
-                  count: periodStats.bucketCounts.completed,
-                },
-                {
-                  id: 'with_cancelled' as const,
-                  label: 'İptal / Gelmeyenler Dahil',
-                  count: periodStats.bucketCounts.cancelled_no_show,
-                },
-              ]).map(preset => {
-                const isActive = activePresetId === preset.id
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => applyCalendarPreset(preset.id)}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: 999,
-                      border: isActive ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                      background: isActive
-                        ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
-                        : 'var(--input-bg)',
-                      color: isActive ? '#ffffff' : 'var(--foreground-2)',
-                      fontSize: '0.73rem',
-                      fontWeight: isActive ? 700 : 600,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      boxShadow: isActive ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    <span style={{ color: isActive ? '#ffffff' : 'var(--foreground-2)' }}>{preset.label}</span>
-                    <span
-                      style={{
-                        padding: '0 6px',
-                        borderRadius: 999,
-                        background: isActive ? '#1e40af' : 'var(--badge-clinic-bg, #e0f2fe)',
-                        border: isActive ? '1px solid #93c5fd' : '1px solid var(--badge-clinic-border, #bae6fd)',
-                        color: isActive ? '#ffffff' : 'var(--badge-clinic-text, #0369a1)',
-                        fontSize: '0.67rem',
-                        fontWeight: 800,
-                      }}
-                    >
-                      {preset.count}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* Sağ: Aktif Dönem Randevu Sayacı & Filtreleri Sıfırla */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <span
-                title="Seçili dönemde filtrelere uyan randevu sayısı / toplam randevu sayısı"
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 8,
-                  background: 'var(--badge-clinic-bg, #e0f2fe)',
-                  border: '1px solid var(--badge-clinic-border, #bae6fd)',
-                  color: 'var(--badge-clinic-text, #0369a1)',
-                  fontSize: '0.73rem',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap',
-                  boxShadow: 'var(--pc-clay-pale)',
-                }}
-              >
-                Gösterilen: {periodStats.visibleCount} / {periodStats.totalAll} Randevu
-              </span>
-
-              {isCustomFilterActive && (
-                <button
-                  type="button"
-                  onClick={resetAllCalendarFilters}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 8,
-                    border: '1px solid var(--danger, #ef4444)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--danger, #ef4444)',
-                    fontSize: '0.73rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    whiteSpace: 'nowrap',
-                    boxShadow: 'var(--pc-clay-btn)',
-                  }}
-                >
-                  <X size={13} />
-                  <span>Filtreleri Sıfırla</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Açılır Detaylı Kombinasyonlu Filtre Paneli */}
-          {filterPanelOpen && (
-            <div
-              style={{
-                padding: '14px 16px',
-                borderRadius: 12,
-                background: 'var(--card-bg)',
-                border: '1.5px solid var(--input-border)',
-                boxShadow: 'var(--pc-neo-card)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
-              {/* 1. Satır: Çoklu Durum Seçimi (OR mantığı) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                    1. Randevu Durumu Filtresi (Çoklu Seçim — Seçilen Durumlardan Herhangi Biri)
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilters(STATUS_FILTER_OPTIONS.map(o => o.id))}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        color: 'var(--brand, #2563eb)',
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      Tüm Durumları Seç
-                    </button>
-                    <span style={{ color: 'var(--foreground-3)', fontSize: '0.72rem' }}>·</span>
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilters([...DEFAULT_STATUS_FILTERS])}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        color: 'var(--foreground-2)',
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      Varsayılan Aktifler
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {STATUS_FILTER_OPTIONS.map(opt => {
-                    const isChecked = statusFilters.includes(opt.id)
-                    const count = periodStats.bucketCounts[opt.id] || 0
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={(e) => toggleStatusBucket(opt.id, e.altKey || e.shiftKey)}
-                        title={`${opt.description} (Yalnızca bu durumu görmek için Shift/Alt + Tık)`}
-                        style={{
-                          padding: '6px 11px',
-                          borderRadius: 8,
-                          border: isChecked ? `1.5px solid ${opt.color}` : '1px solid var(--input-border)',
-                          background: isChecked ? 'var(--card-inner)' : 'var(--input-bg)',
-                          color: isChecked ? 'var(--foreground)' : 'var(--foreground-3)',
-                          fontSize: '0.75rem',
-                          fontWeight: isChecked ? 700 : 500,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 7,
-                          boxShadow: 'var(--pc-clay-btn)',
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: '50%',
-                            background: isChecked ? opt.color : 'transparent',
-                            border: `2px solid ${opt.color}`,
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span>{opt.label}</span>
-                        <span
-                          style={{
-                            padding: '1px 6px',
-                            borderRadius: 999,
-                            background: 'var(--card-bg)',
-                            border: '1px solid var(--input-border)',
-                            color: 'var(--foreground-2)',
-                            fontSize: '0.68rem',
-                            fontWeight: 800,
-                          }}
-                        >
-                          {count}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* 2. Satır: Kombinasyon Kriterleri (Hasta Teyit VE Tedavi Planı VE Kanal) */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: 10,
-                  paddingTop: 10,
-                  borderTop: '1px solid var(--input-border)',
-                }}
-              >
-                {/* Hasta Teyit / Yanıt Durumu */}
-                <div
-                  style={{
-                    padding: 10,
-                    borderRadius: 9,
-                    background: 'var(--card-inner)',
-                    border: '1px solid var(--input-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                    2. Hasta Teyit / Onay Durumu (VE)
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {([
-                      { id: 'all' as const, label: 'Tümü', count: null },
-                      { id: 'confirmed' as const, label: '✓ Geleceğini Onaylayanlar', count: periodStats.confirmedCount },
-                      { id: 'pending' as const, label: '⏳ Onay / Teyit Bekleyenler', count: periodStats.pendingConfCount },
-                      { id: 'reschedule' as const, label: '📅 Erteleme İsteyenler', count: periodStats.rescheduleCount },
-                      { id: 'pending_review' as const, label: '🤖 Yapay Zeka Onayı Bekleyenler', count: periodStats.pendingReviewCount },
-                    ]).map(item => {
-                      const active = confirmationFilter === item.id
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => handleConfirmationFilterChange(item.id)}
-                          style={{
-                            padding: '5px 9px',
-                            borderRadius: 7,
-                            border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                            background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-bg)',
-                            color: active ? '#ffffff' : 'var(--foreground-2)',
-                            fontSize: '0.72rem',
-                            fontWeight: active ? 700 : 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                          }}
-                        >
-                          <span style={{ color: active ? '#ffffff' : 'var(--foreground-2)' }}>{item.label}</span>
-                          {item.count !== null && (
-                            <span style={{ fontSize: '0.66rem', fontWeight: 800, color: active ? '#ffffff' : 'var(--foreground-3)' }}>
-                              ({item.count})
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* İçerik / Tedavi Planı Filtresi */}
-                <div
-                  style={{
-                    padding: 10,
-                    borderRadius: 9,
-                    background: 'var(--card-inner)',
-                    border: '1px solid var(--input-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                    3. İçerik / Tedavi Planı Filtresi (VE)
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {([
-                      { id: 'all' as const, label: 'Tümü', count: null },
-                      { id: 'with_treatment' as const, label: '🦷 Tedavi Planı Olanlar', count: periodStats.withTreatmentCount },
-                      { id: 'without_treatment' as const, label: '📋 Yalnızca Muayene / Planı Olmayanlar', count: periodStats.withoutTreatmentCount },
-                    ]).map(item => {
-                      const active = treatmentFilter === item.id
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setTreatmentFilter(item.id)}
-                          style={{
-                            padding: '5px 9px',
-                            borderRadius: 7,
-                            border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                            background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-bg)',
-                            color: active ? '#ffffff' : 'var(--foreground-2)',
-                            fontSize: '0.72rem',
-                            fontWeight: active ? 700 : 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                          }}
-                        >
-                          <span style={{ color: active ? '#ffffff' : 'var(--foreground-2)' }}>{item.label}</span>
-                          {item.count !== null && (
-                            <span style={{ fontSize: '0.66rem', fontWeight: 800, color: active ? '#ffffff' : 'var(--foreground-3)' }}>
-                              ({item.count})
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Kayıt Kanalı / Kaynak Filtresi */}
-                <div
-                  style={{
-                    padding: 10,
-                    borderRadius: 9,
-                    background: 'var(--card-inner)',
-                    border: '1px solid var(--input-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                    4. Kayıt Kanalı / Kaynak Filtresi (VE)
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {([
-                      { id: 'all' as const, label: 'Tümü', count: null },
-                      { id: 'ai' as const, label: '🤖 Yapay Zeka / Sesli Asistan', count: periodStats.aiSourceCount },
-                      { id: 'manual' as const, label: '🏥 Klinik / Manuel Kayıt', count: periodStats.manualSourceCount },
-                    ]).map(item => {
-                      const active = sourceFilter === item.id
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setSourceFilter(item.id)}
-                          style={{
-                            padding: '5px 9px',
-                            borderRadius: 7,
-                            border: active ? '1px solid #1d4ed8' : '1px solid var(--input-border)',
-                            background: active ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : 'var(--card-bg)',
-                            color: active ? '#ffffff' : 'var(--foreground-2)',
-                            fontSize: '0.72rem',
-                            fontWeight: active ? 700 : 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
-                          }}
-                        >
-                          <span style={{ color: active ? '#ffffff' : 'var(--foreground-2)' }}>{item.label}</span>
-                          {item.count !== null && (
-                            <span style={{ fontSize: '0.66rem', fontWeight: 800, color: active ? '#ffffff' : 'var(--foreground-3)' }}>
-                              ({item.count})
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <DentalCalendar

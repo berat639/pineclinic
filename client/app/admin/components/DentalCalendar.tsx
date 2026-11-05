@@ -118,6 +118,16 @@ function getPatientStatusVisual(e: CalendarEvent) {
       strike: true,
     }
   }
+  if (status === 'waiting_in_clinic' || status === 'arrived_unconfirmed') {
+    return {
+      prefix: '🏥 ',
+      badge: status === 'arrived_unconfirmed' ? 'TEYİTSİZ GELDİ' : 'KLİNİKTE BEKLİYOR',
+      borderLeftColor: '#0ea5e9',
+      borderStyle: 'solid',
+      bgOverride: null,
+      strike: false,
+    }
+  }
   if (status === 'in_progress') {
     return {
       prefix: '🔄 ',
