@@ -10,6 +10,7 @@ interface PatientProfileCardProps {
   profile: any
   doctors?: any[]
   onEdit?: (patient: any) => void
+  onDelete?: (patient: any) => void
   calendarHistoryMode?: boolean
   onConsentChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void
   onRefresh?: () => void
@@ -19,6 +20,7 @@ export default function PatientProfileCard({
   profile,
   doctors = [],
   onEdit,
+  onDelete,
   calendarHistoryMode = false,
   onConsentChange,
   onRefresh,
@@ -122,26 +124,52 @@ export default function PatientProfileCard({
       <div style={cardStyle}>
         <div style={{ ...headerStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>📋 Demografik Bilgiler</span>
-          {onEdit && (
-            <button
-              onClick={() => onEdit(patient)}
-              style={{
-                background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
-                border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
-                color: 'var(--btn-clinic-secondary-text, #0284c7)',
-                borderRadius: 6,
-                padding: '2px 8px',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}
-            >
-              ✏️ Düzenle
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(patient)}
+                style={{
+                  background: 'var(--btn-clinic-secondary-bg, #eff6ff)',
+                  border: '1px solid var(--btn-clinic-secondary-border, #93c5fd)',
+                  color: 'var(--btn-clinic-secondary-text, #0284c7)',
+                  borderRadius: 6,
+                  padding: '2px 8px',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                ✏️ Düzenle
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => onDelete(patient)}
+                title={patient?.isArchived ? 'Hastayı KVKK kapsamında kalıcı olarak sil' : 'Hastayı sil veya arşive taşı'}
+                style={{
+                  background: 'var(--card-inner, #f1f5f9)',
+                  border: '1px solid var(--danger, #ef4444)',
+                  color: 'var(--danger, #ef4444)',
+                  borderRadius: 6,
+                  padding: '2px 8px',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                <Trash2 size={12} />
+                <span>{patient?.isArchived ? 'Kalıcı Sil (KVKK)' : 'Sil'}</span>
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
           <div><span style={{ color: 'var(--foreground-3)' }}>Ad:</span> {patient.name}</div>

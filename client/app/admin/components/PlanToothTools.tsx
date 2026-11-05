@@ -5,6 +5,7 @@ import PlanDialog from './PlanDialog'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
 import {
   ALL_TOOTH_REGION_IDS,
+  ToothAnatomy,
   formatToothRegionLabel,
   formatToothRegionShortLabel,
   parseToothRegions,
@@ -37,14 +38,14 @@ export const DENTAL_SUBLAYERS: Array<{
   shortDesc: string
   color: string
 }> = [
+  { id: 'root', label: 'Kök (Kök Gövdesi)', shortDesc: 'Diş kök gövdesi, sement ve furkasyon', color: '#a16207' },
+  { id: 'root-canal', label: 'Kök Kanalı', shortDesc: 'Kök içi pulpa kanal sistemi (Endodonti)', color: '#8b5cf6' },
+  { id: 'apex', label: 'Kök Ucu (Apikal)', shortDesc: 'Apikal foramen ve periapikal lezyon bölgesi', color: '#be123c' },
   { id: 'enamel', label: 'Mine', shortDesc: 'Dış koruyucu mine tabakası', color: '#38bdf8' },
   { id: 'dentin', label: 'Dentin', shortDesc: 'Orta sert diş dokusu', color: '#f59e0b' },
-  { id: 'pulp', label: 'Pulpa', shortDesc: 'Merkez sinir ve damar odası', color: '#e11d48' },
-  { id: 'root-canal', label: 'Kök Kanalı', shortDesc: 'Kök içi kanal sistemi', color: '#8b5cf6' },
+  { id: 'pulp', label: 'Pulpa (Kuron Pulpası)', shortDesc: 'Merkez sinir ve damar odası', color: '#e11d48' },
   { id: 'crown', label: 'Taç (Kuron)', shortDesc: 'Ağız içi görünür kuron', color: '#0284c7' },
   { id: 'neck', label: 'Boyun (Kole)', shortDesc: 'Servikal geçiş hattı', color: '#06b6d4' },
-  { id: 'root', label: 'Kök', shortDesc: 'Diş kök gövdesi', color: '#a16207' },
-  { id: 'apex', label: 'Kök Ucu', shortDesc: 'Apikal foramen bölgesi', color: '#be123c' },
   { id: 'gingiva', label: 'Diş Eti', shortDesc: 'Yumuşak diş eti dokusu', color: '#ec4899' },
   { id: 'jaw-bone', label: 'Çene Kemiği', shortDesc: 'Alveol destek kemiği', color: '#d97706' },
 ]
@@ -257,22 +258,38 @@ export function AnatomyLayerSvgIcon({
         />
       )}
 
-      {/* Kök (Alt kök çatalları) */}
+      {/* Kök (Alt kök çatalları ve furkasyon gövdesi) */}
       {layer === 'root' && (
-        <path
-          d="M 5.6 11.4 Q 12 12.2 18.4 11.4 C 18.0 14.3 17.5 17.6 16.4 20.6 C 16.0 21.5 15.1 21.5 14.7 20.5 L 13.1 15.4 C 12.6 14.2 11.4 14.2 10.9 15.4 L 9.3 20.5 C 8.9 21.5 8.0 21.5 7.6 20.6 C 6.5 17.6 6.0 14.3 5.6 11.4 Z"
-          fill={color}
-          fillOpacity="0.85"
-          stroke={color}
-          strokeWidth="1"
-        />
+        <>
+          <path
+            d="M 5.6 11.4 Q 12 12.2 18.4 11.4 C 18.0 14.3 17.5 17.6 16.4 20.6 C 16.0 21.5 15.1 21.5 14.7 20.5 L 13.1 15.4 C 12.6 14.2 11.4 14.2 10.9 15.4 L 9.3 20.5 C 8.9 21.5 8.0 21.5 7.6 20.6 C 6.5 17.6 6.0 14.3 5.6 11.4 Z"
+            fill={color}
+            fillOpacity="0.9"
+            stroke={color}
+            strokeWidth="1.2"
+          />
+          <path
+            d="M 8.2 13.5 L 7.8 18.6 M 15.8 13.5 L 16.2 18.6"
+            stroke="#ffffff"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+        </>
       )}
 
-      {/* Kök Ucu / Apeks */}
+      {/* Kök Ucu / Apeks (Periapikal hedef halkası ve apikal foramen) */}
       {layer === 'apex' && (
         <>
-          <circle cx="8.3" cy="20.3" r="2.3" fill={color} />
-          <circle cx="15.7" cy="20.3" r="2.3" fill={color} />
+          <path
+            d="M 10.4 11.8 L 8.3 19.6 M 13.6 11.8 L 15.7 19.6"
+            stroke={baseStroke}
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+          <circle cx="8.3" cy="20.2" r="3.1" fill="#ffe4e6" stroke={color} strokeWidth="1.2" strokeDasharray="1.5 1" />
+          <circle cx="15.7" cy="20.2" r="3.1" fill="#ffe4e6" stroke={color} strokeWidth="1.2" strokeDasharray="1.5 1" />
+          <circle cx="8.3" cy="20.2" r="1.7" fill={color} />
+          <circle cx="15.7" cy="20.2" r="1.7" fill={color} />
         </>
       )}
 
@@ -927,7 +944,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
             )}
           </div>
 
-          {/* Alt Katmanlar Hızlı Seçim Çubuğu (Tümünü Seç / Temizle) */}
+          {/* Alt Katmanlar Hızlı Seçim Çubuğu (Kök / Kanal / Kök Ucu + Tümünü Seç / Temizle) */}
           <div
             style={{
               display: 'flex',
@@ -937,6 +954,54 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
               flexWrap: 'wrap',
             }}
           >
+            {(
+              [
+                { id: 'root' as SubLayerCode, label: 'Kök', color: '#a16207' },
+                { id: 'root-canal' as SubLayerCode, label: 'Kanal', color: '#8b5cf6' },
+                { id: 'apex' as SubLayerCode, label: 'Kök Ucu', color: '#be123c' },
+              ] as const
+            ).map(quick => {
+              const active = activeSubLayers.includes(quick.id)
+              return (
+                <button
+                  key={quick.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggleSubLayer(quick.id)}
+                  style={{
+                    width: 'auto',
+                    minHeight: 24,
+                    padding: '2px 7px',
+                    borderRadius: 6,
+                    border: active
+                      ? '1px solid #1d4ed8'
+                      : '1px solid var(--pc-border, var(--input-border))',
+                    background: active
+                      ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
+                      : 'var(--pc-surface, var(--input-bg))',
+                    color: active ? '#ffffff' : 'var(--foreground)',
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    boxShadow: active ? 'var(--pc-clay-primary)' : 'var(--pc-clay-btn)',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: quick.color,
+                      border: '1px solid #ffffff',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ color: active ? '#ffffff' : 'var(--foreground)' }}>{quick.label}</span>
+                </button>
+              )
+            })}
             <button
               type="button"
               aria-pressed={isAllSubLayersSelected}
@@ -1157,6 +1222,31 @@ export default function PlanToothTools(p: any) {
               ))}
             </div>
             <label htmlFor="tooth-section">Alt Katmanlar (Anatomik)</label>
+            <div
+              style={{
+                marginBottom: 8,
+                borderRadius: 8,
+                overflow: 'hidden',
+                border: '1px solid var(--pc-border, var(--input-border))',
+                background: 'var(--card-bg)',
+                maxHeight: 200,
+              }}
+            >
+              <ToothAnatomy
+                activeTooth={Number(tooth)}
+                selectedRegions={currentDetailSubLayers}
+                value={currentDetailSubLayers[0] || null}
+                compact={false}
+                zoomMode="full"
+                onChange={region => {
+                  const active = currentDetailSubLayers.includes(region)
+                  const nextList = active
+                    ? currentDetailSubLayers.filter(id => id !== region)
+                    : [...currentDetailSubLayers, region]
+                  p.updateSection(Number(tooth), serializeToothRegions(nextList))
+                }}
+              />
+            </div>
             <div className={styles.wrapActions} style={{ marginBottom: 6 }}>
               <button
                 type="button"

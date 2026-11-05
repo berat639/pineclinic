@@ -24,7 +24,7 @@ import ShiftContextMenu from '../../../admin/components/ShiftContextMenu'
 
 export type Staff = { id: string; name: string; role: string; active: boolean; color?: string }
 export type Shift = { id: string; userId: string; userName: string; userColor?: string; date: string; startTime: string; endTime: string; shiftType: string }
-type Leave = { doctorId: string; date: string; isFullDay: boolean; startTime: string; endTime: string; reason?: string | null }
+type Leave = { id: string; doctorId: string; doctorName?: string; date: string; isFullDay: boolean; startTime: string; endTime: string; reason?: string | null }
 type View = 'day' | 'week' | 'month'
 type RepeatMode = 'once' | 'week' | 'month'
 
@@ -813,11 +813,16 @@ export default function ShiftPlanner({
   useEffect(() => {
     const startDate = view === 'day' ? selectedDate : view === 'week' ? monday(selectedDate) : monthStart(selectedDate)
     const endDate = view === 'day' ? selectedDate : view === 'week' ? addDays(startDate, 6) : monthEnd(selectedDate)
-    fetch(`/api/dental/doctors/leaves?startDate=${startDate}&endDate=${endDate}`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setLeaves)
-      .catch(() => {})
-  }, [selectedDate, view])
+    const loadLeaves = () => {
+      fetch(`/api/dental/doctors/leaves?startDate=${startDate}&endDate=${endDate}`, { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data) => setLeaves(Array.isArray(data) ? data : []))
+        .catch(() => {})
+    }
+    loadLeaves()
+    window.addEventListener('doctorLeavesUpdated', loadLeaves)
+    return () => window.removeEventListener('doctorLeavesUpdated', loadLeaves)
+  }, [selectedDate, view, shifts])
 
   const staff = useMemo(
     () =>
@@ -879,6 +884,28 @@ export default function ShiftPlanner({
       onChanged()
     } catch {
       setUndoError('Mesai silinirken hata oluştu.')
+    }
+  }
+
+  const handleDeleteLeave = async (leaveId: string) => {
+    if (!canManageLeaves || !leaveId) return
+    setUndoError('')
+    try {
+      const res = await fetch(`/api/dental/doctors/leaves/${leaveId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setUndoError(err.error || 'Hekim izni kaldırılamadı.')
+        return
+      }
+      setLeaves((prev) => prev.filter((item) => item.id !== leaveId))
+      setSuccessNotice('Hekim izni kaldırıldı ve çalışma saatleri yeniden açıldı.')
+      window.dispatchEvent(new CustomEvent('doctorLeavesUpdated'))
+      onChanged()
+    } catch {
+      setUndoError('Hekim izni kaldırılırken bağlantı hatası oluştu.')
     }
   }
 
@@ -1232,6 +1259,8 @@ export default function ShiftPlanner({
           shifts={shifts}
           leaves={leaves}
           canEdit={canEditShifts}
+          onDeleteLeave={canManageLeaves ? handleDeleteLeave : undefined}
+          onOpenLeave={canManageLeaves ? onOpenLeave : undefined}
           onOpen={(userId, shift) =>
             canEditShifts &&
             setEditor({
@@ -1264,6 +1293,8 @@ export default function ShiftPlanner({
           shifts={shifts}
           leaves={leaves}
           canEdit={canEditShifts}
+          onDeleteLeave={canManageLeaves ? handleDeleteLeave : undefined}
+          onOpenLeave={canManageLeaves ? onOpenLeave : undefined}
           onOpen={(userId, day, shift) =>
             canEditShifts &&
             setEditor({
@@ -1305,7 +1336,10 @@ export default function ShiftPlanner({
           selectedDate={monthFocus}
           staff={staff}
           shifts={shifts.filter((item) => staff.some((person) => person.id === item.userId))}
+          leaves={leaves}
           canEdit={canEditShifts}
+          onDeleteLeave={canManageLeaves ? handleDeleteLeave : undefined}
+          onOpenLeave={canManageLeaves ? onOpenLeave : undefined}
           onSelect={setMonthFocus}
           onOpen={(userId, day, shift) =>
             canEditShifts &&
@@ -1395,6 +1429,8 @@ function DayView({
   shifts,
   leaves,
   canEdit,
+  onDeleteLeave,
+  onOpenLeave,
   onOpen,
   onContextMenu,
 }: {
@@ -1403,6 +1439,8 @@ function DayView({
   shifts: Shift[]
   leaves: Leave[]
   canEdit: boolean
+  onDeleteLeave?: (leaveId: string) => void
+  onOpenLeave?: (userId: string, date: string) => void
   onOpen: (userId: string, shift?: Shift) => void
   onContextMenu: (e: React.MouseEvent, person: Staff, shift?: Shift) => void
 }) {
@@ -1416,14 +1454,20 @@ function DayView({
           <button
             key={person.id}
             type="button"
-            onClick={() => !leave && canEdit && onOpen(person.id, shift)}
+            onClick={() => {
+              if (leave) {
+                onOpenLeave?.(person.id, date)
+              } else if (canEdit) {
+                onOpen(person.id, shift)
+              }
+            }}
             onContextMenu={(e) => onContextMenu(e, person, shift)}
             style={{
               ...neoSubCard,
               background: shift ? 'var(--card-inner)' : 'var(--input-bg)',
               minHeight: 54,
               padding: '10px 14px',
-              cursor: leave || !canEdit ? 'default' : 'pointer',
+              cursor: (leave && onOpenLeave) || (!leave && canEdit) ? 'pointer' : 'default',
               textAlign: 'left',
               display: 'flex',
               alignItems: 'center',
@@ -1435,23 +1479,61 @@ function DayView({
               <span style={{ width: 10, height: 10, background: person.color || '#2563eb', borderRadius: 999 }} />
               {person.name}
             </span>
-            <span
-              style={{
-                padding: '4px 10px',
-                borderRadius: 8,
-                background: shift ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-bg)',
-                border: shift ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
-                color: shift ? 'var(--badge-clinic-fg, #0369a1)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
-                boxShadow: shift ? 'var(--pc-clay-pale)' : 'none',
-                fontWeight: shift || leave ? 750 : 600,
-                fontSize: 12.5,
-              }}
-            >
-              {shift
-                ? `${shift.startTime} – ${shift.endTime}`
-                : leave
-                  ? `İzinli${leave.reason ? ` · ${leave.reason}` : ''}`
-                  : '+ Mesai Ekle'}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 8,
+                  background: shift ? 'var(--badge-clinic-bg, #e0f2fe)' : 'var(--card-bg)',
+                  border: shift ? '1px solid var(--badge-clinic-border, #bae6fd)' : '1px solid var(--input-border)',
+                  color: shift ? 'var(--badge-clinic-fg, #0369a1)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
+                  boxShadow: shift ? 'var(--pc-clay-pale)' : 'none',
+                  fontWeight: shift || leave ? 750 : 600,
+                  fontSize: 12.5,
+                }}
+              >
+                {shift
+                  ? `${shift.startTime} – ${shift.endTime}`
+                  : leave
+                    ? `İzinli (${leave.isFullDay ? 'Tüm Gün' : `${leave.startTime}–${leave.endTime}`})${leave.reason ? ` · ${leave.reason}` : ''}`
+                    : '+ Mesai Ekle'}
+              </span>
+              {leave && onDeleteLeave && leave.id && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Hekim iznini kaldır"
+                  aria-label="Hekim iznini kaldır"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDeleteLeave(leave.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onDeleteLeave(leave.id)
+                    }
+                  }}
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: 7,
+                    border: '1px solid var(--danger, #ef4444)',
+                    background: 'var(--card-bg)',
+                    color: 'var(--danger, #ef4444)',
+                    boxShadow: 'var(--pc-clay-btn)',
+                    fontSize: 11.5,
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Trash2 size={12} />
+                  <span>İzni Kaldır</span>
+                </span>
+              )}
             </span>
           </button>
         )
@@ -1467,6 +1549,8 @@ function WeekView({
   shifts,
   leaves,
   canEdit,
+  onDeleteLeave,
+  onOpenLeave,
   onOpen,
   onAssignRepeat,
   onContextMenu,
@@ -1476,6 +1560,8 @@ function WeekView({
   shifts: Shift[]
   leaves: Leave[]
   canEdit: boolean
+  onDeleteLeave?: (leaveId: string) => void
+  onOpenLeave?: (userId: string, date: string) => void
   onOpen: (userId: string, date: string, shift?: Shift) => void
   onAssignRepeat: (userId: string, date: string, repeatMode: RepeatMode) => void
   onContextMenu: (e: React.MouseEvent, person: Staff, date: string, shift?: Shift) => void
@@ -1536,11 +1622,18 @@ function WeekView({
         <div style={{ display: 'grid', gap: 7 }}>
           {staff.map((person) => {
             const shift = shifts.find((item) => item.userId === person.id && item.date === activeDate)
+            const leave = leaves.find((item) => item.doctorId === person.id && item.date === activeDate)
             return (
               <button
                 key={person.id}
                 type="button"
-                onClick={() => canEdit && onOpen(person.id, activeDate, shift)}
+                onClick={() => {
+                  if (leave) {
+                    onOpenLeave?.(person.id, activeDate)
+                  } else if (canEdit) {
+                    onOpen(person.id, activeDate, shift)
+                  }
+                }}
                 onContextMenu={(e) => onContextMenu(e, person, activeDate, shift)}
                 style={{
                   ...neoSubCard,
@@ -1551,13 +1644,42 @@ function WeekView({
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   color: 'var(--foreground)',
-                  cursor: canEdit ? 'pointer' : 'default',
+                  cursor: (leave && onOpenLeave) || (!leave && canEdit) ? 'pointer' : 'default',
                   textAlign: 'left',
                 }}
               >
                 <span style={{ fontWeight: 700 }}>{person.name}</span>
-                <span style={{ color: shift ? '#2563eb' : 'var(--foreground-3)', fontWeight: 700 }}>
-                  {shift ? `${shift.startTime}–${shift.endTime}` : '+ Mesai'}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: shift ? '#2563eb' : leave ? 'var(--danger)' : 'var(--foreground-3)', fontWeight: 700 }}>
+                    {shift ? `${shift.startTime}–${shift.endTime}` : leave ? 'İzinli' : '+ Mesai'}
+                  </span>
+                  {leave && onDeleteLeave && leave.id && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="İzni kaldır"
+                      aria-label="İzni kaldır"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteLeave(leave.id)
+                      }}
+                      style={{
+                        padding: '3px 7px',
+                        borderRadius: 6,
+                        border: '1px solid var(--danger, #ef4444)',
+                        background: 'var(--card-bg)',
+                        color: 'var(--danger, #ef4444)',
+                        fontSize: 11,
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 3,
+                      }}
+                    >
+                      <X size={11} /> Kaldır
+                    </span>
+                  )}
                 </span>
               </button>
             )
@@ -1688,7 +1810,13 @@ function WeekView({
                   <button
                     key={`${person.id}-${day}`}
                     type="button"
-                    onClick={() => !leave && canEdit && onOpen(person.id, day, shift)}
+                    onClick={() => {
+                      if (leave) {
+                        onOpenLeave?.(person.id, day)
+                      } else if (canEdit) {
+                        onOpen(person.id, day, shift)
+                      }
+                    }}
                     onContextMenu={(e) => onContextMenu(e, person, day, shift)}
                     style={{
                       minHeight: 68,
@@ -1696,7 +1824,7 @@ function WeekView({
                       background: shift ? 'var(--card-inner)' : 'var(--input-bg)',
                       border: 'none',
                       color: shift ? 'var(--foreground)' : leave ? 'var(--danger)' : 'var(--foreground-3)',
-                      cursor: leave || !canEdit ? 'default' : 'pointer',
+                      cursor: (leave && onOpenLeave) || (!leave && canEdit) ? 'pointer' : 'default',
                       textAlign: 'center',
                       display: 'flex',
                       flexDirection: 'column',
@@ -1722,7 +1850,56 @@ function WeekView({
                         {shift.startTime}–{shift.endTime}
                       </div>
                     ) : leave ? (
-                      <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--danger)' }}>İzinli</span>
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '4px 7px',
+                          borderRadius: 7,
+                          background: 'var(--card-bg)',
+                          border: '1px solid var(--danger, #ef4444)',
+                          color: 'var(--danger, #ef4444)',
+                          fontSize: 11,
+                          fontWeight: 750,
+                        }}
+                      >
+                        <span>İzinli</span>
+                        {onDeleteLeave && leave.id && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            title="İzni kaldır"
+                            aria-label="İzni kaldır"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onDeleteLeave(leave.id)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                onDeleteLeave(leave.id)
+                              }
+                            }}
+                            style={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: 4,
+                              background: 'var(--input-bg)',
+                              border: '1px solid var(--danger, #ef4444)',
+                              color: 'var(--danger, #ef4444)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <X size={11} />
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span style={{ fontSize: 11.5, fontWeight: 600 }}>+ Mesai</span>
                     )}
@@ -1743,7 +1920,10 @@ function MonthView({
   selectedDate,
   staff,
   shifts,
+  leaves = [],
   canEdit,
+  onDeleteLeave,
+  onOpenLeave,
   onSelect,
   onOpen,
   onContextMenu,
@@ -1752,7 +1932,10 @@ function MonthView({
   selectedDate: string
   staff: Staff[]
   shifts: Shift[]
+  leaves?: Leave[]
   canEdit: boolean
+  onDeleteLeave?: (leaveId: string) => void
+  onOpenLeave?: (userId: string, date: string) => void
   onSelect: (date: string) => void
   onOpen: (userId: string, date: string, shift?: Shift) => void
   onContextMenu: (e: React.MouseEvent, person: Staff, date: string, shift?: Shift) => void
@@ -1822,11 +2005,18 @@ function MonthView({
         <div style={{ display: 'grid', gap: 6 }}>
           {staff.map((person) => {
             const shift = focusedShifts.find((item) => item.userId === person.id)
+            const leave = leaves.find((item) => item.doctorId === person.id && item.date === selectedDate)
             return (
               <button
                 key={person.id}
                 type="button"
-                onClick={() => canEdit && onOpen(person.id, selectedDate, shift)}
+                onClick={() => {
+                  if (leave) {
+                    onOpenLeave?.(person.id, selectedDate)
+                  } else if (canEdit) {
+                    onOpen(person.id, selectedDate, shift)
+                  }
+                }}
                 onContextMenu={(e) => onContextMenu(e, person, selectedDate, shift)}
                 style={{
                   ...neoSubCard,
@@ -1837,13 +2027,46 @@ function MonthView({
                   padding: '8px 12px',
                   background: 'var(--card-bg)',
                   color: 'var(--foreground)',
-                  cursor: canEdit ? 'pointer' : 'default',
+                  cursor: (leave && onOpenLeave) || (!leave && canEdit) ? 'pointer' : 'default',
                   textAlign: 'left',
                 }}
               >
                 <span style={{ fontWeight: 700, fontSize: 13 }}>{person.name}</span>
-                <span style={{ color: shift ? '#2563eb' : 'var(--foreground-3)', fontWeight: 700, fontSize: 12.5 }}>
-                  {shift ? `${shift.startTime}–${shift.endTime}` : '+ Mesai Ekle'}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: shift ? '#2563eb' : leave ? 'var(--danger)' : 'var(--foreground-3)', fontWeight: 700, fontSize: 12.5 }}>
+                    {shift
+                      ? `${shift.startTime}–${shift.endTime}`
+                      : leave
+                        ? `İzinli (${leave.isFullDay ? 'Tüm Gün' : `${leave.startTime}–${leave.endTime}`})`
+                        : '+ Mesai Ekle'}
+                  </span>
+                  {leave && onDeleteLeave && leave.id && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="İzni kaldır"
+                      aria-label="İzni kaldır"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteLeave(leave.id)
+                      }}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        border: '1px solid var(--danger, #ef4444)',
+                        background: 'var(--input-bg)',
+                        color: 'var(--danger, #ef4444)',
+                        fontSize: 11,
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 3,
+                      }}
+                    >
+                      <Trash2 size={11} /> İzni Kaldır
+                    </span>
+                  )}
                 </span>
               </button>
             )

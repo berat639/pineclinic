@@ -117,8 +117,12 @@ export default function DoctorLeaveModal({
 
   // Conflicting appointments management states
   const [fetchedDayAppointments, setFetchedDayAppointments] = useState<any[]>([])
+  const [removedAppointmentIds, setRemovedAppointmentIds] = useState<string[]>([])
+  const [removingApptId, setRemovingApptId] = useState<string | null>(null)
   const [substituteDoctorId, setSubstituteDoctorId] = useState<string>('')
+  const [cancelAppointments, setCancelAppointments] = useState<boolean>(true)
   const [unassignAppointments, setUnassignAppointments] = useState<boolean>(false)
+  const [deletingLeaveId, setDeletingLeaveId] = useState<string | null>(null)
 
   const [showDatePopover, setShowDatePopover] = useState(false)
   const [datePopoverCoords, setDatePopoverCoords] = useState<{ top: number; left: number }>({
@@ -148,7 +152,9 @@ export default function DoctorLeaveModal({
 
   useEffect(() => {
     setSubstituteDoctorId('')
+    setCancelAppointments(true)
     setUnassignAppointments(false)
+    setRemovedAppointmentIds([])
   }, [selectedDoctorId, isOpen])
 
   useEffect(() => {
@@ -190,12 +196,10 @@ export default function DoctorLeaveModal({
   }, [showDatePopover])
 
   const fetchLeaves = async () => {
-    if (!selectedDoctorId) {
-      setExistingLeaves([])
-      return
-    }
     try {
-      const res = await fetch(`/api/dental/doctors/leaves?doctorId=${selectedDoctorId}`)
+      const res = await fetch('/api/dental/doctors/leaves', {
+        credentials: 'include',
+      })
       if (res.ok) {
         const data = await res.json()
         setExistingLeaves(Array.isArray(data) ? data : [])
@@ -214,7 +218,9 @@ export default function DoctorLeaveModal({
   useEffect(() => {
     if (!isOpen || !date) return
     let cancelled = false
-    fetch(`/api/dental/appointments?date=${encodeURIComponent(date)}`)
+    fetch(`/api/dental/appointments?date=${encodeURIComponent(date)}`, {
+      credentials: 'include',
+    })
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => {
         if (!cancelled) {
@@ -229,14 +235,27 @@ export default function DoctorLeaveModal({
     }
   }, [isOpen, date])
 
+  const displayedLeaves = useMemo(() => {
+    if (!selectedDoctorId) return existingLeaves
+    return existingLeaves.filter((l) => l.doctorId === selectedDoctorId)
+  }, [existingLeaves, selectedDoctorId])
+
+  const activeDateLeaves = useMemo(() => {
+    if (!date) return []
+    return existingLeaves.filter(
+      (l) => l.date === date && (!selectedDoctorId || l.doctorId === selectedDoctorId)
+    )
+  }, [existingLeaves, date, selectedDoctorId])
+
   const conflictingAppointments = useMemo(() => {
     if (!selectedDoctorId || !date) return []
+    const removedSet = new Set(removedAppointmentIds)
     const map = new Map<string, any>()
     for (const ev of events || []) {
-      if (ev?.id) map.set(ev.id, ev)
+      if (ev?.id && !removedSet.has(ev.id)) map.set(ev.id, ev)
     }
     for (const ev of fetchedDayAppointments || []) {
-      if (ev?.id) map.set(ev.id, ev)
+      if (ev?.id && !removedSet.has(ev.id)) map.set(ev.id, ev)
     }
     const all = Array.from(map.values())
     const leaveStartMin = isFullDay ? 0 : toMins(startTime)
@@ -263,7 +282,7 @@ export default function DoctorLeaveModal({
         return evStart < leaveEndMin && evEnd > leaveStartMin
       })
       .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-  }, [selectedDoctorId, date, events, fetchedDayAppointments, isFullDay, startTime, endTime])
+  }, [selectedDoctorId, date, events, fetchedDayAppointments, removedAppointmentIds, isFullDay, startTime, endTime])
 
   if (!isOpen) return null
 
@@ -301,6 +320,42 @@ export default function DoctorLeaveModal({
     window.addEventListener('pointerup', onUp)
   }
 
+  const cancelOrDeleteAppointmentById = async (apptId: string) => {
+    const delRes = await fetch(`/api/dental/appointments/${apptId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    }).catch(() => null)
+    if (delRes && delRes.ok) return true
+    const putRes = await fetch(`/api/dental/appointments/${apptId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'cancelled', doctorId: null }),
+    }).catch(() => null)
+    return Boolean(putRes && putRes.ok)
+  }
+
+  const handleRemoveSingleConflictingAppt = async (apptId: string) => {
+    if (!apptId || removingApptId) return
+    setRemovingApptId(apptId)
+    try {
+      const ok = await cancelOrDeleteAppointmentById(apptId)
+      if (ok) {
+        setRemovedAppointmentIds((prev) => [...prev, apptId])
+        setFetchedDayAppointments((prev) => prev.filter((a) => a.id !== apptId))
+        toast.success('Çakışan randevu iptal edildi ve takvimden kaldırıldı')
+        if (onSaved) onSaved()
+        if (onSuccess) onSuccess()
+      } else {
+        toast.error('Randevu kaldırılamadı')
+      }
+    } catch {
+      toast.error('Randevu kaldırılırken hata oluştu')
+    } finally {
+      setRemovingApptId(null)
+    }
+  }
+
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     if (!selectedDoctorId) {
@@ -321,17 +376,22 @@ export default function DoctorLeaveModal({
     }
 
     const finalReason = reason === 'Diğer' ? customReason.trim() : reason
+    const shouldCancelAppts = Boolean(cancelAppointments && !substituteDoctorId)
+    const shouldUnassignAppts = Boolean((unassignAppointments || cancelAppointments) && !substituteDoctorId)
+    const targetAppts = [...conflictingAppointments]
 
     setSaving(true)
     try {
       const res = await fetch('/api/dental/doctors/leaves', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           doctorId: selectedDoctorId,
           substituteDoctorId: substituteDoctorId || null,
-          unassignAppointments: Boolean(unassignAppointments && !substituteDoctorId),
-          appointmentIds: conflictingAppointments.map((a) => a.id),
+          cancelAppointments: shouldCancelAppts,
+          unassignAppointments: shouldUnassignAppts,
+          appointmentIds: targetAppts.map((a) => a.id),
           date,
           startTime: finalStartTime,
           endTime: finalEndTime,
@@ -342,18 +402,27 @@ export default function DoctorLeaveModal({
       })
 
       if (res.ok) {
-        if (substituteDoctorId && conflictingAppointments.length > 0) {
+        if (shouldCancelAppts && targetAppts.length > 0) {
+          await Promise.all(targetAppts.map((a) => cancelOrDeleteAppointmentById(a.id)))
+        }
+
+        if (substituteDoctorId && targetAppts.length > 0) {
           const subDoc = doctors.find((d) => d.id === substituteDoctorId)
           toast.success(
-            `Hekim izni kaydedildi ve ${conflictingAppointments.length} randevu ${subDoc?.name || 'vekil hekime'} devredildi`
+            `Hekim izni kaydedildi ve ${targetAppts.length} randevu ${subDoc?.name || 'vekil hekime'} devredildi`
           )
-        } else if (unassignAppointments && conflictingAppointments.length > 0) {
+        } else if (shouldCancelAppts && targetAppts.length > 0) {
           toast.success(
-            `Hekim izni kaydedildi ve ${conflictingAppointments.length} randevu Atama Bekleyenlere aktarıldı`
+            `Hekim izni kaydedildi ve çakışan ${targetAppts.length} randevu iptal edilerek kaldırıldı`
+          )
+        } else if (shouldUnassignAppts && targetAppts.length > 0) {
+          toast.success(
+            `Hekim izni kaydedildi ve ${targetAppts.length} randevu Atama Bekleyenlere aktarıldı`
           )
         } else {
           toast.success('Hekim izni başarıyla kaydedildi')
         }
+        window.dispatchEvent(new CustomEvent('doctorLeavesUpdated'))
         if (onSaved) onSaved()
         if (onSuccess) onSuccess()
         fetchLeaves()
@@ -361,6 +430,7 @@ export default function DoctorLeaveModal({
         setCustomReason('')
         setNotes('')
         setSubstituteDoctorId('')
+        setCancelAppointments(true)
         setUnassignAppointments(false)
         onClose()
       } else {
@@ -376,20 +446,27 @@ export default function DoctorLeaveModal({
   }
 
   const handleDeleteLeave = async (leaveId: string) => {
+    if (!leaveId || deletingLeaveId) return
+    setDeletingLeaveId(leaveId)
     try {
       const res = await fetch(`/api/dental/doctors/leaves/${leaveId}`, {
         method: 'DELETE',
+        credentials: 'include',
       })
       if (res.ok) {
-        toast.success('İzin silindi, saatler yeniden açıldı')
+        toast.success('Hekim izni kaldırıldı, çalışma saatleri yeniden açıldı')
         setExistingLeaves((prev) => prev.filter((l) => l.id !== leaveId))
+        window.dispatchEvent(new CustomEvent('doctorLeavesUpdated'))
         if (onSaved) onSaved()
         if (onSuccess) onSuccess()
       } else {
-        toast.error('İzin silinemedi')
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error || 'İzin kaldırılamadı')
       }
     } catch {
-      toast.error('İzin silinirken hata oluştu')
+      toast.error('İzin kaldırılırken hata oluştu')
+    } finally {
+      setDeletingLeaveId(null)
     }
   }
 
@@ -726,6 +803,92 @@ export default function DoctorLeaveModal({
             gap: '14px',
           }}
         >
+          {/* Seçili Tarihte Mevcut İzin Varsa Üst Uyarı & Hızlı İzin Kaldırma Bandı */}
+          {activeDateLeaves.length > 0 && (
+            <div
+              style={{
+                background: subCardBg,
+                padding: '12px 14px',
+                borderRadius: '11px',
+                border: '1.5px solid var(--danger, #ef4444)',
+                boxShadow: 'var(--pc-neo-subcard)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  color: 'var(--danger, #ef4444)',
+                }}
+              >
+                <CalendarOff size={15} />
+                <span>Seçili Tarihte Aktif İzin Bulunuyor ({formattedDate})</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {activeDateLeaves.map((l) => {
+                  const docName =
+                    l.doctorName || doctors.find((d) => d.id === l.doctorId)?.name || 'Hekim'
+                  return (
+                    <div
+                      key={`active-banner-${l.id}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        background: cardBg,
+                        border: `1px solid ${borderCol}`,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 750, color: textCol }}>
+                          {docName} · {l.isFullDay ? 'Tüm Gün İzinli' : `${l.startTime} – ${l.endTime}`}
+                        </div>
+                        {(l.reason || l.notes) && (
+                          <div style={{ fontSize: '0.7rem', color: mutedCol }}>
+                            {l.reason || ''}
+                            {l.notes ? ` (${l.notes})` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={deletingLeaveId === l.id}
+                        onClick={() => handleDeleteLeave(l.id)}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 7,
+                          border: '1.5px solid var(--danger, #ef4444)',
+                          background: cardBg,
+                          color: 'var(--danger, #ef4444)',
+                          boxShadow: 'var(--pc-clay-btn)',
+                          cursor: deletingLeaveId === l.id ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontSize: '0.73rem',
+                          fontWeight: 800,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Trash2 size={13} />
+                        <span>{deletingLeaveId === l.id ? 'Kaldırılıyor...' : 'İzni Kaldır / İptal Et'}</span>
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div
             style={{
               background: subCardBg,
@@ -763,7 +926,7 @@ export default function DoctorLeaveModal({
               </select>
             </div>
 
-            {/* Hekim Seçimi Altında Çakışan Randevu Yönetimi (Opsiyonel) */}
+            {/* Hekim Seçimi Altında Çakışan Randevu Yönetimi */}
             {selectedDoctorId && conflictingAppointments.length > 0 && (
               <div
                 style={{
@@ -797,7 +960,7 @@ export default function DoctorLeaveModal({
                     }}
                   >
                     <AlertTriangle size={14} color="#d97706" />
-                    <span>Randevu Çakışma Yönetimi (Opsiyonel)</span>
+                    <span>Randevu Çakışma Yönetimi</span>
                   </div>
                   <span
                     style={{
@@ -819,8 +982,8 @@ export default function DoctorLeaveModal({
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 4,
-                    maxHeight: 96,
+                    gap: 5,
+                    maxHeight: 112,
                     overflowY: 'auto',
                     padding: '6px 8px',
                     borderRadius: 8,
@@ -875,6 +1038,25 @@ export default function DoctorLeaveModal({
                           {sStr}
                           {eStr ? ` – ${eStr}` : ''}
                         </span>
+                        <button
+                          type="button"
+                          disabled={removingApptId === appt.id}
+                          onClick={() => handleRemoveSingleConflictingAppt(appt.id)}
+                          title="Bu randevuyu iptal et ve takvimden kaldır"
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 5,
+                            border: '1px solid var(--danger, #ef4444)',
+                            background: cardBg,
+                            color: 'var(--danger, #ef4444)',
+                            fontSize: '0.66rem',
+                            fontWeight: 750,
+                            cursor: removingApptId === appt.id ? 'wait' : 'pointer',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {removingApptId === appt.id ? 'Siliniyor...' : 'Randevuyu Kaldır'}
+                        </button>
                       </div>
                     )
                   })}
@@ -914,7 +1096,13 @@ export default function DoctorLeaveModal({
                     onChange={(e) => {
                       const val = e.target.value
                       setSubstituteDoctorId(val)
-                      if (val) setUnassignAppointments(false)
+                      if (val) {
+                        setCancelAppointments(false)
+                        setUnassignAppointments(false)
+                      } else {
+                        setCancelAppointments(true)
+                        setUnassignAppointments(false)
+                      }
                     }}
                     style={inputStyle}
                   >
@@ -938,90 +1126,158 @@ export default function DoctorLeaveModal({
                   </select>
                 </div>
 
-                {/* 2. Opsiyonel Input: Atanan Randevulardan Çıkma Durumu */}
-                <div>
-                  <div
-                    style={{
-                      ...labelStyle,
-                      position: 'relative',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      marginBottom: 5,
-                    }}
-                  >
-                    <UserX size={13} color="#d97706" />
-                    <span>Atanan Randevulardan Çıkma Durumu</span>
-                    <span
-                      className="dlm-help-wrap"
-                      tabIndex={0}
-                      role="button"
-                      aria-label="Atanan randevulardan çıkma açıklaması"
-                    >
-                      <span className="dlm-help-icon" aria-hidden="true">
-                        ?
-                      </span>
-                      <span className="dlm-help-popup" role="tooltip">
-                        İzin saatlerindeki {conflictingAppointments.length} randevudan hekim ataması
-                        kaldırılır ve takvimde &quot;Atama Bekliyor&quot; durumuna geçirilir.
-                      </span>
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !unassignAppointments
-                      setUnassignAppointments(next)
-                      if (next) setSubstituteDoctorId('')
-                    }}
-                    className={unassignAppointments ? 'btn-clinic-primary' : ''}
-                    style={{
-                      width: '100%',
-                      padding: '9px 11px',
-                      borderRadius: 10,
-                      border: unassignAppointments
-                        ? `1.5px solid ${brandBlueBorder}`
-                        : `1.5px solid ${borderCol}`,
-                      background: unassignAppointments ? brandBlueGradient : inputBg,
-                      color: unassignAppointments ? '#ffffff' : textCol,
-                      boxShadow: unassignAppointments
-                        ? 'var(--pc-clay-primary)'
-                        : 'var(--pc-clay-btn)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 9,
-                      textAlign: 'left',
-                    }}
-                  >
+                {/* 2. Vekil Hekim Seçilmediğinde Çakışan Randevu İşlemi */}
+                {!substituteDoctorId && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                     <div
                       style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 5,
-                        border: unassignAppointments
-                          ? '1.5px solid #ffffff'
-                          : `1.5px solid ${borderCol}`,
-                        background: unassignAppointments ? '#ffffff' : cardBg,
+                        ...labelStyle,
+                        position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
+                        gap: 5,
+                        marginBottom: 2,
                       }}
                     >
-                      {unassignAppointments && <Check size={12} color={brandBlue} strokeWidth={3} />}
+                      <UserX size={13} color="#d97706" />
+                      <span>Çakışan Randevular İçin İşlem Seçin</span>
+                      <span
+                        className="dlm-help-wrap"
+                        tabIndex={0}
+                        role="button"
+                        aria-label="Çakışan randevu işlemi açıklaması"
+                      >
+                        <span className="dlm-help-icon" aria-hidden="true">
+                          ?
+                        </span>
+                        <span className="dlm-help-popup" role="tooltip">
+                          İzin saatlerindeki {conflictingAppointments.length} randevuyu tamamen iptal
+                          ederek takvimden kaldırabilir veya yalnızca hekim atamasını kaldırıp
+                          &quot;Atama Bekliyor&quot; durumuna düşürebilirsiniz.
+                        </span>
+                      </span>
                     </div>
-                    <span
+
+                    {/* Seçenek 1: Randevuları İptal Et / Takvimden Kaldır (Varsayılan) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCancelAppointments(true)
+                        setUnassignAppointments(false)
+                        setSubstituteDoctorId('')
+                      }}
+                      className={cancelAppointments ? 'btn-clinic-primary' : ''}
                       style={{
-                        fontSize: '0.78rem',
-                        fontWeight: 750,
-                        color: unassignAppointments ? '#ffffff' : textCol,
+                        width: '100%',
+                        padding: '9px 11px',
+                        borderRadius: 10,
+                        border: cancelAppointments
+                          ? `1.5px solid ${brandBlueBorder}`
+                          : `1.5px solid ${borderCol}`,
+                        background: cancelAppointments ? brandBlueGradient : inputBg,
+                        color: cancelAppointments ? '#ffffff' : textCol,
+                        boxShadow: cancelAppointments
+                          ? 'var(--pc-clay-primary)'
+                          : 'var(--pc-clay-btn)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 9,
+                        textAlign: 'left',
                       }}
                     >
-                      Atanan Randevulardan Çık (Atama Bekleyenlere Aktar)
-                    </span>
-                  </button>
-                </div>
+                      <div
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 5,
+                          border: cancelAppointments
+                            ? '1.5px solid #ffffff'
+                            : `1.5px solid ${borderCol}`,
+                          background: cancelAppointments ? '#ffffff' : cardBg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {cancelAppointments && <Check size={12} color={brandBlue} strokeWidth={3} />}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '0.77rem',
+                          fontWeight: 750,
+                          color: cancelAppointments ? '#ffffff' : textCol,
+                        }}
+                      >
+                        Randevuları İptal Et / Takvimden Kaldır
+                      </span>
+                    </button>
+
+                    {/* Seçenek 2: Yalnızca Hekim Atamasını Kaldır (Atama Bekliyor'a Düşür) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnassignAppointments(true)
+                        setCancelAppointments(false)
+                        setSubstituteDoctorId('')
+                      }}
+                      className={unassignAppointments && !cancelAppointments ? 'btn-clinic-primary' : ''}
+                      style={{
+                        width: '100%',
+                        padding: '9px 11px',
+                        borderRadius: 10,
+                        border:
+                          unassignAppointments && !cancelAppointments
+                            ? `1.5px solid ${brandBlueBorder}`
+                            : `1.5px solid ${borderCol}`,
+                        background:
+                          unassignAppointments && !cancelAppointments ? brandBlueGradient : inputBg,
+                        color: unassignAppointments && !cancelAppointments ? '#ffffff' : textCol,
+                        boxShadow:
+                          unassignAppointments && !cancelAppointments
+                            ? 'var(--pc-clay-primary)'
+                            : 'var(--pc-clay-btn)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 9,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 5,
+                          border:
+                            unassignAppointments && !cancelAppointments
+                              ? '1.5px solid #ffffff'
+                              : `1.5px solid ${borderCol}`,
+                          background:
+                            unassignAppointments && !cancelAppointments ? '#ffffff' : cardBg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {unassignAppointments && !cancelAppointments && (
+                          <Check size={12} color={brandBlue} strokeWidth={3} />
+                        )}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '0.77rem',
+                          fontWeight: 750,
+                          color: unassignAppointments && !cancelAppointments ? '#ffffff' : textCol,
+                        }}
+                      >
+                        Yalnızca Hekim Atamasını Kaldır (Atama Bekliyor&apos;a Düşür)
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1356,8 +1612,8 @@ export default function DoctorLeaveModal({
             </div>
           </div>
 
-          {/* Seçili Hekimin Mevcut İzinleri */}
-          {selectedDoctorId && existingLeaves.length > 0 && (
+          {/* Seçili Hekimin (veya Tüm Hekimlerin) Mevcut İzinleri */}
+          {displayedLeaves.length > 0 && (
             <div
               style={{
                 background: subCardBg,
@@ -1370,66 +1626,76 @@ export default function DoctorLeaveModal({
               }}
             >
               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: textCol }}>
-                Kayıtlı İzinler ({existingLeaves.length})
+                {selectedDoctorId ? 'Seçili Hekimin Mevcut İzinleri' : 'Kayıtlı Hekim İzinleri'} ({displayedLeaves.length})
               </div>
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '6px',
-                  maxHeight: '130px',
+                  maxHeight: '160px',
                   overflowY: 'auto',
                 }}
               >
-                {existingLeaves.map((l) => (
-                  <div
-                    key={l.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '8px 10px',
-                      background: inputBg,
-                      borderRadius: '8px',
-                      border: `1px solid ${borderCol}`,
-                      fontSize: '0.76rem',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 700, color: textCol }}>
-                        {l.date} · {l.isFullDay ? 'Tüm Gün' : `${l.startTime}–${l.endTime}`}
-                      </div>
-                      {(l.reason || l.substituteDoctorName || l.notes) && (
-                        <div style={{ fontSize: '0.7rem', color: mutedCol }}>
-                          {l.reason || ''}
-                          {l.substituteDoctorName
-                            ? `${l.reason ? ' · ' : ''}Yerine: ${l.substituteDoctorName}`
-                            : ''}
-                          {l.notes ? ` (${l.notes})` : ''}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteLeave(l.id)}
+                {displayedLeaves.map((l) => {
+                  const docName =
+                    l.doctorName || doctors.find((d) => d.id === l.doctorId)?.name || 'Hekim'
+                  return (
+                    <div
+                      key={l.id}
                       style={{
-                        padding: '4px 8px',
-                        background: cardBg,
-                        border: '1px solid var(--danger, #ef4444)',
-                        borderRadius: '6px',
-                        color: 'var(--danger, #ef4444)',
-                        cursor: 'pointer',
                         display: 'flex',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
-                        gap: 4,
-                        fontSize: '0.7rem',
-                        fontWeight: 700,
+                        gap: 8,
+                        padding: '8px 10px',
+                        background: inputBg,
+                        borderRadius: '8px',
+                        border: `1px solid ${borderCol}`,
+                        fontSize: '0.76rem',
                       }}
                     >
-                      <Trash2 size={12} /> Aç
-                    </button>
-                  </div>
-                ))}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: textCol }}>
+                          {!selectedDoctorId ? `${docName} · ` : ''}
+                          {l.date} · {l.isFullDay ? 'Tüm Gün' : `${l.startTime}–${l.endTime}`}
+                        </div>
+                        {(l.reason || l.substituteDoctorName || l.notes) && (
+                          <div style={{ fontSize: '0.7rem', color: mutedCol }}>
+                            {l.reason || ''}
+                            {l.substituteDoctorName
+                              ? `${l.reason ? ' · ' : ''}Yerine: ${l.substituteDoctorName}`
+                              : ''}
+                            {l.notes ? ` (${l.notes})` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={deletingLeaveId === l.id}
+                        onClick={() => handleDeleteLeave(l.id)}
+                        style={{
+                          padding: '5px 10px',
+                          background: cardBg,
+                          border: '1px solid var(--danger, #ef4444)',
+                          borderRadius: '6px',
+                          color: 'var(--danger, #ef4444)',
+                          boxShadow: 'var(--pc-clay-btn)',
+                          cursor: deletingLeaveId === l.id ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: '0.71rem',
+                          fontWeight: 750,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Trash2 size={12} />
+                        <span>{deletingLeaveId === l.id ? 'Kaldırılıyor...' : 'İzni Kaldır'}</span>
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}

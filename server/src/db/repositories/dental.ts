@@ -324,6 +324,7 @@ export async function createDoctorLeave(data: {
   doctorId: string
   substituteDoctorId?: string | null
   unassignAppointments?: boolean
+  cancelAppointments?: boolean
   appointmentIds?: string[]
   date: string
   startTime: string
@@ -357,7 +358,7 @@ export async function createDoctorLeave(data: {
     })
     .returning()
 
-  if (subDocId || data.unassignAppointments) {
+  if (subDocId || data.unassignAppointments || data.cancelAppointments) {
     try {
       await ensurePatientArchiveSchema()
       const dayStart = new Date(`${data.date}T00:00:00+03:00`)
@@ -494,8 +495,92 @@ export async function createDoctorLeave(data: {
                 )
             }
           }
+        } else if (data.cancelAppointments) {
+          // Case 2: Cancel and deactivate conflicting appointments ("Randevuyu Kaldır / İptal Et")
+          for (const apptId of targetApptIds) {
+            import('../../services/appointment-notifications')
+              .then(({ cancelAppointmentNotifications }) =>
+                cancelAppointmentNotifications(clinicId, apptId)
+              )
+              .catch(() => {})
+          }
+
+          await db
+            .update(dentalAppointments)
+            .set({
+              status: 'cancelled',
+              isActive: false,
+              doctorId: null,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(dentalAppointments.clinicId, clinicId),
+                inArray(dentalAppointments.id, targetApptIds)
+              )
+            )
+
+          await db
+            .delete(appointmentTreatments)
+            .where(
+              and(
+                inArray(appointmentTreatments.appointmentId, targetApptIds),
+                ne(appointmentTreatments.sessionStatus, 'done')
+              )
+            )
+            .catch(() => {})
+
+          if (linkedTreatmentIds.length > 0) {
+            await db
+              .update(treatmentPlans)
+              .set({ doctorId: null })
+              .where(
+                and(
+                  eq(treatmentPlans.clinicId, clinicId),
+                  eq(treatmentPlans.doctorId, data.doctorId),
+                  inArray(treatmentPlans.id, linkedTreatmentIds),
+                  ne(treatmentPlans.status, 'completed')
+                )
+              )
+
+            const detailRows = await db
+              .select()
+              .from(treatmentPlanDetails)
+              .where(
+                and(
+                  eq(treatmentPlanDetails.clinicId, clinicId),
+                  inArray(treatmentPlanDetails.treatmentId, linkedTreatmentIds)
+                )
+              )
+            for (const detail of detailRows) {
+              const meta =
+                detail.metadata && typeof detail.metadata === 'object'
+                  ? { ...(detail.metadata as Record<string, any>) }
+                  : {}
+              let changed = false
+              if (Array.isArray(meta.doctorIds)) {
+                meta.doctorIds = meta.doctorIds.filter((id: string) => id !== data.doctorId)
+                changed = true
+              }
+              if ('plannedDate' in meta) {
+                delete meta.plannedDate
+                changed = true
+              }
+              if (changed) {
+                await db
+                  .update(treatmentPlanDetails)
+                  .set({ metadata: meta })
+                  .where(
+                    and(
+                      eq(treatmentPlanDetails.clinicId, clinicId),
+                      eq(treatmentPlanDetails.treatmentId, detail.treatmentId)
+                    )
+                  )
+              }
+            }
+          }
         } else if (data.unassignAppointments) {
-          // Case 2: Unassign doctor from appointments & linked treatments
+          // Case 3: Unassign doctor from appointments & linked treatments
           await db
             .update(dentalAppointments)
             .set({
@@ -574,12 +659,18 @@ export async function createDoctorLeave(data: {
 }
 
 export async function deleteDoctorLeave(id: string): Promise<boolean> {
+  if (!isValidUuid(id)) return false
   await ensureDoctorLeavesTable()
   const clinicId = requireClinicId()
 
   const rows = await db
     .delete(doctorLeaves)
-    .where(and(eq(doctorLeaves.id, id), eq(doctorLeaves.clinicId, clinicId)))
+    .where(
+      and(
+        eq(doctorLeaves.id, id),
+        or(eq(doctorLeaves.clinicId, clinicId), sql`${doctorLeaves.clinicId} IS NULL`)
+      )
+    )
     .returning({ id: doctorLeaves.id })
 
   return rows.length > 0
@@ -1254,7 +1345,17 @@ export async function listPatients() {
       WHERE ${dentalAppointments.clinicId} = ${clinicId}
         AND ${dentalAppointments.patientId} = ${patients.id}
         AND ${dentalAppointments.isActive} = true
+        AND ${dentalAppointments.status} NOT IN ('cancelled', 'pending_assignment')
+        AND ${dentalAppointments.doctorId} IS NOT NULL
+    )`,
+    unassignedAppointmentCount: sql<number>`(
+      SELECT count(*)::int
+      FROM ${dentalAppointments}
+      WHERE ${dentalAppointments.clinicId} = ${clinicId}
+        AND ${dentalAppointments.patientId} = ${patients.id}
+        AND ${dentalAppointments.isActive} = true
         AND ${dentalAppointments.status} <> 'cancelled'
+        AND (${dentalAppointments.status} = 'pending_assignment' OR ${dentalAppointments.doctorId} IS NULL)
     )`,
     paymentCount: sql<number>`(
       SELECT count(*)::int
@@ -2593,148 +2694,206 @@ export class PatientArchiveRequiredError extends Error {
   }
 }
 
-export async function deletePatientsBulk(patientIds: string[]) {
+export async function deletePatientsBulk(patientIds: string[], options?: { force?: boolean }) {
   const clinicId = requireClinicId()
-  await ensurePatientArchiveSchema()
   const { ensureTreatmentPlanningSchema } = await import('../treatment-planning-schema')
-  await ensureTreatmentPlanningSchema()
-  if (!patientIds || patientIds.length === 0) return { deletedCount: 0 }
+  await Promise.all([
+    ensurePatientArchiveSchema(),
+    ensureAiAppointmentReviewSchema(),
+    ensurePatientActivityLogsTable(),
+    ensureTreatmentPlanningSchema(),
+  ])
+  const cleanIds = Array.isArray(patientIds) ? patientIds.filter(isValidUuid) : []
+  if (cleanIds.length === 0) return { deletedCount: 0 }
 
   const validPatients = await db
-    .select({ id: patients.id })
+    .select({ id: patients.id, isArchived: patients.isArchived })
     .from(patients)
-    .where(and(eq(patients.clinicId, clinicId), inArray(patients.id, patientIds)))
+    .where(and(eq(patients.clinicId, clinicId), inArray(patients.id, cleanIds)))
 
   const validIds = validPatients.map(p => p.id)
   if (validIds.length === 0) return { deletedCount: 0 }
 
-  // Yalnızca takvimde aktif (iptal edilmemiş ve pasife alınmamış) randevusu olan hastaların kalıcı silinmesini engelle
-  const activeAppointmentRows = await db
-    .select({ patientId: dentalAppointments.patientId })
-    .from(dentalAppointments)
-    .where(
-      and(
-        eq(dentalAppointments.clinicId, clinicId),
-        inArray(dentalAppointments.patientId, validIds),
-        eq(dentalAppointments.isActive, true),
-        ne(dentalAppointments.status, 'cancelled')
-      )
-    )
-  const protectedIds = new Set(activeAppointmentRows.map(row => row.patientId).filter((id): id is string => Boolean(id)))
-  if (protectedIds.size > 0) {
-    throw new PatientArchiveRequiredError([...protectedIds])
+  if (!options?.force) {
+    // Yalnızca arşivde OLMAYAN ve aktif atanmış randevusu veya aktif ödemesi olan hastalar için arşivleme iste
+    const nonArchivedIds = validPatients.filter(p => !p.isArchived).map(p => p.id)
+    if (nonArchivedIds.length > 0) {
+      const [activeAppointmentRows, activePaymentRows] = await Promise.all([
+        db
+          .select({ patientId: dentalAppointments.patientId })
+          .from(dentalAppointments)
+          .where(
+            and(
+              eq(dentalAppointments.clinicId, clinicId),
+              inArray(dentalAppointments.patientId, nonArchivedIds),
+              eq(dentalAppointments.isActive, true),
+              sql`${dentalAppointments.status} NOT IN ('cancelled', 'pending_assignment')`,
+              sql`${dentalAppointments.doctorId} IS NOT NULL`
+            )
+          ),
+        db
+          .select({ patientId: patientPayments.patientId })
+          .from(patientPayments)
+          .where(
+            and(
+              eq(patientPayments.clinicId, clinicId),
+              inArray(patientPayments.patientId, nonArchivedIds),
+              eq(patientPayments.isActive, true)
+            )
+          ),
+      ])
+      const protectedIds = new Set<string>([
+        ...activeAppointmentRows.map(row => row.patientId).filter((id): id is string => Boolean(id)),
+        ...activePaymentRows.map(row => row.patientId).filter((id): id is string => Boolean(id)),
+      ])
+      if (protectedIds.size > 0) {
+        throw new PatientArchiveRequiredError([...protectedIds])
+      }
+    }
   }
 
   await db.transaction(async (tx) => {
-    // 1. WhatsApp conversation referansını null yap
-    await tx
-      .update(whatsappConversations)
-      .set({ patientId: null })
-      .where(inArray(whatsappConversations.patientId, validIds))
+    const runSafe = async (fn: () => Promise<unknown>) => {
+      await tx.execute(sql`SAVEPOINT kvkk_del_sp`)
+      try {
+        await fn()
+        await tx.execute(sql`RELEASE SAVEPOINT kvkk_del_sp`)
+      } catch (err) {
+        await tx.execute(sql`ROLLBACK TO SAVEPOINT kvkk_del_sp`).catch(() => {})
+        console.warn('[DentalRepo] Non-fatal cleanup step skipped during patient delete:', err)
+      }
+    }
 
-    // 2. Aktivite logları ve bildirim kayıtları
+    // Önceden ilişkili ID listelerini topla (randevu, tedavi, grup, ödeme, onam)
+    const [patientAppointments, tpRows, tgRows, paymentsToClean, consentReqs] = await Promise.all([
+      tx.select({ id: dentalAppointments.id }).from(dentalAppointments).where(inArray(dentalAppointments.patientId, validIds)).catch(() => []),
+      tx.select({ id: treatmentPlans.id }).from(treatmentPlans).where(inArray(treatmentPlans.patientId, validIds)).catch(() => []),
+      tx.select({ id: treatmentGroups.id }).from(treatmentGroups).where(inArray(treatmentGroups.patientId, validIds)).catch(() => []),
+      tx.select({ id: patientPayments.id }).from(patientPayments).where(inArray(patientPayments.patientId, validIds)).catch(() => []),
+      tx.select({ id: patientConsentRequests.id }).from(patientConsentRequests).where(inArray(patientConsentRequests.patientId, validIds)).catch(() => []),
+    ])
+    const apptIds = patientAppointments.map(a => a.id)
+    const tpIds = tpRows.map(r => r.id)
+    const tgIds = tgRows.map(r => r.id)
+    const payIds = paymentsToClean.map(p => p.id)
+    const reqIds = consentReqs.map(r => r.id)
+
+    // 1. WhatsApp conversation referansını null yap
+    await runSafe(() =>
+      tx
+        .update(whatsappConversations)
+        .set({ patientId: null })
+        .where(inArray(whatsappConversations.patientId, validIds))
+    )
+
+    // 2. Aktivite logları, bildirim kayıtları ve finansal belge referansları
     for (const pid of validIds) {
-      await tx.execute(sql`DELETE FROM patient_activity_logs WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
-      await tx.execute(sql`DELETE FROM patient_notification_deliveries WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
-      await tx.execute(sql`DELETE FROM appointment_notification_jobs WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
-      await tx.execute(sql`UPDATE financial_documents SET patient_id = NULL, payment_id = NULL WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_activity_logs WHERE patient_id = ${pid}`))
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_notification_deliveries WHERE patient_id = ${pid}`))
+      await runSafe(() => tx.execute(sql`DELETE FROM appointment_notification_jobs WHERE patient_id = ${pid}`))
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_consent_audit WHERE patient_id = ${pid}`))
+      await runSafe(() => tx.execute(sql`UPDATE financial_documents SET patient_id = NULL, payment_id = NULL WHERE patient_id = ${pid}`))
+    }
+    for (const tpId of tpIds) {
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_notification_deliveries WHERE treatment_id = ${tpId}`))
+      await runSafe(() => tx.execute(sql`DELETE FROM appointment_notification_jobs WHERE treatment_id = ${tpId}`))
+    }
+    for (const apptId of apptIds) {
+      await runSafe(() => tx.execute(sql`DELETE FROM appointment_notification_jobs WHERE appointment_id = ${apptId}`))
+    }
+    for (const reqId of reqIds) {
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_consent_audit WHERE request_id = ${reqId}`))
+      await runSafe(() => tx.execute(sql`DELETE FROM patient_consent_preferences WHERE request_id = ${reqId}`))
     }
 
     // 3. Onam ve ek dosya (attachment) kayıtları
-    await tx.delete(patientConsentPreferences).where(inArray(patientConsentPreferences.patientId, validIds)).catch(() => {})
-    await tx.delete(patientConsentRequests).where(inArray(patientConsentRequests.patientId, validIds)).catch(() => {})
+    await runSafe(() => tx.delete(patientConsentPreferences).where(inArray(patientConsentPreferences.patientId, validIds)))
+    await runSafe(() => tx.delete(patientConsentRequests).where(inArray(patientConsentRequests.patientId, validIds)))
 
-    const attachments = await tx
-      .select({ id: planAttachments.id })
-      .from(planAttachments)
-      .where(inArray(planAttachments.patientId, validIds))
-      .catch(() => [])
-    const attIds = attachments.map(a => a.id)
-    if (attIds.length > 0) {
-      await tx.delete(planAttachmentFiles).where(inArray(planAttachmentFiles.attachmentId, attIds)).catch(() => {})
-      await tx.delete(planAttachments).where(inArray(planAttachments.id, attIds)).catch(() => {})
+    await runSafe(async () => {
+      const attConditions = [inArray(planAttachments.patientId, validIds)]
+      if (tgIds.length > 0) attConditions.push(inArray(planAttachments.groupId, tgIds))
+      const attachments = await tx
+        .select({ id: planAttachments.id })
+        .from(planAttachments)
+        .where(or(...attConditions))
+      const attIds = attachments.map(a => a.id)
+      if (attIds.length > 0) {
+        await tx.delete(planAttachmentFiles).where(inArray(planAttachmentFiles.attachmentId, attIds))
+        await tx.delete(planAttachments).where(inArray(planAttachments.id, attIds))
+      }
+    })
+
+    // 4. Material Usages (hastaya ve randevuya bağlı)
+    if (apptIds.length > 0) {
+      await runSafe(() => tx.delete(materialUsages).where(inArray(materialUsages.appointmentId, apptIds)))
     }
+    await runSafe(() => tx.delete(materialUsages).where(inArray(materialUsages.patientId, validIds)))
 
-    // 4. Material Usages (hastaya bağlı)
-    await tx.delete(materialUsages).where(inArray(materialUsages.patientId, validIds))
-
-    // 5. Tooth records
-    await tx.delete(toothRecords).where(inArray(toothRecords.patientId, validIds))
+    // 5. Tooth records (hastaya ve tedaviye bağlı)
+    if (tpIds.length > 0) {
+      await runSafe(() => tx.delete(toothRecords).where(inArray(toothRecords.treatmentId, tpIds)))
+    }
+    await runSafe(() => tx.delete(toothRecords).where(inArray(toothRecords.patientId, validIds)))
 
     // 6. Appointment Treatments ve Dental Appointments (iptal edilmiş/pasif randevular dahil)
-    const patientAppointments = await tx
-      .select({ id: dentalAppointments.id })
-      .from(dentalAppointments)
-      .where(inArray(dentalAppointments.patientId, validIds))
-    const apptIds = patientAppointments.map(a => a.id)
-
-    if (apptIds.length > 0) {
-      await tx.delete(materialUsages).where(inArray(materialUsages.appointmentId, apptIds)).catch(() => {})
-      await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.appointmentId, apptIds))
-      await tx.delete(dentalAppointments).where(inArray(dentalAppointments.id, apptIds))
+    if (tpIds.length > 0) {
+      await runSafe(() => tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.treatmentPlanId, tpIds)))
     }
+    if (apptIds.length > 0) {
+      await runSafe(() => tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.appointmentId, apptIds)))
+      await runSafe(() => tx.delete(dentalAppointments).where(inArray(dentalAppointments.id, apptIds)))
+    }
+    await runSafe(() => tx.delete(dentalAppointments).where(inArray(dentalAppointments.patientId, validIds)))
 
-    // 7. Patient payments (ve online payment referansları)
-    const paymentsToClean = await tx
-      .select({ id: patientPayments.id })
-      .from(patientPayments)
-      .where(inArray(patientPayments.patientId, validIds))
-      .catch(() => [])
-    const payIds = paymentsToClean.map(p => p.id)
+    // 7. Patient payments (ve online payment referansları - treatment_plans silinmeden ÖNCE temizlenmeli)
     if (payIds.length > 0) {
       for (const payId of payIds) {
-        await tx.execute(sql`UPDATE online_payment_transactions SET payment_id = NULL WHERE payment_id = ${payId}`).catch(() => {})
-        await tx.execute(sql`UPDATE financial_documents SET payment_id = NULL WHERE payment_id = ${payId}`).catch(() => {})
+        await runSafe(() => tx.execute(sql`UPDATE online_payment_transactions SET payment_id = NULL WHERE payment_id = ${payId}`))
+        await runSafe(() => tx.execute(sql`UPDATE financial_documents SET payment_id = NULL WHERE payment_id = ${payId}`))
       }
     }
-    await tx.delete(patientPayments).where(inArray(patientPayments.patientId, validIds))
+    if (tpIds.length > 0) {
+      await runSafe(() => tx.delete(patientPayments).where(inArray(patientPayments.treatmentPlanId, tpIds)))
+    }
+    await runSafe(() => tx.delete(patientPayments).where(inArray(patientPayments.patientId, validIds)))
 
     // 8. Installment plans
-    await tx.delete(installmentPlans).where(inArray(installmentPlans.patientId, validIds))
+    await runSafe(() => tx.delete(installmentPlans).where(inArray(installmentPlans.patientId, validIds)))
 
     // 9. Completed works (lab works)
-    await tx.delete(completedWorks).where(inArray(completedWorks.patientId, validIds))
+    await runSafe(() => tx.delete(completedWorks).where(inArray(completedWorks.patientId, validIds)))
 
     // 10. Waiting list
-    await tx.delete(waitingList).where(inArray(waitingList.patientId, validIds))
+    await runSafe(() => tx.delete(waitingList).where(inArray(waitingList.patientId, validIds)))
 
     // 11. Consultations & Notes & Diseases & Anamnesis
-    await tx.delete(consultations).where(inArray(consultations.patientId, validIds))
-    await tx.delete(doctorNotes).where(inArray(doctorNotes.patientId, validIds))
-    await tx.delete(patientNotes).where(inArray(patientNotes.patientId, validIds))
-    await tx.delete(patientDiseases).where(inArray(patientDiseases.patientId, validIds))
-    await tx.delete(patientAnamnesis).where(inArray(patientAnamnesis.patientId, validIds))
+    await runSafe(() => tx.delete(consultations).where(inArray(consultations.patientId, validIds)))
+    await runSafe(() => tx.delete(doctorNotes).where(inArray(doctorNotes.patientId, validIds)))
+    await runSafe(() => tx.delete(patientNotes).where(inArray(patientNotes.patientId, validIds)))
+    await runSafe(() => tx.delete(patientDiseases).where(inArray(patientDiseases.patientId, validIds)))
+    await runSafe(() => tx.delete(patientAnamnesis).where(inArray(patientAnamnesis.patientId, validIds)))
 
     // 12. Treatment plans & treatment groups (detay tabloları dahil)
-    const tpRows = await tx
-      .select({ id: treatmentPlans.id })
-      .from(treatmentPlans)
-      .where(inArray(treatmentPlans.patientId, validIds))
-    const tpIds = tpRows.map(r => r.id)
     if (tpIds.length > 0) {
-      await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.treatmentPlanId, tpIds)).catch(() => {})
-      await tx.delete(treatmentPlanDetails).where(inArray(treatmentPlanDetails.treatmentId, tpIds)).catch(() => {})
+      await runSafe(() => tx.delete(treatmentPlanDetails).where(inArray(treatmentPlanDetails.treatmentId, tpIds)))
     }
-    const tgRows = await tx
-      .select({ id: treatmentGroups.id })
-      .from(treatmentGroups)
-      .where(inArray(treatmentGroups.patientId, validIds))
-    const tgIds = tgRows.map(r => r.id)
     if (tgIds.length > 0) {
-      await tx.delete(treatmentGroupDetails).where(inArray(treatmentGroupDetails.groupId, tgIds)).catch(() => {})
+      await runSafe(() => tx.delete(treatmentGroupDetails).where(inArray(treatmentGroupDetails.groupId, tgIds)))
+      await runSafe(() => tx.delete(treatmentPlans).where(inArray(treatmentPlans.groupId, tgIds)))
     }
-    await tx.delete(treatmentPlans).where(inArray(treatmentPlans.patientId, validIds))
-    await tx.delete(treatmentGroups).where(inArray(treatmentGroups.patientId, validIds))
+    await runSafe(() => tx.delete(treatmentPlans).where(inArray(treatmentPlans.patientId, validIds)))
+    await runSafe(() => tx.delete(treatmentGroups).where(inArray(treatmentGroups.patientId, validIds)))
 
-    // 13. En son hastaları sil
+    // 13. En son hastaları kalıcı olarak sil
     await tx.delete(patients).where(and(eq(patients.clinicId, clinicId), inArray(patients.id, validIds)))
   })
 
   return { deletedCount: validIds.length }
 }
 
-export async function deletePatient(patientId: string) {
-  return await deletePatientsBulk([patientId])
+export async function deletePatient(patientId: string, options?: { force?: boolean }) {
+  return await deletePatientsBulk([patientId], options)
 }
 
 export async function archivePatients(patientIds: string[]) {

@@ -24,6 +24,8 @@ interface CalendarEvent {
   notes?: string
   timeConfirmed?: boolean
   hasTreatment?: boolean
+  intakeSource?: string | null
+  reviewStatus?: string | null
   patientResponseStatus?: string | null
   patientResponseNote?: string | null
   patientPreferredDate?: string | null
@@ -86,7 +88,7 @@ function getPatientStatusVisual(e: CalendarEvent) {
       strike: true,
     }
   }
-  if (status === 'postponed' || resp === 'postponed') {
+  if (status === 'postponed' || resp === 'postponed' || resp === 'reschedule_requested') {
     return {
       prefix: '⏳ ',
       badge: 'ERTELEME TALEBİ',
@@ -114,6 +116,36 @@ function getPatientStatusVisual(e: CalendarEvent) {
       borderStyle: 'dashed',
       bgOverride: 'rgba(239, 68, 68, 0.12)',
       strike: true,
+    }
+  }
+  if (status === 'in_progress') {
+    return {
+      prefix: '🔄 ',
+      badge: 'TEDAVİDE / İŞLEMDE',
+      borderLeftColor: '#f59e0b',
+      borderStyle: 'solid',
+      bgOverride: null,
+      strike: false,
+    }
+  }
+  if (status === 'completed') {
+    return {
+      prefix: '✓ ',
+      badge: 'TAMAMLANDI',
+      borderLeftColor: '#10b981',
+      borderStyle: 'solid',
+      bgOverride: null,
+      strike: false,
+    }
+  }
+  if (status === 'pending_review' || e.reviewStatus === 'pending_review') {
+    return {
+      prefix: '🤖 ',
+      badge: 'ONAY BEKLİYOR',
+      borderLeftColor: '#0284c7',
+      borderStyle: 'dashed',
+      bgOverride: null,
+      strike: false,
     }
   }
   return null
@@ -966,12 +998,13 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
             const left = `calc(56px + 2px + ((100% - 56px - 4px) / ${maxCol}) * ${col})`;
             const width = `calc((100% - 56px - 4px) / ${maxCol})`;
             const { top, height } = eventPosition(e.startTime, e.endTime, slotStartHour, slotEndHour);
+            const patientVisual = getPatientStatusVisual(e);
             
             return (
               <div id={`cal-event-${e.id}`} key={e.id} className="rc-event rc-event-unassigned" style={{ top, height, left, width, maxWidth: `calc(100% - 56px - 4px - ((100% - 56px - 4px) / ${maxCol}) * ${col})`, minWidth: 0, background: 'var(--calendar-unassigned-bg, #ffedd5)', border: '1.5px solid var(--calendar-unassigned-border, #ea580c)', borderLeft: '4px solid #ea580c', boxShadow: '0 2px 10px rgba(234, 88, 12, 0.22)' }}
                    onClick={(evt) => { if(evt.ctrlKey || evt.button !== 0 || hasDraggedRef.current) return; onEventClick(e.id, e); }} 
                    onContextMenu={(evt) => { evt.preventDefault(); if(onEventContextMenu) onEventContextMenu(evt, e); }} 
-                   title={`${e.title} — ${UNASSIGNED_TOOLTIP_TEXT}`}
+                   title={`${patientVisual ? `[${patientVisual.badge}] ` : ''}${e.title} — ${UNASSIGNED_TOOLTIP_TEXT}`}
                    onMouseDown={(evt) => {
                      let initialColIdx = 0;
                      if (gridRef.current) {
@@ -1015,7 +1048,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
                     ATAMA BEKLİYOR
                   </span>
                 </div>
-                <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--calendar-unassigned-text, #9a3412)' }}>{e.title}</span>
+                <span className="rc-ev-title" style={{ pointerEvents: 'none', fontWeight: 700, color: 'var(--calendar-unassigned-text, #9a3412)', textDecoration: patientVisual?.strike ? 'line-through' : 'none' }}>{patientVisual?.prefix || ''}{e.title}</span>
                 {height > 44 && <span className="rc-ev-time" style={{ pointerEvents: 'none', color: 'var(--calendar-unassigned-subtext, #c2410c)', fontWeight: 600 }}>{new Date(e.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}-{new Date(e.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>}
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, cursor: 'ns-resize', zIndex: 10 }} onMouseDown={(evt) => startInteraction(evt, e, 'resize-bottom', 0)} />
               </div>

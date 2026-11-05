@@ -551,6 +551,7 @@ const app = new Elysia()
       doctorId: b.doctorId,
       substituteDoctorId: b.substituteDoctorId || null,
       unassignAppointments: Boolean(b.unassignAppointments),
+      cancelAppointments: Boolean(b.cancelAppointments),
       appointmentIds: Array.isArray(b.appointmentIds) ? b.appointmentIds : undefined,
       date: b.date,
       startTime: b.startTime,
@@ -807,10 +808,11 @@ const app = new Elysia()
     }
     return { success: true }
   })
-  .delete('/api/dental/patients/:id', async ({ params, set }) => {
+  .delete('/api/dental/patients/:id', async ({ params, query, set }) => {
     try {
       const { deletePatient } = await import('./db/repositories/dental')
-      const res = await deletePatient(params.id)
+      const force = (query as any)?.force === 'true'
+      const res = await deletePatient(params.id, { force })
       return res
     } catch (e: any) {
       if (e?.code === 'PATIENT_ARCHIVE_REQUIRED') { set.status = 409; return { error: e.message, code: e.code, patientIds: e.patientIds } }
@@ -848,13 +850,13 @@ const app = new Elysia()
   })
   .post('/api/dental/patients/bulk-delete', async ({ body, set }) => {
     try {
-      const { patientIds } = body as { patientIds?: string[] }
+      const { patientIds, force } = body as { patientIds?: string[]; force?: boolean }
       if (!patientIds || !Array.isArray(patientIds) || patientIds.length === 0) {
         set.status = 400
         return { error: 'Silinecek hasta ID listesi boş olamaz' }
       }
       const { deletePatientsBulk } = await import('./db/repositories/dental')
-      const res = await deletePatientsBulk(patientIds)
+      const res = await deletePatientsBulk(patientIds, { force: Boolean(force) })
       return res
     } catch (e: any) {
       if (e?.code === 'PATIENT_ARCHIVE_REQUIRED' && Array.isArray(e.patientIds)) {

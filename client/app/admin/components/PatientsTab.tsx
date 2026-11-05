@@ -63,8 +63,10 @@ export default function PatientsTab() {
     title: string
     message: string
     confirmText?: string
+    secondaryText?: string
     variant?: 'danger' | 'warning' | 'primary'
     onConfirm: () => void
+    onSecondaryConfirm?: () => void
   }>({
     isOpen: false,
     title: '',
@@ -481,16 +483,14 @@ export default function PatientsTab() {
 
   const fmtBirthInfo = (patient: Patient) => patient.birthDate ? fmtDate(patient.birthDate) : patient.birthYear ? String(patient.birthYear) : '—'
 
-  // Selection toggle
+  // Selection toggle (Aktif ve Arşiv sekmelerinin her ikisinde de çalışır)
   const toggleSelectPatient = (id: string) => {
-    if (patientTab === 'archived') return
     setSelectedPatientIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     )
   }
 
   const toggleSelectAll = () => {
-    if (patientTab === 'archived') return
     const pageIds = paginated.map(p => p.id)
     const isAllSelected = pageIds.every(id => selectedPatientIds.includes(id))
     if (isAllSelected) {
@@ -500,81 +500,122 @@ export default function PatientsTab() {
     }
   }
 
-  const getPatientsWithRecords = (ids: string[]) => patients.filter(patient => ids.includes(patient.id) && (patient.appointmentCount || 0) > 0)
+  const getPatientsWithRecords = (ids: string[]) =>
+    patients.filter(
+      patient =>
+        ids.includes(patient.id) &&
+        !patient.isArchived &&
+        ((patient.appointmentCount || 0) > 0 || (patient.paymentCount || 0) > 0)
+    )
 
-  const openRemovalConfirmation = (ids: string[]) => {
+  const openRemovalConfirmation = (ids: string[], forcePermanentMode = false) => {
+    const targetPatients = patients.filter(p => ids.includes(p.id))
+    const allArchived = targetPatients.length > 0 && targetPatients.every(p => Boolean(p.isArchived))
+
+    if (forcePermanentMode || allArchived || patientTab === 'archived') {
+      setConfirmModal({
+        isOpen: true,
+        title: 'KVKK Uyumlu Kalıcı Olarak Sil',
+        message:
+          ids.length === 1
+            ? 'Seçilen hasta ve ilişkili tüm geçmiş kayıtları KVKK kapsamında kalıcı olarak silinecektir. Bu işlem geri alınamaz. Onaylıyor musunuz?'
+            : `Seçilen ${ids.length} hasta ve ilişkili tüm geçmiş kayıtları KVKK kapsamında kalıcı olarak silinecektir. Bu işlem geri alınamaz. Onaylıyor musunuz?`,
+        confirmText: '🗑️ Kalıcı Olarak Sil (KVKK)',
+        secondaryText: undefined,
+        variant: 'danger',
+        onConfirm: () => handleBulkDelete(ids, { forcePermanent: true }),
+        onSecondaryConfirm: undefined,
+      })
+      return
+    }
+
     const patientsWithRecords = getPatientsWithRecords(ids)
     const appointmentCount = patientsWithRecords.reduce((total, patient) => total + (patient.appointmentCount || 0), 0)
     const paymentCount = patientsWithRecords.reduce((total, patient) => total + (patient.paymentCount || 0), 0)
     const hasRecords = patientsWithRecords.length > 0
+
+    if (!hasRecords) {
+      setConfirmModal({
+        isOpen: true,
+        title: 'KVKK Uyumlu Kalıcı Olarak Sil',
+        message:
+          ids.length === 1
+            ? 'Seçilen hastanın aktif randevu veya ödeme kaydı bulunmamaktadır. KVKK kapsamında tüm verileriyle birlikte kalıcı olarak silinecektir. Onaylıyor musunuz?'
+            : `Seçilen ${ids.length} hastanın aktif randevu veya ödeme kaydı bulunmamaktadır. KVKK kapsamında tüm verileriyle birlikte kalıcı olarak silinecektir. Onaylıyor musunuz?`,
+        confirmText: '🗑️ Kalıcı Olarak Sil (KVKK)',
+        secondaryText: undefined,
+        variant: 'danger',
+        onConfirm: () => handleBulkDelete(ids, { forcePermanent: true }),
+        onSecondaryConfirm: undefined,
+      })
+      return
+    }
+
     setConfirmModal({
       isOpen: true,
-      title: hasRecords ? 'Hastayı Arşivle' : 'Hastayı Kalıcı Olarak Sil',
-      message: hasRecords
-        ? `${patientsWithRecords.length} hastanın ${appointmentCount} randevu ve ${paymentCount} ödeme kaydı var. Bu hastalar kalıcı olarak silinmeyecek; hasta, randevu ve ödeme kayıtları pasife alınarak Arşiv sekmesine taşınacak. Devam etmek istiyor musunuz?`
-        : `${ids.length} hasta kalıcı olarak silinecek. Devam etmek istiyor musunuz?`,
-      confirmText: hasRecords ? `Evet, Arşive Taşı` : `Evet, Kalıcı Sil`,
-      variant: hasRecords ? 'warning' : 'danger',
-      onConfirm: () => handleBulkDelete(ids)
+      title: 'Hasta Silme / Arşivleme Seçimi',
+      message: `${patientsWithRecords.length} hastanın ${appointmentCount} aktif randevu ve ${paymentCount} ödeme kaydı bulunmaktadır. Kayıtları koruyarak Arşiv sekmesine taşıyabilir veya KVKK kapsamında tüm verileriyle birlikte kalıcı olarak silebilirsiniz.`,
+      confirmText: '📦 Arşive Taşı (Önerilen)',
+      secondaryText: '🗑️ Yine de Kalıcı Olarak Sil (KVKK Tam Silme)',
+      variant: 'warning',
+      onConfirm: () => handleBulkDelete(ids, { forcePermanent: false }),
+      onSecondaryConfirm: () => handleBulkDelete(ids, { forcePermanent: true }),
     })
   }
 
-  // Randevusu veya ödemesi olan hastalar arşivlenir; kaydı olmayanlar kalıcı silinir.
-  const handleBulkDelete = async (ids: string[]) => {
+  // forcePermanent=true ise tüm seçilen hastalar KVKK kapsamında kalıcı silinir; aksi halde aktif kaydı olanlar arşivlenir, olmayanlar kalıcı silinir.
+  const handleBulkDelete = async (ids: string[], options?: { forcePermanent?: boolean }) => {
     if (!ids || ids.length === 0) return
+    const forcePermanent = Boolean(options?.forcePermanent)
     setIsDeletingBulk(true)
     try {
-      const archiveIds = getPatientsWithRecords(ids).map(patient => patient.id)
+      const archiveIds = forcePermanent ? [] : getPatientsWithRecords(ids).map(patient => patient.id)
       const deleteIds = ids.filter(id => !archiveIds.includes(id))
       const results = await Promise.all([
-        archiveIds.length ? fetch('/api/dental/patients/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: archiveIds }) }) : null,
-        deleteIds.length ? fetch('/api/dental/patients/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: deleteIds }) }) : null,
+        archiveIds.length
+          ? fetch('/api/dental/patients/archive', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ patientIds: archiveIds }),
+            })
+          : null,
+        deleteIds.length
+          ? fetch('/api/dental/patients/bulk-delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ patientIds: deleteIds, force: true }),
+            })
+          : null,
       ])
       const [archiveResponse, deleteResponse] = results
       if (archiveResponse && !archiveResponse.ok) {
         const err = await archiveResponse.json().catch(() => ({}))
         throw new Error(err.error || 'Arşivleme işlemi yapılamadı')
       }
-      let fallbackArchiveData: { archivedCount?: number; deactivatedAppointments?: number; deactivatedPayments?: number } | null = null
-      let retriedDeleteData: { deletedCount?: number } | null = null
       if (deleteResponse && !deleteResponse.ok) {
         const err = await deleteResponse.json().catch(() => ({}))
-        if (err.code !== 'PATIENT_ARCHIVE_REQUIRED' || !Array.isArray(err.patientIds) || err.patientIds.length === 0) {
-          throw new Error(err.error || 'Silme işlemi yapılamadı')
-        }
-        const fallbackArchiveResponse = await fetch('/api/dental/patients/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: err.patientIds }) })
-        if (!fallbackArchiveResponse.ok) {
-          const fallbackError = await fallbackArchiveResponse.json().catch(() => ({}))
-          throw new Error(fallbackError.error || 'Hasta arşivlenemedi')
-        }
-        fallbackArchiveData = await fallbackArchiveResponse.json()
-        const protectedIds = new Set(err.patientIds)
-        const deletableIds = deleteIds.filter(id => !protectedIds.has(id))
-        if (deletableIds.length) {
-          const retryDeleteResponse = await fetch('/api/dental/patients/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patientIds: deletableIds }) })
-          if (!retryDeleteResponse.ok) {
-            const retryError = await retryDeleteResponse.json().catch(() => ({}))
-            throw new Error(retryError.error || 'Silme işlemi yapılamadı')
-          }
-          retriedDeleteData = await retryDeleteResponse.json()
-        }
+        throw new Error(err.error || 'Kalıcı silme işlemi yapılamadı')
       }
       const archiveData = archiveResponse ? await archiveResponse.json() : null
-      const deleteData = deleteResponse?.ok ? await deleteResponse.json() : retriedDeleteData
-      const archivedCount = (archiveData?.archivedCount || 0) + (fallbackArchiveData?.archivedCount || 0)
-      const deactivatedAppointments = (archiveData?.deactivatedAppointments || 0) + (fallbackArchiveData?.deactivatedAppointments || 0)
-      const deactivatedPayments = (archiveData?.deactivatedPayments || 0) + (fallbackArchiveData?.deactivatedPayments || 0)
-      if (archivedCount) toast.success(`${archivedCount} hasta arşive taşındı; ${deactivatedAppointments} randevu ve ${deactivatedPayments} ödeme pasife alındı.`)
-      if (deleteData?.deletedCount) toast.success(`${deleteData.deletedCount} hasta kalıcı olarak silindi.`)
+      const deleteData = deleteResponse ? await deleteResponse.json() : null
+      const archivedCount = archiveData?.archivedCount || 0
+      const deactivatedAppointments = archiveData?.deactivatedAppointments || 0
+      const deactivatedPayments = archiveData?.deactivatedPayments || 0
+      if (archivedCount) {
+        toast.success(`${archivedCount} hasta arşive taşındı; ${deactivatedAppointments} randevu ve ${deactivatedPayments} ödeme pasife alındı.`)
+      }
+      if (deleteData?.deletedCount) {
+        toast.success(`${deleteData.deletedCount} hasta KVKK kapsamında kalıcı olarak silindi.`)
+      }
       setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
       loadPatients()
       if (selectedPatientId && ids.includes(selectedPatientId)) {
         setSelectedPatientId(null)
         setProfileData(null)
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      toast.error('Hastalar silinirken hata oluştu.')
+      toast.error(err?.message || 'Hastalar silinirken hata oluştu.')
     } finally {
       setIsDeletingBulk(false)
       setConfirmModal(prev => ({ ...prev, isOpen: false }))
@@ -592,6 +633,7 @@ export default function PatientsTab() {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Hasta aktifleştirilemedi')
       toast.success(`${patient.name} Aktif sekmesine geri alındı; ${data.reactivatedAppointments || 0} randevu ve ${data.reactivatedPayments || 0} ödeme yeniden aktifleştirildi.`)
+      setSelectedPatientIds(prev => prev.filter(id => id !== patient.id))
       if (selectedPatientId === patient.id) {
         setSelectedPatientId(null)
         setProfileData(null)
@@ -602,6 +644,32 @@ export default function PatientsTab() {
       toast.error(error instanceof Error ? error.message : 'Hasta aktifleştirilemedi.')
     } finally {
       setRestoringPatientId(null)
+    }
+  }
+
+  const handleBulkRestore = async (ids: string[]) => {
+    if (!ids.length) return
+    setIsDeletingBulk(true)
+    try {
+      const response = await fetch('/api/dental/patients/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientIds: ids }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Hastalar aktifleştirilemedi')
+      toast.success(`${data.restoredCount || ids.length} hasta Aktif sekmesine geri yüklendi.`)
+      setSelectedPatientIds(prev => prev.filter(id => !ids.includes(id)))
+      if (selectedPatientId && ids.includes(selectedPatientId)) {
+        setSelectedPatientId(null)
+        setProfileData(null)
+      }
+      loadPatients()
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : 'Hastalar aktifleştirilemedi.')
+    } finally {
+      setIsDeletingBulk(false)
     }
   }
 
@@ -669,7 +737,7 @@ export default function PatientsTab() {
     }
   }
 
-  const isCurrentPageAllSelected = patientTab === 'active' && paginated.length > 0 && paginated.every(p => selectedPatientIds.includes(p.id))
+  const isCurrentPageAllSelected = paginated.length > 0 && paginated.every(p => selectedPatientIds.includes(p.id))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingBottom: '2rem' }}>
@@ -780,8 +848,8 @@ export default function PatientsTab() {
         ))}
       </div>
 
-      {/* ── Toplu Silme Barı ── */}
-      {patientTab === 'active' && selectedPatientIds.length > 0 && (
+      {/* ── Toplu İşlem Barı (Aktif ve Arşiv Sekmeleri) ── */}
+      {selectedPatientIds.length > 0 && (
         <div style={{
           padding: '10px 16px',
           background: 'var(--card-bg, #1e293b)',
@@ -797,7 +865,7 @@ export default function PatientsTab() {
             <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 700 }}>✓</span>
             <span>Toplam <strong>{selectedPatientIds.length}</strong> hasta seçildi.</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={() => setSelectedPatientIds([])}
@@ -812,10 +880,27 @@ export default function PatientsTab() {
             >
               Seçimi Temizle
             </button>
+            {patientTab === 'archived' && (
+              <button
+                type="button"
+                disabled={isDeletingBulk}
+                onClick={() => handleBulkRestore(selectedPatientIds)}
+                className="btn-clinic-mint"
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: isDeletingBulk ? 'not-allowed' : 'pointer',
+                }}
+              >
+                ↩ Seçilenleri Geri Yükle
+              </button>
+            )}
             <button
               type="button"
               disabled={isDeletingBulk}
-              onClick={() => openRemovalConfirmation(selectedPatientIds)}
+              onClick={() => openRemovalConfirmation(selectedPatientIds, patientTab === 'archived')}
               style={{
                 padding: '6px 14px',
                 background: '#dc2626',
@@ -831,7 +916,11 @@ export default function PatientsTab() {
               }}
             >
               <Trash2 size={14} />
-              {isDeletingBulk ? 'İşleniyor...' : `Seçilen (${selectedPatientIds.length}) Hastayı Sil`}
+              {isDeletingBulk
+                ? 'İşleniyor...'
+                : patientTab === 'archived'
+                  ? `Seçilenleri Kalıcı Sil (KVKK) (${selectedPatientIds.length})`
+                  : `Seçilen (${selectedPatientIds.length}) Hastayı Sil`}
             </button>
           </div>
         </div>
@@ -940,9 +1029,8 @@ export default function PatientsTab() {
                         type="checkbox"
                         checked={isCurrentPageAllSelected}
                         onChange={toggleSelectAll}
-                        disabled={patientTab === 'archived'}
-                        style={{ cursor: patientTab === 'archived' ? 'not-allowed' : 'pointer' }}
-                        title={patientTab === 'archived' ? 'Arşivdeki hastalar seçilemez' : 'Sayfadaki tüm hastaları seç/kaldır'}
+                        style={{ cursor: 'pointer' }}
+                        title="Sayfadaki tüm hastaları seç/kaldır"
                       />
                     </th>
                     <th style={{ padding: '0.8rem 0.75rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--foreground-2, #cbd5e1)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Ad</th>
@@ -970,10 +1058,10 @@ export default function PatientsTab() {
                           cursor: 'pointer',
                           transition: 'background 0.15s',
                           background: isSelected 
-                            ? 'rgba(239, 68, 68, 0.12)' 
+                            ? 'var(--card-inner, #1e293b)' 
                             : selectedPatientId === p.id 
-                              ? 'rgba(59, 130, 246, 0.12)' 
-                              : 'transparent'
+                              ? 'var(--pc-tint, #eff6ff)' 
+                              : 'var(--card-bg, #1e293b)'
                         }}
                       >
                         <td style={{ padding: '0.8rem 0.5rem 0.8rem 1rem', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
@@ -981,9 +1069,8 @@ export default function PatientsTab() {
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelectPatient(p.id)}
-                            disabled={isArchived}
-                            style={{ cursor: isArchived ? 'not-allowed' : 'pointer' }}
-                            title={isArchived ? 'Arşivdeki hastalar seçilemez' : 'Hastayı seç'}
+                            style={{ cursor: 'pointer' }}
+                            title="Hastayı seç"
                           />
                         </td>
                         <td style={{ padding: '0.8rem 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--foreground, #ffffff)' }}>
@@ -1009,15 +1096,35 @@ export default function PatientsTab() {
                         </td>
                         <td style={{ padding: '0.8rem 1rem', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                           {isArchived ? (
-                            <button
-                              type="button"
-                              onClick={() => handleRestorePatient(p)}
-                              disabled={restoringPatientId === p.id}
-                              className="btn-clinic-mint"
-                              style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.76rem', fontWeight: 700, cursor: restoringPatientId === p.id ? 'not-allowed' : 'pointer', marginRight: 8 }}
-                            >
-                              {restoringPatientId === p.id ? 'Aktifleştiriliyor…' : '↩ Aktife Al'}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleRestorePatient(p)}
+                                disabled={restoringPatientId === p.id}
+                                className="btn-clinic-mint"
+                                style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.76rem', fontWeight: 700, cursor: restoringPatientId === p.id ? 'not-allowed' : 'pointer', marginRight: 6 }}
+                              >
+                                {restoringPatientId === p.id ? 'Aktifleştiriliyor…' : '↩ Geri Yükle'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openRemovalConfirmation([p.id], true)}
+                                title="Hastayı ve tüm verilerini KVKK kapsamında kalıcı olarak sil"
+                                style={{
+                                  padding: '4px 10px',
+                                  background: 'var(--card-inner)',
+                                  border: '1px solid var(--danger)',
+                                  borderRadius: 6,
+                                  color: 'var(--danger)',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  marginRight: 8,
+                                }}
+                              >
+                                🗑️ Kalıcı Sil (KVKK)
+                              </button>
+                            </>
                           ) : (
                             <>
                               <button
@@ -1108,7 +1215,11 @@ export default function PatientsTab() {
                 {profileLoading ? (
                   <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3, #94a3b8)' }}>Profil yükleniyor...</div>
                 ) : profileData ? (
-                  <PatientProfileCard profile={profileData} onEdit={handleOpenEditModal} />
+                  <PatientProfileCard
+                    profile={profileData}
+                    onEdit={handleOpenEditModal}
+                    onDelete={(p) => openRemovalConfirmation([p.id], Boolean(p.isArchived))}
+                  />
                 ) : (
                   <div style={{ padding: '2rem', textAlign: 'center', color: '#ef4444' }}>Profil yüklenemedi.</div>
                 )}
@@ -1287,16 +1398,190 @@ export default function PatientsTab() {
         </div>
       )}
 
-      {/* ── Onay Modalı (Tekil veya Toplu Silme) ── */}
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={confirmModal.confirmText}
-        variant={confirmModal.variant}
-        onConfirm={confirmModal.onConfirm}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-      />
+      {/* ── Onay Modalı (Tekil veya Toplu Silme / KVKK Kalıcı Silme) ── */}
+      {confirmModal.isOpen && confirmModal.onSecondaryConfirm ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'var(--modal-overlay, rgba(15, 23, 42, 0.6))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999999,
+            padding: '16px',
+          }}
+          onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 'min(460px, calc(100vw - 24px))',
+              maxWidth: '460px',
+              background: 'var(--card-bg)',
+              borderRadius: '14px',
+              border: '1.5px solid var(--input-border)',
+              boxShadow: 'var(--pc-modal-shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '15px 20px',
+                borderBottom: '1px solid var(--input-border)',
+                background: 'var(--card-inner)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: '#d97706',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: 'var(--pc-clay-primary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <AlertCircle size={17} color="#ffffff" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>
+                    {confirmModal.title}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: '2px' }}>
+                    Arşivleme veya KVKK tam silme işlemi
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                aria-label="Kapat"
+                style={{
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)',
+                  borderRadius: '6px',
+                  width: '28px',
+                  height: '28px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--foreground)',
+                  boxShadow: 'var(--pc-clay-btn)',
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: '18px 20px', background: 'var(--card-bg)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div
+                style={{
+                  background: 'var(--card-inner)',
+                  padding: '14px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--input-border)',
+                  fontSize: '0.86rem',
+                  lineHeight: 1.55,
+                  color: 'var(--foreground-2)',
+                }}
+              >
+                {confirmModal.message}
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: '1px solid var(--input-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                background: 'var(--card-inner)',
+              }}
+            >
+              <button
+                type="button"
+                disabled={isDeletingBulk}
+                onClick={confirmModal.onConfirm}
+                style={{
+                  width: '100%',
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid #1d4ed8',
+                  background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+                  color: '#ffffff',
+                  cursor: isDeletingBulk ? 'not-allowed' : 'pointer',
+                  fontSize: '0.86rem',
+                  fontWeight: 700,
+                  boxShadow: 'var(--pc-clay-primary)',
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>{confirmModal.confirmText}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingBulk}
+                onClick={confirmModal.onSecondaryConfirm}
+                style={{
+                  width: '100%',
+                  padding: '9px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid #dc2626',
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  cursor: isDeletingBulk ? 'not-allowed' : 'pointer',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ color: '#ffffff' }}>{confirmModal.secondaryText}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                style={{
+                  width: '100%',
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--input-border)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--foreground)',
+                  cursor: 'pointer',
+                  fontSize: '0.84rem',
+                  fontWeight: 600,
+                  boxShadow: 'var(--pc-clay-btn)',
+                }}
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmText={confirmModal.confirmText}
+          variant={confirmModal.variant}
+          onConfirm={confirmModal.onConfirm}
+          onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        />
+      )}
     </div>
   )
 }
