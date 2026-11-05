@@ -1,5 +1,7 @@
 {
+  "id": "voiceaiMetaWaInb01",
   "name": "VoiceAI — Meta WhatsApp Inbound Bridge",
+  "active": true,
   "nodes": [
     {
       "parameters": {
@@ -17,17 +19,27 @@
     },
     {
       "parameters": {
+        "jsCode": "const query = $input.first().json.query || {};\nconst mode = query['hub.mode'] || '';\nconst token = query['hub.verify_token'] || '';\nconst challenge = query['hub.challenge'] || '';\nconst baseUrl = ($env.VOICEAI_BASE_URL || 'http://voiceai-server:3001').replace(/\\/+$/, '');\n\nif (mode === 'subscribe' && token) {\n  if ($env.META_VERIFY_TOKEN && token === $env.META_VERIFY_TOKEN) {\n    return [{ json: { ok: true, statusCode: 200, challenge: String(challenge) } }];\n  }\n  try {\n    const url = `${baseUrl}/api/whatsapp/meta-webhook-verify?hub.mode=${encodeURIComponent(mode)}&hub.verify_token=${encodeURIComponent(token)}&hub.challenge=${encodeURIComponent(challenge)}`;\n    const res = await fetch(url);\n    if (res.ok) {\n      const text = await res.text();\n      return [{ json: { ok: true, statusCode: 200, challenge: text || String(challenge) } }];\n    }\n  } catch {}\n}\nreturn [{ json: { ok: false, statusCode: 403, challenge: 'Forbidden' } }];"
+      },
+      "id": "meta-verify-code",
+      "name": "Verify Token with VoiceAI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 180]
+    },
+    {
+      "parameters": {
         "respondWith": "text",
-        "responseBody": "={{ $json.query['hub.verify_token'] === $env.META_VERIFY_TOKEN ? $json.query['hub.challenge'] : 'Forbidden' }}",
+        "responseBody": "={{ $json.challenge }}",
         "options": {
-          "responseCode": "={{ $json.query['hub.verify_token'] === $env.META_VERIFY_TOKEN ? 200 : 403 }}"
+          "responseCode": "={{ $json.statusCode || 200 }}"
         }
       },
       "id": "meta-verify-respond",
       "name": "Respond Challenge",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [500, 180]
+      "position": [740, 180]
     },
     {
       "parameters": {
@@ -45,49 +57,28 @@
     },
     {
       "parameters": {
-        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body || $input.first().json;\nconst clinicId = $env.VOICEAI_CLINIC_ID;\nconst secret = $env.VOICEAI_N8N_SECRET;\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst messages = [];\n\nfor (const entry of entries) {\n  for (const change of (entry.changes || [])) {\n    const value = change.value || {};\n    const phoneNumberId = value.metadata?.phone_number_id || '';\n    for (const msg of (value.messages || [])) {\n      const text =\n        msg.text?.body ||\n        msg.button?.text ||\n        msg.interactive?.button_reply?.title ||\n        msg.interactive?.list_reply?.title ||\n        '';\n      if (!text) continue;\n      messages.push({\n        clinicId,\n        provider: 'n8n_meta',\n        externalId: msg.id,\n        from: msg.from,\n        phoneNumberId,\n        timestamp: Number(msg.timestamp || Math.floor(Date.now() / 1000)),\n        type: msg.type || 'text',\n        text\n      });\n    }\n  }\n}\n\nif (messages.length === 0) return [];\n\nconst rawBody = JSON.stringify({ messages });\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst signature = 'sha256=' + crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');\n\nreturn [{\n  json: {\n    clinicId,\n    rawBody,\n    timestamp,\n    signature\n  }\n}];"
-      },
-      "id": "normalize-and-sign",
-      "name": "Normalize & Sign HMAC",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [500, 380]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.VOICEAI_BASE_URL + '/api/whatsapp/n8n/' + $json.clinicId + '/inbound' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-VoiceAI-Timestamp",
-              "value": "={{ $json.timestamp }}"
-            },
-            {
-              "name": "X-VoiceAI-Signature",
-              "value": "={{ $json.signature }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "string",
-        "body": "={{ $json.rawBody }}",
-        "options": {}
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst baseUrl = ($env.VOICEAI_BASE_URL || 'http://voiceai-server:3001').replace(/\\/+$/, '');\nconst defaultClinicId = $env.VOICEAI_CLINIC_ID || 'auto';\nconst secret = $env.VOICEAI_N8N_SECRET || '';\n\nconst res = await fetch(`${baseUrl}/api/whatsapp/n8n-webhook/${encodeURIComponent(defaultClinicId)}`, {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    ...(secret ? { 'X-Webhook-Secret': secret } : {})\n  },\n  body: JSON.stringify(body)\n});\nconst data = await res.json().catch(() => ({}));\nreturn [{ json: { status: res.status, response: data } }];"
       },
       "id": "forward-to-voiceai",
       "name": "Forward to VoiceAI Inbound",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [760, 380]
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 380]
     }
   ],
   "connections": {
     "Meta Webhook Verify (GET)": {
+      "main": [
+        [
+          {
+            "node": "Verify Token with VoiceAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Token with VoiceAI": {
       "main": [
         [
           {
@@ -99,17 +90,6 @@
       ]
     },
     "Meta Webhook Inbound (POST)": {
-      "main": [
-        [
-          {
-            "node": "Normalize & Sign HMAC",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Normalize & Sign HMAC": {
       "main": [
         [
           {
@@ -125,4 +105,3 @@
     "executionOrder": "v1"
   }
 }
-

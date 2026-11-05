@@ -168,7 +168,7 @@ export default function PublicAppointmentResponsePage() {
                       ? '⏳ Erteleme Talebi İletildi'
                       : info.status === 'cancelled'
                         ? '❌ İptal Edildi (Gelemeyeceğim)'
-                        : '📅 Planlandı (Yanıt Bekleniyor)'}
+                        : '📅 Planlandı (Teyit Bekleniyor)'}
                 </span>
               </div>
             </div>

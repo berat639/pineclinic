@@ -123,10 +123,14 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
     const slab = () => ({
       thicknessMm: num('in-thick'),
       mode: $<HTMLInputElement>('in-max').checked ? ('max' as const) : ('mean' as const),
-      trackMandible: $<HTMLInputElement>('in-tracking').checked,
+      trackMandible: jaw() === 'lower' && $<HTMLInputElement>('in-tracking').checked,
     })
     const half = () => num('in-width')
     const crossThickness = () => Number($<HTMLSelectElement>('in-cross-thick')?.value || 2)
+    const updateSliceOutput = (zVal?: number) => {
+      const z = zVal !== undefined ? zVal : num('in-slice')
+      $('o-slice').textContent = volume ? `${z + 1} / ${volume.nz}` : String(z)
+    }
 
     // ---- Bildirimler ve üst bilgi (Toast & Case Info) -------------------------------------------
     let toastTimer = 0
@@ -261,13 +265,56 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
     }
 
     // ---- 1. Panel: Aksiyel Görünüm (Axial) ------------------------------------------------------
+    let axialSlabBuf: Float32Array | null = null
     function drawAxial() {
       if (disposed || !volume) return
-      const z = num('in-slice')
+      const z = Math.max(0, Math.min(volume.nz - 1, num('in-slice')))
+      const slabMm = num('in-arch-slab')
+      const halfSlices = Math.max(0, Math.floor(slabMm / 2 / Math.max(0.1, volume.sz)))
+      const plane = volume.nx * volume.ny
+      let sliceData: Float32Array
+      if (halfSlices <= 0) {
+        sliceData = volume.data.subarray(z * plane, (z + 1) * plane)
+      } else {
+        const z0 = Math.max(0, z - halfSlices)
+        const z1 = Math.min(volume.nz - 1, z + halfSlices)
+        const count = z1 - z0 + 1
+        if (count <= 1) {
+          sliceData = volume.data.subarray(z * plane, (z + 1) * plane)
+        } else {
+          if (!axialSlabBuf || axialSlabBuf.length !== plane) {
+            axialSlabBuf = new Float32Array(plane)
+          }
+          const isMax = $<HTMLInputElement>('in-max')?.checked ?? false
+          if (isMax) {
+            axialSlabBuf.set(volume.data.subarray(z0 * plane, (z0 + 1) * plane))
+            for (let zz = z0 + 1; zz <= z1; zz++) {
+              const offset = zz * plane
+              for (let i = 0; i < plane; i++) {
+                const val = volume.data[offset + i]
+                if (val > axialSlabBuf[i]) axialSlabBuf[i] = val
+              }
+            }
+          } else {
+            axialSlabBuf.fill(0)
+            for (let zz = z0; zz <= z1; zz++) {
+              const offset = zz * plane
+              for (let i = 0; i < plane; i++) {
+                axialSlabBuf[i] += volume.data[offset + i]
+              }
+            }
+            const inv = 1 / count
+            for (let i = 0; i < plane; i++) {
+              axialSlabBuf[i] *= inv
+            }
+          }
+          sliceData = axialSlabBuf
+        }
+      }
       toCanvas(
         cvAxial,
         {
-          data: volume.data.subarray(z * volume.nx * volume.ny, (z + 1) * volume.nx * volume.ny),
+          data: sliceData,
           w: volume.nx,
           h: volume.ny,
         },
@@ -372,9 +419,19 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       if (!volume || !currentArch || !panoGeom) return
       const g = panoGeom
       drawRulers(ctx, g, { color: COLOR.pano })
-      const y = g.top + g.height * (1 - (num('in-slice') + 0.5) / volume.nz)
+      const zCur = num('in-slice')
+      const halfSlabSlices = Math.max(0, Math.floor(num('in-arch-slab') / 2 / Math.max(0.1, volume.sz)))
+      if (halfSlabSlices > 0) {
+        const zTop = Math.min(volume.nz, zCur + halfSlabSlices + 1)
+        const zBot = Math.max(0, zCur - halfSlabSlices)
+        const yTop = g.top + g.height * (1 - zTop / volume.nz)
+        const yBot = g.top + g.height * (1 - zBot / volume.nz)
+        ctx.fillStyle = 'rgba(255, 154, 60, 0.12)'
+        ctx.fillRect(g.left, yTop, g.width, Math.max(1, yBot - yTop))
+      }
+      const y = g.top + g.height * (1 - (zCur + 0.5) / volume.nz)
       ctx.strokeStyle = COLOR.level
-      ctx.lineWidth = 1
+      ctx.lineWidth = 1.5
       ctx.beginPath()
       ctx.moveTo(g.left, y)
       ctx.lineTo(g.left + g.width, y)
@@ -488,6 +545,18 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       const [left, right] = sideLabels(currentArch, sec.s)
       drawOrientation(ctx, g, left, right, COLOR.cross)
       drawCornerText(ctx, g, String(sec.number), COLOR.cross, 'top-center', k === 2 ? 14 : 12, k === 2 ? 1 : 0.85)
+      if (volume.nz > 1) {
+        const yLevel = g.top + (1 - num('in-slice') / (volume.nz - 1)) * g.height
+        ctx.save()
+        ctx.strokeStyle = COLOR.level
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 3])
+        ctx.beginPath()
+        ctx.moveTo(g.left, yLevel)
+        ctx.lineTo(g.left + g.width, yLevel)
+        ctx.stroke()
+        ctx.restore()
+      }
       if (slab().trackMandible && currentArch.panorama) {
         ctx.save()
         ctx.beginPath()
@@ -609,6 +678,13 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       drawAxial()
       drawPano()
       drawCross(false)
+      if (viewer3d) {
+        const { center, width } = windowLevel()
+        const normBrightness = Math.max(0.5, Math.min(1.5, 1 + (500 - center) / 2500))
+        const normOpacity = Math.max(0.2, Math.min(2.0, 2000 / Math.max(200, width)))
+        viewer3d.setBrightness(normBrightness)
+        viewer3d.setOpacity(normOpacity)
+      }
     }
 
     function clearDerivedViews() {
@@ -692,7 +768,12 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
         }
       }
       const detected = findOcclusalSlice(volume, 20)
-      return detected >= 0 ? detected : Math.round(volume.nz * 0.55)
+      const baseSlice = detected >= 0 ? detected : Math.round(volume.nz * 0.55)
+      const jawOffsetSlices = Math.max(2, Math.round(6 / Math.max(0.2, volume.sz || 0.5)))
+      if (targetJaw === 'upper') {
+        return Math.min(volume.nz - 1, baseSlice + jawOffsetSlices)
+      }
+      return Math.max(0, baseSlice - jawOffsetSlices)
     }
 
     let detectToken = 0
@@ -713,20 +794,32 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
         return false
       }
       if (disposed || token !== detectToken || volume !== v) return false
-      if (!result.anyEvidence) {
+      const chosen = result.chosen ?? result.best
+      if (!chosen) {
+        const oppositeJaw: Jaw = jaw() === 'upper' ? 'lower' : 'upper'
+        const fallbackSaved = arches.get(oppositeJaw)
+        if (fallbackSaved?.arch) {
+          currentArch = splineArch(
+            fallbackSaved.controls.map((p) => [...p] as Pt),
+            fallbackSaved.arch.points.length
+          )
+          $<HTMLInputElement>('in-tracking').disabled = !currentArch.panorama
+          seedControls(true)
+          saveJaw()
+          centerS = currentArch.length / 2
+          crossImgs.length = 0
+          refresh()
+          toast(
+            'Bu kesit seviyesinde otomatik ark kanıtı zayıf; mevcut ark eğrisi referans olarak kopyalandı. Sarı noktalarla düzenleyebilirsiniz.',
+            'warn',
+            6000
+          )
+          return true
+        }
         toast(
           'Bu kesit seviyesinde güvenli bir otomatik ark için yeterli diş/kemik kanıtı yok. Aksiyel kesiti değiştirip tekrar deneyin.',
-          'warn'
-        )
-        return false
-      }
-      const chosen = result.chosen
-      if (!chosen) {
-        const ev = result.best?.ev
-        toast(
-          `Bu kesit seviyesinde güvenilir eğri bulunamadı (kanıt desteği %${((ev?.supportFraction ?? 0) * 100).toFixed(0)}). Başka bir kesit seçin veya "Oklüzalden Ark Yenile" (⌁) butonunu kullanın.`,
           'warn',
-          9000
+          6000
         )
         return false
       }
@@ -738,8 +831,17 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       centerS = currentArch.length / 2
       crossImgs.length = 0
       refresh()
-      setCaseInfo(`${caseSummary()} · Kesit ${z + 1} arkı (${num('in-arch-slab')} mm dilim)`)
-      toast(`Seçili aksiyel kesitten (${z + 1}/${v.nz}) ark tespit edildi.`, 'ok', 4500)
+      setCaseInfo(`${caseSummary()} · Kesit ${z + 1}/${v.nz} arkı (${num('in-arch-slab')} mm kalınlık)`)
+      if (!result.chosen) {
+        const ev = result.best?.ev
+        toast(
+          `Yaklaşık ark eğrisi oluşturuldu (kanıt desteği %${((ev?.supportFraction ?? 0) * 100).toFixed(0)}). Sarı kontrol noktalarıyla ince ayar yapabilirsiniz.`,
+          'warn',
+          6500
+        )
+      } else {
+        toast(`Seçili aksiyel kesitten (${z + 1}/${v.nz}) ark tespit edildi.`, 'ok', 4500)
+      }
       return true
     }
 
@@ -759,7 +861,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       )
       if (disposed || token !== detectToken || volume !== v) return false
       if (!result.arch) {
-        toast(`Oklüzal B-spline arch reddedildi: ${result.reason ?? 'yeterli kanıt yok'}.`, 'warn', 9000)
+        toast(`Oklüzal B-spline ark bulunamadı (${result.reason ?? 'yeterli kanıt yok'}), kesit tabanlı arka geçiliyor…`, 'warn', 5000)
         return false
       }
       currentArch = result.arch
@@ -770,14 +872,17 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       centerS = currentArch.length / 2
       crossImgs.length = 0
       refresh()
-      setCaseInfo(`${caseSummary()} · ${jaw() === 'upper' ? 'Üst' : 'Alt'} çene arch'ı (oklüzal B-spline)`)
+      setCaseInfo(`${caseSummary()} · ${jaw() === 'upper' ? 'Üst' : 'Alt'} çene arkı (oklüzal B-spline)`)
       toast(`Oklüzal B-spline uygulandı · kanıt %${(result.assessment!.supportFraction * 100).toFixed(0)}`, 'ok', 5000)
       return true
     }
 
     async function detectArch(): Promise<boolean> {
       if (!volume) return false
-      if (volume.maskSchema === 'dental-segmentator-v1') return detectOcclusalSplineArch()
+      if (volume.maskSchema === 'dental-segmentator-v1') {
+        const ok = await detectOcclusalSplineArch()
+        if (ok) return true
+      }
       return detectSliceArch()
     }
 
@@ -998,7 +1103,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       const slice = $<HTMLInputElement>('in-slice')
       slice.max = String(next.nz - 1)
       slice.value = String(autoSlice())
-      $('o-slice').textContent = slice.value
+      updateSliceOutput()
       setCaseInfo(caseSummary())
       clearDerivedViews()
       drawAxial()
@@ -1343,8 +1448,12 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
         'input',
         () => {
           if (disposed) return
-          const output = root.querySelector<HTMLElement>(`#${id.replace('in-', 'o-')}`)
-          if (output) output.textContent = $<HTMLInputElement>(id).value
+          if (id === 'in-slice') {
+            updateSliceOutput()
+          } else {
+            const output = root.querySelector<HTMLElement>(`#${id.replace('in-', 'o-')}`)
+            if (output) output.textContent = $<HTMLInputElement>(id).value
+          }
           callback()
         },
         { signal }
@@ -1357,6 +1466,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
     bind('in-slice', () => {
       drawAxial()
       drawPanoOverlay()
+      for (let k = 0; k < crossCells.length; k++) drawCrossOverlay(k)
       schedule3d()
     })
     bind('in-thick', () => {
@@ -1369,15 +1479,25 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
     bind('in-ww', windowChanged)
     bind('in-arch-slab', () => {
       if (!volume) return
+      drawAxial()
+      drawPanoOverlay()
       window.clearTimeout(archSlabTimer)
       archSlabTimer = window.setTimeout(() => {
-        void detectSliceArch()
+        if (disposed || !volume) return
+        if (!currentArch) {
+          void detectSliceArch()
+        } else {
+          setCaseInfo(
+            `${caseSummary()} · ${jaw() === 'upper' ? 'Üst' : 'Alt'} çene · Kesit ${num('in-slice') + 1}/${volume.nz} (${num('in-arch-slab')} mm kalınlık)`
+          )
+        }
       }, 260)
     })
     $<HTMLInputElement>('in-max').addEventListener(
       'change',
       () => {
         if (disposed) return
+        drawAxial()
         drawPano()
         drawCross(true)
       },
@@ -1412,24 +1532,51 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       selectedJaw = next
       const slice = $<HTMLInputElement>('in-slice')
       slice.value = String(autoSlice(next))
-      $('o-slice').textContent = slice.value
+      updateSliceOutput()
       loadJaw(next)
       if (!currentArch) {
         clearDerivedViews()
         drawAxial()
         void detectArch()
-      } else refresh()
+      } else {
+        refresh()
+        setCaseInfo(
+          `${caseSummary()} · ${next === 'upper' ? 'Üst' : 'Alt'} çene · Kesit ${num('in-slice') + 1}/${volume.nz}`
+        )
+      }
     }
     $<HTMLSelectElement>('in-wlpreset').addEventListener(
       'change',
       (event) => {
         if (disposed) return
-        const preset = WL_PRESETS[(event.target as HTMLSelectElement).value]
+        const val = (event.target as HTMLSelectElement).value
+        if (val === 'mip') {
+          $<HTMLInputElement>('in-max').checked = true
+          const preset = WL_PRESETS.bone
+          $<HTMLInputElement>('in-wc').value = String(preset.wc)
+          $<HTMLInputElement>('in-ww').value = String(preset.ww)
+          $('o-wc').textContent = String(preset.wc)
+          $('o-ww').textContent = String(preset.ww)
+          $<HTMLSelectElement>('in-preset').value = 'mip'
+          applyViewer3dOptions()
+          refreshWindow()
+          drawCross(true)
+          return
+        }
+        const preset = WL_PRESETS[val]
         if (!preset) return
+        if ($<HTMLInputElement>('in-max').checked && (val === 'bone' || val === 'tooth' || val === 'soft')) {
+          $<HTMLInputElement>('in-max').checked = false
+          drawCross(true)
+        }
         $<HTMLInputElement>('in-wc').value = String(preset.wc)
         $<HTMLInputElement>('in-ww').value = String(preset.ww)
         $('o-wc').textContent = String(preset.wc)
         $('o-ww').textContent = String(preset.ww)
+        if (val === 'bone' || val === 'tooth' || val === 'soft') {
+          $<HTMLSelectElement>('in-preset').value = val
+          applyViewer3dOptions()
+        }
         refreshWindow()
       },
       { signal }
@@ -1639,9 +1786,10 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
         const slice = $<HTMLInputElement>('in-slice'),
           step = (event.shiftKey ? 5 : 1) * (event.deltaY > 0 ? 1 : -1)
         slice.value = String(Math.max(0, Math.min(volume.nz - 1, Number(slice.value) + step)))
-        $('o-slice').textContent = slice.value
+        updateSliceOutput()
         drawAxial()
         drawPanoOverlay()
+        for (let k = 0; k < crossCells.length; k++) drawCrossOverlay(k)
         schedule3d()
       },
       { passive: false, signal }
@@ -1781,10 +1929,10 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
   }, [initialFiles])
 
   return (
-    <div ref={rootRef} className={styles.cbctModalRoot} role="dialog" aria-modal="true" aria-label="3D CBCT Viewer">
+    <div ref={rootRef} className={styles.cbctModalRoot} role="dialog" aria-modal="true" aria-label="3B CBCT Görüntüleyici">
       <header className="topbar">
         <h1>
-          <span className="logo">◖◗</span> 3D CBCT Viewer
+          <span className="logo">◖◗</span> 3B CBCT Görüntüleyici
         </h1>
         <span id="case-info" className="case-info"></span>
         <div className="actions">
@@ -1853,7 +2001,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
             title="Yerel AI ve görüntü işleme servisinin bağlantı durumunu gösterir."
             data-tip="Yerel AI ve görüntü işleme servisinin bağlantı durumunu gösterir."
           >
-            <span id="service-dot" className="service-dot"></span> Local Service
+            <span id="service-dot" className="service-dot"></span> Yerel Servis
           </button>
           <button
             id="btn-close-modal"
@@ -2026,8 +2174,8 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
         </dl>
       </div>
 
-      <div id="service-popover" className="service-popover" hidden role="dialog" aria-label="Local service status">
-        <strong id="sp-state">Offline</strong>
+      <div id="service-popover" className="service-popover" hidden role="dialog" aria-label="Yerel servis durumu">
+        <strong id="sp-state">Çevrimdışı</strong>
         <dl>
           <dt>Adres</dt>
           <dd id="sp-address">—</dd>
@@ -2099,14 +2247,14 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       </section>
 
       <main className="grid" id="viewer" hidden>
-        <section className="panel" id="panel-axial" aria-label="Axial">
-          <div className="tools" aria-label="Axial tools">
+        <section className="panel" id="panel-axial" aria-label="Aksiyel Kesit">
+          <div className="tools" aria-label="Aksiyel araçlar">
             <button
               type="button"
               className="tool"
               data-pop="pop-axial"
-              title="Çene seçimi, kontrast, kesit numarası ve kesit arama kalınlığı ayarlarını açar."
-              data-tip="Çene seçimi, kontrast, kesit numarası ve kesit arama kalınlığı ayarlarını açar."
+              title="Çene seçimi, pencere/kontrast, aksiyel kesit ve kesit kalınlığı ayarlarını açar."
+              data-tip="Çene seçimi, pencere/kontrast, aksiyel kesit ve kesit kalınlığı ayarlarını açar."
             >
               ◐
             </button>
@@ -2144,8 +2292,8 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           </div>
         </section>
 
-        <section className="panel" id="panel-pano" aria-label="Panoramic">
-          <div className="tools" aria-label="Panoramic tools">
+        <section className="panel" id="panel-pano" aria-label="Panoramik">
+          <div className="tools" aria-label="Panoramik araçlar">
             <button
               type="button"
               className="tool"
@@ -2172,8 +2320,8 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           </div>
         </section>
 
-        <section className="panel" id="panel-3d" aria-label="3D volume">
-          <div className="tools" aria-label="3D tools">
+        <section className="panel" id="panel-3d" aria-label="3B Hacim">
+          <div className="tools" aria-label="3B araçlar">
             <button
               type="button"
               className="tool"
@@ -2252,8 +2400,8 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           </div>
         </section>
 
-        <section className="panel" id="panel-cross" aria-label="Cross-sections">
-          <div className="tools" aria-label="Cross-section tools">
+        <section className="panel" id="panel-cross" aria-label="Çapraz Kesitler">
+          <div className="tools" aria-label="Çapraz kesit araçları">
             <button
               type="button"
               className="tool"
@@ -2270,45 +2418,46 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
 
       <div className="popover" id="pop-axial" hidden>
         <label>
-          Çene{' '}
+          Çene Seçimi{' '}
           <select id="in-jaw" defaultValue="lower">
-            <option value="lower">Alt</option>
-            <option value="upper">Üst</option>
+            <option value="lower">Alt Çene (Mandibula)</option>
+            <option value="upper">Üst Çene (Maksilla)</option>
           </select>
         </label>
         <label>
-          Pencere ön ayarı
+          Pencere Ön Ayarı
           <select id="in-wlpreset" defaultValue="bone">
             <option value="bone">Kemik</option>
-            <option value="tooth">Diş</option>
-            <option value="soft">Yumuşak doku</option>
+            <option value="tooth">Diş / Mine</option>
+            <option value="soft">Yumuşak Doku</option>
+            <option value="mip">MIP (Maks. Yoğunluk)</option>
             <option value="custom">Özel</option>
           </select>
         </label>
         <label>
-          Window center <output id="o-wc">500</output>
+          Pencere Merkezi (Parlaklık) <output id="o-wc">500</output>
           <input id="in-wc" type="range" min="-500" max="2500" defaultValue="500" />
         </label>
         <label>
-          Window width <output id="o-ww">2000</output>
+          Pencere Genişliği (Kontrast) <output id="o-ww">2000</output>
           <input id="in-ww" type="range" min="100" max="4000" defaultValue="2000" />
         </label>
         <label>
-          Aksiyel kesit <output id="o-slice">0</output>
+          Aksiyel Kesit <output id="o-slice">0</output>
           <input id="in-slice" type="range" min="0" max="0" defaultValue="0" />
         </label>
         <label>
-          Kesit arama kalınlığı (mm) <output id="o-arch-slab">10</output>
-          <input id="in-arch-slab" type="range" min="2" max="40" defaultValue="10" />
+          Kesit Kalınlığı (mm) <output id="o-arch-slab">10</output>
+          <input id="in-arch-slab" type="range" min="1" max="40" defaultValue="10" />
         </label>
       </div>
       <div className="popover" id="pop-pano" hidden>
         <label>
-          Panorama kalınlığı (mm) <output id="o-thick">20</output>
+          Panorama Kalınlığı (mm) <output id="o-thick">20</output>
           <input id="in-thick" type="range" min="0" max="35" defaultValue="20" step="0.5" />
         </label>
         <label className="inline">
-          <input id="in-max" type="checkbox" /> MIP (ortalama yerine)
+          <input id="in-max" type="checkbox" /> MIP (Maksimum Yoğunluk)
         </label>
         <label className="inline">
           <input id="in-tracking" type="checkbox" defaultChecked disabled /> Alt çene gövdesini takip et
@@ -2317,7 +2466,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       </div>
       <div className="popover" id="pop-cross" hidden>
         <label>
-          Kesit aralığı
+          Kesit Aralığı
           <select id="in-spacing" defaultValue="1">
             <option value="0.5">0.5 mm</option>
             <option value="1">1 mm</option>
@@ -2326,7 +2475,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           </select>
         </label>
         <label>
-          Kesit yarı genişliği
+          Kesit Yarı Genişliği
           <select id="in-width" defaultValue="20">
             <option value="10">±10 mm</option>
             <option value="15">±15 mm</option>
@@ -2335,7 +2484,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           </select>
         </label>
         <label>
-          Kesit kalınlığı
+          Kesit Kalınlığı
           <select id="in-cross-thick" defaultValue="2">
             <option value="0.5">0.5 mm</option>
             <option value="1">1 mm</option>
@@ -2346,13 +2495,13 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
       </div>
       <div className="popover" id="pop-3d" hidden>
         <label>
-          Görünüm
+          Görünüm Ön Ayarı
           <select id="in-preset" defaultValue="bone">
             <option value="bone">Kemik / Diş</option>
-            <option value="tooth">Diş (mine)</option>
-            <option value="soft">Yumuşak doku + kemik</option>
-            <option value="mip">MIP</option>
-            <option value="xray">X-Ray</option>
+            <option value="tooth">Diş (Mine)</option>
+            <option value="soft">Yumuşak Doku + Kemik</option>
+            <option value="mip">MIP (Maks. Yoğunluk)</option>
+            <option value="xray">Röntgen (X-Ray)</option>
           </select>
         </label>
         <label>
@@ -2367,7 +2516,7 @@ export default function DentalCprViewerModal({ onClose, initialFiles }: DentalCp
           <input id="in-clip" type="checkbox" /> Çene bölgesine kırp
         </label>
         <label className="inline">
-          <input id="in-g-arch" type="checkbox" /> Arch eğrisi
+          <input id="in-g-arch" type="checkbox" /> Ark eğrisi
         </label>
         <label className="inline">
           <input id="in-g-planes" type="checkbox" /> Kesit düzlemleri

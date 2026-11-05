@@ -158,6 +158,30 @@ async function handleToolCall(
     case 'randevuDurumBildir': return post('/api/tools/appointment-status', args)
     case 'randevuMusaitlikKontrol': return post('/api/tools/check-availability', args)
     case 'gecmisRandevular': return post('/api/tools/customer-query', { telefon: args.telefon })
+    case 'aramaAktar':
+    case 'whatsappKonumGonder':
+    case 'cagriySonlandir': {
+      if (flowSession) {
+        try {
+          const response = await fetch(`/api/flow-sessions/${flowSession.id}/actions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-flow-session-key': flowSession.token },
+            body: JSON.stringify({ name, args }),
+          })
+          return await response.json()
+        } catch {
+          return { success: false, message: 'İşlem şu anda tamamlanamadı.' }
+        }
+      }
+      if (name === 'aramaAktar') {
+        const hedef = String(args.hedef || 'yetkili birim')
+        return { success: true, message: `Görüşmeniz ${hedef} birimine aktarılıyor, lütfen hattan ayrılmayın.` }
+      }
+      if (name === 'whatsappKonumGonder') {
+        return { success: true, message: 'Klinik konumu WhatsApp üzerinden paylaşıldı.' }
+      }
+      return { success: true, message: 'Görüşme sonlandırılıyor.' }
+    }
     case 'havaDurumuSorgula': return { success: true, sehir: String(args.sehir || 'Ankara'), sicaklik: '21°C', durum: 'açık ve güneşli', message: `${String(args.sehir || 'Ankara')}'da hava şu an yaklaşık 21 derece, açık ve güneşli.` }
     default: return { error: `Bilinmeyen araç: ${name}` }
   }
@@ -389,22 +413,39 @@ export class AiLiveSession {
           },
         })
 
+        const candidateParts = (response.candidates?.[0]?.content?.parts ?? []) as Array<Record<string, unknown>>
         const functionCalls = response.functionCalls ?? []
         if (functionCalls.length === 0) {
           const answer = response.text?.trim()
+          if (candidateParts.length > 0) {
+            this.textHistory.push({
+              role: 'model',
+              parts: candidateParts.map(part => ({ ...part })),
+            })
+          } else if (answer) {
+            this.textHistory.push({
+              role: 'model',
+              parts: [{ text: answer }],
+            })
+          }
           if (answer) this.callbacks.onText(answer)
           this.callbacks.onTurnComplete()
           return
         }
 
+        // Preserve exact candidate.content.parts so thought: true and
+        // thoughtSignature / thought_signature on functionCall parts are kept.
         this.textHistory.push({
           role: 'model',
-          parts: functionCalls.map(call => ({
-            functionCall: { name: call.name, args: call.args ?? {} },
-          })),
+          parts: candidateParts.length > 0
+            ? candidateParts.map(part => ({ ...part }))
+            : functionCalls.map(call => ({
+                functionCall: { name: call.name, args: call.args ?? {} },
+              })),
         })
 
         const results = await Promise.all(functionCalls.map(async (call) => ({
+          ...(call.id ? { id: call.id } : {}),
           name: call.name,
           response: await this.runTool(call.name ?? '', (call.args ?? {}) as Record<string, unknown>),
         })))

@@ -14,7 +14,7 @@
  */
 import { getActiveApiBase, type ServiceLink } from './service';
 import { formatDisplayPatientName } from './turkishNameSplitter';
-import { formatDicomDateWithDayjs, type DicomMeta } from './volume';
+import { formatDicomDateWithDayjs, formatDicomSexLabel, type DicomMeta } from './volume';
 
 const $ = <T extends HTMLElement>(id: string, root: ParentNode = document) =>
   (root.querySelector(`#${id}`) ?? document.getElementById(id)) as T;
@@ -344,15 +344,15 @@ export function updatePatientMetaUi(meta?: DicomMeta, root: ParentNode = documen
 
   const birthFormatted = val(meta.birthDate) === '—'
     ? '—'
-    : (/\d{8}/.test(meta.birthDate) ? formatDicomDateWithDayjs(meta.birthDate) : meta.birthDate);
+    : formatDicomDateWithDayjs(meta.birthDate);
   const studyFormatted = val(meta.studyDate) === '—'
     ? '—'
-    : (/^\d{6,8}$/.test(meta.studyDate) ? formatDicomDateWithDayjs(meta.studyDate) : meta.studyDate);
+    : formatDicomDateWithDayjs(meta.studyDate);
 
   set('pm-name', formatDisplayPatientName(meta.patientName));
   set('pm-id', val(meta.patientId));
   set('pm-birth', birthFormatted);
-  set('pm-sex', val(meta.sex));
+  set('pm-sex', formatDicomSexLabel(meta.sex));
   set('pm-date', studyFormatted);
   set('pm-device', val(meta.device));
   set('pm-clinic', val(meta.clinic));

@@ -1,15 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, CheckSquare, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import PlanDialog from './PlanDialog'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
-import { formatToothRegionLabel } from './ToothAnatomy2D'
+import {
+  ALL_TOOTH_REGION_IDS,
+  formatToothRegionLabel,
+  formatToothRegionShortLabel,
+  parseToothRegions,
+  serializeToothRegions,
+  type ToothRegion,
+} from './ToothAnatomy2D'
 import styles from './PineTreatmentPlan.module.css'
 
 type Menu = { x: number; y: number; teeth: number[] }
 
 export type SurfaceCode = 'O' | 'M' | 'D' | 'B' | 'L'
-export type SubLayerCode = 'enamel' | 'pulp' | 'root-canal'
+export type SubLayerCode = ToothRegion
 
 export const DENTAL_SURFACES: Array<{
   code: SurfaceCode
@@ -31,8 +38,15 @@ export const DENTAL_SUBLAYERS: Array<{
   color: string
 }> = [
   { id: 'enamel', label: 'Mine', shortDesc: 'Dış koruyucu mine tabakası', color: '#38bdf8' },
+  { id: 'dentin', label: 'Dentin', shortDesc: 'Orta sert diş dokusu', color: '#f59e0b' },
   { id: 'pulp', label: 'Pulpa', shortDesc: 'Merkez sinir ve damar odası', color: '#e11d48' },
   { id: 'root-canal', label: 'Kök Kanalı', shortDesc: 'Kök içi kanal sistemi', color: '#8b5cf6' },
+  { id: 'crown', label: 'Taç (Kuron)', shortDesc: 'Ağız içi görünür kuron', color: '#0284c7' },
+  { id: 'neck', label: 'Boyun (Kole)', shortDesc: 'Servikal geçiş hattı', color: '#06b6d4' },
+  { id: 'root', label: 'Kök', shortDesc: 'Diş kök gövdesi', color: '#a16207' },
+  { id: 'apex', label: 'Kök Ucu', shortDesc: 'Apikal foramen bölgesi', color: '#be123c' },
+  { id: 'gingiva', label: 'Diş Eti', shortDesc: 'Yumuşak diş eti dokusu', color: '#ec4899' },
+  { id: 'jaw-bone', label: 'Çene Kemiği', shortDesc: 'Alveol destek kemiği', color: '#d97706' },
 ]
 
 /**
@@ -125,8 +139,8 @@ export function SurfaceSvgIcon({
 }
 
 /**
- * 20x20 Özel Anatomik Diş Kesiti (Mine / Pulpa / Kök Kanalı) SVG İkonu
- * Gerçek diş kron+kök silüeti içinde ilgili katman kendi klinik rengiyle vurgulanır.
+ * 20x20 Özel Anatomik Diş Kesiti SVG İkonu
+ * Gerçek diş kron+kök silüeti içinde ilgili alt katman kendi klinik rengiyle vurgulanır.
  */
 export function AnatomyLayerSvgIcon({
   layer,
@@ -164,6 +178,18 @@ export function AnatomyLayerSvgIcon({
           fillRule="evenodd"
           d="M 5.5 11.2 C 4.6 9.5 4.2 7.6 4.5 5.6 C 4.8 3.6 6.5 2.3 8.6 2.4 C 10.1 2.5 11.1 3.5 12 3.5 C 12.9 3.5 13.9 2.5 15.4 2.4 C 17.5 2.3 19.2 3.6 19.5 5.6 C 19.8 7.6 19.4 9.5 18.5 11.2 L 16.5 10.5 C 17.2 9.1 17.4 7.5 17.2 6.0 C 16.9 4.7 15.9 4.1 14.8 4.2 C 13.7 4.3 12.9 5.2 12 5.2 C 11.1 5.2 10.3 4.3 9.2 4.2 C 8.1 4.1 7.1 4.7 6.8 6.0 C 6.6 7.5 6.8 9.1 7.5 10.5 Z"
           fill={color}
+          stroke={color}
+          strokeWidth="0.9"
+          strokeLinejoin="round"
+        />
+      )}
+
+      {/* Dentin katmanı (Orta sert doku) */}
+      {layer === 'dentin' && (
+        <path
+          d="M 7.1 10.6 C 6.6 9.1 6.5 7.4 6.8 5.9 C 7.1 4.6 8.1 4.0 9.2 4.1 C 10.3 4.2 11.1 5.1 12 5.1 C 12.9 5.1 13.7 4.2 14.8 4.1 C 15.9 4.0 16.9 4.6 17.2 5.9 C 17.5 7.4 17.4 9.1 16.9 10.6 C 16.5 13.4 16.1 16.1 15.2 18.6 L 13.4 14.2 C 12.7 12.8 11.3 12.8 10.6 14.2 L 8.8 18.6 C 7.9 16.1 7.5 13.4 7.1 10.6 Z"
+          fill={color}
+          fillOpacity="0.85"
           stroke={color}
           strokeWidth="0.9"
           strokeLinejoin="round"
@@ -208,6 +234,68 @@ export function AnatomyLayerSvgIcon({
           <circle cx="8.4" cy="20.1" r="1.45" fill={color} />
           <circle cx="15.6" cy="20.1" r="1.45" fill={color} />
         </>
+      )}
+
+      {/* Taç / Kuron (Üst kuron gövdesi) */}
+      {layer === 'crown' && (
+        <path
+          d="M 5.5 11.2 C 4.6 9.5 4.2 7.6 4.5 5.6 C 4.8 3.6 6.5 2.3 8.6 2.4 C 10.1 2.5 11.1 3.5 12 3.5 C 12.9 3.5 13.9 2.5 15.4 2.4 C 17.5 2.3 19.2 3.6 19.5 5.6 C 19.8 7.6 19.4 9.5 18.5 11.2 Q 12 12.2 5.5 11.2 Z"
+          fill={color}
+          fillOpacity="0.88"
+          stroke={color}
+          strokeWidth="1.1"
+        />
+      )}
+
+      {/* Boyun / Kole (Servikal geçiş kuşağı) */}
+      {layer === 'neck' && (
+        <path
+          d="M 5.2 11.0 Q 12 12.4 18.8 11.0"
+          stroke={color}
+          strokeWidth="3.2"
+          strokeLinecap="round"
+        />
+      )}
+
+      {/* Kök (Alt kök çatalları) */}
+      {layer === 'root' && (
+        <path
+          d="M 5.6 11.4 Q 12 12.2 18.4 11.4 C 18.0 14.3 17.5 17.6 16.4 20.6 C 16.0 21.5 15.1 21.5 14.7 20.5 L 13.1 15.4 C 12.6 14.2 11.4 14.2 10.9 15.4 L 9.3 20.5 C 8.9 21.5 8.0 21.5 7.6 20.6 C 6.5 17.6 6.0 14.3 5.6 11.4 Z"
+          fill={color}
+          fillOpacity="0.85"
+          stroke={color}
+          strokeWidth="1"
+        />
+      )}
+
+      {/* Kök Ucu / Apeks */}
+      {layer === 'apex' && (
+        <>
+          <circle cx="8.3" cy="20.3" r="2.3" fill={color} />
+          <circle cx="15.7" cy="20.3" r="2.3" fill={color} />
+        </>
+      )}
+
+      {/* Diş Eti / Gingiva */}
+      {layer === 'gingiva' && (
+        <path
+          d="M 2.5 10.5 Q 6 9.5 9 11.2 L 15 11.2 Q 18 9.5 21.5 10.5 L 21.5 13.5 Q 17.5 12.5 14.5 13.8 L 9.5 13.8 Q 6.5 12.5 2.5 13.5 Z"
+          fill={color}
+          fillOpacity="0.9"
+          stroke={color}
+          strokeWidth="0.9"
+        />
+      )}
+
+      {/* Çene Kemiği / Alveol */}
+      {layer === 'jaw-bone' && (
+        <path
+          d="M 3 13.2 Q 12 14.4 21 13.2 L 21 21.5 Q 12 22.2 3 21.5 Z"
+          fill={color}
+          fillOpacity="0.78"
+          stroke={color}
+          strokeWidth="1"
+        />
       )}
     </svg>
   )
@@ -342,6 +430,10 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
 
   const activeSurfaces = getToothSurfaces(primaryTooth)
   const activeSection = getToothSection(primaryTooth)
+  const activeSubLayers: SubLayerCode[] = parseToothRegions(activeSection)
+  const allSubLayerIds: SubLayerCode[] = DENTAL_SUBLAYERS.map(l => l.id)
+  const isAllSubLayersSelected =
+    allSubLayerIds.length > 0 && allSubLayerIds.every(id => activeSubLayers.includes(id))
 
   const applySurfacesToMenuTeeth = (nextSurfaces: string[]) => {
     const nextMap = { ...localSurfacesMap }
@@ -378,13 +470,13 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
     applySurfacesToMenuTeeth(nextSurfaces)
   }
 
-  const toggleSubLayer = (layerId: SubLayerCode) => {
-    const nextSection = activeSection === layerId ? null : layerId
+  const applySubLayersToMenuTeeth = (nextLayers: SubLayerCode[]) => {
+    const serialized = serializeToothRegions(nextLayers)
     const nextMap = { ...localSectionsMap }
     for (const rawTooth of menu.teeth) {
       const t = Number(rawTooth)
-      nextMap[t] = nextSection
-      p.updateSection?.(t, nextSection)
+      nextMap[t] = serialized
+      p.updateSection?.(t, serialized)
     }
     setLocalSectionsMap(nextMap)
     if (!p.updateSection && p.setDrafts) {
@@ -395,12 +487,28 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
           if (Array.isArray(next[t])) {
             next[t] = next[t].map((item: any) => ({
               ...item,
-              section: nextSection || undefined,
+              section: serialized || undefined,
             }))
           }
         }
         return next
       })
+    }
+  }
+
+  const toggleSubLayer = (layerId: SubLayerCode) => {
+    const exists = activeSubLayers.includes(layerId)
+    const nextLayers = exists
+      ? activeSubLayers.filter(id => id !== layerId)
+      : [...activeSubLayers, layerId]
+    applySubLayersToMenuTeeth(nextLayers)
+  }
+
+  const toggleAllSubLayers = () => {
+    if (isAllSubLayersSelected) {
+      applySubLayersToMenuTeeth([])
+    } else {
+      applySubLayersToMenuTeeth(allSubLayerIds)
     }
   }
 
@@ -540,7 +648,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
           }}
         >
           <span>Seçili Dişler: #{menu.teeth.join(', #')}</span>
-          {(activeSurfaces.length > 0 || activeSection) && (
+          {(activeSurfaces.length > 0 || activeSubLayers.length > 0) && (
             <span
               style={{
                 padding: '2px 6px',
@@ -551,7 +659,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
                 fontWeight: 800,
               }}
             >
-              {[activeSurfaces.join(''), formatToothRegionLabel(activeSection)]
+              {[activeSurfaces.join(''), formatToothRegionShortLabel(activeSubLayers)]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
@@ -575,7 +683,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
                 <span>{assignedDrafts.length}</span>
               </div>
               {assignedDrafts.map(entry => {
-                const badgeText = [entry.surface, formatToothRegionLabel(entry.section)]
+                const badgeText = [entry.surface, formatToothRegionShortLabel(entry.section)]
                   .filter(Boolean)
                   .join('·')
                 return (
@@ -789,7 +897,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
             </button>
           </div>
 
-          {/* Bölüm 2: Alt Katmanlar (Anatomik Katmanlar) */}
+          {/* Bölüm 2: Alt Katmanlar (Anatomik Katmanlar — Çoklu Seçim + Tümünü Seç) */}
           <div
             className={styles.menuSection}
             style={{
@@ -798,22 +906,97 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 6,
             }}
           >
             <span>Alt Katmanlar (Anatomik)</span>
-            {activeSection && (
-              <span style={{ fontWeight: 800, color: 'var(--pc-blue, #0284c7)' }}>
-                {formatToothRegionLabel(activeSection)}
+            {activeSubLayers.length > 0 && (
+              <span
+                style={{
+                  fontWeight: 800,
+                  color: 'var(--pc-blue, #0284c7)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: 110,
+                }}
+                title={formatToothRegionLabel(activeSubLayers)}
+              >
+                {formatToothRegionShortLabel(activeSubLayers)}
               </span>
             )}
           </div>
 
+          {/* Alt Katmanlar Hızlı Seçim Çubuğu (Tümünü Seç / Temizle) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 12px 5px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              type="button"
+              aria-pressed={isAllSubLayersSelected}
+              onClick={toggleAllSubLayers}
+              style={{
+                width: 'auto',
+                minHeight: 24,
+                padding: '2px 8px',
+                borderRadius: 6,
+                border: isAllSubLayersSelected
+                  ? '1px solid #1d4ed8'
+                  : '1px solid var(--pc-blue, #0284c7)',
+                background: isAllSubLayersSelected
+                  ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
+                  : 'var(--pc-tint)',
+                color: isAllSubLayersSelected ? '#ffffff' : 'var(--pc-tint-fg)',
+                fontSize: 10.5,
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                boxShadow: isAllSubLayersSelected ? 'var(--pc-clay-primary)' : 'var(--pc-clay-pale)',
+              }}
+            >
+              <CheckSquare size={11} style={{ color: isAllSubLayersSelected ? '#ffffff' : 'var(--pc-tint-fg)' }} />
+              <span style={{ color: isAllSubLayersSelected ? '#ffffff' : 'var(--pc-tint-fg)' }}>
+                {isAllSubLayersSelected ? 'Tümü Seçili' : 'Tümünü Seç'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => applySubLayersToMenuTeeth([])}
+              disabled={activeSubLayers.length === 0}
+              style={{
+                width: 'auto',
+                minHeight: 24,
+                padding: '2px 8px',
+                marginLeft: 'auto',
+                borderRadius: 6,
+                border: '1px solid var(--pc-border, var(--input-border))',
+                background: 'var(--card-bg)',
+                color: 'var(--pc-muted)',
+                fontSize: 10.5,
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              <RotateCcw size={10} />
+              <span>Temizle</span>
+            </button>
+          </div>
+
           {DENTAL_SUBLAYERS.map(layer => {
-            const isSelected = activeSection === layer.id
+            const isSelected = activeSubLayers.includes(layer.id)
             return (
               <button
                 type="button"
-                role="menuitemradio"
+                role="menuitemcheckbox"
                 aria-checked={isSelected}
                 key={layer.id}
                 onClick={() => toggleSubLayer(layer.id)}
@@ -863,6 +1046,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
                 type="button"
                 className={`${styles.button} ${styles.primary}`}
                 onClick={() => {
+                  const serializedSec = serializeToothRegions(activeSubLayers)
                   if (p.onAddProcedure) {
                     p.onAddProcedure(p.selectedProcedure)
                   } else if (p.add) {
@@ -871,7 +1055,7 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
                       indications: p.selectedIndications || [],
                       activeMaterials: p.selectedMaterials || p.selectedProcedure.materials || [],
                       surface: activeSurfaces.join('') || undefined,
-                      section: activeSection || undefined,
+                      section: serializedSec || undefined,
                     })
                   }
                   closeMenu()
@@ -911,6 +1095,12 @@ export function PlanToothContextMenu(p: PlanToothContextMenuProps & Record<strin
 export default function PlanToothTools(p: any) {
   const tooth = p.detailTooth
   const items = tooth ? p.drafts[tooth] || [] : []
+  const currentDetailSubLayers: SubLayerCode[] = tooth
+    ? parseToothRegions(p.toothSections?.[tooth])
+    : []
+  const isAllDetailSubLayers =
+    currentDetailSubLayers.length === ALL_TOOTH_REGION_IDS.length
+
   const update = (id: string, values: any) => {
     const targetItem = items.find((item: any) => item.id === id)
     if (targetItem && (targetItem.wasCompleted || targetItem.status === 'completed')) {
@@ -966,11 +1156,43 @@ export default function PlanToothTools(p: any) {
                 </button>
               ))}
             </div>
-            <label htmlFor="tooth-section">Anatomik bölüm</label>
+            <label htmlFor="tooth-section">Alt Katmanlar (Anatomik)</label>
+            <div className={styles.wrapActions} style={{ marginBottom: 6 }}>
+              <button
+                type="button"
+                className={`${styles.button} ${isAllDetailSubLayers ? styles.primary : styles.pale}`}
+                aria-pressed={isAllDetailSubLayers}
+                onClick={() => {
+                  const next = isAllDetailSubLayers ? null : serializeToothRegions(ALL_TOOTH_REGION_IDS)
+                  p.updateSection(Number(tooth), next)
+                }}
+              >
+                {isAllDetailSubLayers ? 'Tümü Seçili' : 'Tümünü Seç'}
+              </button>
+              {DENTAL_SUBLAYERS.map(layer => {
+                const active = currentDetailSubLayers.includes(layer.id)
+                return (
+                  <button
+                    type="button"
+                    key={layer.id}
+                    className={`${styles.button} ${active ? styles.primary : ''}`}
+                    aria-pressed={active}
+                    onClick={() => {
+                      const nextList = active
+                        ? currentDetailSubLayers.filter(id => id !== layer.id)
+                        : [...currentDetailSubLayers, layer.id]
+                      p.updateSection(Number(tooth), serializeToothRegions(nextList))
+                    }}
+                  >
+                    {layer.label}
+                  </button>
+                )
+              })}
+            </div>
             <select
               id="tooth-section"
               className={styles.select}
-              value={p.toothSections[tooth] || ''}
+              value={currentDetailSubLayers[0] || ''}
               onChange={event => p.updateSection(Number(tooth), event.target.value || null)}
             >
               <option value="">Seçilmedi</option>

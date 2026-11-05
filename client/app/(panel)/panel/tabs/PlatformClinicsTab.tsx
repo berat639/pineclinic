@@ -2,10 +2,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { IMaskInput } from 'react-imask'
 import ConfirmModal from '../../../admin/components/ConfirmModal'
+import N8nMetaWhatsAppCard from '../../../admin/components/N8nMetaWhatsAppCard'
 import PlatformSystemPrompts from './PlatformSystemPrompts'
 import styles from './PlatformClinicsTab.module.css'
 
-type Clinic = { id: string; name: string; hostname: string; isActive?: boolean }; type Test = { id: string; kind: string; status: string; message: string | null; revision: number; expiresAt?: string }; type State = { configured: boolean; enabled: boolean; revision: number; health: string; test: Test | null; tests?: Test[]; config?: Record<string, unknown> }; type Integrations = { phone: State; sms: State; smtp: State; connection: { ip: string; port: number; protocol: string } }; type Wa = { connectionState: string; expectedPhone: string | null; numberVerifiedAt: string | null }
+type Clinic = { id: string; name: string; hostname: string; isActive?: boolean }; type Test = { id: string; kind: string; status: string; message: string | null; revision: number; expiresAt?: string }; type State = { configured: boolean; enabled: boolean; revision: number; health: string; test: Test | null; tests?: Test[]; config?: Record<string, unknown> }; type Integrations = { phone: State; sms: State; smtp: State; connection: { ip: string; port: number; protocol: string } }; type Wa = { connectionState: string; expectedPhone: string | null; linkedPhone?: string | null; numberVerifiedAt: string | null; enabled?: boolean; setupStatus?: string }
 type GeminiKeyInfo = { configured: boolean; source: 'clinic' | 'shared' | 'missing'; last4: string | null; updatedAt: string | null; conflict?: boolean }
 type ClinicAdmin = { id: string; email: string; name: string; phone: string | null; role: string; active: boolean; isPlatformAdmin: boolean; createdAt: string }
 type ClinicAdminInvite = { id: string; email: string; name: string; role: string; status: string; expiresAt: string; createdAt: string }
@@ -98,7 +99,7 @@ function DiagnosticAlert({ message, service, smtpState, onQuickFix }: { message:
   )
 }
 
-function Step({ complete, title, detail, action, disabled, onClick, onCancel }: { complete: boolean; title: string; detail: string; action: string; disabled?: boolean; onClick: () => void; onCancel?: () => void }) { const waiting = action === 'Bağlantı bekleniyor'; return <div className={`${styles.step} ${complete ? styles.stepComplete : ''}`}><div><strong>{complete ? 'Tamamlandı' : title}</strong><p>{detail}</p></div>{!complete && <div className={styles.stepActions}>{onCancel && <button type="button" className={styles.removeButton} disabled={disabled} onClick={onCancel}>Testi iptal et</button>}<button type="button" className={waiting ? styles.removeButton : styles.secondaryButton} disabled={waiting ? false : disabled} onClick={onClick}>{waiting ? 'Testi iptal et' : action}</button></div>}</div> }
+function Step({ complete, title, detail, action, disabled, onClick, onCancel, alwaysShowAction }: { complete: boolean; title: string; detail: string; action: string; disabled?: boolean; onClick: () => void; onCancel?: () => void; alwaysShowAction?: boolean }) { const waiting = action === 'Bağlantı bekleniyor'; return <div className={`${styles.step} ${complete ? styles.stepComplete : ''}`}><div><strong>{complete ? `${title} (Kayıtlı)` : title}</strong><p>{detail}</p></div>{(!complete || alwaysShowAction) && <div className={styles.stepActions}>{onCancel && <button type="button" className={styles.removeButton} disabled={disabled} onClick={onCancel}>Testi iptal et</button>}<button type="button" className={waiting ? styles.removeButton : styles.secondaryButton} disabled={waiting ? false : disabled} onClick={onClick}>{waiting ? 'Testi iptal et' : action}</button></div>}</div> }
 
 export default function PlatformClinicsTab() {
   const [clinics, setClinics] = useState<Clinic[]>([]), [selected, setSelected] = useState<string | null>(null), [ints, setInts] = useState<Integrations | null>(null), [wa, setWa] = useState<Wa | null>(null), [geminiKey, setGeminiKey] = useState<GeminiKeyInfo | null>(null), [geminiKeyInput, setGeminiKeyInput] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [error, setError] = useState(''), [name, setName] = useState(''), [host, setHost] = useState(''), [zone, setZone] = useState('Europe/Istanbul'), [waPhone, setWaPhone] = useState(''), [qr, setQr] = useState<string | null>(null)
@@ -116,10 +117,92 @@ export default function PlatformClinicsTab() {
   const loadClinic = useCallback(async (id: string) => { const req = ++serial.current; const [i, w, a, gk] = await Promise.all([api<Integrations>(`/api/platform/clinics/${id}/integrations`), api<Wa>(`/api/platform/clinics/${id}/whatsapp`), api<ClinicAdminsPayload>(`/api/platform/clinics/${id}/admins`), api<GeminiKeyInfo>(`/api/platform/clinics/${id}/gemini-key`).catch(() => ({ configured: false, source: 'missing' as const, last4: null, updatedAt: null }))]); if (req !== serial.current) return; setInts(i); setWa(w); setGeminiKey(gk); setGeminiKeyInput(''); setClinicAdmins(a.admins || []); setAdminInvites((a.invitations || []).filter(inv => inv.status === 'pending')); setAdminSmtp({ ready: Boolean(a.smtpStatus?.ready), message: a.smtpStatus?.message || '' }); setWaPhone(national(w.expectedPhone || '')); const p = i.phone.config || {}, s = i.sms.config || {}, m = i.smtp.config || {}; setPhone(x => ({ ...x, password: '', username: String(p.username || ''), numbers: Array.isArray(p.numbers) && p.numbers.length ? p.numbers.map(v => national(String(v))) : [''], callerId: national(String(p.callerId || '')), transferNumber: national(String(p.transferNumber || '')) })); setSms(x => ({ ...x, password: '', username: String(s.username || ''), senderId: String(s.senderId || '') })); setSmtp(x => ({ ...x, password: '', host: String(m.host || ''), port: String(m.port || 465), username: String(m.username || ''), secure: String(m.secure || (Number(m.port || 465) === 465 ? 'ssl' : 'tls')), fromName: String(m.fromName || ''), fromAddress: String(m.fromAddress || '') })) }, [])
   useEffect(() => { void load().catch(e => setError(e.message)) }, [load]); const choose = (id: string) => { setSelected(id); setInts(null); setQr(null); void loadClinic(id).catch(e => setError(e.message)) }
   // Refresh status without resetting unsaved configuration or WhatsApp state.
-  useEffect(() => { if (!selected) return; let cancelled = false; let running = false; const timer = setInterval(async () => { if (running) return; running = true; const req = serial.current; try { const next = await api<Integrations>(`/api/platform/clinics/${selected}/integrations`); if (!cancelled && req === serial.current) setInts(next) } catch { } finally { running = false } }, 3000); return () => { cancelled = true; clearInterval(timer) } }, [selected])
+  useEffect(() => {
+    if (!selected) return
+    let cancelled = false
+    let running = false
+    const timer = setInterval(async () => {
+      if (running) return
+      running = true
+      const req = serial.current
+      try {
+        const next = await api<Integrations>(`/api/platform/clinics/${selected}/integrations`)
+        if (!cancelled && req === serial.current) setInts(next)
+        if (qr || wa?.connectionState === 'connecting') {
+          const nextWa = await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`)
+          if (!cancelled && req === serial.current) {
+            setWa(nextWa)
+            if (nextWa.expectedPhone && !waPhone) setWaPhone(national(nextWa.expectedPhone))
+            if (nextWa.connectionState === 'open' && qr) {
+              setQr(null)
+              setNotice('WhatsApp karekodu okutuldu ve bağlantı kuruldu. "Gönderimleri etkinleştir" butonuna basabilirsiniz.')
+            }
+          }
+        }
+      } catch {
+      } finally {
+        running = false
+      }
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [selected, qr, wa?.connectionState, waPhone])
   const save = async (service: 'phone' | 'sms' | 'smtp', body: Record<string, unknown>) => { if (!selected || !ints) return; await api(`/api/platform/clinics/${selected}/integrations/${service}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, revision: ints[service].revision }) }); await loadClinic(selected); setNotice('Kaydedildi. Sıradaki test adımına geçebilirsiniz.') }
   const cancelActiveTest = async (service: 'phone' | 'sms' | 'smtp', testId: string) => { if (!selected) return; await api(`/api/platform/clinics/${selected}/integrations/${service}/tests/${testId}/cancel`, { method: 'POST' }); await loadClinic(selected); setNotice('Bekleyen test iptal edildi. Yeni test başlatabilirsiniz.') }
-  const test = async (service: 'phone' | 'sms' | 'smtp', target: string, kind = 'delivery') => { if (!selected || !ints) return; const active = current(ints[service], kind); if (active?.status === 'accepted') { await cancelActiveTest(service, active.id); return } if (service === 'sms' && !validMobile(target)) throw new Error('Test için kendi cep telefonunuzu +90 (5__) ___ __ __ biçiminde girin.'); if (service === 'phone' && !validPhone(target)) throw new Error('Test için geçerli bir telefon numarasını +90 (___) ___ __ __ biçiminde girin.'); const r = await api<Test>(`/api/platform/clinics/${selected}/integrations/${service}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: ints[service].revision, target: service === 'smtp' ? target : e164(target), kind, operationId: crypto.randomUUID() }) }); await loadClinic(selected); if (r.status === 'failed') setError(r.message || 'Test başarısız oldu.'); else setNotice(r.message || 'Test başlatıldı.') }
+  const test = async (service: 'phone' | 'sms' | 'smtp', target: string, kind = 'delivery') => {
+    if (!selected || !ints) return
+    const active = current(ints[service], kind)
+    if (active?.status === 'accepted') { await cancelActiveTest(service, active.id); return }
+    if (service === 'sms' && !validMobile(target)) throw new Error('Test için kendi cep telefonunuzu +90 (5__) ___ __ __ biçiminde girin.')
+    if (service === 'phone' && !validPhone(target)) throw new Error('Test için geçerli bir telefon numarasını +90 (___) ___ __ __ biçiminde girin.')
+    let currentRevision = ints[service].revision
+    if (service === 'smtp') {
+      const m = ints.smtp.config || {}
+      const smtpDirty =
+        Boolean(smtp.password.trim()) ||
+        smtp.host.trim() !== String(m.host || '') ||
+        String(Number(smtp.port || 465)) !== String(m.port || 465) ||
+        smtp.username.trim() !== String(m.username || '') ||
+        (smtp.fromAddress.trim() || smtp.username.trim()) !== String(m.fromAddress || '') ||
+        smtp.fromName.trim() !== String(m.fromName || '')
+      if (smtpDirty) {
+        const saved = await api<{ ok: boolean; revision?: number }>(`/api/platform/clinics/${selected}/integrations/smtp`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...smtp,
+            port: Number(smtp.port),
+            secure: Number(smtp.port) === 465 ? 'ssl' : 'tls',
+            fromAddress: smtp.fromAddress || smtp.username,
+            revision: currentRevision,
+          }),
+        })
+        if (typeof saved.revision === 'number') currentRevision = saved.revision
+        else currentRevision += 1
+      }
+    } else if (service === 'sms') {
+      const s = ints.sms.config || {}
+      const smsDirty =
+        Boolean(sms.password.trim()) ||
+        sms.username.trim() !== String(s.username || '') ||
+        sms.senderId.trim() !== String(s.senderId || '')
+      if (smsDirty) {
+        const saved = await api<{ ok: boolean; revision?: number }>(`/api/platform/clinics/${selected}/integrations/sms`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sms, revision: currentRevision }),
+        })
+        if (typeof saved.revision === 'number') currentRevision = saved.revision
+        else currentRevision += 1
+      }
+    }
+    const r = await api<Test>(`/api/platform/clinics/${selected}/integrations/${service}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: currentRevision, target: service === 'smtp' ? target : e164(target), kind, operationId: crypto.randomUUID() }) })
+    await loadClinic(selected)
+    if (r.status === 'failed') setError(r.message || 'Test başarısız oldu.')
+    else setNotice(r.message || 'Test başlatıldı.')
+  }
   const confirm = async (service: 'phone' | 'sms' | 'smtp', id: string) => { if (!selected) return; await api(`/api/platform/clinics/${selected}/integrations/${service}/tests/${id}/confirm`, { method: 'POST' }); await loadClinic(selected); setNotice('Test doğrulandı. Sıradaki adıma geçebilirsiniz.') }; const toggle = async (service: 'phone' | 'sms' | 'smtp') => { if (!selected || !ints) return; const active = !ints[service].enabled; await api(`/api/platform/clinics/${selected}/integrations/${service}/${active ? 'activate' : 'deactivate'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: ints[service].revision }) }); await loadClinic(selected); setNotice(active ? 'Entegrasyon etkinleştirildi.' : 'Yeni kullanım kapatıldı.') }; const removeIntegration = async (service: 'phone' | 'sms' | 'smtp') => { if (!selected) return; await api(`/api/platform/clinics/${selected}/integrations/${service}`, { method: 'DELETE' }); if (service === 'phone') setPhone({ username: '', password: '', numbers: [''], callerId: '', transferNumber: '', target: '' }); await loadClinic(selected); setNotice('Klinik telefon numarası ve bağlantısı silindi. Numarayı başka bir kliniğe ekleyebilirsiniz.') }
   const executeClinicStatusChange = async (targetClinic: Clinic, nextActive: boolean) => {
     await run(async () => {
@@ -434,9 +517,125 @@ export default function PlatformClinicsTab() {
           </div>
         </div>
       </section>
-      <section className={styles.card}><h2 className={styles.title}>{clinic?.name} · Netgsm telefon</h2><p className={styles.description}>Netgsm paneline: {ints.connection.ip || 'IP yapılandırılmamış'} · {ints.connection.port} · {ints.connection.protocol}</p><div className={styles.setupGrid}><Field label="SIP kullanıcı adı"><input value={phone.username} onChange={e => setPhone(v => ({ ...v, username: e.target.value }))} /></Field><Field label="SIP parolası" help={phoneSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : 'Netgsm SIP parolasını girin.'}><input type="password" autoComplete="new-password" placeholder={phoneSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'SIP parolası'} value={phone.password} onChange={e => setPhone(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Gelen numaralar" help="0850 sabit hat veya mobil numara girin. Örnek: +90 (850) 309 61 19."><PhoneList values={phone.numbers} canRemoveLast={ints.phone.configured} onRemoveLast={() => void run(() => removeIntegration('phone'))} onChange={numbers => setPhone(v => { const nextCaller = numbers.some(n => national(n) === national(v.callerId)) ? v.callerId : (numbers.find(Boolean) || ''); return { ...v, numbers, callerId: nextCaller } })} /></Field><Field label="Çıkış numarası" help="Gelen numaralardan biri olmalı; arayanlarda görünecek klinik hattıdır."><PhoneInput value={phone.callerId} onChange={callerId => setPhone(v => ({ ...v, callerId }))} /></Field><Field label="Aktarım numarası" help="Flow Builder hedefiyle aynı olmalı; 0850 veya mobil numara olabilir, zorunlu değildir."><PhoneInput value={phone.transferNumber} onChange={transferNumber => setPhone(v => ({ ...v, transferNumber }))} /></Field><Field label="Test numarası" help="Test araması yapılacak cep veya sabit telefon numarasını girin (+90 5XX... önerilir)."><PhoneInput value={phone.target} onChange={target => setPhone(v => ({ ...v, target }))} /></Field></div>{phoneFailedMsg && <DiagnosticAlert message={phoneFailedMsg} service="phone" />}<div className={styles.steps}><Step complete={ints.phone.configured} title="1. Bilgileri kaydedin" detail={phoneValid ? 'Ayarlar kaydedildi; gelen veya giden çağrı testini başlatabilirsiniz.' : 'Tüm telefon numaralarını eksiksiz girin.'} action="Kaydet" disabled={busy || !phoneValid} onClick={() => void run(() => save('phone', { ...phone, numbers: phone.numbers.map(e164), callerId: e164(phone.callerId), transferNumber: phone.transferNumber ? e164(phone.transferNumber) : '' }))} /><Step complete={Boolean(inbound?.status === 'confirmed')} title="2. Gelen çağrıyı test edin" detail={inbound?.status === 'accepted' ? '15 dakika içinde test telefonundan klinik hattını arayın. Bağlantı otomatik doğrulanır.' : 'Gelen çağrı testini başlatıp klinik hattını arayın.'} action={inbound?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Gelen çağrı testi başlat'} disabled={busy || inbound?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'inbound'))} /><Step complete={Boolean(outbound?.status === 'confirmed')} title="3. Giden çağrıyı test edin" detail={outbound?.status === 'accepted' ? 'Telefonunuz çaldığında açın. Bağlantı otomatik doğrulanır.' : 'Klinik hattından test numarasına giden aramayı başlatın.'} action={outbound?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Giden çağrı testi başlat'} disabled={busy || outbound?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'outbound'))} />{phone.transferNumber && <Step complete={Boolean(transfer?.status === 'confirmed')} title="4. Aktarımı test edin" detail={transfer?.status === 'accepted' ? 'Aktarım hedefi cevapladığında bağlantı otomatik doğrulanır.' : 'Canlı aktarım testini başlatın.'} action={transfer?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Aktarım testi başlat'} disabled={busy || transfer?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'transfer'))} />}<Step complete={ints.phone.enabled} title="5. Telefonu etkinleştirin" detail={ints.phone.health === 'registered' ? 'SIP kaydı aktif; hattı canlı kullanıma açabilirsiniz.' : 'SIP kaydı veya test doğrulandıktan sonra canlı kullanımı açın.'} action="Etkinleştir" disabled={busy || ints.phone.enabled || !ints.phone.configured || (ints.phone.health !== 'registered' && !done(ints.phone, 'inbound') && !done(ints.phone, 'outbound'))} onClick={() => void run(() => toggle('phone'))} /></div>{ints.phone.configured && <div className={styles.actions}>{ints.phone.enabled && <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => void run(() => toggle('phone'))}>Hattı devre dışı bırak</button>}<button type="button" className={styles.removeButton} disabled={busy} onClick={() => void run(() => removeIntegration('phone'))}>Telefon bağlantısını kaldır (Numarayı boşa çıkar)</button></div>}</section>
-      {(['sms', 'smtp'] as const).map(service => { const s = ints[service], delivery = current(s, 'delivery'), isSms = service === 'sms', configured = isSms ? Boolean(sms.username && (sms.password || smsSaved) && sms.senderId) : Boolean(smtp.host && smtp.port && smtp.username && (smtp.password || smtpSaved) && (smtp.fromAddress || smtp.username)), target = isSms ? sms.target : smtp.target; const showNatroHint = !isSms && (smtp.host.toLowerCase().includes('thinpine.com') || (smtp.host.toLowerCase().includes('natro') && smtp.port === '587')); return <section className={styles.card} key={service}><h2 className={styles.title}>{isSms ? 'SMS / Netgsm' : 'E-posta / SMTP'}</h2><div className={styles.setupGrid}>{isSms ? <><Field label="API kullanıcı kodu"><input value={sms.username} onChange={e => setSms(v => ({ ...v, username: e.target.value }))} /></Field><Field label="API parolası" help={smsSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : undefined}><input type="password" autoComplete="new-password" placeholder={smsSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'API parolası'} value={sms.password} onChange={e => setSms(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Başlık"><input value={sms.senderId} onChange={e => setSms(v => ({ ...v, senderId: e.target.value }))} /></Field><Field label="Test alıcısı" help="Teslimatı doğrulamak için kendi cep telefonunuzu +90 (5__) ___ __ __ biçiminde girin."><PhoneInput value={sms.target} onChange={target => setSms(v => ({ ...v, target }))} /></Field></> : <><Field label="Sunucu" help="Natro için mx-out03.natrohost.com önerilir."><input value={smtp.host} onChange={e => setSmtp(v => ({ ...v, host: e.target.value }))} /></Field><Field label="Port" help="SSL için 465 (Önerilen), STARTTLS için 587."><input inputMode="numeric" value={smtp.port} onChange={e => { const port = e.target.value; setSmtp(v => ({ ...v, port, secure: port.trim() === '465' ? 'ssl' : 'tls' })) }} /></Field><Field label="Kullanıcı"><input value={smtp.username} onChange={e => setSmtp(v => ({ ...v, username: e.target.value, fromAddress: v.fromAddress || e.target.value }))} /></Field><Field label="Parola" help={smtpSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : undefined}><input type="password" autoComplete="new-password" placeholder={smtpSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'SMTP parolası'} value={smtp.password} onChange={e => setSmtp(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Gönderici adı"><input value={smtp.fromName} onChange={e => setSmtp(v => ({ ...v, fromName: e.target.value }))} /></Field><Field label="Gönderici e-posta"><input type="email" value={smtp.fromAddress} onChange={e => setSmtp(v => ({ ...v, fromAddress: e.target.value }))} /></Field><Field label="Test alıcısı"><input type="email" value={smtp.target} onChange={e => setSmtp(v => ({ ...v, target: e.target.value }))} /></Field></>}</div>{showNatroHint && <div className={styles.hintBanner}><span>💡 <strong>Natro Kurumsal E-posta İpucu:</strong> <code>mail.thinpine.com</code> ve Port <code>587</code> paylaşımlı SSL/zaman aşımı nedeniyle takılabilir. Natro giden sunucusu <code>mx-out03.natrohost.com</code> ve Port <code>465 (SSL)</code> ile doğrudan çalışır.</span><button type="button" className={styles.quickFixButton} onClick={() => setSmtp(v => ({ ...v, host: 'mx-out03.natrohost.com', port: '465', secure: 'ssl', fromAddress: v.fromAddress || v.username }))}>⚡ Önerilen Ayarı Uygula (mx-out03.natrohost.com : 465)</button></div>}{delivery?.status === 'failed' && delivery.message && <DiagnosticAlert message={delivery.message} service={service} smtpState={!isSms ? smtp : undefined} onQuickFix={!isSms ? patch => { setSmtp(v => ({ ...v, ...patch })); setNotice('Önerilen SMTP ayarları forma uygulandı. "1. Bilgileri kaydedin → Kaydet" butonuna basıp tekrar test edin.') } : undefined} />}<div className={styles.steps}><Step complete={s.configured} title="1. Bilgileri kaydedin" detail="Bağlantı bilgilerini kaydedin." action="Kaydet" disabled={busy || !configured} onClick={() => void run(() => save(service, isSms ? sms : { ...smtp, port: Number(smtp.port), secure: Number(smtp.port) === 465 ? 'ssl' : 'tls', fromAddress: smtp.fromAddress || smtp.username }))} /><Step complete={Boolean(delivery?.status === 'confirmed')} title="2. Test gönderin ve doğrulayın" detail={delivery?.status === 'accepted' ? 'Mesajı/e-postayı aldıktan sonra doğrulayın.' : (delivery?.status === 'failed' ? 'Son test başarısız oldu; yukarıdaki çözüm önerisini inceleyip tekrar deneyin.' : 'Kaydedilen bilgilerle test gönderin.')} action={delivery?.status === 'accepted' ? 'Teslimatı doğrula' : 'Test gönder'} disabled={busy || !s.configured || (delivery?.status !== 'accepted' && (isSms ? !validMobile(target) : !/^\S+@\S+\.\S+$/.test(target)))} onClick={() => void run(() => delivery?.status === 'accepted' ? confirm(service, delivery.id) : test(service, target))} onCancel={delivery?.status === 'accepted' ? () => void run(() => cancelActiveTest(service, delivery.id)) : undefined} /><Step complete={s.enabled} title="3. Etkinleştirin" detail="Doğrulanan bağlantıyı canlı kullanıma açın." action="Etkinleştir" disabled={busy || s.enabled || !done(s, 'delivery')} onClick={() => void run(() => toggle(service))} /></div></section> })}
-      <section className={styles.card}><h2 className={styles.title}>WhatsApp kurulumu</h2><p className={styles.description}>Mevcut QR ve aktivasyon akışı korunur.</p><Field label="Klinik WhatsApp telefonu" help="WhatsApp hesabına bağlı cep telefonu: +90 (5__) ___ __ __."><PhoneInput value={waPhone} onChange={setWaPhone} /></Field><div className={styles.actions}><button className={styles.button} disabled={busy || !validMobile(waPhone)} onClick={() => void run(async () => { if (!selected) return; setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedPhone: e164(waPhone) }) })); setNotice('Telefon kaydedildi.') })}>Telefonu kaydet</button><button className={styles.button} disabled={busy} onClick={() => void run(async () => { if (!selected) return; const r = await api<{ qrcode: string | null }>(`/api/platform/clinics/${selected}/whatsapp/connect`, { method: 'POST' }); setQr(r.qrcode) })}>QR göster</button><button className={styles.button} disabled={busy || wa?.connectionState !== 'open' || !wa?.numberVerifiedAt} onClick={() => void run(async () => { if (!selected) return; setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp/activate`, { method: 'POST' })); setNotice('WhatsApp etkinleştirildi.') })}>Gönderimleri etkinleştir</button>{Boolean(wa?.expectedPhone || waPhone) && <button type="button" className={styles.removeButton} disabled={busy} onClick={() => void run(async () => { if (!selected) return; setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`, { method: 'DELETE' })); setWaPhone(''); setQr(null); setNotice('Klinik WhatsApp numarası silindi.') })}>Numarayı sil</button>}</div>{qr && <div className={styles.qr}><img src={qr} width={240} height={240} alt="WhatsApp QR" /></div>}</section>
+      <section className={styles.card}><h2 className={styles.title}>{clinic?.name} · Netgsm telefon</h2><p className={styles.description}>Netgsm paneline: {ints.connection.ip || 'IP yapılandırılmamış'} · {ints.connection.port} · {ints.connection.protocol}</p><div className={styles.setupGrid}><Field label="SIP kullanıcı adı"><input value={phone.username} onChange={e => setPhone(v => ({ ...v, username: e.target.value }))} /></Field><Field label="SIP parolası" help={phoneSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : 'Netgsm SIP parolasını girin.'}><input type="password" autoComplete="new-password" placeholder={phoneSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'SIP parolası'} value={phone.password} onChange={e => setPhone(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Gelen numaralar" help="0850 sabit hat veya mobil numara girin. Örnek: +90 (850) 309 61 19."><PhoneList values={phone.numbers} canRemoveLast={ints.phone.configured} onRemoveLast={() => void run(() => removeIntegration('phone'))} onChange={numbers => setPhone(v => { const nextCaller = numbers.some(n => national(n) === national(v.callerId)) ? v.callerId : (numbers.find(Boolean) || ''); return { ...v, numbers, callerId: nextCaller } })} /></Field><Field label="Çıkış numarası" help="Gelen numaralardan biri olmalı; arayanlarda görünecek klinik hattıdır."><PhoneInput value={phone.callerId} onChange={callerId => setPhone(v => ({ ...v, callerId }))} /></Field><Field label="Aktarım numarası" help="Flow Builder hedefiyle aynı olmalı; 0850 veya mobil numara olabilir, zorunlu değildir."><PhoneInput value={phone.transferNumber} onChange={transferNumber => setPhone(v => ({ ...v, transferNumber }))} /></Field><Field label="Test numarası" help="Test araması yapılacak cep veya sabit telefon numarasını girin (+90 5XX... önerilir)."><PhoneInput value={phone.target} onChange={target => setPhone(v => ({ ...v, target }))} /></Field></div>{phoneFailedMsg && <DiagnosticAlert message={phoneFailedMsg} service="phone" />}<div className={styles.steps}><Step complete={ints.phone.configured} alwaysShowAction title="1. Bilgileri kaydedin" detail={phoneValid ? 'Ayarlar kaydedildi; değişiklik yaptıysanız tekrar kaydedebilir veya çağrı testini başlatabilirsiniz.' : 'Tüm telefon numaralarını eksiksiz girin.'} action={ints.phone.configured ? 'Güncelle / Kaydet' : 'Kaydet'} disabled={busy || !phoneValid} onClick={() => void run(() => save('phone', { ...phone, numbers: phone.numbers.map(e164), callerId: e164(phone.callerId), transferNumber: phone.transferNumber ? e164(phone.transferNumber) : '' }))} /><Step complete={Boolean(inbound?.status === 'confirmed')} title="2. Gelen çağrıyı test edin" detail={inbound?.status === 'accepted' ? '15 dakika içinde test telefonundan klinik hattını arayın. Bağlantı otomatik doğrulanır.' : 'Gelen çağrı testini başlatıp klinik hattını arayın.'} action={inbound?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Gelen çağrı testi başlat'} disabled={busy || inbound?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'inbound'))} /><Step complete={Boolean(outbound?.status === 'confirmed')} title="3. Giden çağrıyı test edin" detail={outbound?.status === 'accepted' ? 'Telefonunuz çaldığında açın. Bağlantı otomatik doğrulanır.' : 'Klinik hattından test numarasına giden aramayı başlatın.'} action={outbound?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Giden çağrı testi başlat'} disabled={busy || outbound?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'outbound'))} />{phone.transferNumber && <Step complete={Boolean(transfer?.status === 'confirmed')} title="4. Aktarımı test edin" detail={transfer?.status === 'accepted' ? 'Aktarım hedefi cevapladığında bağlantı otomatik doğrulanır.' : 'Canlı aktarım testini başlatın.'} action={transfer?.status === 'accepted' ? 'Bağlantı bekleniyor' : 'Aktarım testi başlat'} disabled={busy || transfer?.status === 'accepted' || !ints.phone.configured || !validPhone(phone.target)} onClick={() => void run(() => test('phone', phone.target, 'transfer'))} />}<Step complete={ints.phone.enabled} title="5. Telefonu etkinleştirin" detail={ints.phone.health === 'registered' ? 'SIP kaydı aktif; hattı canlı kullanıma açabilirsiniz.' : 'SIP kaydı veya test doğrulandıktan sonra canlı kullanımı açın.'} action="Etkinleştir" disabled={busy || ints.phone.enabled || !ints.phone.configured || (ints.phone.health !== 'registered' && !done(ints.phone, 'inbound') && !done(ints.phone, 'outbound'))} onClick={() => void run(() => toggle('phone'))} /></div>{ints.phone.configured && <div className={styles.actions}>{ints.phone.enabled && <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => void run(() => toggle('phone'))}>Hattı devre dışı bırak</button>}<button type="button" className={styles.removeButton} disabled={busy} onClick={() => void run(() => removeIntegration('phone'))}>Telefon bağlantısını kaldır (Numarayı boşa çıkar)</button></div>}</section>
+      {(['sms', 'smtp'] as const).map(service => { const s = ints[service], delivery = current(s, 'delivery'), isSms = service === 'sms', configured = isSms ? Boolean(sms.username && (sms.password || smsSaved) && sms.senderId) : Boolean(smtp.host && smtp.port && smtp.username && (smtp.password || smtpSaved) && (smtp.fromAddress || smtp.username)), target = isSms ? sms.target : smtp.target; const showNatroHint = !isSms && (smtp.host.toLowerCase().includes('thinpine.com') || (smtp.host.toLowerCase().includes('natro') && smtp.port === '587')); return <section className={styles.card} key={service}><h2 className={styles.title}>{isSms ? 'SMS / Netgsm' : 'E-posta / SMTP'}</h2><div className={styles.setupGrid}>{isSms ? <><Field label="API kullanıcı kodu"><input value={sms.username} onChange={e => setSms(v => ({ ...v, username: e.target.value }))} /></Field><Field label="API parolası" help={smsSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : undefined}><input type="password" autoComplete="new-password" placeholder={smsSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'API parolası'} value={sms.password} onChange={e => setSms(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Başlık"><input value={sms.senderId} onChange={e => setSms(v => ({ ...v, senderId: e.target.value }))} /></Field><Field label="Test alıcısı" help="Teslimatı doğrulamak için kendi cep telefonunuzu +90 (5__) ___ __ __ biçiminde girin."><PhoneInput value={sms.target} onChange={target => setSms(v => ({ ...v, target }))} /></Field></> : <><Field label="Sunucu" help="Natro için mx-out03.natrohost.com önerilir."><input value={smtp.host} onChange={e => setSmtp(v => ({ ...v, host: e.target.value }))} /></Field><Field label="Port" help="SSL için 465 (Önerilen), STARTTLS için 587."><input inputMode="numeric" value={smtp.port} onChange={e => { const port = e.target.value; setSmtp(v => ({ ...v, port, secure: port.trim() === '465' ? 'ssl' : 'tls' })) }} /></Field><Field label="Kullanıcı"><input value={smtp.username} onChange={e => setSmtp(v => ({ ...v, username: e.target.value, fromAddress: v.fromAddress || e.target.value }))} /></Field><Field label="Parola" help={smtpSaved ? 'Parola kayıtlıdır. Değiştirmek istemiyorsanız boş bırakın.' : undefined}><input type="password" autoComplete="new-password" placeholder={smtpSaved ? 'Parola kayıtlı — değiştirmek için yazın' : 'SMTP parolası'} value={smtp.password} onChange={e => setSmtp(v => ({ ...v, password: e.target.value }))} /></Field><Field label="Gönderici adı"><input value={smtp.fromName} onChange={e => setSmtp(v => ({ ...v, fromName: e.target.value }))} /></Field><Field label="Gönderici e-posta"><input type="email" value={smtp.fromAddress} onChange={e => setSmtp(v => ({ ...v, fromAddress: e.target.value }))} /></Field><Field label="Test alıcısı"><input type="email" value={smtp.target} onChange={e => setSmtp(v => ({ ...v, target: e.target.value }))} /></Field></>}</div>{showNatroHint && <div className={styles.hintBanner}><span>💡 <strong>Natro Kurumsal E-posta İpucu:</strong> <code>mail.thinpine.com</code> ve Port <code>587</code> paylaşımlı SSL/zaman aşımı nedeniyle takılabilir. Natro giden sunucusu <code>mx-out03.natrohost.com</code> ve Port <code>465 (SSL)</code> ile doğrudan çalışır.</span><button type="button" className={styles.quickFixButton} onClick={() => setSmtp(v => ({ ...v, host: 'mx-out03.natrohost.com', port: '465', secure: 'ssl', fromAddress: v.fromAddress || v.username }))}>⚡ Önerilen Ayarı Uygula (mx-out03.natrohost.com : 465)</button></div>}{delivery?.status === 'failed' && delivery.message && <DiagnosticAlert message={delivery.message} service={service} smtpState={!isSms ? smtp : undefined} onQuickFix={!isSms ? patch => { setSmtp(v => ({ ...v, ...patch })); setNotice('Önerilen SMTP ayarları forma uygulandı. "1. Bilgileri kaydedin → Kaydet" butonuna basıp tekrar test edin.') } : undefined} />}<div className={styles.steps}><Step complete={s.configured} alwaysShowAction title="1. Bilgileri kaydedin" detail="Bağlantı bilgilerini kaydedin veya güncelleyin." action={s.configured ? 'Güncelle / Kaydet' : 'Kaydet'} disabled={busy || !configured} onClick={() => void run(() => save(service, isSms ? sms : { ...smtp, port: Number(smtp.port), secure: Number(smtp.port) === 465 ? 'ssl' : 'tls', fromAddress: smtp.fromAddress || smtp.username }))} /><Step complete={Boolean(delivery?.status === 'confirmed')} title="2. Test gönderin ve doğrulayın" detail={delivery?.status === 'accepted' ? 'Mesajı/e-postayı aldıktan sonra doğrulayın.' : (delivery?.status === 'failed' ? 'Son test başarısız oldu; yukarıdaki çözüm önerisini inceleyip tekrar deneyin.' : 'Kaydedilen bilgilerle test gönderin.')} action={delivery?.status === 'accepted' ? 'Teslimatı doğrula' : 'Test gönder'} disabled={busy || !s.configured || (delivery?.status !== 'accepted' && (isSms ? !validMobile(target) : !/^\S+@\S+\.\S+$/.test(target)))} onClick={() => void run(() => delivery?.status === 'accepted' ? confirm(service, delivery.id) : test(service, target))} onCancel={delivery?.status === 'accepted' ? () => void run(() => cancelActiveTest(service, delivery.id)) : undefined} /><Step complete={s.enabled} title="3. Etkinleştirin" detail="Doğrulanan bağlantıyı canlı kullanıma açın." action="Etkinleştir" disabled={busy || s.enabled || !done(s, 'delivery')} onClick={() => void run(() => toggle(service))} /></div></section> })}
+      <section className={styles.card}>
+        <div className={styles.setupHeading}>
+          <div>
+            <h2 className={styles.title}>{clinic?.name} · WhatsApp Kurulumu</h2>
+            <p className={styles.description}>
+              Klinik telefon numarasını kaydedip karekod (QR) oluşturun; okutulduktan sonra gönderimleri etkinleştirin.
+            </p>
+          </div>
+          <div className={styles.rowActions}>
+            <span className={wa?.connectionState === 'open' ? styles.badgeActive : wa?.connectionState === 'connecting' ? styles.badgePlatform : styles.badgeFrozen}>
+              {wa?.connectionState === 'open'
+                ? (wa?.enabled ? '● Bağlı ve Gönderimler Aktif' : '● QR Bağlı (Etkinleştirme Bekliyor)')
+                : wa?.connectionState === 'connecting'
+                  ? '● Bağlanıyor…'
+                  : '○ Bağlı Değil'}
+            </span>
+          </div>
+        </div>
+        <Field label="Klinik WhatsApp telefonu" help="WhatsApp hesabına bağlı cep telefonu: +90 (5__) ___ __ __. Boş bırakılırsa QR okutulduğunda bağlanan numara otomatik alınır.">
+          <PhoneInput value={waPhone} onChange={setWaPhone} />
+        </Field>
+        <div className={styles.actions}>
+          <button
+            className={styles.button}
+            disabled={busy || !validMobile(waPhone)}
+            onClick={() => void run(async () => {
+              if (!selected) return
+              setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ expectedPhone: e164(waPhone) }),
+              }))
+              setNotice('Telefon kaydedildi. Şimdi "QR göster" butonuna basabilirsiniz.')
+            })}
+          >
+            Telefonu kaydet
+          </button>
+          <button
+            className={styles.button}
+            disabled={busy}
+            onClick={() => void run(async () => {
+              if (!selected) return
+              if (validMobile(waPhone) && e164(waPhone) !== wa?.expectedPhone) {
+                const savedWa = await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ expectedPhone: e164(waPhone) }),
+                })
+                setWa(savedWa)
+              }
+              const r = await api<{ clinic?: Wa; qrcode: string | null; connectionState?: string }>(
+                `/api/platform/clinics/${selected}/whatsapp/connect`,
+                { method: 'POST' },
+              )
+              if (r.clinic) setWa(r.clinic)
+              setQr(r.qrcode)
+              if (r.connectionState === 'open') {
+                setNotice('WhatsApp zaten bağlı. Gönderimleri etkinleştirebilirsiniz.')
+              } else if (r.qrcode) {
+                setNotice('WhatsApp karekodu hazır. Klinik telefonundan okutun.')
+              } else {
+                setNotice('Bağlantı isteği gönderildi; durum kontrol ediliyor.')
+              }
+            })}
+          >
+            {qr ? 'QR yenile' : 'QR göster'}
+          </button>
+          <button
+            className={styles.button}
+            disabled={busy || wa?.connectionState !== 'open'}
+            onClick={() => void run(async () => {
+              if (!selected) return
+              setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp/activate`, { method: 'POST' }))
+              setNotice('WhatsApp etkinleştirildi.')
+            })}
+          >
+            Gönderimleri etkinleştir
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            disabled={busy}
+            onClick={() => void run(async () => {
+              if (!selected) return
+              const refreshed = await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`)
+              setWa(refreshed)
+              if (refreshed.expectedPhone) setWaPhone(national(refreshed.expectedPhone))
+              if (refreshed.connectionState === 'open') setQr(null)
+              setNotice('WhatsApp bağlantı durumu güncellendi.')
+            })}
+          >
+            Durumu yenile
+          </button>
+          {Boolean(wa?.expectedPhone || waPhone) && (
+            <button
+              type="button"
+              className={styles.removeButton}
+              disabled={busy}
+              onClick={() => void run(async () => {
+                if (!selected) return
+                setWa(await api<Wa>(`/api/platform/clinics/${selected}/whatsapp`, { method: 'DELETE' }))
+                setWaPhone('')
+                setQr(null)
+                setNotice('Klinik WhatsApp numarası silindi.')
+              })}
+            >
+              Numarayı sil
+            </button>
+          )}
+        </div>
+        {qr && (
+          <div className={styles.qr}>
+            <img src={qr} width={240} height={240} alt="WhatsApp QR" />
+          </div>
+        )}
+      </section>
+      <N8nMetaWhatsAppCard clinicId={selected} />
       <section className={styles.card}>
         <div className={styles.setupHeading}>
           <div>

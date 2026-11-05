@@ -510,6 +510,44 @@ Görev:
         stoppedNode = node
         break
       }
+      if ((act === 'transfer_call' || act === 'transfer') && node.data.requireConfirmation !== false && String(node.data.confirmationQuestion || '').trim()) {
+        const confirmKey = `_transferConfirm_${node.id}`
+        if (fields[confirmKey] !== 'confirmed' && fields[confirmKey] !== 'declined') {
+          if (fields[confirmKey] === 'asked' && userMessage) {
+            const lowerMsg = userMessage.toLocaleLowerCase('tr-TR')
+            const isNegative = /\b(hayır|hayir|değil|degil|istemiyorum|vazgeçtim|vazgectim|gerek yok|aktarma)\b/i.test(lowerMsg)
+            if (isNegative) {
+              fields[confirmKey] = 'declined'
+              logs.push({
+                role: 'system',
+                text: `❌ Kullanıcı aktarımı reddetti — aktarım iptal edildi.`,
+              })
+              const outEdge = edges.find(e => e.source === node.id)
+              if (!outEdge) {
+                stoppedNode = node
+                completed = true
+                break
+              }
+              if (!visitedEdgeIds.includes(outEdge.id)) visitedEdgeIds.push(outEdge.id)
+              currId = outEdge.target
+              continue
+            }
+            fields[confirmKey] = 'confirmed'
+            logs.push({
+              role: 'system',
+              text: `✅ Kullanıcı aktarımı onayladı.`,
+            })
+          } else {
+            fields[confirmKey] = 'asked'
+            stoppedNode = node
+            logs.push({
+              role: 'system',
+              text: `❓ Aktarım Onay Sorusu Soruluyor: "${String(node.data.confirmationQuestion).trim()}" — Kullanıcının onayı bekleniyor.`,
+            })
+            break
+          }
+        }
+      }
       triggeredActions.push(node)
       const actTitle = ACTION_LABELS[act] || node.data.label || act
       logs.push({
@@ -582,6 +620,9 @@ Görev:
   } else if (stoppedNode?.type === 'ACTION' && (stoppedNode.data.action === 'wait_reprompt' || stoppedNode.data.action === 'wait')) {
     const waitMsg = renderFlowTemplate(String(stoppedNode.data.message || 'Sizi dinliyorum, nasıl yardımcı olabilirim?'), fields)
     stepInstruction = `Hastaya "${waitMsg}" cümlesini söyle ve konuşmasını bekle.`
+  } else if (stoppedNode?.type === 'ACTION' && (stoppedNode.data.action === 'transfer_call' || stoppedNode.data.action === 'transfer') && fields[`_transferConfirm_${stoppedNode.id}`] === 'asked') {
+    const confirmQ = renderFlowTemplate(String(stoppedNode.data.confirmationQuestion || 'Sizi yetkili birime aktarmamı ister misiniz?'), fields)
+    stepInstruction = `Hastaya yalnızca şu aktarım onay sorusunu sor: "${confirmQ}" ve cevabını bekle.`
   } else if (stoppedNode?.type === 'END' || completed) {
     const closeMsg = stoppedNode?.data?.message || 'Görüşmeyi nazikçe tamamla ve sağlıklı günler dile.'
     stepInstruction = `${triggeredActionSummary ? `Gerçekleşen işlem bilgisini hastaya söyle: "${triggeredActionSummary}". ` : ''}Akış tamamlandı. Kapanış mesajı: "${closeMsg}".`
@@ -687,6 +728,12 @@ SIRADAKİ ZORUNLU GÖREVİN: ${stepInstruction}`
     logs.push({
       role: 'ai',
       text: `🤖 AI Asistan: "${waitMsg}"`,
+    })
+  } else if (stoppedNode?.type === 'ACTION' && (stoppedNode.data.action === 'transfer_call' || stoppedNode.data.action === 'transfer') && fields[`_transferConfirm_${stoppedNode.id}`] === 'asked') {
+    const confirmQ = renderFlowTemplate(String(stoppedNode.data.confirmationQuestion || 'Sizi yetkili birime aktarmamı ister misiniz?'), fields)
+    logs.push({
+      role: 'ai',
+      text: `🤖 AI Asistan: "${confirmQ}"`,
     })
   } else if (stoppedNode?.type === 'END') {
     logs.push({

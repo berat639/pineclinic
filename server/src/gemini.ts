@@ -181,6 +181,7 @@ export async function createLiveSession(
       initialFields,
     })
     : null
+  let collectedFlowFields: Record<string, unknown> = { ...(initialFields || {}) }
 
   async function handleTool(name: string, args: Record<string, unknown>) {
     console.log(`[Tool:${name}]`, JSON.stringify(args).slice(0, 300))
@@ -205,7 +206,11 @@ export async function createLiveSession(
           }
         }
       }
+      collectedFlowFields = { ...collectedFlowFields, ...fields }
       const result = await flowEngine.accept({ fields, intent: args.yeni_kisi === true ? 'new_person' : 'continue' })
+      if (result.fields) {
+        collectedFlowFields = { ...collectedFlowFields, ...result.fields }
+      }
       return {
         success: result.success,
         message: result.message || result.next?.prompt || (result.completed ? 'Görüşmeyi kısa ve nazikçe tamamla.' : 'Müşterinin yanıtını dinle.'),
@@ -236,13 +241,18 @@ export async function createLiveSession(
         }
       }
       let flowActionId: string | undefined
+      let bookingFields: Record<string, unknown> = { ...collectedFlowFields, ...args }
       if (flowEngine) {
         const step = await flowEngine.accept({ fields: args })
+        if (step.fields) {
+          bookingFields = { ...collectedFlowFields, ...step.fields, ...args }
+          collectedFlowFields = { ...collectedFlowFields, ...step.fields }
+        }
         const hasCoreBookingFields = Boolean(
-          String(args.musteri_adi || step.fields?.musteri_adi || '').trim().length >= 3 &&
-          String(args.telefon || step.fields?.telefon || '').replace(/\D/g, '').length >= 10 &&
-          String(args.tarih || step.fields?.tarih || '').trim() &&
-          String(args.saat || step.fields?.saat || '').trim()
+          String(bookingFields.musteri_adi || bookingFields.ad_soyad || '').trim().length >= 3 &&
+          String(bookingFields.telefon || '').replace(/\D/g, '').length >= 10 &&
+          String(bookingFields.tarih || '').trim() &&
+          String(bookingFields.saat || '').trim()
         )
         if ((!step.success || step.next?.type !== 'ACTION') && !hasCoreBookingFields) {
           return { success: false, message: step.message || step.next?.prompt || 'Randevu için gerekli bilgileri önce tamamlayın.' }
@@ -252,7 +262,7 @@ export async function createLiveSession(
         }
       }
       try {
-        const appointment = await createAssistantAppointment(args, { sessionId: options.dbSessionId, clinicId: options.clinicId, source: options.appointmentSource || 'phone_ai' })
+        const appointment = await createAssistantAppointment(bookingFields, { sessionId: options.dbSessionId, clinicId: options.clinicId, source: options.appointmentSource || 'phone_ai' })
         if (flowEngine && flowActionId) await flowEngine.completeAction(flowActionId, true)
         return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için başarıyla oluşturuldu. Müşteriye randevusunun oluşturulduğunu net biçimde söyle ve başka bir isteği yoksa görüşmeyi nazikçe tamamla.` }
       } catch (err) {
@@ -338,7 +348,19 @@ export async function createLiveSession(
       // generated tool argument redirect to a different number.
       const rawTarget = configuredRule?.target || requestedTarget
 
-      if (configuredRule?.requiresConfirmation && confirmedTransferRuleId !== configuredRule.id) {
+      const userConfirmationDecision = classifyTransferConfirmation(recentUserTranscript)
+      const modelAlreadyAskedConfirmation =
+        Boolean(flowEngine?.isTransferConfirmationAsked(configuredRule?.id))
+        || pendingTransferConfirmation?.ruleId === configuredRule?.id
+        || (
+          userConfirmationDecision === 'affirmative'
+          && /(?:aktar|bağla|bagla|ister misiniz|onayl|dediniz)/iu.test(`${lastModelTurnTranscript} ${currentModelTurnTranscript}`)
+        )
+      const isConfirmedNow =
+        confirmedTransferRuleId === configuredRule?.id
+        || (modelAlreadyAskedConfirmation && userConfirmationDecision !== 'negative')
+
+      if (configuredRule?.requiresConfirmation && !isConfirmedNow) {
         const question = getTransferConfirmationQuestion(configuredRule)
         pendingTransferConfirmation = {
           ruleId: configuredRule.id,
@@ -368,9 +390,12 @@ export async function createLiveSession(
         let targetNumber = normalizeTransferPhoneNumber(rawTarget)
         if (!targetNumber) {
           const { getSetting } = await import('./db/repositories/settings')
-          const [phonebookRaw, directSetting] = await Promise.all([
+          const { activeConfig } = await import('./integrations/managed/store')
+          const [phonebookRaw, directSetting, defaultSetting, managedPhone] = await Promise.all([
             getSetting('transfer.phonebook'),
             getSetting(`transfer.${targetKey}`),
+            getSetting('transfer.resepsiyon'),
+            options.clinicId ? activeConfig(options.clinicId, 'phone').catch(() => null) : Promise.resolve(null),
           ])
           let phonebook: Array<{ label: string; number: string }> = []
           if (phonebookRaw) {
@@ -378,6 +403,9 @@ export async function createLiveSession(
           }
           targetNumber = resolveTransferPhonebookTarget(rawTarget, phonebook)
             || normalizeTransferPhoneNumber(directSetting || '')
+            || normalizeTransferPhoneNumber(String(managedPhone?.transferNumber || ''))
+            || normalizeTransferPhoneNumber(defaultSetting || '')
+            || (phonebook.length === 1 ? normalizeTransferPhoneNumber(phonebook[0].number) : null)
         }
 
         const triggerTransferFailFlow = async (defaultMsg: string) => {
@@ -390,20 +418,30 @@ export async function createLiveSession(
           return defaultMsg
         }
 
+        const completeTransferFlow = async () => {
+          if (!flowEngine) return
+          const expected = flowEngine.expectedAction()
+          if (expected && (expected.action === 'transfer_call' || expected.action === 'transfer')) {
+            await flowEngine.completeAction(expected.nodeId, true).catch(() => null)
+          }
+        }
+
+        if (!options.telephonyChannel) {
+          const displayTarget = targetNumber || rawTarget || 'resepsiyon'
+          console.log(`[aramaAktar] telephonyChannel yok (web/test oturumu). Hedef: ${displayTarget}`)
+          await completeTransferFlow()
+          return {
+            success: true,
+            message: `Arama aktarma talebiniz başlatıldı (${displayTarget} birimine aktarılıyor, lütfen hattan ayrılmayın).`,
+          }
+        }
+
         if (!targetNumber) {
           transferAttempted = false
           console.warn(`[aramaAktar] Hedef numara bulunamadı: ${targetKey}`)
           return {
             success: false,
             message: await triggerTransferFailFlow('Şu anda aktarılacak hat yanıt vermiyor veya meşgul. Dilerseniz notunuzu alıp yetkililerimize iletebilirim.'),
-          }
-        }
-
-        const completeTransferFlow = async () => {
-          if (!flowEngine) return
-          const expected = flowEngine.expectedAction()
-          if (expected && (expected.action === 'transfer_call' || expected.action === 'transfer')) {
-            await flowEngine.completeAction(expected.nodeId, true).catch(() => null)
           }
         }
 

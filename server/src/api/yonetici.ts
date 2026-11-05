@@ -792,7 +792,98 @@ export const yoneticiPlugin = new Elysia({ prefix: '/api/yonetici' })
     if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
 
     const { integrationView } = await import('../integrations/managed/store')
-    return integrationView(requireClinicId())
+    return integrationView(requireClinicId(), true)
   })
 
-  .put('/integrations', ({ set }) => { set.status = 403; return { error: 'Entegrasyonlar yalnız platform Klinikler ekranından yönetilir.' } })
+  .put('/integrations/:service', async ({ params, body, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { saveConfig } = await import('../integrations/managed/store')
+      return await saveConfig(requireClinicId(), serviceOf(params.service), (body ?? {}) as Record<string, unknown>, user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon ayarları kaydedilemedi.' }
+    }
+  })
+
+  .post('/integrations/:service/test', async ({ params, body, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { beginTest } = await import('../integrations/managed/workflow')
+      return await beginTest(requireClinicId(), serviceOf(params.service), (body ?? {}) as Record<string, unknown>, user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Bağlantı testi başlatılamadı.' }
+    }
+  })
+
+  .post('/integrations/:service/tests/:testId/confirm', async ({ params, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { confirmTest } = await import('../integrations/managed/workflow')
+      return await confirmTest(requireClinicId(), serviceOf(params.service), params.testId, user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Test doğrulaması tamamlanamadı.' }
+    }
+  })
+
+  .post('/integrations/:service/tests/:testId/cancel', async ({ params, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { cancelTest } = await import('../integrations/managed/workflow')
+      return await cancelTest(requireClinicId(), serviceOf(params.service), params.testId, user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Test iptal edilemedi.' }
+    }
+  })
+
+  .post('/integrations/:service/activate', async ({ params, body, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { setEnabled } = await import('../integrations/managed/workflow')
+      const payload = (body ?? {}) as { revision?: number; force?: boolean }
+      return await setEnabled(requireClinicId(), serviceOf(params.service), true, Number(payload.revision || 0), user!.id, payload.force !== false)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon etkinleştirilemedi.' }
+    }
+  })
+
+  .post('/integrations/:service/deactivate', async ({ params, body, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { setEnabled } = await import('../integrations/managed/workflow')
+      const payload = (body ?? {}) as { revision?: number }
+      return await setEnabled(requireClinicId(), serviceOf(params.service), false, Number(payload.revision || 0), user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon devre dışı bırakılamadı.' }
+    }
+  })
+
+  .delete('/integrations/:service', async ({ params, cookie, set }) => {
+    const user = await authenticateRequest(((cookie.token?.value as string | undefined) as string | undefined))
+    if (!requireYonetici(user, set)) return { error: 'Yetki yok' }
+    try {
+      const { serviceOf } = await import('../integrations/managed/model')
+      const { removeConfig } = await import('../integrations/managed/store')
+      return await removeConfig(requireClinicId(), serviceOf(params.service), user!.id)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon kaldırılamadı.' }
+    }
+  })

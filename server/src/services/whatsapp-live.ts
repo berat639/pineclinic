@@ -81,6 +81,7 @@ async function generateWhatsAppReplyText(
       }
     }
 
+    const candidateParts = (response.candidates?.[0]?.content?.parts ?? []) as Array<Record<string, unknown>>
     const functionCalls = response.functionCalls ?? []
     if (functionCalls.length === 0) {
       const answer = response.text?.trim()
@@ -88,11 +89,15 @@ async function generateWhatsAppReplyText(
       return answer
     }
 
+    // Preserve raw candidate.content.parts so thought: true and
+    // thoughtSignature / thought_signature on functionCall parts are retained.
     contents.push({
       role: 'model',
-      parts: functionCalls.map(call => ({
-        functionCall: { name: call.name, args: call.args ?? {} },
-      })),
+      parts: candidateParts.length > 0
+        ? candidateParts.map(part => ({ ...part }))
+        : functionCalls.map(call => ({
+            functionCall: { name: call.name, args: call.args ?? {} },
+          })),
     })
 
     const functionResponses: Array<Record<string, unknown>> = []
@@ -101,6 +106,7 @@ async function generateWhatsAppReplyText(
       const result = await input.executeTool(call.name || '', (call.args as Record<string, unknown>) || {})
       functionResponses.push({
         functionResponse: {
+          ...(call.id ? { id: call.id } : {}),
           name: call.name || '',
           response: result,
         },

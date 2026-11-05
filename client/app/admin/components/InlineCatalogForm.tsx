@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { maskTlPrice, tlPriceToMinor } from '@/lib/tl-price-input'
+import { isSelectableTreatmentMaterial, maskTlPrice, tlPriceToMinor } from '@/lib/tl-price-input'
 import styles from './PineTreatmentPlan.module.css'
 
 type CatalogKind = 'procedure' | 'indication'
@@ -68,7 +68,7 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
           scope: isProcedure ? scope : 'tooth',
           priceMinor,
           color: isProcedure ? color : undefined,
-          materials: editingItem?.defaultMaterials ?? [],
+          materials: (editingItem?.defaultMaterials ?? []).filter(isSelectableTreatmentMaterial),
         }),
       })
       const result = await response.json().catch(() => ({}))
@@ -77,6 +77,7 @@ export default function InlineCatalogForm({ kind, initialName, editingItem, repl
       onCreated({
         ...result,
         color: isProcedure ? (result.color || color) : result.color,
+        materials: Array.isArray(result.materials) ? result.materials.filter(isSelectableTreatmentMaterial) : [],
       })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Kayıt kaydedilemedi.')

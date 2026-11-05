@@ -7,13 +7,16 @@ services:
     environment:
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
-      - N8N_HOST=${N8N_HOST:-localhost}
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_HOST=${N8N_HOST:-pineclinic.thinpine.com}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-https://pineclinic.thinpine.com/}
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
       - GENERIC_TIMEZONE=Europe/Istanbul
       - TZ=Europe/Istanbul
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}
-      - VOICEAI_BASE_URL=${APP_URL:-http://server:3001}
-      - VOICEAI_CLINIC_ID=${VOICEAI_CLINIC_ID:-}
+      - VOICEAI_BASE_URL=${APP_URL:-http://voiceai-server:3001}
+      - VOICEAI_CLINIC_ID=${VOICEAI_CLINIC_ID:-auto}
       - VOICEAI_N8N_SECRET=${VOICEAI_N8N_SECRET:-}
       - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-}
       - META_PHONE_NUMBER_ID=${META_PHONE_NUMBER_ID:-}
@@ -21,7 +24,15 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - ./deploy/n8n:/home/node/voiceai-workflows:ro
+    networks:
+      dokploy-network:
+        aliases:
+          - voiceai-n8n
+          - n8n
 
 volumes:
   n8n_data:
 
+networks:
+  dokploy-network:
+    external: true

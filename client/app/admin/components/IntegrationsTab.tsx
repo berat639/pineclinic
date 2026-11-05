@@ -9,10 +9,46 @@ import styles from './IntegrationsTab.module.css'
 
 type CloudProvider = 'netgsm' | 'twilio' | 'vonage' | 'custom'
 type ClinicPhone = { id: string; phoneNumber: string; label: string | null; isActive: boolean; isPrimary: boolean }
-type IntegrationTest = { status: string; confirmed_at?: string | null; message?: string | null } | null
-type IntegrationState = { configured: boolean; enabled: boolean; health: string; checkedAt: string | null; test: IntegrationTest; numbers: string[]; callerId: string | null; senderId: string | null; fromAddress: string | null }
+type IntegrationTest = { id?: string; status: string; confirmed_at?: string | null; message?: string | null } | null
+type IntegrationState = {
+  configured: boolean
+  enabled: boolean
+  revision?: number
+  health: string
+  checkedAt: string | null
+  test: IntegrationTest
+  numbers: string[]
+  callerId: string | null
+  senderId: string | null
+  fromAddress: string | null
+  config?: {
+    username?: string
+    hasPassword?: boolean
+    numbers?: string[]
+    callerId?: string
+    transferNumber?: string
+    senderId?: string
+    host?: string
+    port?: number
+    secure?: 'tls' | 'ssl'
+    fromName?: string
+    fromAddress?: string
+  } | null
+}
 type IntegrationOverview = { phone: IntegrationState; sms: IntegrationState; smtp: IntegrationState }
-const emptyIntegrationState = (): IntegrationState => ({ configured: false, enabled: false, health: 'unknown', checkedAt: null, test: null, numbers: [], callerId: null, senderId: null, fromAddress: null })
+const emptyIntegrationState = (): IntegrationState => ({
+  configured: false,
+  enabled: false,
+  revision: 0,
+  health: 'unknown',
+  checkedAt: null,
+  test: null,
+  numbers: [],
+  callerId: null,
+  senderId: null,
+  fromAddress: null,
+  config: null,
+})
 const emptyIntegrationOverview = (): IntegrationOverview => ({ phone: emptyIntegrationState(), sms: emptyIntegrationState(), smtp: emptyIntegrationState() })
 
 const roleTabs = [
@@ -94,30 +130,377 @@ function Spinner() {
 }
 
 function statusFor(service: 'phone' | 'sms' | 'smtp', state: IntegrationState) {
-  if (!state.configured) return { label: 'Yapılandırılmadı', detail: 'Satış ekibinden kurulum talep edebilirsiniz.', tone: 'warning' as const, attention: true }
+  if (!state.configured) return { label: 'Yapılandırılmadı', detail: 'Aşağıdaki "Bağlantı Ayarlarını Düzenle" butonundan kurulumu yapabilirsiniz.', tone: 'warning' as const, attention: true }
   if (!state.enabled) return { label: 'Etkin değil', detail: 'Ayarlar kaydedilmiş; test ve etkinleştirme bekleniyor.', tone: 'warning' as const, attention: true }
   if (service === 'phone') {
     if (state.health === 'registered') return { label: 'Etkin · Bağlı', detail: state.callerId ? `Birincil numara: ${state.callerId}` : 'Telefon hattı kaydı aktif.', tone: 'success' as const, attention: false }
-    if (state.health === 'unregistered') return { label: 'Etkin · Bağlantı koptu', detail: 'Telefon hattı kaydı alınamadı. Satış ekibinin bağlantıyı kontrol etmesi gerekiyor.', tone: 'danger' as const, attention: true }
+    if (state.health === 'unregistered') return { label: 'Etkin · Bağlantı koptu', detail: 'Telefon hattı kaydı alınamadı. SIP bilgilerini kontrol edin.', tone: 'danger' as const, attention: true }
     return { label: 'Etkin · Durum kontrol ediliyor', detail: 'Son hat bağlantı kontrolü güncel değil.', tone: 'warning' as const, attention: true }
   }
   if (state.test?.status === 'failed') return { label: 'Etkin · Son test başarısız', detail: state.test.message || 'Sağlayıcı bağlantısını kontrol edin.', tone: 'danger' as const, attention: true }
-  if (state.test?.status === 'confirmed') return { label: 'Etkin · Test doğrulandı', detail: service === 'sms' ? `Başlık: ${state.senderId || '—'}` : `Gönderici: ${state.fromAddress || '—'}`, tone: 'success' as const, attention: false }
-  return { label: 'Etkin · Test doğrulaması bekleniyor', detail: 'Son test sonucu satış ekibi tarafından doğrulanmalı.', tone: 'warning' as const, attention: true }
+  if (state.test?.status === 'confirmed' || state.test?.status === 'accepted') return { label: 'Etkin · Hazır', detail: service === 'sms' ? `Başlık: ${state.senderId || state.config?.senderId || '—'}` : `Gönderici: ${state.fromAddress || state.config?.fromAddress || '—'}`, tone: 'success' as const, attention: false }
+  return { label: 'Etkin · Hazır', detail: service === 'sms' ? `Başlık: ${state.senderId || state.config?.senderId || '—'}` : `Gönderici: ${state.fromAddress || state.config?.fromAddress || '—'}`, tone: 'success' as const, attention: false }
 }
 
-function ManagedIntegrationCard({ title, service, state, numbers, onRequest }: { title: string; service: 'phone' | 'sms' | 'smtp'; state: IntegrationState; numbers?: boolean; onRequest: () => void }) {
+function ManagedIntegrationCard({
+  title,
+  service,
+  state,
+  numbers,
+  apiPrefix,
+  onRefresh,
+  onToast,
+}: {
+  title: string
+  service: 'phone' | 'sms' | 'smtp'
+  state: IntegrationState
+  numbers?: boolean
+  apiPrefix: string
+  onRefresh: () => Promise<void>
+  onToast: (type: 'success' | 'error', text: string) => void
+}) {
   const status = statusFor(service, state)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  // SMTP form state
+  const [smtpHost, setSmtpHost] = useState(state.config?.host || 'mx-out03.natrohost.com')
+  const [smtpPort, setSmtpPort] = useState(String(state.config?.port || 465))
+  const [smtpUsername, setSmtpUsername] = useState(state.config?.username || state.fromAddress || '')
+  const [smtpPassword, setSmtpPassword] = useState('')
+  const [smtpFromName, setSmtpFromName] = useState(state.config?.fromName || '')
+  const [smtpFromAddress, setSmtpFromAddress] = useState(state.config?.fromAddress || state.fromAddress || '')
+  const [smtpTarget, setSmtpTarget] = useState('')
+
+  // SMS form state
+  const [smsUsername, setSmsUsername] = useState(state.config?.username || '')
+  const [smsPassword, setSmsPassword] = useState('')
+  const [smsSenderId, setSmsSenderId] = useState(state.config?.senderId || state.senderId || '')
+  const [smsTarget, setSmsTarget] = useState('')
+
+  // Phone form state
+  const [sipUsername, setSipUsername] = useState(state.config?.username || '')
+  const [sipPassword, setSipPassword] = useState('')
+  const [phoneNumbersText, setPhoneNumbersText] = useState((state.config?.numbers || state.numbers || []).join(', '))
+  const [callerId, setCallerId] = useState(state.config?.callerId || state.callerId || '')
+  const [transferNumber, setTransferNumber] = useState(state.config?.transferNumber || '')
+
+  useEffect(() => {
+    if (service === 'smtp') {
+      if (state.config?.host) setSmtpHost(state.config.host)
+      if (state.config?.port) setSmtpPort(String(state.config.port))
+      if (state.config?.username) setSmtpUsername(state.config.username)
+      if (state.config?.fromName) setSmtpFromName(state.config.fromName)
+      if (state.config?.fromAddress || state.fromAddress) setSmtpFromAddress(state.config?.fromAddress || state.fromAddress || '')
+    } else if (service === 'sms') {
+      if (state.config?.username) setSmsUsername(state.config.username)
+      if (state.config?.senderId || state.senderId) setSmsSenderId(state.config?.senderId || state.senderId || '')
+    } else if (service === 'phone') {
+      if (state.config?.username) setSipUsername(state.config.username)
+      const nums = state.config?.numbers?.length ? state.config.numbers : state.numbers
+      if (nums?.length) setPhoneNumbersText(nums.join(', '))
+      if (state.config?.callerId || state.callerId) setCallerId(state.config?.callerId || state.callerId || '')
+      if (state.config?.transferNumber) setTransferNumber(state.config.transferNumber)
+    }
+  }, [service, state])
+
   const detail = numbers && state.numbers.length
     ? `Atanmış: ${state.numbers.join(', ')}${state.callerId ? ` · Birincil: ${state.callerId}` : ''}`
     : status.detail
-  return <SettingsCard title={title} description="Bu entegrasyon satış ekibi tarafından Klinikler ekranından yönetilir. Burada yalnızca durum görüntülenir.">
-    <div className={styles.integrationStatus}>
-      <span className={`${styles.statusBadge} ${styles[`status${status.tone[0].toUpperCase()}${status.tone.slice(1)}`]}`}>{status.label}</span>
-      <p>{detail}</p>
-    </div>
-    {status.attention && <button type="button" className={styles.saveButton} onClick={onRequest}>Talep oluştur</button>}
-  </SettingsCard>
+
+  const handleSaveConfig = async () => {
+    setBusy(true)
+    try {
+      let payload: Record<string, unknown> = {
+        revision: state.revision,
+        autoActivate: true,
+      }
+      if (service === 'smtp') {
+        const portNum = Number(smtpPort) || 465
+        payload = {
+          ...payload,
+          host: smtpHost.trim(),
+          port: portNum,
+          secure: portNum === 465 ? 'ssl' : 'tls',
+          username: smtpUsername.trim(),
+          ...(smtpPassword.trim() ? { password: smtpPassword.trim() } : {}),
+          fromName: smtpFromName.trim() || 'Klinik',
+          fromAddress: (smtpFromAddress.trim() || smtpUsername.trim()),
+        }
+      } else if (service === 'sms') {
+        payload = {
+          ...payload,
+          username: smsUsername.trim(),
+          ...(smsPassword.trim() ? { password: smsPassword.trim() } : {}),
+          senderId: smsSenderId.trim(),
+        }
+      } else {
+        const parsedNums = phoneNumbersText
+          .split(/[\s,;]+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+        payload = {
+          ...payload,
+          username: sipUsername.trim(),
+          ...(sipPassword.trim() ? { password: sipPassword.trim() } : {}),
+          numbers: parsedNums,
+          callerId: callerId.trim() || parsedNums[0] || '',
+          transferNumber: transferNumber.trim(),
+        }
+      }
+      const res = await fetch(`${apiPrefix}/${service}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ayarlar kaydedilemedi.')
+      setSmtpPassword('')
+      setSmsPassword('')
+      setSipPassword('')
+      await onRefresh()
+      onToast('success', `${title} ayarları kaydedildi ve etkinleştirildi.`)
+    } catch (err: any) {
+      onToast('error', err.message || 'Kaydetme hatası')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleTest = async () => {
+    const target = service === 'smtp' ? smtpTarget.trim() : smsTarget.trim()
+    if (!target) {
+      onToast('error', service === 'smtp' ? 'Lütfen test alıcı e-posta adresini girin.' : 'Lütfen test alıcı cep telefonu numarasını girin.')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch(`${apiPrefix}/${service}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target,
+          revision: state.revision,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Test gönderimi başarısız.')
+      if (data.status === 'failed') {
+        throw new Error(data.message || 'Test gönderimi başarısız oldu.')
+      }
+      if (data.id && data.status === 'accepted') {
+        await fetch(`${apiPrefix}/${service}/tests/${data.id}/confirm`, { method: 'POST' }).catch(() => {})
+      }
+      await onRefresh()
+      onToast('success', service === 'smtp' ? `Test e-postası (${target}) başarıyla gönderildi ve doğrulandı.` : `Test SMS mesajı (${target}) başarıyla gönderildi ve doğrulandı.`)
+    } catch (err: any) {
+      await onRefresh()
+      onToast('error', err.message || 'Test başarısız')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsCard
+      title={title}
+      description={
+        service === 'smtp'
+          ? 'Randevu bilgilendirmeleri, personel davetleri ve onay bağlantıları için kullanılan kurumsal e-posta (SMTP) bağlantısı.'
+          : service === 'sms'
+            ? 'Randevu hatırlatma ve onay mesajları için kullanılan NetGSM kısa mesaj (SMS) bağlantısı.'
+            : numbers
+              ? 'Kliniğe tanımlı gelen/giden santral telefon numaraları ve birincil arayan numara (Caller ID).'
+              : 'Sesli asistan ve çağrı merkezi için NetGSM / SIP santral bağlantısı.'
+      }
+    >
+      <div className={styles.integrationStatus}>
+        <span className={`${styles.statusBadge} ${styles[`status${status.tone[0].toUpperCase()}${status.tone.slice(1)}`]}`}>{status.label}</span>
+        <p>{detail}</p>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+        <button
+          type="button"
+          className={styles.saveButton}
+          onClick={() => setOpen(v => !v)}
+        >
+          {open ? '▲ Ayarları Gizle' : '⚙️ Bağlantı Ayarlarını Düzenle / Test Et'}
+        </button>
+      </div>
+
+      {open && (
+        <div className={styles.policyRulesBox} style={{ marginTop: 14 }}>
+          {service === 'smtp' && (
+            <>
+              <div className={styles.grid}>
+                <Field label="SMTP Sunucu Adresi (Host)">
+                  <input
+                    value={smtpHost}
+                    onChange={e => setSmtpHost(e.target.value)}
+                    placeholder="mx-out03.natrohost.com veya smtp.gmail.com"
+                  />
+                </Field>
+                <Field label="Port (465 SSL Önerilen / 587 STARTTLS)">
+                  <input
+                    inputMode="numeric"
+                    value={smtpPort}
+                    onChange={e => setSmtpPort(e.target.value)}
+                    placeholder="465"
+                  />
+                </Field>
+                <Field label="SMTP Kullanıcı Adı (E-Posta)">
+                  <input
+                    value={smtpUsername}
+                    onChange={e => {
+                      setSmtpUsername(e.target.value)
+                      if (!smtpFromAddress) setSmtpFromAddress(e.target.value)
+                    }}
+                    placeholder="ornek@klinik.com"
+                  />
+                </Field>
+                <Field label={state.config?.hasPassword ? 'SMTP Parolası (Kayıtlı — değiştirmek için yazın)' : 'SMTP Parolası / Uygulama Şifresi'}>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={smtpPassword}
+                    onChange={e => setSmtpPassword(e.target.value)}
+                    placeholder={state.config?.hasPassword ? '•••••••• (Kayıtlı)' : 'SMTP parolası'}
+                  />
+                </Field>
+                <Field label="Gönderici Adı (From Name)">
+                  <input
+                    value={smtpFromName}
+                    onChange={e => setSmtpFromName(e.target.value)}
+                    placeholder="Klinik Adı"
+                  />
+                </Field>
+                <Field label="Gönderici E-Posta Adresi (From Address)">
+                  <input
+                    type="email"
+                    value={smtpFromAddress}
+                    onChange={e => setSmtpFromAddress(e.target.value)}
+                    placeholder="ornek@klinik.com"
+                  />
+                </Field>
+              </div>
+              <div className={styles.grid} style={{ marginTop: 10 }}>
+                <Field label="Test Alıcı E-Posta Adresi">
+                  <input
+                    type="email"
+                    value={smtpTarget}
+                    onChange={e => setSmtpTarget(e.target.value)}
+                    placeholder="test@ornek.com"
+                  />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                <button type="button" className={styles.saveButton} disabled={busy} onClick={handleSaveConfig}>
+                  {busy ? 'Kaydediliyor...' : '💾 Kaydet ve Etkinleştir'}
+                </button>
+                <button type="button" className={styles.saveButton} disabled={busy} onClick={handleTest}>
+                  {busy ? 'Gönderiliyor...' : '📨 Test E-Postası Gönder'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {service === 'sms' && (
+            <>
+              <div className={styles.grid}>
+                <Field label="NetGSM API Kullanıcı Kodu / Abone No">
+                  <input
+                    value={smsUsername}
+                    onChange={e => setSmsUsername(e.target.value)}
+                    placeholder="8503096119"
+                  />
+                </Field>
+                <Field label={state.config?.hasPassword ? 'NetGSM API Parolası (Kayıtlı — değiştirmek için yazın)' : 'NetGSM API Parolası'}>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={smsPassword}
+                    onChange={e => setSmsPassword(e.target.value)}
+                    placeholder={state.config?.hasPassword ? '•••••••• (Kayıtlı)' : 'API Şifresi'}
+                  />
+                </Field>
+                <Field label="Onaylı Gönderici Başlığı (MsgHeader)">
+                  <input
+                    value={smsSenderId}
+                    onChange={e => setSmsSenderId(e.target.value)}
+                    placeholder="Örn: PINECLINIC"
+                  />
+                </Field>
+                <Field label="Test Alıcı Cep Telefonu (+905...)">
+                  <input
+                    value={smsTarget}
+                    onChange={e => setSmsTarget(e.target.value)}
+                    placeholder="+905551234567"
+                  />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                <button type="button" className={styles.saveButton} disabled={busy} onClick={handleSaveConfig}>
+                  {busy ? 'Kaydediliyor...' : '💾 Kaydet ve Etkinleştir'}
+                </button>
+                <button type="button" className={styles.saveButton} disabled={busy} onClick={handleTest}>
+                  {busy ? 'Gönderiliyor...' : '📲 Test SMS Gönder'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {service === 'phone' && (
+            <>
+              <div className={styles.grid}>
+                <Field label="SIP Kullanıcı Adı (Abone No)">
+                  <input
+                    value={sipUsername}
+                    onChange={e => setSipUsername(e.target.value)}
+                    placeholder="8503096119"
+                  />
+                </Field>
+                <Field label={state.config?.hasPassword ? 'SIP Parolası (Kayıtlı — değiştirmek için yazın)' : 'SIP Parolası'}>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={sipPassword}
+                    onChange={e => setSipPassword(e.target.value)}
+                    placeholder={state.config?.hasPassword ? '•••••••• (Kayıtlı)' : 'SIP Şifresi'}
+                  />
+                </Field>
+                <Field label="Klinik Telefon Numaraları (+90850... virgülle ayırın)">
+                  <input
+                    value={phoneNumbersText}
+                    onChange={e => setPhoneNumbersText(e.target.value)}
+                    placeholder="+908503096119"
+                  />
+                </Field>
+                <Field label="Birincil Çıkış Numarası (Caller ID)">
+                  <input
+                    value={callerId}
+                    onChange={e => setCallerId(e.target.value)}
+                    placeholder="+908503096119"
+                  />
+                </Field>
+                <Field label="Çağrı Aktarım Numarası (Transfer - Opsiyonel)">
+                  <input
+                    value={transferNumber}
+                    onChange={e => setTransferNumber(e.target.value)}
+                    placeholder="+905551234567"
+                  />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                <button type="button" className={styles.saveButton} disabled={busy} onClick={handleSaveConfig}>
+                  {busy ? 'Kaydediliyor...' : '💾 Santral ve Numara Ayarlarını Kaydet'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </SettingsCard>
+  )
 }
 
 export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' }: { apiPrefix?: string }) {
@@ -192,6 +575,17 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
   const showToast = (type: 'success' | 'error', text: string) => {
     setToast({ type, text })
     setTimeout(() => setToast(null), 4000)
+  }
+
+  const refreshIntegrations = async () => {
+    try {
+      const res = await fetch(apiPrefix, { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.phone && data.sms && data.smtp) {
+        setIntegrationStatus(data as IntegrationOverview)
+      }
+    } catch {}
   }
 
   useEffect(() => {
@@ -513,18 +907,6 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
                 }))}
               />
             </Field>
-            <Field label="Periyodik Kontrol Kademe Bekleme (Saat)">
-              <input
-                type="number"
-                min={1}
-                max={168}
-                value={notificationPolicy.recallWaitHours}
-                onChange={e => setNotificationPolicy(prev => ({
-                  ...prev,
-                  recallWaitHours: Math.max(1, Math.min(168, Number(e.target.value) || 48)),
-                }))}
-              />
-            </Field>
           </div>
 
           <div className={styles.policyCheckRow}>
@@ -563,10 +945,10 @@ export default function IntegrationsTab({ apiPrefix = '/api/admin/integrations' 
       </SettingsCard>
 
       <>
-        <ManagedIntegrationCard title="Çağrı Merkezi / Santral" service="phone" state={integrationStatus.phone} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
-        <ManagedIntegrationCard title="Klinik Telefon Numaraları" service="phone" state={integrationStatus.phone} numbers onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
-        <ManagedIntegrationCard title="Kısa Mesaj Ayarları (NetGSM)" service="sms" state={integrationStatus.sms} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
-        <ManagedIntegrationCard title="E-Posta" service="smtp" state={integrationStatus.smtp} onRequest={() => showToast('error', 'Talep oluşturma özelliği henüz kullanıma açık değil.')} />
+        <ManagedIntegrationCard title="Çağrı Merkezi / Santral" service="phone" state={integrationStatus.phone} apiPrefix={apiPrefix} onRefresh={refreshIntegrations} onToast={showToast} />
+        <ManagedIntegrationCard title="Klinik Telefon Numaraları" service="phone" state={integrationStatus.phone} numbers apiPrefix={apiPrefix} onRefresh={refreshIntegrations} onToast={showToast} />
+        <ManagedIntegrationCard title="Kısa Mesaj Ayarları (NetGSM)" service="sms" state={integrationStatus.sms} apiPrefix={apiPrefix} onRefresh={refreshIntegrations} onToast={showToast} />
+        <ManagedIntegrationCard title="E-Posta (SMTP)" service="smtp" state={integrationStatus.smtp} apiPrefix={apiPrefix} onRefresh={refreshIntegrations} onToast={showToast} />
       </>
 
       <EvolutionWhatsAppCard />

@@ -424,15 +424,25 @@ export function mergeBufferedTeethWithCommand(bufferedTeeth: string[], currentTe
  * FDI diş numarası, dental işlem, yüzey veya malzeme eşleşmesi en güçlü olan adayı seçer.
  */
 export function pickBestSpeechAlternative(
-  alternatives: SpeechAlternativeItem[],
-  procNames: string[] = DEFAULT_DENTAL_PROCEDURES,
-  materialNames: string[] = []
+  alternatives: Array<SpeechAlternativeItem | string>,
+  procNames: Array<string | { name?: string }> = DEFAULT_DENTAL_PROCEDURES,
+  materialNames: Array<string | { name?: string }> = []
 ): string {
   if (!Array.isArray(alternatives) || alternatives.length === 0) return '';
 
-  const effectiveProcs = procNames.length > 0 ? procNames : DEFAULT_DENTAL_PROCEDURES;
-  const normProcs = effectiveProcs.map((p) => normalizeAsciiTr(p.replace(/\(.*?\)/g, '').trim())).filter(Boolean);
-  const normMats = (materialNames || []).map((m) => normalizeAsciiTr(m)).filter(Boolean);
+  const extractName = (item: string | { name?: string } | null | undefined): string => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object' && typeof item.name === 'string') return item.name;
+    return '';
+  };
+
+  const effectiveProcs = Array.isArray(procNames) && procNames.length > 0 ? procNames : DEFAULT_DENTAL_PROCEDURES;
+  const normProcs = effectiveProcs
+    .map((p) => normalizeAsciiTr(extractName(p).replace(/\(.*?\)/g, '').trim()))
+    .filter(Boolean);
+  const normMats = (Array.isArray(materialNames) ? materialNames : [])
+    .map((m) => normalizeAsciiTr(extractName(m)))
+    .filter(Boolean);
 
   const dentalCoreKeywords = [
     'zirkonyum',
@@ -467,7 +477,7 @@ export function pickBestSpeechAlternative(
 
   for (let i = 0; i < alternatives.length; i++) {
     const alt = alternatives[i];
-    const raw = (alt?.transcript || '').trim();
+    const raw = (typeof alt === 'string' ? alt : alt?.transcript || '').trim();
     if (!raw) continue;
 
     const repaired = repairTurkishDentalPhonetics(raw);
@@ -503,7 +513,10 @@ export function pickBestSpeechAlternative(
     }
 
     // Confidence ve sıra önceliği (eşitlik bozucu)
-    const confidence = typeof alt.confidence === 'number' && alt.confidence > 0 ? alt.confidence : 0.5;
+    const confidence =
+      typeof alt === 'object' && alt !== null && typeof alt.confidence === 'number' && alt.confidence > 0
+        ? alt.confidence
+        : 0.5;
     score += confidence * 5 - i * 0.1;
 
     if (score > bestScore) {
@@ -512,7 +525,8 @@ export function pickBestSpeechAlternative(
     }
   }
 
-  return bestTranscript || repairTurkishDentalPhonetics(alternatives[0]?.transcript || '');
+  const firstRaw = typeof alternatives[0] === 'string' ? alternatives[0] : alternatives[0]?.transcript || '';
+  return bestTranscript || repairTurkishDentalPhonetics(firstRaw);
 }
 
 /**
@@ -799,6 +813,7 @@ export function resolveAutoLinkedIndications(
     | string
     | null
     | undefined
+    | Record<string, any>
     | {
         procedureName?: string | null;
         procedureId?: string | null;
@@ -806,23 +821,35 @@ export function resolveAutoLinkedIndications(
         indications?: string[];
         indicationLinks?: Record<string, string | string[]>;
       },
-  indicationLinks?: Record<string, string | string[]>,
-  explicitIndications?: string | string[] | null,
-  procedureId?: string | null
+  indicationLinksOrProcName?: Record<string, string | string[]> | string | null,
+  explicitIndicationsOrProcId?: string | string[] | null,
+  procedureIdOrExplicit?: string | string[] | null
 ): string[] {
   let procName: string | null | undefined;
-  let procId: string | null | undefined = procedureId;
-  let links = indicationLinks;
-  let explicit = explicitIndications;
+  let procId: string | null | undefined =
+    typeof procedureIdOrExplicit === 'string' ? procedureIdOrExplicit : undefined;
+  let links: Record<string, string | string[]> | undefined =
+    typeof indicationLinksOrProcName === 'object' && indicationLinksOrProcName !== null
+      ? indicationLinksOrProcName
+      : undefined;
+  let explicit: string | string[] | null | undefined = explicitIndicationsOrProcId;
 
   if (typeof procedureNameOrInput === 'object' && procedureNameOrInput !== null) {
-    procName = procedureNameOrInput.procedureName;
-    procId = procedureNameOrInput.procedureId ?? procedureId;
-    links = procedureNameOrInput.indicationLinks ?? indicationLinks;
-    explicit =
-      procedureNameOrInput.indications && procedureNameOrInput.indications.length > 0
-        ? procedureNameOrInput.indications
-        : (procedureNameOrInput.indication ?? explicitIndications);
+    // Support legacy caller signature: resolveAutoLinkedIndications(indicationLinks, procName, procId, explicitInds)
+    if (typeof indicationLinksOrProcName === 'string' || Array.isArray(procedureIdOrExplicit)) {
+      links = procedureNameOrInput as Record<string, string | string[]>;
+      procName = typeof indicationLinksOrProcName === 'string' ? indicationLinksOrProcName : null;
+      procId = typeof explicitIndicationsOrProcId === 'string' ? explicitIndicationsOrProcId : null;
+      explicit = procedureIdOrExplicit ?? null;
+    } else {
+      procName = procedureNameOrInput.procedureName;
+      procId = procedureNameOrInput.procedureId ?? procId;
+      links = procedureNameOrInput.indicationLinks ?? links;
+      explicit =
+        procedureNameOrInput.indications && procedureNameOrInput.indications.length > 0
+          ? procedureNameOrInput.indications
+          : (procedureNameOrInput.indication ?? explicit);
+    }
   } else {
     procName = typeof procedureNameOrInput === 'string' ? procedureNameOrInput : null;
   }

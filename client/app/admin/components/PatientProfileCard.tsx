@@ -1,4 +1,6 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import PatientConsentPanel from './PatientConsentPanel'
 import PatientRecordsTimeline from './PatientRecordsTimeline'
 import { getTreatmentColorTheme } from './FastScheduleModal'
@@ -10,6 +12,7 @@ interface PatientProfileCardProps {
   onEdit?: (patient: any) => void
   calendarHistoryMode?: boolean
   onConsentChange?: (field: 'smsOptOut' | 'emailOptOut' | 'whatsappOptOut', value: boolean) => void
+  onRefresh?: () => void
 }
 
 export default function PatientProfileCard({
@@ -18,7 +21,11 @@ export default function PatientProfileCard({
   onEdit,
   calendarHistoryMode = false,
   onConsentChange,
+  onRefresh,
 }: PatientProfileCardProps) {
+  const [deletedTreatmentIds, setDeletedTreatmentIds] = useState<Set<string>>(new Set())
+  const [deletingTreatmentId, setDeletingTreatmentId] = useState<string | null>(null)
+
   if (!profile) return (
     <div style={{ padding: 24, textAlign: 'center', color: 'var(--foreground-3)' }}>
       Yükleniyor...
@@ -26,6 +33,43 @@ export default function PatientProfileCard({
   )
 
   const { patient, treatments, payments, consultations, diseases, completedWorks, doctorNotes, toothRecords, materialUsages } = profile
+
+  const visibleTreatments = useMemo(() => {
+    return (Array.isArray(treatments) ? treatments : []).filter(
+      (t: any) => t && t.status !== 'cancelled' && !deletedTreatmentIds.has(t.id)
+    )
+  }, [treatments, deletedTreatmentIds])
+
+  const filteredProfile = useMemo(() => {
+    if (!profile) return profile
+    return {
+      ...profile,
+      treatments: visibleTreatments,
+    }
+  }, [profile, visibleTreatments])
+
+  const handleDeleteTreatment = async (treatment: any) => {
+    if (!treatment?.id || deletingTreatmentId) return
+    setDeletingTreatmentId(treatment.id)
+    try {
+      const res = await fetch(`/api/dental/treatments/${treatment.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || 'Tedavi silinemedi')
+      }
+      setDeletedTreatmentIds(prev => {
+        const next = new Set(prev)
+        next.add(treatment.id)
+        return next
+      })
+      toast.success('Tedavi kaydı silindi')
+      if (onRefresh) onRefresh()
+    } catch (e: any) {
+      toast.error(e.message || 'Tedavi silinirken hata oluştu')
+    } finally {
+      setDeletingTreatmentId(null)
+    }
+  }
 
   const cardStyle = {
     background: 'var(--card-bg, #1e293b)',
@@ -206,16 +250,17 @@ export default function PatientProfileCard({
       )}
 
       {/* Salt-Okunur (Read-Only) Tedavi Planı Kartlığı */}
-      {!calendarHistoryMode && treatments && treatments.length > 0 && (
+      {!calendarHistoryMode && visibleTreatments.length > 0 && (
         <div style={cardStyle}>
-          <div style={headerStyle}>🦷 Tedavi Planları ({treatments.length})</div>
+          <div style={headerStyle}>🦷 Tedavi Planları ({visibleTreatments.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {treatments.map((t: any, idx: number) => {
+            {visibleTreatments.map((t: any, idx: number) => {
               const badge = getReadOnlyTreatmentStatusBadge(t.status)
               const tTheme = getTreatmentColorTheme(t.color || t.metadata?.color || t.procedureName, idx)
               const costVal = Number(t.cost ?? t.price ?? 0)
               const docName = resolveDoctorName(t)
-              const sessionDate = t.sessions?.[0]?.startTime || t.plannedDate || t.createdAt
+              const sessionDate = t.sessions?.[0]?.startTime || null
+              const isDeleting = deletingTreatmentId === t.id
 
               return (
                 <div
@@ -286,6 +331,34 @@ export default function PatientProfileCard({
                       >
                         {badge.label}
                       </span>
+                      {t.id && (
+                        <button
+                          type="button"
+                          disabled={isDeleting}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void handleDeleteTreatment(t)
+                          }}
+                          title="Tedavi Kaydını Sil"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '3px 7px',
+                            borderRadius: 6,
+                            border: '1px solid var(--danger, #ef4444)',
+                            background: 'var(--card-inner, #f1f5f9)',
+                            color: 'var(--danger, #ef4444)',
+                            fontSize: '0.67rem',
+                            fontWeight: 700,
+                            cursor: isDeleting ? 'wait' : 'pointer',
+                            opacity: isDeleting ? 0.6 : 1,
+                          }}
+                        >
+                          <Trash2 size={12} />
+                          <span>Sil</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -319,7 +392,7 @@ export default function PatientProfileCard({
       {/* Tüm Kayıtlar & İşlem Geçmişi */}
       <div style={cardStyle}>
         <div style={headerStyle}>📋 Tüm Kayıtlar & İşlem Geçmişi</div>
-        <PatientRecordsTimeline profile={profile} doctors={doctors} compact />
+        <PatientRecordsTimeline profile={filteredProfile} doctors={doctors} compact onRefresh={onRefresh} />
       </div>
 
       {/* Ödemeler */}

@@ -36,6 +36,12 @@ function toRow(r: typeof knowledgeCategories.$inferSelect): CategoryRow {
   }
 }
 
+function isObsoleteGalleryCategory(slug?: string | null, label?: string | null): boolean {
+  const s = (slug || '').trim().toLocaleLowerCase('tr-TR')
+  const l = (label || '').trim().toLocaleLowerCase('tr-TR')
+  return s === 'galeri' || s === 'gallery' || l === 'galeri' || l === 'gallery'
+}
+
 export async function listCategories(): Promise<CategoryRow[]> {
   const clinicId = requireClinicId()
   const rows = await db
@@ -43,7 +49,22 @@ export async function listCategories(): Promise<CategoryRow[]> {
     .from(knowledgeCategories)
     .where(eq(knowledgeCategories.clinicId, clinicId))
     .orderBy(knowledgeCategories.sortOrder)
-  return rows.map(toRow)
+
+  const hasObsolete = rows.some(r => isObsoleteGalleryCategory(r.slug, r.label))
+  if (hasObsolete) {
+    await db.execute(drizzleSql`
+      UPDATE knowledge_documents
+      SET category = 'genel', updated_at = now()
+      WHERE clinic_id = ${clinicId} AND LOWER(category) IN ('galeri', 'gallery')
+    `).catch(() => {})
+    await db.execute(drizzleSql`
+      DELETE FROM knowledge_categories
+      WHERE clinic_id = ${clinicId}
+        AND (LOWER(slug) IN ('galeri', 'gallery') OR LOWER(label) IN ('galeri', 'gallery'))
+    `).catch(() => {})
+  }
+
+  return rows.filter(r => !isObsoleteGalleryCategory(r.slug, r.label)).map(toRow)
 }
 
 export async function createCategory(data: {
@@ -116,6 +137,17 @@ export async function deleteCategory(id: string): Promise<{ success: boolean; mo
 
 /** Seed default categories for a specific clinic if its table is empty. */
 export async function seedCategoriesForClinic(clinicId: string): Promise<void> {
+  await db.execute(drizzleSql`
+    UPDATE knowledge_documents
+    SET category = 'genel', updated_at = now()
+    WHERE clinic_id = ${clinicId} AND LOWER(category) IN ('galeri', 'gallery')
+  `).catch(() => {})
+  await db.execute(drizzleSql`
+    DELETE FROM knowledge_categories
+    WHERE clinic_id = ${clinicId}
+      AND (LOWER(slug) IN ('galeri', 'gallery') OR LOWER(label) IN ('galeri', 'gallery'))
+  `).catch(() => {})
+
   const existing = await db.select({ id: knowledgeCategories.id }).from(knowledgeCategories).where(eq(knowledgeCategories.clinicId, clinicId)).limit(1)
   if (existing.length > 0) return
 

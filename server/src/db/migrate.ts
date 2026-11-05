@@ -293,6 +293,17 @@ async function runMigrations() {
     console.log('[Migration] Varsayılan kategoriler oluşturuldu')
   }
 
+  // Retire legacy 'galeri' / 'gallery' category from existing databases
+  await sql`
+    UPDATE knowledge_documents
+    SET category = 'genel', updated_at = now()
+    WHERE LOWER(category) IN ('galeri', 'gallery')
+  `.catch(() => {})
+  await sql`
+    DELETE FROM knowledge_categories
+    WHERE LOWER(slug) IN ('galeri', 'gallery') OR LOWER(label) IN ('galeri', 'gallery')
+  `.catch(() => {})
+
   // ── VIP Assistants & Personal Assistant Numbers ───────────────────────────
   await sql`
     CREATE TABLE IF NOT EXISTS vip_assistants (
@@ -929,6 +940,9 @@ async function runMigrations() {
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_inbound_secret TEXT`
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS n8n_send_webhook_url TEXT`
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_phone_number_id TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_waba_id TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_access_token TEXT`
+  await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS meta_verify_token TEXT`
   await sql`ALTER TABLE clinics ADD COLUMN IF NOT EXISTS whatsapp_templates JSONB NOT NULL DEFAULT '[]'::jsonb`
   await sql`ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_inbound_at TIMESTAMPTZ`
 

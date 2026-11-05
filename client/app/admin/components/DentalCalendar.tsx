@@ -243,6 +243,7 @@ function getLocalYMD(dateStrOrObj: string | Date): string {
 export default function DentalCalendar({ doctors, events, shifts, doctorLeaves = [], workingHours, currentDate, onEventClick, view = 'day', onHeaderContextMenu, onEventContextMenu, onEventUpdate, onUnassignedHeaderContextMenu, onEmptySlotSelect }: Props & { onUnassignedHeaderContextMenu?: (e: React.MouseEvent) => void, onEmptySlotSelect?: (start: string, end: string, doctorId: string | null, x: number, y: number) => void }) {
   
   const gridRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const slotStartHour = typeof workingHours?.slotStartHour === 'number' ? workingHours.slotStartHour : 8;
   const slotEndHour = typeof workingHours?.slotEndHour === 'number' ? Math.max(workingHours.slotEndHour, slotStartHour + 1) : 20;
 
@@ -617,31 +618,48 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     return () => window.removeEventListener('clear-calendar-draft', handleClearDraft);
   }, []);
 
-  // Auto-scroll to current hour
+  // Auto-scroll to current hour when opened in Daily or Weekly view
+  const hasDoctorsLoaded = doctors.length > 0;
   useEffect(() => {
     if (view === 'day' || view === 'week') {
-      const timer = setTimeout(() => {
-        if (!gridRef.current) return;
-        let currentHour = new Date().getHours();
+      const performScrollToCurrentTime = () => {
+        const now = new Date();
+        let currentHour = now.getHours() + now.getMinutes() / 60;
         if (slotEndHour > 24 && currentHour < slotStartHour) {
           currentHour += 24;
         }
-        const offsetHours = Math.max(0, currentHour - slotStartHour);
+        const clampedHour = Math.min(Math.max(currentHour, slotStartHour), Math.max(slotStartHour, slotEndHour - 0.5));
+        const offsetHours = Math.max(0, clampedHour - slotStartHour);
         const top = offsetHours * 96; // 96px per hour (48px per 30 min)
-        
+        const targetScrollTop = Math.max(0, Math.round(top - 96)); // ~1 hour before current time
+
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = targetScrollTop;
+          return;
+        }
+
+        if (!gridRef.current) return;
         let parent = gridRef.current.parentElement;
         while (parent) {
           const style = window.getComputedStyle(parent);
           if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-            parent.scrollTo({ top: Math.max(0, top - 100), behavior: 'smooth' });
+            parent.scrollTop = targetScrollTop;
             break;
           }
           parent = parent.parentElement;
         }
-      }, 100);
-      return () => clearTimeout(timer);
+      };
+
+      const rafId = window.requestAnimationFrame(performScrollToCurrentTime);
+      const timer1 = setTimeout(performScrollToCurrentTime, 60);
+      const timer2 = setTimeout(performScrollToCurrentTime, 180);
+      return () => {
+        window.cancelAnimationFrame(rafId);
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
     }
-  }, [view, slotStartHour, slotEndHour]);
+  }, [view, slotStartHour, slotEndHour, currentDate, hasDoctorsLoaded]);
 
   const slots = generateTimeSlots(slotStartHour, slotEndHour)
 
@@ -707,7 +725,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     const cols = displayDoctors.length || 1
     const minDayWidth = cols <= 1 ? '100%' : `${cols * 220 + 56}px`
     return (
-      <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
+      <div ref={scrollContainerRef} className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
         {renderWarningTooltip()}
         <div className="rc-wrap" style={{ minWidth: minDayWidth, width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>
@@ -1014,7 +1032,7 @@ export default function DentalCalendar({ doctors, events, shifts, doctorLeaves =
     const weekDays = getWeekDays(currentDate)
     const cols = weekDays.length
     return (
-      <div className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
+      <div ref={scrollContainerRef} className={`rc-scroll-container${isUnassignedDrag ? ' rc-unassigned-drag' : ''}`}>
         {renderWarningTooltip()}
         <div className="rc-wrap" style={{ minWidth: '840px', width: '100%' }}>
         <div className="rc-header" style={{ gridTemplateColumns: `56px repeat(${cols}, 1fr)` }}>

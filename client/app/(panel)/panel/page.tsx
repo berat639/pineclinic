@@ -28,11 +28,37 @@ const BASE_TABS: { id: Tab; label: string }[] = [
   { id: 'integrations', label: 'Entegrasyonlar (Ayarlar)' },
 ]
 
+const PANEL_TAB_STORAGE_KEY = 'voiceai_panel_active_tab'
+
+function resolveInitialPanelTab(allowed: Tab[], defaultTab: Tab): Tab {
+  if (typeof window !== 'undefined') {
+    const urlTab = new URLSearchParams(window.location.search).get('tab') as Tab | null
+    if (urlTab && allowed.includes(urlTab)) return urlTab
+    const sessionTab = window.sessionStorage.getItem(PANEL_TAB_STORAGE_KEY) as Tab | null
+    if (sessionTab && allowed.includes(sessionTab)) return sessionTab
+    const localTab = window.localStorage.getItem(PANEL_TAB_STORAGE_KEY) as Tab | null
+    if (localTab && allowed.includes(localTab)) return localTab
+  }
+  return allowed.includes(defaultTab) ? defaultTab : (allowed[0] || 'calendar')
+}
+
 export default function YoneticiPage() {
   const { user, logout } = useAuth()
-  const [tab, setTab] = useState<Tab | null>(null)
-  const [appointments, setAppointments] = useState<any[]>([])
+  const [tab, setTabState] = useState<Tab | null>(null)
   const [allowedTabs, setAllowedTabs] = useState<Tab[] | null>(null)
+
+  const setTab = useCallback((nextTab: Tab) => {
+    setTabState(nextTab)
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(PANEL_TAB_STORAGE_KEY, nextTab)
+        window.localStorage.setItem(PANEL_TAB_STORAGE_KEY, nextTab)
+        const url = new URL(window.location.href)
+        url.searchParams.set('tab', nextTab)
+        window.history.replaceState(null, '', url.toString())
+      } catch {}
+    }
+  }, [])
 
   const isModerator = user?.role === 'moderator' || user?.email === 'moderator@klinik.com'
 
@@ -43,40 +69,91 @@ export default function YoneticiPage() {
     ? [{ id: 'platform-clinics' as Tab, label: 'Klinikler' }, ...roleTabs]
     : roleTabs
 
-  const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001'
-  const fetchAppts = useCallback(() => {
-    fetch(`/api/appointments`).then(r => r.ok ? r.json() : []).then(setAppointments).catch(() => {})
-  }, [])
-  useEffect(() => { fetchAppts() }, [fetchAppts])
-
   useEffect(() => {
     if (!user) return
     if (isModerator) {
-      setAllowedTabs([
+      const allowed: Tab[] = [
         ...(user.canManagePlatform ? ['platform-clinics' as Tab] : []),
         'vip', 'knowledge', 'calendar',
-      ])
-      if (!tab) setTab(user.canManagePlatform ? 'platform-clinics' : 'vip')
+      ]
+      setAllowedTabs(allowed)
+      setTabState(prev => {
+        const next = prev && allowed.includes(prev) ? prev : resolveInitialPanelTab(allowed, 'vip')
+        if (typeof window !== 'undefined') {
+          try {
+            window.sessionStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+            window.localStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+            const url = new URL(window.location.href)
+            if (url.searchParams.get('tab') !== next) {
+              url.searchParams.set('tab', next)
+              window.history.replaceState(null, '', url.toString())
+            }
+          } catch {}
+        }
+        return next
+      })
     } else if (user.role === 'yonetici') {
-      setAllowedTabs([
+      const allowed: Tab[] = [
         ...(user.canManagePlatform ? ['platform-clinics' as Tab] : []),
         ...BASE_TABS.map(t => t.id),
-      ])
-      if (!tab) setTab(user.canManagePlatform ? 'platform-clinics' : 'calendar')
+      ]
+      setAllowedTabs(allowed)
+      setTabState(prev => {
+        const next = prev && allowed.includes(prev) ? prev : resolveInitialPanelTab(allowed, 'calendar')
+        if (typeof window !== 'undefined') {
+          try {
+            window.sessionStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+            window.localStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+            const url = new URL(window.location.href)
+            if (url.searchParams.get('tab') !== next) {
+              url.searchParams.set('tab', next)
+              window.history.replaceState(null, '', url.toString())
+            }
+          } catch {}
+        }
+        return next
+      })
     } else {
       fetch('/api/admin/settings/roles')
         .then(r => r.json())
         .then(perms => {
-          const rolePerms = perms[user.role] || ['calendar']
+          const rolePerms: Tab[] = perms[user.role] || ['calendar']
           setAllowedTabs(rolePerms)
-          if (!tab) setTab(rolePerms[0] || 'calendar')
+          setTabState(prev => {
+            const next = prev && rolePerms.includes(prev) ? prev : resolveInitialPanelTab(rolePerms, rolePerms[0] || 'calendar')
+            if (typeof window !== 'undefined') {
+              try {
+                window.sessionStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+                window.localStorage.setItem(PANEL_TAB_STORAGE_KEY, next)
+                const url = new URL(window.location.href)
+                if (url.searchParams.get('tab') !== next) {
+                  url.searchParams.set('tab', next)
+                  window.history.replaceState(null, '', url.toString())
+                }
+              } catch {}
+            }
+            return next
+          })
         })
         .catch(() => {
-          setAllowedTabs(['calendar'])
-          if (!tab) setTab('calendar')
+          const fallback: Tab[] = ['calendar']
+          setAllowedTabs(fallback)
+          setTabState(prev => prev && fallback.includes(prev) ? prev : 'calendar')
         })
     }
-  }, [user, tab, isModerator])
+  }, [user, isModerator])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !allowedTabs) return
+    const handlePopState = () => {
+      const urlTab = new URLSearchParams(window.location.search).get('tab') as Tab | null
+      if (urlTab && allowedTabs.includes(urlTab)) {
+        setTabState(urlTab)
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [allowedTabs])
 
   const visibleTabs = tabsList.filter(t => allowedTabs?.includes(t.id))
 

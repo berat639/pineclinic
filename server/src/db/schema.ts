@@ -123,6 +123,9 @@ export const clinics = pgTable('clinics', {
   n8nInboundSecret: text('n8n_inbound_secret'),
   n8nSendWebhookUrl: text('n8n_send_webhook_url'),
   metaPhoneNumberId: text('meta_phone_number_id'),
+  metaWabaId: text('meta_waba_id'),
+  metaAccessToken: text('meta_access_token'),
+  metaVerifyToken: text('meta_verify_token'),
   whatsappTemplates: jsonb('whatsapp_templates').notNull().default([]),
   // Per-clinic Gemini API key (AES-256-GCM encrypted via integration-secrets)
   geminiApiKey: text('gemini_api_key'),

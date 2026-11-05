@@ -365,8 +365,44 @@ const CLOUD_PROVIDER_META: Record<CloudProvider, {
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
+const ADMIN_VALID_TABS: Tab[] = ['calendar', 'patients', 'payments', 'knowledge', 'settings', 'users', 'integrations']
+const ADMIN_TAB_STORAGE_KEY = 'voiceai_admin_active_tab'
+
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('patients')
+  const [activeTab, setActiveTabState] = useState<Tab>('calendar')
+
+  const setActiveTab = useCallback((nextTab: Tab) => {
+    setActiveTabState(nextTab)
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(ADMIN_TAB_STORAGE_KEY, nextTab)
+        window.localStorage.setItem(ADMIN_TAB_STORAGE_KEY, nextTab)
+        const url = new URL(window.location.href)
+        url.searchParams.set('tab', nextTab)
+        window.history.replaceState(null, '', url.toString())
+      } catch {}
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const urlTab = new URLSearchParams(window.location.search).get('tab') as Tab | null
+      const sessionTab = window.sessionStorage.getItem(ADMIN_TAB_STORAGE_KEY) as Tab | null
+      const localTab = window.localStorage.getItem(ADMIN_TAB_STORAGE_KEY) as Tab | null
+      const candidate = (urlTab && ADMIN_VALID_TABS.includes(urlTab) ? urlTab : null)
+        || (sessionTab && ADMIN_VALID_TABS.includes(sessionTab) ? sessionTab : null)
+        || (localTab && ADMIN_VALID_TABS.includes(localTab) ? localTab : null)
+      if (candidate) {
+        setActiveTabState(candidate)
+        const url = new URL(window.location.href)
+        if (url.searchParams.get('tab') !== candidate) {
+          url.searchParams.set('tab', candidate)
+          window.history.replaceState(null, '', url.toString())
+        }
+      }
+    } catch {}
+  }, [])
 
   // Appointments
   const [appointments, setAppointments] = useState<Appointment[]>([])

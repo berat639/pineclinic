@@ -478,7 +478,20 @@ export async function createAssistantAppointment(fields: Record<string, unknown>
       gt(dentalAppointments.endTime, start),
     )).limit(1)
     if (conflicts.length) throw new Error('Seçilen saat geçici veya planlanmış başka bir randevu ile dolu.')
-    const complaint = String(fields.sikayet || fields.islem_turu || fields.randevu_turu || fields.sorun_veya_talep || '')
+    const rawRandevuTuru = String(fields.randevu_turu || '').trim()
+    const complaint = String(
+      fields.sikayet ||
+      fields.hasta_sikayeti ||
+      fields.talep ||
+      fields.sorun_veya_talep ||
+      fields.islem_turu ||
+      fields.complaint ||
+      fields.notlar ||
+      fields.hastaNotu ||
+      fields.not ||
+      (rawRandevuTuru && rawRandevuTuru.toLowerCase() !== 'kontrol' ? rawRandevuTuru : '') ||
+      ''
+    ).trim()
     const validDoctorUuid = doctorId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(doctorId) ? doctorId : null
     const [dental] = await tx.insert(dentalAppointments).values({
       clinicId: context.clinicId, patientId: null, doctorId: validDoctorUuid,

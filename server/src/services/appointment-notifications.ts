@@ -17,7 +17,7 @@ import {
   type NotificationChannelKey,
 } from '../db/repositories/settings'
 import { enqueueWhatsAppNotification, patientPhoneMatches } from '../db/repositories/whatsapp'
-import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
+import { activeConfig, decrypt, getRow, resolveEffectiveConfig } from '../integrations/managed/store'
 import type { Config } from '../integrations/managed/model'
 import { normalizePhone } from '../integrations/whatsapp'
 import { broadcastSSE } from '../events'
@@ -282,7 +282,7 @@ export async function deliverSingleChannelNotification(params: {
 
   if (channel === 'sms') {
     if (!patient.phone) return false
-    let config = await activeConfig(clinic.id, 'sms')
+    let config = await resolveEffectiveConfig(clinic.id, 'sms')
     if (!config) {
       const row = await getRow(clinic.id, 'sms')
       if (row?.draft) config = decrypt(row.draft as Config)
@@ -297,7 +297,7 @@ export async function deliverSingleChannelNotification(params: {
 
   if (channel === 'email') {
     if (!patient.email) return false
-    const config = await activeConfig(clinic.id, 'smtp')
+    const config = await resolveEffectiveConfig(clinic.id, 'smtp')
     if (!config?.host || !config.port || !config.username || !config.password) return false
     await runWithTenantContext({ clinicId: clinic.id, hostname: 'notification' }, () =>
       sendEmail({ clinicId: clinic.id, to: patient.email!, subject, text: message }),

@@ -7,6 +7,7 @@ import {
   treatmentPlans,
   treatmentPlanDetails,
   treatmentGroups,
+  treatmentGroupDetails,
   appointmentTreatments,
   patientPayments,
   completedWorks,
@@ -25,7 +26,9 @@ import {
   installmentPlans,
   whatsappConversations,
   patientConsentRequests,
+  patientConsentPreferences,
   planAttachments,
+  planAttachmentFiles,
 } from '../schema'
 import { currentClinicId, requireClinicId } from '../../tenancy/context'
 
@@ -90,8 +93,27 @@ export async function logPatientActivity(entry: PatientActivityLogInput): Promis
     const eventType = entry.eventType || entry.event_type || 'status_changed'
     const oldVal = entry.oldValue !== undefined ? entry.oldValue : (entry.old_value ?? null)
     const newVal = entry.newValue !== undefined ? entry.newValue : (entry.new_value ?? null)
+    if ((eventType === 'status_changed' || eventType === 'treatment_status_changed') && oldVal && newVal && oldVal === newVal) {
+      return
+    }
     const actorType = entry.actorType || entry.actor_type || 'desk'
     const actorName = entry.actorName !== undefined ? entry.actorName : (entry.actor_name ?? null)
+
+    // Deduplicate identical log entries written within the last 60 seconds
+    const existingDup = await db.execute(sql`
+      SELECT id FROM patient_activity_logs
+      WHERE clinic_id = ${clinicId}
+        AND patient_id = ${entry.patientId}
+        AND COALESCE(appointment_id::text, '') = COALESCE(${entry.appointmentId ?? null}::text, '')
+        AND COALESCE(treatment_id::text, '') = COALESCE(${entry.treatmentId ?? null}::text, '')
+        AND event_type = ${eventType}
+        AND COALESCE(old_value, '') = COALESCE(${oldVal}, '')
+        AND COALESCE(new_value, '') = COALESCE(${newVal}, '')
+        AND created_at >= NOW() - INTERVAL '60 seconds'
+      LIMIT 1
+    `).catch(() => [])
+    if (Array.isArray(existingDup) && existingDup.length > 0) return
+
     await db.execute(sql`
       INSERT INTO patient_activity_logs (
         clinic_id, patient_id, appointment_id, treatment_id,
@@ -663,8 +685,7 @@ async function ensureAppointmentPatient(
 // ── Dental Appointments ──────────────────────────────────────────────────────
 
 export async function listDentalAppointments(dateStr?: string) {
-  await ensureAiAppointmentReviewSchema()
-  await ensurePatientArchiveSchema()
+  await Promise.all([ensureAiAppointmentReviewSchema(), ensurePatientArchiveSchema()])
   const clinicId = requireClinicId()
   let appts: any[] = [];
   if (dateStr) {
@@ -681,67 +702,82 @@ export async function listDentalAppointments(dateStr?: string) {
   
   if (appts.length === 0) return appts;
 
-  // Self-healing: patientId eksik olan aktif randevulara otomatik hasta kaydı bağla
-  for (const a of appts) {
-    if (!isValidUuid(a.patientId) && a.status !== 'cancelled') {
-      await ensureAppointmentPatient(clinicId, a)
-    }
+  // Self-healing: patientId eksik olan aktif randevulara otomatik hasta kaydı bağla (paralel)
+  const unlinkedAppts = appts.filter(a => !isValidUuid(a.patientId) && a.status !== 'cancelled' && a.reviewStatus !== 'rejected')
+  if (unlinkedAppts.length > 0) {
+    await Promise.all(unlinkedAppts.map(a => ensureAppointmentPatient(clinicId, a)))
   }
 
-  // Self-healing: Eğer gelecekteki aktif bir randevunun hekimi dondurulmuş (active = false) ise otomatik boşa çıkar
-  try {
-    const startOfToday = new Date()
-    startOfToday.setHours(0, 0, 0, 0)
-    const assignedDocIds = Array.from(
-      new Set(appts.map((a: any) => a.doctorId).filter((id): id is string => Boolean(id)))
-    )
-    if (assignedDocIds.length > 0) {
-      const docRows = await db
-        .select({ id: users.id, active: users.active })
-        .from(users)
-        .where(inArray(users.id, assignedDocIds))
-      const inactiveDocIds = new Set(
-        docRows.filter((d) => d.active === false).map((d) => d.id)
-      )
-      if (inactiveDocIds.size > 0) {
-        const toUnassignIds: string[] = []
-        for (const a of appts) {
-          if (
-            a.doctorId &&
-            inactiveDocIds.has(a.doctorId) &&
-            new Date(a.startTime).getTime() >= startOfToday.getTime() &&
-            a.status !== 'completed' &&
-            a.status !== 'cancelled' &&
-            a.status !== 'no_show'
-          ) {
-            toUnassignIds.push(a.id)
-            a.doctorId = null
-            a.status = 'pending_assignment'
+  const apptIds = appts.map((a: any) => a.id)
+
+  const [, links] = await Promise.all([
+    // Self-healing: Eğer aktif bir randevunun hekimi dondurulmuş/ayrılmış ise veya durum pending_assignment ise doktor seçimini boşa çıkar
+    (async () => {
+      try {
+        const assignedDocIds = Array.from(
+          new Set(appts.map((a: any) => a.doctorId).filter((id): id is string => Boolean(id)))
+        )
+        if (assignedDocIds.length > 0) {
+          const activeDocRows = await db
+            .select({ id: users.id })
+            .from(users)
+            .innerJoin(clinicMemberships, eq(clinicMemberships.userId, users.id))
+            .where(
+              and(
+                eq(clinicMemberships.clinicId, clinicId),
+                eq(clinicMemberships.role, 'hekim'),
+                eq(clinicMemberships.active, true),
+                eq(users.active, true),
+                inArray(users.id, assignedDocIds)
+              )
+            )
+          const activeDocIdSet = new Set(activeDocRows.map((d) => d.id))
+          const inactiveDocIds = assignedDocIds.filter((id) => !activeDocIdSet.has(id))
+          const toUnassignIds: string[] = []
+          for (const a of appts) {
+            if (
+              a.doctorId &&
+              (!activeDocIdSet.has(a.doctorId) || a.status === 'pending_assignment') &&
+              a.status !== 'completed' &&
+              a.status !== 'cancelled' &&
+              a.status !== 'no_show'
+            ) {
+              toUnassignIds.push(a.id)
+              a.doctorId = null
+              a.status = 'pending_assignment'
+            }
+          }
+          if (toUnassignIds.length > 0) {
+            await db
+              .update(dentalAppointments)
+              .set({
+                doctorId: null,
+                status: 'pending_assignment',
+                updatedAt: new Date(),
+              })
+              .where(inArray(dentalAppointments.id, toUnassignIds))
+          }
+          if (inactiveDocIds.length > 0) {
+            await db
+              .update(treatmentPlans)
+              .set({ doctorId: null })
+              .where(
+                and(
+                  eq(treatmentPlans.clinicId, clinicId),
+                  inArray(treatmentPlans.doctorId, inactiveDocIds),
+                  sql`${treatmentPlans.status} <> 'completed'`
+                )
+              )
           }
         }
-        if (toUnassignIds.length > 0) {
-          await db
-            .update(dentalAppointments)
-            .set({
-              doctorId: null,
-              status: 'pending_assignment',
-              updatedAt: new Date(),
-            })
-            .where(inArray(dentalAppointments.id, toUnassignIds))
-        }
+      } catch (err) {
+        console.warn('[DentalRepo] Could not self-heal frozen doctor appointments:', err)
       }
-    }
-  } catch (err) {
-    console.warn('[DentalRepo] Could not self-heal frozen doctor appointments:', err)
-  }
-  
-  const { appointmentTreatments } = await import('../schema');
-  const { inArray: inArr } = await import('drizzle-orm');
-  
-  const apptIds = appts.map((a: any) => a.id);
-  const links = await db.select({ appointmentId: appointmentTreatments.appointmentId })
-    .from(appointmentTreatments)
-    .where(inArr(appointmentTreatments.appointmentId, apptIds));
+    })(),
+    db.select({ appointmentId: appointmentTreatments.appointmentId })
+      .from(appointmentTreatments)
+      .where(inArray(appointmentTreatments.appointmentId, apptIds)),
+  ])
     
   const linkedApptIds = new Set(links.map(l => l.appointmentId));
   return appts.map(a => ({ ...a, hasTreatment: linkedApptIds.has(a.id) }));
@@ -809,7 +845,55 @@ export async function deleteDentalAppointment(id: string): Promise<boolean> {
   import('../../services/appointment-notifications')
     .then(({ cancelAppointmentNotifications }) => cancelAppointmentNotifications(clinicId, id))
     .catch(() => {})
+
+  const linkedRows = await db
+    .select({ treatmentPlanId: appointmentTreatments.treatmentPlanId })
+    .from(appointmentTreatments)
+    .where(eq(appointmentTreatments.appointmentId, id))
+    .catch(() => [])
+  const linkedTreatmentIds = Array.from(new Set(linkedRows.map(r => r.treatmentPlanId).filter(Boolean)))
+
+  await db.execute(sql`DELETE FROM patient_activity_logs WHERE clinic_id = ${clinicId} AND appointment_id = ${id}`).catch(() => {})
+  await db.delete(appointmentTreatments).where(eq(appointmentTreatments.appointmentId, id)).catch(() => {})
+
   const rows = await db.delete(dentalAppointments).where(and(eq(dentalAppointments.id, id), eq(dentalAppointments.clinicId, clinicId))).returning({ id: dentalAppointments.id })
+
+  if (linkedTreatmentIds.length > 0) {
+    try {
+      const remainingLinks = await db
+        .select({ treatmentPlanId: appointmentTreatments.treatmentPlanId })
+        .from(appointmentTreatments)
+        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+        .where(
+          and(
+            inArray(appointmentTreatments.treatmentPlanId, linkedTreatmentIds),
+            eq(dentalAppointments.isActive, true),
+            ne(dentalAppointments.status, 'cancelled')
+          )
+        )
+      const stillScheduledIds = new Set(remainingLinks.map(r => r.treatmentPlanId))
+      const unscheduledIds = linkedTreatmentIds.filter(tpId => !stillScheduledIds.has(tpId))
+      if (unscheduledIds.length > 0) {
+        const detailRows = await db
+          .select()
+          .from(treatmentPlanDetails)
+          .where(and(eq(treatmentPlanDetails.clinicId, clinicId), inArray(treatmentPlanDetails.treatmentId, unscheduledIds)))
+        for (const detail of detailRows) {
+          if (detail.metadata && typeof detail.metadata === 'object' && 'plannedDate' in (detail.metadata as Record<string, unknown>)) {
+            const nextMeta = { ...(detail.metadata as Record<string, unknown>) }
+            delete nextMeta.plannedDate
+            await db
+              .update(treatmentPlanDetails)
+              .set({ metadata: nextMeta })
+              .where(and(eq(treatmentPlanDetails.clinicId, clinicId), eq(treatmentPlanDetails.treatmentId, detail.treatmentId)))
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[DentalRepo] Could not clean up unscheduled treatment metadata on appointment delete:', err)
+    }
+  }
+
   return rows.length > 0
 }
 
@@ -900,6 +984,7 @@ export async function getPatientFullProfile(patientId: string) {
         type: dentalAppointments.type,
         notes: dentalAppointments.notes,
         complaint: dentalAppointments.complaint,
+        intakeSource: dentalAppointments.intakeSource,
         patientResponseStatus: dentalAppointments.patientResponseStatus,
         patientResponseNote: dentalAppointments.patientResponseNote,
         patientPreferredDate: dentalAppointments.patientPreferredDate,
@@ -910,7 +995,7 @@ export async function getPatientFullProfile(patientId: string) {
       })
       .from(dentalAppointments)
       .leftJoin(users, eq(dentalAppointments.doctorId, users.id))
-      .where(and(eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.patientId, patientId)))
+      .where(and(eq(dentalAppointments.clinicId, clinicId), eq(dentalAppointments.patientId, patientId), eq(dentalAppointments.isActive, true), ne(dentalAppointments.status, 'cancelled')))
       .orderBy(desc(dentalAppointments.startTime)),
 
     // Treatment Plans
@@ -926,22 +1011,23 @@ export async function getPatientFullProfile(patientId: string) {
       createdAt: treatmentPlans.createdAt,
       doctorId: treatmentPlans.doctorId,
       doctorName: users.name,
+      doctorActive: users.active,
       detailMetadata: treatmentPlanDetails.metadata,
     })
     .from(treatmentPlans)
     .leftJoin(users, eq(treatmentPlans.doctorId, users.id))
     .leftJoin(treatmentGroups, eq(treatmentPlans.groupId, treatmentGroups.id))
     .leftJoin(treatmentPlanDetails, eq(treatmentPlans.id, treatmentPlanDetails.treatmentId))
-    .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId)))
+    .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled')))
     .orderBy(desc(treatmentPlans.createdAt)),
 
     // Treatment Groups
     db.select({ id: treatmentGroups.id, name: treatmentGroups.name, status: treatmentGroups.status })
-      .from(treatmentGroups).where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId))),
+      .from(treatmentGroups).where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId), ne(treatmentGroups.status, 'cancelled'))),
 
     // Payments (dates only)
     db.select({ date: patientPayments.date })
-      .from(patientPayments).where(and(eq(patientPayments.clinicId, clinicId), eq(patientPayments.patientId, patientId))).orderBy(desc(patientPayments.date)),
+      .from(patientPayments).where(and(eq(patientPayments.clinicId, clinicId), eq(patientPayments.patientId, patientId), eq(patientPayments.isActive, true))).orderBy(desc(patientPayments.date)),
 
     // Completed Works
     db.select({ id: completedWorks.id, date: completedWorks.date, description: completedWorks.description, doctorName: users.name })
@@ -967,14 +1053,40 @@ export async function getPatientFullProfile(patientId: string) {
       .from(materialUsages).leftJoin(inventoryItems, eq(materialUsages.inventoryItemId, inventoryItems.id))
       .where(and(eq(materialUsages.clinicId, clinicId), eq(materialUsages.patientId, patientId))).orderBy(desc(materialUsages.date)),
 
-    // Activity Logs
+    // Activity Logs (exclude orphan logs for deleted/cancelled appointments or cancelled treatments)
     db.execute(sql`
-      SELECT id, clinic_id, patient_id, appointment_id, treatment_id,
-             category, event_type, title, old_value, new_value,
-             actor_type, actor_name, note, created_at
-      FROM patient_activity_logs
-      WHERE clinic_id = ${clinicId} AND patient_id = ${patientId}
-      ORDER BY created_at DESC
+      SELECT l.id, l.clinic_id, l.patient_id, l.appointment_id, l.treatment_id,
+             l.category, l.event_type, l.title, l.old_value, l.new_value,
+             l.actor_type, l.actor_name, l.note, l.created_at
+      FROM patient_activity_logs l
+      WHERE l.clinic_id = ${clinicId}
+        AND l.patient_id = ${patientId}
+        AND NOT (
+          l.event_type IN ('status_changed', 'treatment_status_changed')
+          AND l.old_value IS NOT NULL
+          AND l.new_value IS NOT NULL
+          AND l.old_value = l.new_value
+        )
+        AND (
+          l.appointment_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM dental_appointments a
+            WHERE a.id = l.appointment_id
+              AND a.clinic_id = ${clinicId}
+              AND a.is_active = true
+              AND a.status <> 'cancelled'
+          )
+        )
+        AND (
+          l.treatment_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM treatment_plans tp
+            WHERE tp.id = l.treatment_id
+              AND tp.clinic_id = ${clinicId}
+              AND tp.status <> 'cancelled'
+          )
+        )
+      ORDER BY l.created_at DESC
       LIMIT 200
     `).catch(() => []),
   ])
@@ -997,7 +1109,7 @@ export async function getPatientFullProfile(patientId: string) {
       })
         .from(appointmentTreatments)
         .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-        .where(and(inArray(appointmentTreatments.treatmentPlanId, treatmentIds), ne(dentalAppointments.status, 'cancelled')))
+        .where(and(inArray(appointmentTreatments.treatmentPlanId, treatmentIds), eq(dentalAppointments.isActive, true), ne(dentalAppointments.status, 'cancelled')))
         .orderBy(desc(dentalAppointments.startTime))
       for (const s of sessionRows) {
         const list = sessionsByTreatmentId.get(s.treatmentPlanId) || []
@@ -1018,6 +1130,8 @@ export async function getPatientFullProfile(patientId: string) {
     const meta = (t.detailMetadata && typeof t.detailMetadata === 'object') ? (t.detailMetadata as Record<string, any>) : {}
     const color = typeof meta.color === 'string' ? meta.color : null
     const sessions = sessionsByTreatmentId.get(t.id) || []
+    const isCompleted = t.status === 'completed'
+    const hasValidDoctor = isCompleted || t.doctorActive !== false
     return {
       id: t.id,
       procedureName: t.procedureName,
@@ -1028,8 +1142,8 @@ export async function getPatientFullProfile(patientId: string) {
       groupId: t.groupId,
       groupName: t.groupName,
       createdAt: t.createdAt,
-      doctorId: t.doctorId,
-      doctorName: t.doctorName,
+      doctorId: hasValidDoctor ? t.doctorId : null,
+      doctorName: hasValidDoctor ? t.doctorName : null,
       color,
       metadata: meta,
       sessions,
@@ -1116,8 +1230,7 @@ export async function getPatientFullProfile(patientId: string) {
 
 export async function listPatients() {
   const clinicId = requireClinicId()
-  await ensureAiAppointmentReviewSchema()
-  await ensurePatientArchiveSchema()
+  await Promise.all([ensureAiAppointmentReviewSchema(), ensurePatientArchiveSchema()])
   return db.select({
     id: patients.id,
     clinicId: patients.clinicId,
@@ -1140,18 +1253,23 @@ export async function listPatients() {
       FROM ${dentalAppointments}
       WHERE ${dentalAppointments.clinicId} = ${clinicId}
         AND ${dentalAppointments.patientId} = ${patients.id}
+        AND ${dentalAppointments.isActive} = true
+        AND ${dentalAppointments.status} <> 'cancelled'
     )`,
     paymentCount: sql<number>`(
       SELECT count(*)::int
       FROM ${patientPayments}
       WHERE ${patientPayments.clinicId} = ${clinicId}
         AND ${patientPayments.patientId} = ${patients.id}
+        AND ${patientPayments.isActive} = true
     )`,
     lastAppointmentActivityAt: sql<Date | null>`(
       SELECT max(${dentalAppointments.updatedAt})
       FROM ${dentalAppointments}
       WHERE ${dentalAppointments.clinicId} = ${clinicId}
         AND ${dentalAppointments.patientId} = ${patients.id}
+        AND ${dentalAppointments.isActive} = true
+        AND ${dentalAppointments.status} <> 'cancelled'
     )`,
   }).from(patients)
     .where(eq(patients.clinicId, clinicId))
@@ -1160,6 +1278,8 @@ export async function listPatients() {
       FROM ${dentalAppointments}
       WHERE ${dentalAppointments.clinicId} = ${clinicId}
         AND ${dentalAppointments.patientId} = ${patients.id}
+        AND ${dentalAppointments.isActive} = true
+        AND ${dentalAppointments.status} <> 'cancelled'
     ) DESC NULLS LAST`, desc(patients.createdAt))
 }
 
@@ -1203,76 +1323,88 @@ async function enrichTreatmentDoctorIds(plans: Array<typeof treatmentPlans.$infe
   }
 }
 
+async function attachTreatmentSessionsBatch(plans: Array<typeof treatmentPlans.$inferSelect>) {
+  if (plans.length === 0) return
+  const planIds = plans.map(p => p.id)
+  const allSessions = await db.select({
+    id: appointmentTreatments.id,
+    treatmentPlanId: appointmentTreatments.treatmentPlanId,
+    appointmentId: appointmentTreatments.appointmentId,
+    sessionNumber: appointmentTreatments.sessionNumber,
+    sessionStatus: appointmentTreatments.sessionStatus,
+    notes: appointmentTreatments.notes,
+    startTime: dentalAppointments.startTime,
+    endTime: dentalAppointments.endTime,
+  }).from(appointmentTreatments)
+    .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
+    .where(and(inArray(appointmentTreatments.treatmentPlanId, planIds), eq(dentalAppointments.isActive, true), ne(dentalAppointments.status, 'cancelled')))
+    .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
+
+  const byPlanId = new Map<string, any[]>()
+  for (const s of allSessions) {
+    const arr = byPlanId.get(s.treatmentPlanId) || []
+    arr.push({
+      id: s.id,
+      appointmentId: s.appointmentId,
+      sessionNumber: s.sessionNumber,
+      sessionStatus: s.sessionStatus,
+      notes: s.notes,
+      startTime: s.startTime,
+      endTime: s.endTime,
+    })
+    byPlanId.set(s.treatmentPlanId, arr)
+  }
+  for (const p of plans) {
+    ;(p as any).sessions = byPlanId.get(p.id) || []
+  }
+}
+
 export async function getPatientTreatmentGroups(patientId: string) {
   if (!isValidUuid(patientId)) return { groups: [], ungrouped: [] }
   const clinicId = requireClinicId()
-  const groups = await db.select({
-    id: treatmentGroups.id,
-    patientId: treatmentGroups.patientId,
-    name: treatmentGroups.name,
-    description: treatmentGroups.description,
-    status: treatmentGroups.status,
-    createdById: treatmentGroups.createdById,
-    updatedById: treatmentGroups.updatedById,
-    createdAt: treatmentGroups.createdAt,
-    creatorName: users.name,
-    creatorRole: users.role,
-  }).from(treatmentGroups)
-    .leftJoin(users, eq(treatmentGroups.createdById, users.id))
-    .where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId), ne(treatmentGroups.status, 'cancelled')))
-    .orderBy(desc(treatmentGroups.createdAt))
-  
-  // For each group, fetch its treatment plans + attached sessions
-  const result = []
-  for (const group of groups) {
-    const plans = await db.select().from(treatmentPlans)
-      .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), eq(treatmentPlans.groupId, group.id), ne(treatmentPlans.status, 'cancelled')))
-      .orderBy(desc(treatmentPlans.createdAt))
-    
-    await enrichTreatmentDoctorIds(plans, clinicId)
+  const [groups, allPlans] = await Promise.all([
+    db.select({
+      id: treatmentGroups.id,
+      patientId: treatmentGroups.patientId,
+      name: treatmentGroups.name,
+      description: treatmentGroups.description,
+      status: treatmentGroups.status,
+      createdById: treatmentGroups.createdById,
+      updatedById: treatmentGroups.updatedById,
+      createdAt: treatmentGroups.createdAt,
+      creatorName: users.name,
+      creatorRole: users.role,
+    }).from(treatmentGroups)
+      .leftJoin(users, eq(treatmentGroups.createdById, users.id))
+      .where(and(eq(treatmentGroups.clinicId, clinicId), eq(treatmentGroups.patientId, patientId), ne(treatmentGroups.status, 'cancelled')))
+      .orderBy(desc(treatmentGroups.createdAt)),
+    db.select().from(treatmentPlans)
+      .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled')))
+      .orderBy(desc(treatmentPlans.createdAt)),
+  ])
 
-    for (const p of plans) {
-      const sessions = await db.select({
-        id: appointmentTreatments.id,
-        appointmentId: appointmentTreatments.appointmentId,
-        sessionNumber: appointmentTreatments.sessionNumber,
-        sessionStatus: appointmentTreatments.sessionStatus,
-        notes: appointmentTreatments.notes,
-        startTime: dentalAppointments.startTime,
-        endTime: dentalAppointments.endTime
-      }).from(appointmentTreatments)
-        .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-        .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
-        .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
-      ;(p as any).sessions = sessions
+  await Promise.all([
+    enrichTreatmentDoctorIds(allPlans, clinicId),
+    attachTreatmentSessionsBatch(allPlans),
+  ])
+
+  const byGroupId = new Map<string, Array<typeof treatmentPlans.$inferSelect>>()
+  const ungrouped: Array<typeof treatmentPlans.$inferSelect> = []
+  for (const p of allPlans) {
+    if (p.groupId) {
+      const list = byGroupId.get(p.groupId) || []
+      list.push(p)
+      byGroupId.set(p.groupId, list)
+    } else {
+      ungrouped.push(p)
     }
-
-    result.push({ ...group, treatments: plans })
   }
-  
-  // Also fetch ungrouped treatments + attached sessions
-  const ungrouped = await db.select().from(treatmentPlans)
-    .where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'), sql`group_id IS NULL`))
-    .orderBy(desc(treatmentPlans.createdAt))
 
-  await enrichTreatmentDoctorIds(ungrouped, clinicId)
+  const result = groups.map(group => ({
+    ...group,
+    treatments: byGroupId.get(group.id) || [],
+  }))
 
-  for (const p of ungrouped) {
-    const sessions = await db.select({
-      id: appointmentTreatments.id,
-      appointmentId: appointmentTreatments.appointmentId,
-      sessionNumber: appointmentTreatments.sessionNumber,
-      sessionStatus: appointmentTreatments.sessionStatus,
-      notes: appointmentTreatments.notes,
-      startTime: dentalAppointments.startTime,
-      endTime: dentalAppointments.endTime
-    }).from(appointmentTreatments)
-      .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-      .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
-      .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
-    ;(p as any).sessions = sessions
-  }
-  
   return { groups: result, ungrouped }
 }
 
@@ -1401,23 +1533,10 @@ export async function getPatientTreatments(patientId: string) {
   const clinicId = requireClinicId()
   const plans = await db.select().from(treatmentPlans).where(and(eq(treatmentPlans.clinicId, clinicId), eq(treatmentPlans.patientId, patientId), ne(treatmentPlans.status, 'cancelled'))).orderBy(desc(treatmentPlans.createdAt))
 
-  await enrichTreatmentDoctorIds(plans, clinicId)
-
-  for (const p of plans) {
-    const sessions = await db.select({
-      id: appointmentTreatments.id,
-      appointmentId: appointmentTreatments.appointmentId,
-      sessionNumber: appointmentTreatments.sessionNumber,
-      sessionStatus: appointmentTreatments.sessionStatus,
-      notes: appointmentTreatments.notes,
-      startTime: dentalAppointments.startTime,
-      endTime: dentalAppointments.endTime
-    }).from(appointmentTreatments)
-      .innerJoin(dentalAppointments, eq(appointmentTreatments.appointmentId, dentalAppointments.id))
-      .where(and(eq(appointmentTreatments.treatmentPlanId, p.id), ne(dentalAppointments.status, 'cancelled')))
-      .orderBy(desc(dentalAppointments.startTime), desc(appointmentTreatments.createdAt))
-    ;(p as any).sessions = sessions
-  }
+  await Promise.all([
+    enrichTreatmentDoctorIds(plans, clinicId),
+    attachTreatmentSessionsBatch(plans),
+  ])
 
   return plans
 }
@@ -1828,6 +1947,7 @@ export async function updateDentalAppointment(
     notes?: string
     type?: string
     complaint?: string
+    title?: string
   },
   actor?: { actorType?: string; actorName?: string }
 ) {
@@ -1878,6 +1998,9 @@ export async function updateDentalAppointment(
   if (data.timeConfirmed !== undefined) values.timeConfirmed = data.timeConfirmed
   if (data.status !== undefined) {
     values.status = data.status
+    if (data.status === 'pending_assignment' && data.doctorId === undefined) {
+      values.doctorId = null
+    }
     if (existing.status === 'pending_review' && data.status !== 'pending_review') {
       values.reviewStatus = 'approved'
     }
@@ -1892,12 +2015,15 @@ export async function updateDentalAppointment(
     } else if (data.status === 'arrived_unconfirmed') {
       values.patientResponseStatus = 'arrived_unconfirmed'
     }
+  } else if (data.doctorId && existing.status === 'pending_assignment') {
+    values.status = 'scheduled'
   }
   if (data.startTime !== undefined) values.startTime = data.startTime
   if (data.endTime !== undefined) values.endTime = data.endTime
   if (data.notes !== undefined) values.notes = data.notes
   if (data.type !== undefined) values.type = data.type
   if (data.complaint !== undefined) values.complaint = data.complaint
+  if (data.title !== undefined && data.title.trim()) values.title = data.title.trim()
   if (data.startTime !== undefined && existing.status === 'postponed' && data.status === undefined) {
     values.status = 'scheduled'
     values.patientResponseStatus = null
@@ -1982,21 +2108,25 @@ export async function updateDentalAppointment(
           actor_name: actor?.actorName || null,
         })
       }
-      const startChanged = data.startTime !== undefined && existing.startTime?.getTime() !== data.startTime.getTime()
-      const endChanged = data.endTime !== undefined && existing.endTime?.getTime() !== data.endTime.getTime()
+      const startChanged = data.startTime !== undefined && Math.abs((existing.startTime?.getTime() || 0) - data.startTime.getTime()) >= 60_000
+      const endChanged = data.endTime !== undefined && Math.abs((existing.endTime?.getTime() || 0) - data.endTime.getTime()) >= 60_000
       if (startChanged || endChanged) {
-        void logPatientActivity({
-          clinicId,
-          patientId: pId,
-          appointmentId: row.id,
-          category: 'appointment',
-          event_type: 'rescheduled',
-          title: row.title || existing.title || 'Randevu Tarihi/Saati Değiştirildi',
-          old_value: formatApptDateTimeTR(existing.startTime, existing.endTime),
-          new_value: formatApptDateTimeTR(row.startTime, row.endTime),
-          actor_type: actor?.actorType || 'desk',
-          actor_name: actor?.actorName || null,
-        })
+        const oldFormatted = formatApptDateTimeTR(existing.startTime, existing.endTime)
+        const newFormatted = formatApptDateTimeTR(row.startTime, row.endTime)
+        if (oldFormatted !== newFormatted) {
+          void logPatientActivity({
+            clinicId,
+            patientId: pId,
+            appointmentId: row.id,
+            category: 'appointment',
+            event_type: 'datetime_changed',
+            title: row.title || existing.title || 'Randevu Tarihi/Saati Değiştirildi',
+            old_value: oldFormatted,
+            new_value: newFormatted,
+            actor_type: actor?.actorType || 'desk',
+            actor_name: actor?.actorName || null,
+          })
+        }
       }
       if (data.doctorId !== undefined && existing.doctorId !== data.doctorId) {
         void (async () => {
@@ -2478,19 +2608,19 @@ export async function deletePatientsBulk(patientIds: string[]) {
   const validIds = validPatients.map(p => p.id)
   if (validIds.length === 0) return { deletedCount: 0 }
 
-  const [appointmentRows, paymentRows, treatmentRows, consentRows, attachmentRows] = await Promise.all([
-    db.select({ patientId: dentalAppointments.patientId }).from(dentalAppointments)
-      .where(and(eq(dentalAppointments.clinicId, clinicId), inArray(dentalAppointments.patientId, validIds))),
-    db.select({ patientId: patientPayments.patientId }).from(patientPayments)
-      .where(and(eq(patientPayments.clinicId, clinicId), inArray(patientPayments.patientId, validIds))),
-    db.select({ patientId: treatmentPlans.patientId }).from(treatmentPlans)
-      .where(and(eq(treatmentPlans.clinicId, clinicId), inArray(treatmentPlans.patientId, validIds))),
-    db.select({ patientId: patientConsentRequests.patientId }).from(patientConsentRequests)
-      .where(and(eq(patientConsentRequests.clinicId, clinicId), inArray(patientConsentRequests.patientId, validIds))),
-    db.select({ patientId: planAttachments.patientId }).from(planAttachments)
-      .where(and(eq(planAttachments.clinicId, clinicId), inArray(planAttachments.patientId, validIds))),
-  ])
-  const protectedIds = new Set([...appointmentRows, ...paymentRows, ...treatmentRows, ...consentRows, ...attachmentRows].map(row => row.patientId).filter((id): id is string => Boolean(id)))
+  // Yalnızca takvimde aktif (iptal edilmemiş ve pasife alınmamış) randevusu olan hastaların kalıcı silinmesini engelle
+  const activeAppointmentRows = await db
+    .select({ patientId: dentalAppointments.patientId })
+    .from(dentalAppointments)
+    .where(
+      and(
+        eq(dentalAppointments.clinicId, clinicId),
+        inArray(dentalAppointments.patientId, validIds),
+        eq(dentalAppointments.isActive, true),
+        ne(dentalAppointments.status, 'cancelled')
+      )
+    )
+  const protectedIds = new Set(activeAppointmentRows.map(row => row.patientId).filter((id): id is string => Boolean(id)))
   if (protectedIds.size > 0) {
     throw new PatientArchiveRequiredError([...protectedIds])
   }
@@ -2502,13 +2632,36 @@ export async function deletePatientsBulk(patientIds: string[]) {
       .set({ patientId: null })
       .where(inArray(whatsappConversations.patientId, validIds))
 
-    // 2. Material Usages (hastaya bağlı)
+    // 2. Aktivite logları ve bildirim kayıtları
+    for (const pid of validIds) {
+      await tx.execute(sql`DELETE FROM patient_activity_logs WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
+      await tx.execute(sql`DELETE FROM patient_notification_deliveries WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
+      await tx.execute(sql`DELETE FROM appointment_notification_jobs WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
+      await tx.execute(sql`UPDATE financial_documents SET patient_id = NULL, payment_id = NULL WHERE clinic_id = ${clinicId} AND patient_id = ${pid}`).catch(() => {})
+    }
+
+    // 3. Onam ve ek dosya (attachment) kayıtları
+    await tx.delete(patientConsentPreferences).where(inArray(patientConsentPreferences.patientId, validIds)).catch(() => {})
+    await tx.delete(patientConsentRequests).where(inArray(patientConsentRequests.patientId, validIds)).catch(() => {})
+
+    const attachments = await tx
+      .select({ id: planAttachments.id })
+      .from(planAttachments)
+      .where(inArray(planAttachments.patientId, validIds))
+      .catch(() => [])
+    const attIds = attachments.map(a => a.id)
+    if (attIds.length > 0) {
+      await tx.delete(planAttachmentFiles).where(inArray(planAttachmentFiles.attachmentId, attIds)).catch(() => {})
+      await tx.delete(planAttachments).where(inArray(planAttachments.id, attIds)).catch(() => {})
+    }
+
+    // 4. Material Usages (hastaya bağlı)
     await tx.delete(materialUsages).where(inArray(materialUsages.patientId, validIds))
 
-    // 3. Tooth records
+    // 5. Tooth records
     await tx.delete(toothRecords).where(inArray(toothRecords.patientId, validIds))
 
-    // 4. Appointment Treatments ve Dental Appointments
+    // 6. Appointment Treatments ve Dental Appointments (iptal edilmiş/pasif randevular dahil)
     const patientAppointments = await tx
       .select({ id: dentalAppointments.id })
       .from(dentalAppointments)
@@ -2516,34 +2669,64 @@ export async function deletePatientsBulk(patientIds: string[]) {
     const apptIds = patientAppointments.map(a => a.id)
 
     if (apptIds.length > 0) {
+      await tx.delete(materialUsages).where(inArray(materialUsages.appointmentId, apptIds)).catch(() => {})
       await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.appointmentId, apptIds))
       await tx.delete(dentalAppointments).where(inArray(dentalAppointments.id, apptIds))
     }
 
-    // 5. Patient payments
+    // 7. Patient payments (ve online payment referansları)
+    const paymentsToClean = await tx
+      .select({ id: patientPayments.id })
+      .from(patientPayments)
+      .where(inArray(patientPayments.patientId, validIds))
+      .catch(() => [])
+    const payIds = paymentsToClean.map(p => p.id)
+    if (payIds.length > 0) {
+      for (const payId of payIds) {
+        await tx.execute(sql`UPDATE online_payment_transactions SET payment_id = NULL WHERE payment_id = ${payId}`).catch(() => {})
+        await tx.execute(sql`UPDATE financial_documents SET payment_id = NULL WHERE payment_id = ${payId}`).catch(() => {})
+      }
+    }
     await tx.delete(patientPayments).where(inArray(patientPayments.patientId, validIds))
 
-    // 6. Installment plans
+    // 8. Installment plans
     await tx.delete(installmentPlans).where(inArray(installmentPlans.patientId, validIds))
 
-    // 7. Completed works (lab works)
+    // 9. Completed works (lab works)
     await tx.delete(completedWorks).where(inArray(completedWorks.patientId, validIds))
 
-    // 8. Waiting list
+    // 10. Waiting list
     await tx.delete(waitingList).where(inArray(waitingList.patientId, validIds))
 
-    // 9. Consultations & Notes & Diseases & Anamnesis
+    // 11. Consultations & Notes & Diseases & Anamnesis
     await tx.delete(consultations).where(inArray(consultations.patientId, validIds))
     await tx.delete(doctorNotes).where(inArray(doctorNotes.patientId, validIds))
     await tx.delete(patientNotes).where(inArray(patientNotes.patientId, validIds))
     await tx.delete(patientDiseases).where(inArray(patientDiseases.patientId, validIds))
     await tx.delete(patientAnamnesis).where(inArray(patientAnamnesis.patientId, validIds))
 
-    // 10. Treatment plans & treatment groups
+    // 12. Treatment plans & treatment groups (detay tabloları dahil)
+    const tpRows = await tx
+      .select({ id: treatmentPlans.id })
+      .from(treatmentPlans)
+      .where(inArray(treatmentPlans.patientId, validIds))
+    const tpIds = tpRows.map(r => r.id)
+    if (tpIds.length > 0) {
+      await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.treatmentPlanId, tpIds)).catch(() => {})
+      await tx.delete(treatmentPlanDetails).where(inArray(treatmentPlanDetails.treatmentId, tpIds)).catch(() => {})
+    }
+    const tgRows = await tx
+      .select({ id: treatmentGroups.id })
+      .from(treatmentGroups)
+      .where(inArray(treatmentGroups.patientId, validIds))
+    const tgIds = tgRows.map(r => r.id)
+    if (tgIds.length > 0) {
+      await tx.delete(treatmentGroupDetails).where(inArray(treatmentGroupDetails.groupId, tgIds)).catch(() => {})
+    }
     await tx.delete(treatmentPlans).where(inArray(treatmentPlans.patientId, validIds))
     await tx.delete(treatmentGroups).where(inArray(treatmentGroups.patientId, validIds))
 
-    // 11. En son hastaları sil
+    // 13. En son hastaları sil
     await tx.delete(patients).where(and(eq(patients.clinicId, clinicId), inArray(patients.id, validIds)))
   })
 

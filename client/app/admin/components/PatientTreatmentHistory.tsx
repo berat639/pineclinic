@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { getTreatmentColorTheme } from './FastScheduleModal'
 
 interface Props {
@@ -32,6 +34,15 @@ export function getReadOnlyTreatmentStatusBadge(status?: string | null) {
       isCompleted: false,
     }
   }
+  if (s === 'cancelled' || s === 'iptal') {
+    return {
+      label: 'İptal Edildi',
+      bg: 'var(--card-inner, #f1f5f9)',
+      border: '1px solid var(--danger, #ef4444)',
+      color: 'var(--danger, #ef4444)',
+      isCompleted: false,
+    }
+  }
   return {
     label: 'Planlandı',
     bg: 'var(--badge-clinic-bg, #e0f2fe)',
@@ -44,6 +55,30 @@ export function getReadOnlyTreatmentStatusBadge(status?: string | null) {
 export default function PatientTreatmentHistory({ patient, doctors = [] }: Props) {
   const [data, setData] = useState<{ groups: any[]; ungrouped: any[]; treatments?: any[] } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [deletedTreatmentIds, setDeletedTreatmentIds] = useState<Set<string>>(new Set())
+  const [deletingTreatmentId, setDeletingTreatmentId] = useState<string | null>(null)
+
+  const handleDeleteTreatment = async (treatment: any) => {
+    if (!treatment?.id || deletingTreatmentId) return
+    setDeletingTreatmentId(treatment.id)
+    try {
+      const res = await fetch(`/api/dental/treatments/${treatment.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || 'Tedavi silinemedi')
+      }
+      setDeletedTreatmentIds(prev => {
+        const next = new Set(prev)
+        next.add(treatment.id)
+        return next
+      })
+      toast.success('Tedavi kaydı silindi')
+    } catch (e: any) {
+      toast.error(e.message || 'Tedavi silinirken hata oluştu')
+    } finally {
+      setDeletingTreatmentId(null)
+    }
+  }
 
   React.useEffect(() => {
     if (!patient?.id) return
@@ -66,21 +101,25 @@ export default function PatientTreatmentHistory({ patient, doctors = [] }: Props
   }, [patient?.id])
 
   const allGroups = useMemo(() => {
-    const groups = (data?.groups || []).map(group => ({
-      ...group,
-      label: group.name || 'Tedavi Grubu',
-      treatments: group.treatments || [],
-    }))
-    const ungrouped =
+    const isVisible = (t: any) => t && t.status !== 'cancelled' && !deletedTreatmentIds.has(t.id)
+    const groups = (data?.groups || [])
+      .filter(group => group && group.status !== 'cancelled')
+      .map(group => ({
+        ...group,
+        label: group.name || 'Tedavi Grubu',
+        treatments: (group.treatments || []).filter(isVisible),
+      }))
+    const rawUngrouped =
       data?.ungrouped?.length
         ? data.ungrouped
         : (data?.treatments || []).filter((t: any) => !t.groupId)
+    const ungrouped = rawUngrouped.filter(isVisible)
 
     return [
       ...groups.filter(g => g.treatments.length > 0),
       ...(ungrouped.length ? [{ id: 'ungrouped', label: 'Tedavi İşlemleri', treatments: ungrouped }] : []),
     ]
-  }, [data])
+  }, [data, deletedTreatmentIds])
 
   const resolveDoctorName = (treatment: any): string => {
     if (treatment.doctorName) return treatment.doctorName
@@ -153,7 +192,7 @@ export default function PatientTreatmentHistory({ patient, doctors = [] }: Props
               const session = treatment.sessions
                 ?.slice()
                 .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0]
-              const scheduledAt = session?.startTime || treatment.plannedDate
+              const scheduledAt = session?.startTime || null
               const badge = getReadOnlyTreatmentStatusBadge(treatment.status)
               const tTheme = getTreatmentColorTheme(
                 treatment.color || treatment.metadata?.color || treatment.procedureName,
@@ -161,6 +200,7 @@ export default function PatientTreatmentHistory({ patient, doctors = [] }: Props
               )
               const costVal = Number(treatment.cost ?? treatment.price ?? 0)
               const docName = resolveDoctorName(treatment)
+              const isDeleting = deletingTreatmentId === treatment.id
 
               return (
                 <article
@@ -231,6 +271,34 @@ export default function PatientTreatmentHistory({ patient, doctors = [] }: Props
                       >
                         {badge.label}
                       </span>
+                      {treatment.id && (
+                        <button
+                          type="button"
+                          disabled={isDeleting}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void handleDeleteTreatment(treatment)
+                          }}
+                          title="Tedavi Kaydını Sil"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '3px 7px',
+                            borderRadius: 6,
+                            border: '1px solid var(--danger, #ef4444)',
+                            background: 'var(--card-inner, #f1f5f9)',
+                            color: 'var(--danger, #ef4444)',
+                            fontSize: '0.67rem',
+                            fontWeight: 700,
+                            cursor: isDeleting ? 'wait' : 'pointer',
+                            opacity: isDeleting ? 0.6 : 1,
+                          }}
+                        >
+                          <Trash2 size={12} />
+                          <span>Sil</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -248,18 +316,18 @@ export default function PatientTreatmentHistory({ patient, doctors = [] }: Props
                     <span>
                       👨‍⚕️ İlgili Doktor: <strong style={{ color: 'var(--foreground)' }}>{docName || 'Belirtilmedi'}</strong>
                     </span>
-                    <span style={{ color: 'var(--foreground-3)', fontWeight: 600 }}>
-                      📅{' '}
-                      {scheduledAt
-                        ? new Date(scheduledAt).toLocaleString('tr-TR', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
-                        : 'Randevu tarihi yok'}
-                    </span>
+                    {scheduledAt && (
+                      <span style={{ color: 'var(--foreground-3)', fontWeight: 600 }}>
+                        📅{' '}
+                        {new Date(scheduledAt).toLocaleString('tr-TR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
                   </div>
                 </article>
               )

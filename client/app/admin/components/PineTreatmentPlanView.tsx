@@ -11,7 +11,7 @@ import TreatmentDoctorMultiSelect from './TreatmentDoctorMultiSelect'
 import TableToothGroupCell, { formatTargetPlainName, groupTreatmentDraftRows, type GroupedToothEntry } from './TableToothGroupCell'
 import { HideableColumnHeader, TreatmentTableColumnBar, useTreatmentTableColumns } from './TreatmentTableColumnManager'
 import OdontogramSelectionBar from './OdontogramSelectionBar'
-import ToothAnatomy2D from './ToothAnatomy2D'
+import ToothAnatomy2D, { formatToothRegionShortLabel, parseToothRegions, serializeToothRegions } from './ToothAnatomy2D'
 import {
   IndicationPortButton,
   ProcedurePortButton,
@@ -29,6 +29,27 @@ import { LOWER_TEETH, ToothChip, UPPER_TEETH } from './ToothChip'
 import { parseDraggedTreatmentPayload, resolveMultiToothDragTargets } from '../../../lib/treatment-drag-drop'
 import { formatReminderLabel, getTdbReminderSuggestion, REMINDER_PRESETS } from '../../../lib/tdb-reminder-intervals'
 import { checkDoctorAvailability } from '../../../lib/doctor-availability'
+import {
+  formatPercentDiscountDisplay,
+  formatTlAmountDisplay,
+  isSelectableTreatmentMaterial,
+  maskAndClampPercentDiscount,
+  maskAndClampTlDiscount,
+} from '../../../lib/tl-price-input'
+import {
+  extractAllFdiTeethInOrder,
+  mergeBufferedTeethWithCommand,
+  normalizeDentalCommandNumbers,
+  repairTurkishDentalPhonetics,
+} from '../../../lib/dental-voice-parser'
+import {
+  isCloseVoiceCommand,
+  normalizeQuadrantToothPhrases,
+  parsePineVoiceCommand,
+  resolveCatalogProcedure,
+  safePickBestAlternative,
+  type PineVoiceParseOutcome,
+} from '../../../lib/pine-voice-command'
 import styles from './PineTreatmentPlan.module.css'
 
 const money = (minor: number) => `${(minor / 100).toLocaleString('tr-TR', { minimumFractionDigits: minor % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })} ₺`
@@ -113,6 +134,7 @@ export default function PineTreatmentPlanView(p: any) {
     }
   }
   const [materialRow, setMaterialRow] = useState<{ target: string; id: string; entries?: GroupedToothEntry[] } | null>(null)
+  const selectableInventory = (p.inventory || []).filter(isSelectableTreatmentMaterial)
   const selectedProcedure = p.procedures.find((item: any) => item.id === procedureId)
   const resolveProcColor = (item: any) =>
     item?.color ||
@@ -125,6 +147,46 @@ export default function PineTreatmentPlanView(p: any) {
   const groupedRows = groupTreatmentDraftRows(p.drafts)
   const columnManager = useTreatmentTableColumns(rows)
   const { visibleColumns, colWidths, tableStyle } = columnManager
+  const computedSubtotalMinor = rows.reduce((sum, { item }) => {
+    const baseMinor = Math.max(0, Math.round((Number(item?.price) || 0) * 100))
+    const matMinor = (item?.materials || []).reduce(
+      (mSum: number, m: any) =>
+        mSum + Math.max(1, Math.round(Number(m?.quantity) || 1)) * Math.max(0, Math.round(Number(m?.unitSalePriceMinor) || 0)),
+      0
+    )
+    return sum + baseMinor + matMinor
+  }, 0)
+  const effectiveSubtotalMinor = p.pricing?.subtotalMinor ?? computedSubtotalMinor
+  const clampedPercentBps = Math.max(0, Math.min(10000, Math.round((Number(p.discount) || 0) * 100)))
+  const computedPercentageDiscountMinor = Math.floor((effectiveSubtotalMinor * clampedPercentBps + 5000) / 10000)
+  const maxFixedDiscountMinor = Math.max(0, effectiveSubtotalMinor - computedPercentageDiscountMinor)
+  const [discountText, setDiscountText] = useState(() => formatPercentDiscountDisplay(p.discount))
+  const [discountFixedText, setDiscountFixedText] = useState(() => formatTlAmountDisplay(p.discountFixed))
+
+  useEffect(() => {
+    const nextNum = Number(p.discount) || 0
+    const currentParsed = maskAndClampPercentDiscount(discountText)?.percent ?? 0
+    if (Math.round(currentParsed * 100) !== Math.round(nextNum * 100)) {
+      setDiscountText(formatPercentDiscountDisplay(nextNum))
+    }
+  }, [p.discount])
+
+  useEffect(() => {
+    const nextNum = Number(p.discountFixed) || 0
+    const currentParsedMinor = maskAndClampTlDiscount(discountFixedText)?.amountMinor ?? 0
+    if (currentParsedMinor !== Math.round(nextNum * 100)) {
+      setDiscountFixedText(formatTlAmountDisplay(nextNum))
+    }
+  }, [p.discountFixed])
+
+  useEffect(() => {
+    const currentFixedMinor = Math.round((Number(p.discountFixed) || 0) * 100)
+    if (currentFixedMinor > maxFixedDiscountMinor) {
+      const clampedTl = maxFixedDiscountMinor / 100
+      p.setDiscountFixed(clampedTl)
+      setDiscountFixedText(formatTlAmountDisplay(clampedTl))
+    }
+  }, [maxFixedDiscountMinor, p.discountFixed])
   const tdbSuggestion = getTdbReminderSuggestion(rows.map(row => row.item?.name || ''))
   const [customDayDraft, setCustomDayDraft] = useState('')
   const selectedDaysList: number[] = p.periodic
@@ -240,12 +302,13 @@ export default function PineTreatmentPlanView(p: any) {
     p.add(resolvedTargets, { procedures: proc ? [proc] : [], indications: mergedInds, activeMaterials: mats })
   }
   const selectProcedure = (proc: any) => {
-    setProcedureId(proc.id); setMaterials((proc.materials || []).map((item: any) => ({ ...item })))
+    setProcedureId(proc.id); setMaterials((proc.materials || []).filter(isSelectableTreatmentMaterial).map((item: any) => ({ ...item })))
   }
   const syncProcedureMaterials = (nextMaterials: any[]) => {
-    setMaterials(nextMaterials)
+    const cleanedMaterials = nextMaterials.filter(isSelectableTreatmentMaterial)
+    setMaterials(cleanedMaterials)
     if (!selectedProcedure?.id) return
-    p.setProcedures((previous: any[]) => previous.map(item => item.id === selectedProcedure.id ? { ...item, materials: nextMaterials } : item))
+    p.setProcedures((previous: any[]) => previous.map(item => item.id === selectedProcedure.id ? { ...item, materials: cleanedMaterials } : item))
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedProcedure.id)) {
       void fetch(`/api/dental/treatment-catalog/${selectedProcedure.id}`, {
         method: 'PUT',
@@ -256,7 +319,7 @@ export default function PineTreatmentPlanView(p: any) {
           scope: selectedProcedure.scope || 'tooth',
           priceMinor: Math.round((selectedProcedure.price || 0) * 100),
           color: selectedProcedure.color,
-          materials: nextMaterials.map(m => ({
+          materials: cleanedMaterials.map(m => ({
             inventoryItemId: m.inventoryItemId,
             quantity: Math.max(1, Number(m.quantity) || 1),
             unitSalePriceMinor: Math.max(0, Number(m.unitSalePriceMinor) || 0),
@@ -266,7 +329,7 @@ export default function PineTreatmentPlanView(p: any) {
     }
   }
   const addMaterial = () => {
-    const item = p.inventory.find((entry: any) => entry.id === materialId)
+    const item = selectableInventory.find((entry: any) => entry.id === materialId)
     if (!selectedProcedure || !item) return
     if (!materials.some(entry => entry.inventoryItemId === item.id)) {
       syncProcedureMaterials([...materials, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit, unitSalePriceMinor: 0 }])
@@ -342,6 +405,511 @@ export default function PineTreatmentPlanView(p: any) {
     }
   }
   const materialItem = materialRow && rows.find(row => row.target === materialRow.target && row.item.id === materialRow.id)?.item
+
+  // --- SELF-CONTAINED VOICE COMMAND ENGINE (Fixes stale closures & object-array crash) ---
+  const [voiceListening, setVoiceListening] = useState(false)
+  const [voiceStarting, setVoiceStarting] = useState(false)
+  const [voiceAnalyzing, setVoiceAnalyzing] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [manualVoiceInput, setManualVoiceInput] = useState('')
+
+  const voiceListeningRef = useRef(false)
+  const recognitionRef = useRef<any>(null)
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bufferedVoiceTeethRef = useRef<string[]>([])
+  const lastExecutedSignatureRef = useRef<{ sig: string; at: number }>({ sig: '', at: 0 })
+
+  const latestVoiceCtxRef = useRef({
+    procedures: p.procedures || [],
+    indications: p.indications || [],
+    inventory: selectableInventory,
+    indicationLinks,
+    selected: (p.selected || []) as number[],
+    drafts: p.drafts || {},
+    toothSurfaces: p.toothSurfaces || {},
+    toothSections: p.toothSections || {},
+    add: p.add,
+    setDrafts: p.setDrafts,
+    setSelected: p.setSelected,
+    updateSurfaces: p.updateSurfaces,
+    updateSection: p.updateSection,
+    save: p.save,
+  })
+  latestVoiceCtxRef.current = {
+    procedures: p.procedures || [],
+    indications: p.indications || [],
+    inventory: selectableInventory,
+    indicationLinks,
+    selected: (p.selected || []) as number[],
+    drafts: p.drafts || {},
+    toothSurfaces: p.toothSurfaces || {},
+    toothSections: p.toothSections || {},
+    add: p.add,
+    setDrafts: p.setDrafts,
+    setSelected: p.setSelected,
+    updateSurfaces: p.updateSurfaces,
+    updateSection: p.updateSection,
+    save: p.save,
+  }
+
+  const stopPineVoice = () => {
+    voiceListeningRef.current = false
+    setVoiceListening(false)
+    setVoiceStarting(false)
+    setVoiceAnalyzing(false)
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    bufferedVoiceTeethRef.current = []
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current
+      recognitionRef.current = null
+      try {
+        rec.onend = null
+        rec.onerror = null
+        rec.onresult = null
+        rec.stop()
+      } catch {}
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      stopPineVoice()
+    }
+  }, [])
+
+  const executeVoiceOutcome = (outcome: PineVoiceParseOutcome, rawText: string): boolean => {
+    const ctx = latestVoiceCtxRef.current
+    if (outcome.closeRequested) {
+      stopPineVoice()
+      toast('🎙️ Sesli komut dinleme durduruldu.')
+      return true
+    }
+    if (outcome.globalIntent === 'CONFIRM') {
+      stopPineVoice()
+      toast.success('✅ Tedavi planı kaydediliyor…')
+      ctx.save?.()
+      return true
+    }
+
+    let didExecute = false
+
+    if (outcome.actions.length === 0 && outcome.selectIntent !== 'NONE') {
+      switch (outcome.selectIntent) {
+        case 'SELECT_MAXILLA':
+          ctx.setSelected?.([...UPPER_TEETH])
+          toast.success('🦷 Üst çene dişleri seçildi.')
+          return true
+        case 'SELECT_MANDIBLE':
+          ctx.setSelected?.([...LOWER_TEETH])
+          toast.success('🦷 Alt çene dişleri seçildi.')
+          return true
+        case 'SELECT_ALL':
+          ctx.setSelected?.([...UPPER_TEETH, ...LOWER_TEETH])
+          toast.success('🦷 Tüm dişler seçildi.')
+          return true
+        case 'CLEAR_SELECTION':
+          ctx.setSelected?.([])
+          bufferedVoiceTeethRef.current = []
+          toast.success('✕ Diş seçimi temizlendi.')
+          return true
+        case 'SELECT_TEETH': {
+          const validNums = outcome.targetTeeth
+            .map(Number)
+            .filter(n => Number.isInteger(n) && n >= 11 && n <= 48)
+          if (validNums.length > 0) {
+            ctx.setSelected?.(validNums)
+            toast.success(`🦷 Seçilen dişler: #${validNums.join(', #')}`)
+            return true
+          }
+          break
+        }
+      }
+    }
+
+    const affectedFdiTeeth: number[] = []
+
+    for (const action of outcome.actions) {
+      const validTargets = action.toothNumbers.filter(
+        t => t === 'general' || t === 'upper' || t === 'lower' || /^[1-4][1-8]$/.test(String(t))
+      )
+      if (validTargets.length === 0) continue
+
+      for (const t of validTargets) {
+        const n = Number(t)
+        if (Number.isInteger(n) && n >= 11 && n <= 48 && !affectedFdiTeeth.includes(n)) {
+          affectedFdiTeeth.push(n)
+        }
+      }
+
+      if (action.intent === 'DELETE') {
+        ctx.setDrafts?.((prev: any) => {
+          const next = { ...prev }
+          for (const tk of validTargets) {
+            const list = next[tk] || []
+            if (action.procedureName) {
+              const targetLower = action.procedureName.toLocaleLowerCase('tr-TR')
+              next[tk] = list.filter(
+                (row: any) => !(row.name || '').toLocaleLowerCase('tr-TR').includes(targetLower)
+              )
+            } else {
+              next[tk] = []
+            }
+            if (next[tk]?.length === 0) delete next[tk]
+          }
+          return next
+        })
+        const labelStr = validTargets.map(t => (t === 'general' ? 'Tüm ağız' : t === 'upper' ? 'Üst çene' : t === 'lower' ? 'Alt çene' : `#${t}`)).join(', ')
+        toast.success(`🗑️ ${labelStr} için ${action.procedureName || 'işlemler'} kaldırıldı.`)
+        didExecute = true
+        continue
+      }
+
+      // Sync surfaces and anatomical sub-layers on numeric teeth if spoken
+      for (const tk of validTargets) {
+        const toothNum = Number(tk)
+        if (Number.isInteger(toothNum) && toothNum >= 11 && toothNum <= 48) {
+          if (action.surfaces.length > 0 && typeof ctx.updateSurfaces === 'function') {
+            const existingSurfs: string[] = ctx.toothSurfaces?.[toothNum] || []
+            const mergedSurfs = Array.from(new Set([...existingSurfs, ...action.surfaces]))
+            ctx.updateSurfaces(toothNum, mergedSurfs)
+          }
+          if (action.sections.length > 0 && typeof ctx.updateSection === 'function') {
+            const existingRegs = parseToothRegions(ctx.toothSections?.[toothNum])
+            const mergedRegs = Array.from(new Set([...existingRegs, ...action.sections]))
+            ctx.updateSection(toothNum, serializeToothRegions(mergedRegs))
+          }
+        }
+      }
+
+      if (action.intent === 'UPDATE') {
+        const proc = action.procedure
+        const procName = proc?.name || action.procedureName || 'Kompozit Dolgu (Tek Yüzey)'
+        const mergedInds = proc
+          ? getLinkedIndicationsForProcedure(ctx.indicationLinks, proc, action.indications)
+          : action.indications
+        const mappedMats =
+          action.materials.length > 0
+            ? action.materials.map(m => ({
+                inventoryItemId: m.inventoryItemId,
+                name: m.name,
+                quantity: Number(m.quantity) || 1,
+                unitCost: Number(m.unitCost) || 0,
+                unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
+              }))
+            : (proc?.materials || []).map((m: any) => ({ ...m }))
+
+        ctx.setDrafts?.((prev: any) => {
+          const next = { ...prev }
+          for (const tk of validTargets) {
+            const existingRow = next[tk]?.[0]
+            next[tk] = [
+              {
+                id: existingRow?.id || Math.random().toString(36).substring(2, 9),
+                procedureId: proc?.id,
+                scope: proc?.scope || (tk === 'general' ? 'mouth' : tk === 'upper' || tk === 'lower' ? 'jaw' : 'tooth'),
+                name: procName,
+                price: proc?.price ?? existingRow?.price ?? 0,
+                indications: mergedInds,
+                doctorId: existingRow?.doctorId ?? null,
+                doctorIds: existingRow?.doctorIds || [],
+                initialDoctorIds: existingRow?.initialDoctorIds || [],
+                isFromSavedPlan: existingRow?.isFromSavedPlan || false,
+                doctorManuallySelected: existingRow?.doctorManuallySelected || false,
+                doctorAutoFilled: false,
+                materials: mappedMats,
+                color: proc?.color || existingRow?.color || '#0284c7',
+                surface: action.surfaces.join('') || existingRow?.surface,
+                section: action.sections.length ? serializeToothRegions(action.sections) || undefined : existingRow?.section,
+              },
+            ]
+          }
+          return next
+        })
+        const labelStr = validTargets.map(t => (t === 'general' ? 'Tüm ağız' : t === 'upper' ? 'Üst çene' : t === 'lower' ? 'Alt çene' : `#${t}`)).join(', ')
+        toast.success(`✏️ ${labelStr} işlemi "${procName}" olarak güncellendi.`)
+        didExecute = true
+        continue
+      }
+
+      // ADD intent
+      if (action.procedure || action.indications.length > 0) {
+        const proc = action.procedure
+        const mergedInds = proc
+          ? getLinkedIndicationsForProcedure(ctx.indicationLinks, proc, action.indications)
+          : action.indications
+        const mappedMats =
+          action.materials.length > 0
+            ? action.materials.map(m => ({
+                inventoryItemId: m.inventoryItemId,
+                name: m.name,
+                quantity: Number(m.quantity) || 1,
+                unitCost: Number(m.unitCost) || 0,
+                unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
+              }))
+            : (proc?.materials || []).map((m: any) => ({ ...m }))
+
+        const normalizedTargets: (number | string)[] = validTargets.map(t => {
+          const n = Number(t)
+          return Number.isInteger(n) && n >= 11 && n <= 48 ? n : String(t)
+        })
+
+        ctx.add?.(normalizedTargets, {
+          procedures: proc ? [proc] : [],
+          indications: mergedInds,
+          activeMaterials: mappedMats,
+          surface: action.surfaces.length > 0 ? action.surfaces.join('') : undefined,
+          section: action.sections.length > 0 ? serializeToothRegions(action.sections) || undefined : undefined,
+        })
+        didExecute = true
+      } else if (action.surfaces.length > 0 || action.sections.length > 0) {
+        const parts: string[] = []
+        if (action.surfaces.length > 0) parts.push(`Yüzey: ${action.surfaces.join(', ')}`)
+        if (action.sections.length > 0) parts.push(`Katman: ${action.sections.map(formatToothRegionShortLabel).join(', ')}`)
+        toast.success(`🦷 #${validTargets.join(', #')} → ${parts.join(' · ')} seçildi.`)
+        didExecute = true
+      }
+    }
+
+    if (affectedFdiTeeth.length > 0) {
+      ctx.setSelected?.((prev: number[]) => Array.from(new Set([...(prev || []), ...affectedFdiTeeth])))
+    }
+
+    if (didExecute) {
+      bufferedVoiceTeethRef.current = []
+      setVoiceTranscript(`✅ Uygulandı: "${rawText}"`)
+    }
+    return didExecute
+  }
+
+  const processSpokenOrTypedCommand = async (rawInput: string, isFinalSpeech = true) => {
+    const cleanInput = rawInput.trim()
+    if (!cleanInput) return false
+    const ctx = latestVoiceCtxRef.current
+
+    const outcome = parsePineVoiceCommand(cleanInput, {
+      procedures: ctx.procedures,
+      indications: ctx.indications,
+      inventory: ctx.inventory,
+      indicationLinks: ctx.indicationLinks,
+      bufferedTeeth: bufferedVoiceTeethRef.current,
+      selectedTeeth: ctx.selected,
+    })
+
+    if (outcome.matched) {
+      const sig = JSON.stringify({
+        t: outcome.targetTeeth,
+        s: outcome.selectIntent,
+        g: outcome.globalIntent,
+        c: outcome.closeRequested,
+        a: outcome.actions.map(a => `${a.intent}:${a.toothNumbers.join(',')}:${a.procedureName || ''}:${a.indications.join(',')}:${a.surfaces.join('')}:${a.sections.join(',')}`),
+      })
+      const now = Date.now()
+      if (lastExecutedSignatureRef.current.sig === sig && now - lastExecutedSignatureRef.current.at < 1800) {
+        return true
+      }
+      lastExecutedSignatureRef.current = { sig, at: now }
+      return executeVoiceOutcome(outcome, outcome.normalizedText || cleanInput)
+    }
+
+    // Check if the user only spoke tooth numbers so far (e.g., "36", "otuz altı", "sağ alt 6")
+    const normalizedNumbers = repairTurkishDentalPhonetics(
+      normalizeDentalCommandNumbers(normalizeQuadrantToothPhrases(cleanInput))
+    )
+    const spokenTeethOnly = extractAllFdiTeethInOrder(normalizedNumbers)
+    const strippedWords = normalizedNumbers
+      .replace(/\b[1-4][1-8]\b/g, '')
+      .replace(/\b(numara|numarali|nolu|dis|dise|disler|ve|ile|virgul)\b/gi, '')
+      .trim()
+
+    if (spokenTeethOnly.length > 0 && strippedWords.length <= 2) {
+      bufferedVoiceTeethRef.current = Array.from(new Set([...bufferedVoiceTeethRef.current, ...spokenTeethOnly]))
+      const numericTeeth = bufferedVoiceTeethRef.current.map(Number).filter(n => Number.isInteger(n) && n >= 11 && n <= 48)
+      if (numericTeeth.length > 0) {
+        ctx.setSelected?.(numericTeeth)
+      }
+      setVoiceTranscript(`🦷 Diş #${bufferedVoiceTeethRef.current.join(', #')} seçildi — yapılacak işlemi söyleyin (örn: "kompozit dolgu")…`)
+      return true
+    }
+
+    if (!isFinalSpeech) return false
+
+    // Fallback to backend AI parser for complex phrasing
+    try {
+      setVoiceAnalyzing(true)
+      const response = await fetch('/api/dental/parse-voice-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: normalizedNumbers || cleanInput,
+          procedures: ctx.procedures.map((pr: any) => pr.name),
+          indications: ctx.indications,
+        }),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const aiTreatments = Array.isArray(data?.treatments) ? data.treatments : []
+        if (aiTreatments.length > 0 || (data?.selectIntent && data.selectIntent !== 'NONE') || data?.globalIntent === 'CONFIRM') {
+          const fallbackActions = aiTreatments.map((item: any) => {
+            const { procedure, procedureName } = resolveCatalogProcedure(item.procedureName || '', ctx.procedures)
+            const rawTeeth = Array.isArray(item.toothNumbers) && item.toothNumbers.length > 0
+              ? item.toothNumbers.map(String)
+              : ctx.selected.map(String)
+            return {
+              intent: item.intent === 'DELETE' ? 'DELETE' : item.intent === 'UPDATE' ? 'UPDATE' : 'ADD',
+              toothNumbers: rawTeeth,
+              procedure,
+              procedureName: procedureName || item.procedureName || null,
+              indications: Array.isArray(item.indications) ? item.indications : item.indication ? [item.indication] : [],
+              surfaces: Array.isArray(item.surfaces) ? item.surfaces : [],
+              sections: item.section ? parseToothRegions(item.section) : [],
+              materials: [],
+            }
+          })
+          const aiOutcome: PineVoiceParseOutcome = {
+            matched: true,
+            normalizedText: normalizedNumbers || cleanInput,
+            closeRequested: false,
+            globalIntent: data?.globalIntent === 'CONFIRM' ? 'CONFIRM' : 'NONE',
+            selectIntent: data?.selectIntent || 'NONE',
+            targetTeeth: Array.isArray(data?.targetTeeth) ? data.targetTeeth.map(String) : [],
+            actions: fallbackActions,
+          }
+          const ok = executeVoiceOutcome(aiOutcome, cleanInput)
+          if (ok) return true
+        }
+      }
+    } catch {
+      // Ignore network errors and show helpful feedback below
+    } finally {
+      setVoiceAnalyzing(false)
+    }
+
+    toast.error(`"${cleanInput}" komutunda diş veya tedavi eşleşmedi. Örn: "36 kompozit dolgu" söyleyin.`)
+    return false
+  }
+
+  const togglePineVoice = () => {
+    if (voiceListening || voiceListeningRef.current) {
+      stopPineVoice()
+      return
+    }
+    if (p.listening && typeof p.toggleVoice === 'function') {
+      p.toggleVoice()
+      return
+    }
+    setVoiceError(null)
+    const SpeechRec =
+      typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null
+
+    if (!SpeechRec) {
+      setVoiceListening(true)
+      voiceListeningRef.current = true
+      setVoiceTranscript('Tarayıcı ses tanımayı desteklemiyor; aşağıdaki kutudan sesli komut metni yazıp uygulayabilirsiniz.')
+      return
+    }
+
+    try {
+      setVoiceStarting(true)
+      const recognition = new SpeechRec()
+      recognition.lang = 'tr-TR'
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.maxAlternatives = 5
+
+      recognition.onstart = () => {
+        setVoiceStarting(false)
+        setVoiceListening(true)
+        voiceListeningRef.current = true
+        setVoiceError(null)
+        setVoiceTranscript('🎙️ Dinleniyor… Diş numarası ve işlemi söyleyin (Örn: "36 kompozit dolgu", "18 diş çekimi")')
+      }
+
+      recognition.onresult = (event: any) => {
+        const ctx = latestVoiceCtxRef.current
+        let interimCombined = ''
+        let finalCombined = ''
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i]
+          const bestAlt = safePickBestAlternative(res, ctx.procedures, ctx.indications, ctx.inventory)
+          const rawAlt = bestAlt || res?.[0]?.transcript || ''
+          if (res.isFinal) {
+            finalCombined += ' ' + rawAlt
+          } else {
+            interimCombined += ' ' + rawAlt
+          }
+        }
+
+        const liveText = (finalCombined || interimCombined).trim()
+        if (liveText) {
+          const previewNorm = repairTurkishDentalPhonetics(
+            normalizeDentalCommandNumbers(normalizeQuadrantToothPhrases(liveText))
+          )
+          setVoiceTranscript(`🗣️ "${previewNorm}"`)
+        }
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
+        }
+
+        if (finalCombined.trim()) {
+          void processSpokenOrTypedCommand(finalCombined.trim(), true)
+        } else if (interimCombined.trim()) {
+          const interimText = interimCombined.trim()
+          silenceTimerRef.current = setTimeout(() => {
+            if (!voiceListeningRef.current) return
+            void processSpokenOrTypedCommand(interimText, false)
+          }, 950)
+        }
+      }
+
+      recognition.onerror = (event: any) => {
+        setVoiceStarting(false)
+        const errCode = event?.error
+        if (errCode === 'no-speech' || errCode === 'aborted') {
+          return
+        }
+        if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+          setVoiceError('Mikrofon izni reddedildi. Komutunuzu aşağıdaki alana yazarak da uygulayabilirsiniz.')
+          toast.error('Mikrofon erişim izni reddedildi.')
+        } else {
+          setVoiceError(`Ses tanıma uyarısı (${errCode || 'bağlantı'}). Komutu aşağıdan da girebilirsiniz.`)
+        }
+      }
+
+      recognition.onend = () => {
+        setVoiceStarting(false)
+        if (voiceListeningRef.current) {
+          try {
+            recognition.start()
+          } catch {
+            // Keep panel open for manual/retry use if browser blocks immediate restart
+          }
+        }
+      }
+
+      recognitionRef.current = recognition
+      recognition.start()
+    } catch (err: any) {
+      setVoiceStarting(false)
+      setVoiceListening(true)
+      voiceListeningRef.current = true
+      setVoiceError('Mikrofon başlatılamadı; komutunuzu aşağıdaki kutudan girebilirsiniz.')
+    }
+  }
+
+  const isVoiceActive = Boolean(voiceListening || p.listening)
+  const isVoiceStarting = Boolean(voiceStarting || p.voiceStarting)
+  const isVoiceAnalyzing = Boolean(voiceAnalyzing || p.analyzing)
+  const activeVoiceError = voiceError || p.voiceError
+  const activeVoiceTranscript = voiceTranscript || p.transcript
   return <div className={styles.overlay}><div role="dialog" aria-modal="true" aria-label="Tedavi planı" className={`treatment-plan-modal ${styles.modal}`}>
     <header className={styles.header}>
       <h1>{p.identity ? 'Tedavi Planı Düzenle' : 'Tedavi Planı Oluştur'}</h1>
@@ -544,15 +1112,92 @@ export default function PineTreatmentPlanView(p: any) {
       </div>
       <span className={styles.date}><CalendarDays size={15} />{new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
       <div className={styles.headerRight}>
-        <button type="button" className={`${styles.button} ${styles.primary}`} onClick={p.toggleVoice} disabled={p.voiceStarting} aria-pressed={p.listening}>{p.listening ? <MicOff size={15} /> : <Mic size={15} />}{p.listening ? 'Dinlemeyi Durdur' : 'Sesli Komut ile Planla'}</button>
+        <button
+          type="button"
+          className={`${styles.button} ${styles.primary}`}
+          onClick={togglePineVoice}
+          disabled={isVoiceStarting}
+          aria-pressed={isVoiceActive}
+        >
+          {isVoiceActive ? <MicOff size={15} /> : <Mic size={15} />}
+          {isVoiceActive ? 'Dinlemeyi Durdur' : 'Sesli Komut ile Planla'}
+        </button>
         <button type="button" className={styles.button} aria-label="Tedavi planını kapat" onClick={p.close}><X size={16} /></button>
       </div>
-      {(p.listening || p.analyzing || p.voiceError) && <div className={styles.hint} aria-live="polite">{p.voiceError || (p.analyzing ? 'Komut analiz ediliyor…' : p.transcript || 'Dinleniyor…')}</div>}
+      {(isVoiceActive || isVoiceAnalyzing || activeVoiceError) && (
+        <div
+          className={styles.hint}
+          aria-live="polite"
+          style={{
+            gridColumn: '1 / -1',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 12px',
+            borderRadius: 10,
+            background: 'var(--card-inner, var(--pc-surface))',
+            border: '1.5px solid var(--input-border)',
+            boxShadow: 'var(--pc-neo-subcard)',
+            color: 'var(--foreground)',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '3px 9px',
+              borderRadius: 999,
+              fontSize: 11.5,
+              fontWeight: 700,
+              background: activeVoiceError ? 'var(--danger, #ef4444)' : 'var(--pc-tint, #e0f2fe)',
+              color: activeVoiceError ? '#ffffff' : 'var(--pc-tint-fg, #0369a1)',
+              boxShadow: 'var(--pc-clay-pale)',
+              flexShrink: 0,
+            }}
+          >
+            <Mic size={12} />
+            {isVoiceAnalyzing ? 'Analiz ediliyor…' : isVoiceActive ? 'Canlı Dinleme Aktif' : 'Sesli Komut'}
+          </span>
+          <span style={{ flex: '1 1 220px', fontSize: 12.5, fontWeight: 600, color: 'var(--foreground)' }}>
+            {activeVoiceError || (isVoiceAnalyzing ? 'Komut analiz ediliyor…' : activeVoiceTranscript || 'Dinleniyor… Diş numarası ve işlemi söyleyin.')}
+          </span>
+          <form
+            style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 280px', maxWidth: 440 }}
+            onSubmit={event => {
+              event.preventDefault()
+              const cmd = manualVoiceInput.trim()
+              if (!cmd) return
+              setManualVoiceInput('')
+              void processSpokenOrTypedCommand(cmd, true)
+            }}
+          >
+            <input
+              type="text"
+              className={styles.input}
+              style={{ flex: 1, minWidth: 160, height: 30, fontSize: 12, padding: '4px 10px' }}
+              placeholder='Örn: "36 çürük kompozit dolgu" veya "sağ alt 6 kanal"'
+              aria-label="Sesli komut metni"
+              value={manualVoiceInput}
+              onChange={event => setManualVoiceInput(event.target.value)}
+            />
+            <button
+              type="submit"
+              className={`${styles.button} ${styles.primary} ${styles.small}`}
+              disabled={!manualVoiceInput.trim() || isVoiceAnalyzing}
+              style={{ color: '#ffffff', flexShrink: 0 }}
+            >
+              Uygula
+            </button>
+          </form>
+        </div>
+      )}
     </header>
     <main className={styles.content}>
       <PlanMediaPanel patientId={p.event?.patientId} onEnsurePatient={p.onEnsurePatient} groupId={p.identity?.id} attachments={p.attachments} onChange={p.setAttachments} onUploadingChange={p.setUploading} onAttachmentSaved={p.onAttachmentSaved} />
       <section className={styles.section} aria-label="Odontogram">
-        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>{p.mode === '2d-anatomical' ? 'Tek diş ve tek anatomik katman seçin · Sağ tık ile yüzey/katman açın.' : 'Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.'}</span>
+        <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>{p.mode === '2d-anatomical' ? 'Tek diş seçin · Anatomik alt katmanları çoklu veya tümüyle seçin · Sağ tık ile yüzey/katman açın.' : 'Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.'}</span>
           <div className={styles.chartActions}>
             <button className={`${styles.button} ${styles.small}`} type="button" onClick={() => p.setSelected([])}>Seçimi temizle</button>
             <select className={styles.select} value={p.jaw} aria-label="Çene seçimi" onChange={event => p.changeJaw(event.target.value)}><option value="all">Tüm ağız</option><option value="upper">Üst çene</option><option value="lower">Alt çene</option></select>
@@ -738,7 +1383,7 @@ export default function PineTreatmentPlanView(p: any) {
                 })}
                 {!filteredProcedures.length && <div className={styles.catalogEmpty}><p className={styles.hint}>{procedureSearch.trim() ? 'Eşleşen tedavi bulunamadı.' : 'Katalogda tedavi bulunmuyor.'}</p>{procedureSearch.trim() && procedureEditor === null && <button type="button" className={styles.catalogCreate} onClick={() => { setEditingProcedure(null); setProcedureEditor(procedureSearch.trim().slice(0, 120)) }}><Plus size={14} /><span>“{procedureSearch.trim()}” ile yeni kayıt oluştur</span></button>}</div>}
               </div>
-              <div className={styles.materialBox}><h4>Malzeme <span className={styles.description}>(opsiyonel · seçili tedavi için)</span></h4><div className={styles.materialLine}><select className={styles.select} aria-label="Malzeme seç" value={materialId} onChange={event => setMaterialId(event.target.value)} disabled={!selectedProcedure}><option value="">Malzeme seç...</option>{p.inventory.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button type="button" className={`${styles.button} ${styles.primary} ${styles.small}`} onClick={addMaterial} disabled={!materialId || !selectedProcedure}>+ Ekle</button></div>{materials.map((item, index) => <div className={styles.materialLine} key={item.inventoryItemId}><span>{item.name}</span><input className={styles.input} aria-label={`${item.name} miktarı`} type="number" min="1" style={{ width: 54 }} value={item.quantity} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} /><input className={styles.input} aria-label={`${item.name} satış fiyatı`} type="number" min="0" step="0.01" style={{ width: 70 }} value={(item.unitSalePriceMinor || 0) / 100} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value))} /><button type="button" className={`${styles.button} ${styles.small}`} aria-label={`${item.name} kaldır`} onClick={() => syncProcedureMaterials(materials.filter((_, i) => i !== index))}>×</button></div>)}</div>
+              <div className={styles.materialBox}><h4>Malzeme <span className={styles.description}>(opsiyonel · seçili tedavi için)</span></h4><div className={styles.materialLine}><select className={styles.select} aria-label="Malzeme seç" value={materialId} onChange={event => setMaterialId(event.target.value)} disabled={!selectedProcedure}><option value="">Malzeme seç...</option>{selectableInventory.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button type="button" className={`${styles.button} ${styles.primary} ${styles.small}`} onClick={addMaterial} disabled={!materialId || !selectedProcedure}>+ Ekle</button></div>{materials.map((item, index) => <div className={styles.materialLine} key={item.inventoryItemId}><span>{item.name}</span><input className={styles.input} aria-label={`${item.name} miktarı`} type="number" min="1" style={{ width: 54 }} value={item.quantity} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} /><input className={styles.input} aria-label={`${item.name} satış fiyatı`} type="number" min="0" step="0.01" style={{ width: 70 }} value={(item.unitSalePriceMinor || 0) / 100} onChange={event => syncProcedureMaterials(materials.map((value, i) => i === index ? { ...value, unitSalePriceMinor: Math.round(Number(event.target.value) * 100) } : value))} /><button type="button" className={`${styles.button} ${styles.small}`} aria-label={`${item.name} kaldır`} onClick={() => syncProcedureMaterials(materials.filter((_, i) => i !== index))}>×</button></div>)}</div>
             </div>
             <IndicationProcedureLinkOverlay
               workgridRef={workgridRef}
@@ -1048,7 +1693,84 @@ export default function PineTreatmentPlanView(p: any) {
             </table>
             {!groupedRows.length && <div className={styles.empty}>Henüz plan öğesi eklenmedi.</div>}
           </div>
-          <div className={styles.summary}><div className={styles.sumcard}><div className={styles.sumline}><span>Ara Toplam</span><strong>{p.pricing ? money(p.pricing.subtotalMinor) : '—'}</strong></div><div className={styles.sumline}><label htmlFor="pine-discount">İskonto (%)</label><span className={styles.sumValue}><input id="pine-discount" className={styles.input} type="number" min="0" max="100" step="0.01" value={p.discount} onChange={event => p.setDiscount(Number(event.target.value))} /> % <strong>{p.pricing ? `−${money(p.pricing.percentageDiscountMinor)}` : '—'}</strong></span></div><div className={styles.sumline}><label htmlFor="pine-fixed">Manuel iskonto</label><span className={styles.sumValue}><input id="pine-fixed" className={styles.input} type="number" min="0" step="0.01" value={p.discountFixed} onChange={event => p.setDiscountFixed(Number(event.target.value))} /> ₺ <strong>{p.pricing ? `−${money(p.pricing.fixedDiscountMinor)}` : '—'}</strong></span></div>{!p.pricing && <span role="alert">Fiyat veya iskonto geçersiz.</span>}</div><div className={styles.totalcard}><svg className={styles.totalWave} viewBox="0 0 320 120" preserveAspectRatio="none" aria-hidden="true"><path fill="var(--pc-total-wave-1)" d="M115 120C170 112 204 62 252 44C282 33 304 16 320 0V120H115Z" /><path fill="var(--pc-total-wave-2)" d="M176 120C216 116 242 92 276 78C296 70 310 58 320 42V120H176Z" /></svg><span>Genel Toplam</span><strong>{p.pricing ? money(p.pricing.totalMinor) : '—'}</strong></div></div>
+          <div className={styles.summary}>
+            <div className={styles.sumcard}>
+              <div className={styles.sumline}>
+                <span>Ara Toplam</span>
+                <strong>{p.pricing ? money(p.pricing.subtotalMinor) : money(effectiveSubtotalMinor)}</strong>
+              </div>
+              <div className={styles.sumline}>
+                <label htmlFor="pine-discount">İskonto (%)</label>
+                <span className={styles.sumValue}>
+                  <input
+                    id="pine-discount"
+                    className={styles.input}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="0"
+                    value={discountText}
+                    onChange={event => {
+                      const masked = maskAndClampPercentDiscount(event.target.value)
+                      if (!masked) return
+                      setDiscountText(masked.display)
+                      p.setDiscount(masked.percent)
+                      const nextPercentBps = Math.max(0, Math.min(10000, Math.round(masked.percent * 100)))
+                      const nextPctDiscMinor = Math.floor((effectiveSubtotalMinor * nextPercentBps + 5000) / 10000)
+                      const nextMaxFixedMinor = Math.max(0, effectiveSubtotalMinor - nextPctDiscMinor)
+                      if (Math.round((Number(p.discountFixed) || 0) * 100) > nextMaxFixedMinor) {
+                        const clampedTl = nextMaxFixedMinor / 100
+                        p.setDiscountFixed(clampedTl)
+                        setDiscountFixedText(formatTlAmountDisplay(clampedTl))
+                      }
+                    }}
+                    onBlur={() => setDiscountText(formatPercentDiscountDisplay(p.discount))}
+                  /> % <strong>{p.pricing ? `−${money(p.pricing.percentageDiscountMinor)}` : `−${money(computedPercentageDiscountMinor)}`}</strong>
+                </span>
+              </div>
+              <div className={styles.sumline}>
+                <label htmlFor="pine-fixed">Manuel iskonto</label>
+                <span className={styles.sumValue}>
+                  <input
+                    id="pine-fixed"
+                    className={styles.input}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="0"
+                    value={discountFixedText}
+                    onChange={event => {
+                      const input = event.target
+                      const masked = maskAndClampTlDiscount(input.value, maxFixedDiscountMinor)
+                      if (!masked) return
+                      const position = (input.value.slice(0, input.selectionStart ?? input.value.length).match(/[\d,]/g) || []).length
+                      setDiscountFixedText(masked.display)
+                      p.setDiscountFixed(masked.amountTl)
+                      requestAnimationFrame(() => {
+                        let cursor = 0
+                        let count = 0
+                        while (cursor < masked.display.length && count < position) {
+                          if (/[\d,]/.test(masked.display[cursor])) count++
+                          cursor++
+                        }
+                        if (document.activeElement === input) input.setSelectionRange(cursor, cursor)
+                      })
+                    }}
+                    onBlur={() => setDiscountFixedText(formatTlAmountDisplay(p.discountFixed))}
+                  /> ₺ <strong>{p.pricing ? `−${money(p.pricing.fixedDiscountMinor)}` : '—'}</strong>
+                </span>
+              </div>
+              {!p.pricing && <span role="alert">Fiyat veya iskonto geçersiz.</span>}
+            </div>
+            <div className={styles.totalcard}>
+              <svg className={styles.totalWave} viewBox="0 0 320 120" preserveAspectRatio="none" aria-hidden="true">
+                <path fill="var(--pc-total-wave-1)" d="M115 120C170 112 204 62 252 44C282 33 304 16 320 0V120H115Z" />
+                <path fill="var(--pc-total-wave-2)" d="M176 120C216 116 242 92 276 78C296 70 310 58 320 42V120H176Z" />
+              </svg>
+              <span>Genel Toplam</span>
+              <strong>{p.pricing ? money(p.pricing.totalMinor) : '—'}</strong>
+            </div>
+          </div>
           <div className={styles.actions}><button type="button" className={styles.button} onClick={p.print}><Printer size={15} /> Yazdır</button><button type="button" className={`${styles.button} ${styles.primary}`} disabled={p.saving} onClick={() => p.save()}><Save size={15} /> {p.saving ? 'Kaydediliyor…' : 'Planı Kaydet'}</button></div>
         </section>
       </div>
@@ -1152,7 +1874,7 @@ export default function PineTreatmentPlanView(p: any) {
           ))}
           <label htmlFor="pine-row-material" style={{ marginTop: 6, fontWeight: 600, fontSize: 12.5 }}>Malzeme ekle</label>
           <select id="pine-row-material" className={styles.select} disabled={materialItem.locked} value="" onChange={event => {
-            const item = p.inventory.find((value: any) => value.id === event.target.value)
+            const item = selectableInventory.find((value: any) => value.id === event.target.value)
             if (item && !materialItem.materials.some((value: any) => value.inventoryItemId === item.id)) {
               const updater = (row: any) => ({ ...row, materials: [...row.materials, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit, unitSalePriceMinor: 0 }] })
               if (materialRow.entries?.length) updateGroupEntries(materialRow.entries, updater)
@@ -1160,7 +1882,7 @@ export default function PineTreatmentPlanView(p: any) {
             }
           }}>
             <option value="">Malzeme seçin</option>
-            {p.inventory.map((item: any) => <option value={item.id} key={item.id}>{item.name}</option>)}
+            {selectableInventory.map((item: any) => <option value={item.id} key={item.id}>{item.name}</option>)}
           </select>
         </div>
         <div className={styles.actions} style={{ marginTop: 18 }}>

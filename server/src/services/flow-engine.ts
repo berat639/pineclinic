@@ -58,7 +58,7 @@ function cleanFields(fields: Record<string, unknown> = {}) {
     out.musteri_adi ??= nameVal
     out.ad_soyad ??= nameVal
   }
-  const complaintVal = out.sikayet || out.islem_turu || out.randevu_turu || out.sorun_veya_talep
+  const complaintVal = out.sikayet || out.hasta_sikayeti || out.talep || out.islem_turu || out.randevu_turu || out.sorun_veya_talep || out.notlar || out.not || out.hastaNotu || out.complaint
   if (complaintVal) {
     out.sikayet ??= complaintVal
     out.islem_turu ??= complaintVal
@@ -134,7 +134,8 @@ export function buildFlowNodePrompt(
     }
     if (act === 'transfer_call' || act === 'transfer') {
       const { target, requiresConfirmation, questionInstruction } = getTransferPromptConfig(node.data as Record<string, unknown>)
-      if (requiresConfirmation) {
+      const confirmAskedKey = `_transferConfirmAsked_${node.id}`
+      if (requiresConfirmation && fields[confirmAskedKey] !== 'true') {
         return `Önce kullanıcıya ${questionInstruction} ve müşterinin cevabını bekle. Açıkça olumlu cevap gelirse aramaAktar aracını "hedef": "${target || 'resepsiyon'}" parametresiyle çağır.`
       }
       return `Şimdi aramaAktar aracını "hedef": "${target || 'resepsiyon'}" parametresiyle çağır ve aramayı yetkili birime aktar.`
@@ -255,6 +256,13 @@ export class FlowEngine {
     return node?.type === 'ACTION' ? { nodeId: node.id, action: String(node.data.action || '') } : undefined
   }
 
+  isTransferConfirmationAsked(nodeId?: string): boolean {
+    if (nodeId) return this.state.fields[`_transferConfirmAsked_${nodeId}`] === 'true'
+    const current = this.node()
+    if (current && this.state.fields[`_transferConfirmAsked_${current.id}`] === 'true') return true
+    return Object.keys(this.state.fields).some(k => k.startsWith('_transferConfirmAsked_') && this.state.fields[k] === 'true')
+  }
+
   private next(edge?: FlowEdge) { this.state.currentNodeId = edge?.target }
 
   private promptFor(node: FlowNode) {
@@ -331,7 +339,13 @@ export class FlowEngine {
           }
         }
         if (this.mode === 'observe') return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) }, message: 'Akış bu adımda bir işlem yapacaktı.' }
-        if (!this.state.completedActions.includes(node.id)) return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }
+        if (!this.state.completedActions.includes(node.id)) {
+          const prompt = this.promptFor(node)
+          if ((act === 'transfer_call' || act === 'transfer') && node.data.requireConfirmation !== false) {
+            this.state.fields[`_transferConfirmAsked_${node.id}`] = 'true'
+          }
+          return { success: true, revision: this.revision, fields: this.state.fields, next: { nodeId: node.id, type: node.type, prompt } }
+        }
         this.next(edgesFrom(this.state.flow.edges, node.id)[0]); continue
       }
       if (node.type === 'END') return { success: true, revision: this.revision, fields: this.state.fields, completed: true, next: { nodeId: node.id, type: node.type, prompt: this.promptFor(node) } }

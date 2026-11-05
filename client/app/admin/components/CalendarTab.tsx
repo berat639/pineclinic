@@ -92,7 +92,7 @@ const TimeRangeEditor = ({ selectedEvent, onSave }: any) => {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  scheduled: '🕒 Yanıt Bekliyor (Planlandı)',
+  scheduled: '📅 Planlandı (Teyit Bekliyor)',
   confirmed: '✅ Gelecek (Onaylandı)',
   arrived_unconfirmed: '🚶 Teyitsiz Geldi',
   waiting_in_clinic: '🏥 Klinikte Bekliyor',
@@ -513,12 +513,11 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       }
     }
 
-    const [docs, evts, shiftsData, invs, pats, leavesData, workingHoursData] = await Promise.all([
+    // 1. Critical calendar data: load in parallel and render immediately without waiting for slow secondary endpoints
+    const [docs, evts, shiftsData, leavesData, workingHoursData] = await Promise.all([
       fetchSafe('/api/dental/doctors'),
       fetchSafe('/api/dental/appointments'),
       fetchSafe('/api/shifts'),
-      fetchSafe('/api/yonetici/inventory'),
-      fetchSafe('/api/dental/patients'),
       fetchSafe('/api/dental/doctors/leaves'),
       fetchSafe('/api/dental/working-hours'),
     ])
@@ -541,12 +540,21 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       setSelectedEvent(prev => prev ? (evts.find((e: any) => e.id === prev.id) || prev) : null)
     }
     if (shiftsData) setShifts(shiftsData)
-    if (invs) setInventoryItems(invs)
-    if (pats) setPatients(pats.filter((patient: { isArchived?: boolean }) => !patient.isArchived))
     if (leavesData) setDoctorLeaves(leavesData)
     if (workingHoursData && typeof workingHoursData.slotStartHour === 'number') {
       setWorkingHours(workingHoursData)
     }
+
+    // 2. Non-blocking secondary data (patients list & inventory)
+    void Promise.all([
+      fetchSafe('/api/dental/patients'),
+      fetchSafe('/api/yonetici/inventory'),
+    ]).then(([pats, invs]) => {
+      if (pats && Array.isArray(pats)) {
+        setPatients(pats.filter((patient: { isArchived?: boolean }) => !patient.isArchived))
+      }
+      if (invs) setInventoryItems(invs)
+    })
   }, [currentDate])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -763,17 +771,51 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
     loadPatientContextForEvent(event)
   }
 
+  const formatIntakeSourceLabel = (source?: string | null): string => {
+    const raw = (source || '').trim().toLowerCase()
+    switch (raw) {
+      case 'phone_ai':
+      case 'voice_ai':
+      case 'voice':
+      case 'phone':
+      case 'telefon':
+        return 'Sesli Asistan (Telefon)'
+      case 'web_ai':
+      case 'web':
+        return 'Web Asistanı'
+      case 'whatsapp_ai':
+      case 'whatsapp':
+        return 'WhatsApp Asistanı'
+      case 'manual':
+      case 'desk':
+      case 'admin':
+        return 'Manuel Kayıt (Danışma)'
+      case 'online':
+        return 'Online Randevu'
+      case 'ai':
+      default:
+        return 'Sesli / Yapay Zeka Asistanı'
+    }
+  }
+
   const openAiReview = (event: CalendarEvent) => {
     setAiReviewModal(event)
-    setAiReviewPatientId('')
+    const initialName = event.intakePatientName || event.title.split(' - ')[0] || ''
+    const initialPhone = event.intakePatientPhone || ''
+    const matchedPatient =
+      (event.patientId ? patients.find(p => p.id === event.patientId) : null) ||
+      (initialPhone ? patients.find(p => p.phone && matchesPhoneSearch(p.phone, initialPhone)) : null) ||
+      null
+    setAiReviewPatientId(matchedPatient ? matchedPatient.id : '')
+    setAiReviewCreatePatient(!matchedPatient)
     setAiReviewPatientQuery('')
-    setAiReviewName(event.intakePatientName || event.title.split(' - ')[0] || '')
-    setAiReviewPhone(event.intakePatientPhone || '')
-    setAiReviewComplaint(event.complaint || '')
-    setAiReviewDoctorId(event.doctorId || '')
+    setAiReviewName(matchedPatient?.name || initialName)
+    setAiReviewPhone(matchedPatient?.phone || initialPhone)
+    setAiReviewComplaint(event.complaint || event.notes || '')
+    const isDocActive = Boolean(event.doctorId && doctors.some(d => d.id === event.doctorId) && event.status !== 'pending_assignment')
+    setAiReviewDoctorId(isDocActive ? (event.doctorId || '') : '')
     setAiReviewStart(new Date(event.startTime).toISOString().slice(0, 16))
     setAiReviewEnd(new Date(event.endTime).toISOString().slice(0, 16))
-    setAiReviewCreatePatient(false)
     setAiReviewRejectReason('')
   }
 
@@ -795,7 +837,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       })
       const body = await res.json()
       if (!res.ok) throw new Error(body.error || 'Onay kaydedilemedi')
-      toast.success(aiReviewDoctorId ? 'AI randevusu onaylandı ve planlandı' : 'AI randevusu onaylandı; doktor ataması bekliyor')
+      toast.success(aiReviewDoctorId ? 'Randevu onaylandı ve planlandı' : 'Randevu onaylandı; doktor ataması bekliyor')
       setAiReviewModal(null); setPanelOpen(false); setSelectedEvent(null); fetchData()
     } catch (error: any) { toast.error(error.message || 'Onay sırasında hata oluştu') }
     finally { setAiReviewSaving(false) }
@@ -810,7 +852,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       })
       const body = await res.json()
       if (!res.ok) throw new Error(body.error || 'İptal kaydedilemedi')
-      toast.success('AI randevu talebi iptal edildi')
+      toast.success('Randevu talebi iptal edildi')
       setAiReviewModal(null); setPanelOpen(false); setSelectedEvent(null); fetchData()
     } catch (error: any) { toast.error(error.message || 'İptal sırasında hata oluştu') }
     finally { setAiReviewSaving(false) }
@@ -818,6 +860,8 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
 
   const handleDeleteEvent = () => {
     if (!selectedEvent) return;
+    const deletingId = selectedEvent.id;
+    const deletingPatientId = selectedEvent.patientId;
     setConfirmModal({
       isOpen: true,
       title: 'Randevuyu Sil',
@@ -826,10 +870,17 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
       variant: 'danger',
       onConfirm: async () => {
         try {
-          await fetch(`/api/dental/appointments/${selectedEvent.id}`, { method: 'DELETE' });
+          await fetch(`/api/dental/appointments/${deletingId}`, { method: 'DELETE' });
+          setEvents(prev => prev.filter(ev => ev.id !== deletingId));
           setPanelOpen(false);
           setSelectedEvent(null);
           fetchData();
+          if (patientProfileId && (!deletingPatientId || patientProfileId === deletingPatientId)) {
+            fetch(`/api/dental/patients/${patientProfileId}/profile`)
+              .then(r => r.json())
+              .then(d => { if (!d.error) setPatientProfileData(d); })
+              .catch(() => {});
+          }
         } catch { }
       }
     });
@@ -1754,7 +1805,8 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             const date = event.startTime.slice(0, 10)
             const startTime = new Date(event.startTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
             const endTime = new Date(event.endTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
-            setEventContextMenu({ x: e.clientX, y: e.clientY, event, doctorId: event.doctorId || '', date, startTime, endTime })
+            const isDocValid = Boolean(event.doctorId && event.status !== 'pending_assignment' && doctors.some(d => d.id === event.doctorId))
+            setEventContextMenu({ x: e.clientX, y: e.clientY, event, doctorId: isDocValid ? (event.doctorId || '') : '', date, startTime, endTime })
           }}
           onEmptySlotSelect={(start, end, doctorId, x, y) => {
             if (!hasDoctors) return
@@ -1855,7 +1907,19 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
           {profileLoading ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--foreground-3)' }}>Profil yükleniyor...</div>
           ) : patientProfileData ? (
-            <PatientProfileCard profile={patientProfileData} doctors={doctors} />
+            <PatientProfileCard
+              profile={patientProfileData}
+              doctors={doctors}
+              onRefresh={() => {
+                fetchData()
+                if (patientProfileId) {
+                  fetch(`/api/dental/patients/${patientProfileId}/profile`)
+                    .then(r => r.json())
+                    .then(d => { if (!d.error) setPatientProfileData(d) })
+                    .catch(() => {})
+                }
+              }}
+            />
           ) : (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#ef4444' }}>Profil yüklenemedi.</div>
           )}
@@ -1899,6 +1963,12 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                 fetchData();
                 if (displayPatientId) {
                   loadPatientContextForEvent({ ...selectedEvent, patientId: displayPatientId });
+                }
+                if (patientProfileId) {
+                  fetch(`/api/dental/patients/${patientProfileId}/profile`)
+                    .then(r => r.json())
+                    .then(d => { if (!d.error) setPatientProfileData(d); })
+                    .catch(() => {});
                 }
               };
 
@@ -2660,7 +2730,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                                 )}
                               </div>
                               <select
-                                value={hasActiveAssignedDoctor ? (selectedEvent.doctorId || '') : ''}
+                                value={!isDoctorUnassigned ? (selectedEvent.doctorId || '') : ''}
                                 onChange={async (e) => {
                                   const val = e.target.value;
                                   const newStatus = val ? (selectedEvent.status === 'pending_assignment' ? 'scheduled' : selectedEvent.status) : 'pending_assignment';
@@ -2734,22 +2804,31 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                           value={selectedEvent.status}
                           onChange={async (e) => {
                             const status = e.target.value
+                            const payload: Record<string, any> = { status }
+                            if (status === 'pending_assignment') {
+                              payload.doctorId = null
+                            }
                             try {
                               const res = await fetch(`/api/dental/appointments/${selectedEvent.id}`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ status }),
+                                body: JSON.stringify(payload),
                               })
                               if (res.ok) {
                                 const updated = await res.json();
-                                setEvents(prev => prev.map(ev => ev.id === updated.id ? { ...ev, ...updated } : ev));
-                                setSelectedEvent(prev => prev ? { ...prev, ...updated } : null);
+                                const nextEv = {
+                                  ...selectedEvent,
+                                  ...updated,
+                                  ...(status === 'pending_assignment' ? { doctorId: null } : {}),
+                                };
+                                setEvents(prev => prev.map(ev => ev.id === updated.id ? nextEv : ev));
+                                setSelectedEvent(nextEv);
                               }
                             } catch { }
                           }}
                           style={{ width: '100%', fontSize: '0.78rem', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--input-border, #cbd5e1)', background: 'var(--input-bg, #ffffff)', color: 'var(--foreground)', fontWeight: 500 }}
                         >
-                          <option value="scheduled">🕒 Yanıt Bekliyor (Planlandı)</option>
+                          <option value="scheduled">📅 Planlandı (Teyit Bekliyor)</option>
                           <option value="confirmed">✅ Gelecek (Onaylandı)</option>
                           <option value="arrived_unconfirmed">🚶 Teyitsiz Geldi</option>
                           <option value="waiting_in_clinic">🏥 Klinikte Bekliyor</option>
@@ -3685,11 +3764,11 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: 'var(--foreground-3)', marginBottom: 4 }}>İlgili Doktor</div>
               <select
-                value={eventContextMenu.doctorId}
+                value={doctors.some(d => d.id === eventContextMenu.doctorId) ? eventContextMenu.doctorId : ''}
                 onChange={e => setEventContextMenu({ ...eventContextMenu, doctorId: e.target.value })}
                 style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none' }}
               >
-                <option value="">İlgili Doktor Seçiniz (Opsiyonel)</option>
+                <option value="">⚠️ Boşa Çıktı — Hekim Seçiniz (Atama Bekliyor)</option>
                 {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
@@ -3890,7 +3969,7 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
                 <div style={{ width: 32, height: 32, borderRadius: 8, background: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', boxShadow: 'var(--pc-clay-primary)', flexShrink: 0 }}>📅</div>
                 <div>
                   <div style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--foreground)', lineHeight: 1.2 }}>Randevu Doğrulama</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>Kaynak: {aiReviewModal.intakeSource || 'AI'} · Geçici rezervasyonu doğrulayın</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--foreground-3)', marginTop: 2 }}>Kaynak: {formatIntakeSourceLabel(aiReviewModal.intakeSource)} · Geçici rezervasyonu doğrulayın</div>
                 </div>
               </div>
               <button onClick={() => setAiReviewModal(null)} aria-label="Kapat" style={{ width: 28, height: 28, border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--foreground)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--pc-clay-btn)' }}>✕</button>
@@ -3901,19 +3980,108 @@ export default function CalendarTab({ onNavigateToClinicStaff }: { onNavigateToC
               <div style={{ background: 'var(--card-inner)', padding: 14, borderRadius: 10, border: '1px solid var(--input-border)', display: 'grid', gap: 12 }}>
                 <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--foreground)' }}>Hasta ve Randevu Bilgileri</div>
                 <div style={{ display: 'grid', gap: 8 }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Hasta Eşleştir</label>
-                  <input value={aiReviewPatientQuery} onChange={e => setAiReviewPatientQuery(e.target.value)} placeholder="Ad veya telefon ile ara" style={{ ...inputStyle, width: '100%' }} />
-                  <select value={aiReviewCreatePatient ? '__new__' : aiReviewPatientId} onChange={e => {
-                    const value = e.target.value; setAiReviewCreatePatient(value === '__new__'); setAiReviewPatientId(value === '__new__' ? '' : value)
-                    const patient = patients.find(p => p.id === value); if (patient) { setAiReviewName(patient.name || ''); setAiReviewPhone(patient.phone || '') }
-                  }} style={{ ...inputStyle, width: '100%' }}>
-                    <option value="">Hasta seçin</option>
-                    <option value="__new__">+ Yeni hasta oluştur</option>
-                    {patients.filter(p => {
-                      const query = aiReviewPatientQuery.trim().toLocaleLowerCase('tr-TR')
-                      return !query || `${p.name || ''} ${p.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query) || matchesPhoneSearch(p.phone, aiReviewPatientQuery)
-                    }).map(p => <option key={p.id} value={p.id}>{p.name}{p.phone ? ` · ${p.phone}` : ''}</option>)}
-                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Hasta Eşleştir / Ara</label>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: aiReviewCreatePatient ? 'var(--btn-clinic-mint-bg, #f0fdf4)' : 'var(--badge-clinic-bg, #e0f2fe)',
+                        border: aiReviewCreatePatient ? '1px solid var(--btn-clinic-mint-border, #86efac)' : '1px solid var(--badge-clinic-border, #bae6fd)',
+                        color: aiReviewCreatePatient ? 'var(--btn-clinic-mint-text, #15803d)' : 'var(--badge-clinic-text, #0369a1)',
+                      }}
+                    >
+                      {aiReviewCreatePatient
+                        ? '+ Yeni hasta olarak kaydedilecek'
+                        : aiReviewPatientId
+                          ? `✓ Mevcut hasta seçildi`
+                          : 'Hasta seçiniz'}
+                    </span>
+                  </div>
+                  <input
+                    value={aiReviewPatientQuery}
+                    onChange={e => setAiReviewPatientQuery(e.target.value)}
+                    placeholder="Kayıtlı hastalarda ad veya telefon ile ara..."
+                    style={{ ...inputStyle, width: '100%' }}
+                  />
+                  <div
+                    style={{
+                      maxHeight: 136,
+                      overflowY: 'auto',
+                      borderRadius: 8,
+                      border: '1px solid var(--input-border)',
+                      background: 'var(--input-bg)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiReviewCreatePatient(true)
+                        setAiReviewPatientId('')
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                        padding: '8px 10px',
+                        border: 'none',
+                        borderBottom: '1px solid var(--input-border)',
+                        background: aiReviewCreatePatient ? 'var(--badge-clinic-bg, #e0f2fe)' : 'transparent',
+                        color: aiReviewCreatePatient ? 'var(--badge-clinic-text, #0369a1)' : 'var(--accent)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span>+ Yeni hasta olarak oluştur ({aiReviewName || 'Yeni Hasta'})</span>
+                      {aiReviewCreatePatient && <span>✓</span>}
+                    </button>
+                    {patients
+                      .filter(p => {
+                        const query = aiReviewPatientQuery.trim().toLocaleLowerCase('tr-TR')
+                        return !query || `${p.name || ''} ${p.phone || ''}`.toLocaleLowerCase('tr-TR').includes(query) || matchesPhoneSearch(p.phone, aiReviewPatientQuery)
+                      })
+                      .slice(0, 20)
+                      .map(p => {
+                        const isSelected = !aiReviewCreatePatient && aiReviewPatientId === p.id
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setAiReviewCreatePatient(false)
+                              setAiReviewPatientId(p.id)
+                              setAiReviewName(p.name || '')
+                              setAiReviewPhone(p.phone || '')
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              width: '100%',
+                              padding: '7px 10px',
+                              border: 'none',
+                              borderBottom: '1px solid var(--input-border)',
+                              background: isSelected ? 'var(--badge-clinic-bg, #e0f2fe)' : 'transparent',
+                              color: isSelected ? 'var(--badge-clinic-text, #0369a1)' : 'var(--foreground)',
+                              fontSize: '0.78rem',
+                              fontWeight: isSelected ? 700 : 500,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span>{p.name}{p.phone ? ` · ${p.phone}` : ''}</span>
+                            {isSelected && <span>✓</span>}
+                          </button>
+                        )
+                      })}
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground-2)' }}>Ad Soyad<input value={aiReviewName} onChange={e => setAiReviewName(e.target.value)} style={{ ...inputStyle, width: '100%', marginTop: 4 }} /></label>

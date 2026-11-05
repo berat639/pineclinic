@@ -26,6 +26,13 @@ import {
 import { DentalVoicePipeline } from '../../../lib/dental-audio-pipeline';
 import { checkDoctorAvailability } from '../../../lib/doctor-availability';
 import { PhoneMaskedInput } from '@/lib/phone-mask';
+import {
+  formatPercentDiscountDisplay,
+  formatTlAmountDisplay,
+  isSelectableTreatmentMaterial,
+  maskAndClampPercentDiscount,
+  maskAndClampTlDiscount,
+} from '@/lib/tl-price-input';
 
 const Odontogram3D = dynamic(() => import('./Odontogram3D'), {
   ssr: false,
@@ -112,6 +119,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   const [newConsultation, setNewConsultation] = useState('')
   const [newDisease, setNewDisease] = useState('')
   const [inventory, setInventory] = useState<any[]>([])
+  const selectableInventory = inventory.filter(isSelectableTreatmentMaterial)
   const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null)
   const [editingConsultationDate, setEditingConsultationDate] = useState<string>('')
 
@@ -314,14 +322,14 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
         }
         initialSnapshot.current = null;
       }
-      setConsultations(notes); setInventory(stock); setAutocomplete(completion);
+      setConsultations(notes); setInventory(stock.filter(isSelectableTreatmentMaterial)); setAutocomplete(completion);
       const loadedProcedures = catalog.filter((entry: any) => entry.kind === 'procedure').map((entry: any) => ({
         id: entry.id,
         name: entry.name,
         scope: entry.scope,
         price: entry.priceMinor / 100,
         color: (entry.color && entry.color !== '#3b82f6') ? entry.color : (DEFAULT_PROCEDURE_COLORS[entry.name] || entry.color || '#0284c7'),
-        materials: entry.materials,
+        materials: Array.isArray(entry.materials) ? entry.materials.filter(isSelectableTreatmentMaterial) : [],
       }));
       setProcTemplates(loadedProcedures);
       const indications = catalog.filter((entry: any) => entry.kind === 'indication');
@@ -569,6 +577,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
 
   const [discount, setDiscount] = useState<number>(0)
   const [discountFixed, setDiscountFixed] = useState<number>(0)
+  const [discountText, setDiscountText] = useState<string>('')
+  const [discountFixedText, setDiscountFixedText] = useState<string>('')
 
   const [isPeriodic, setIsPeriodic] = useState(!editingGroup)
   const [periodDays, setPeriodDays] = useState<number>(180)
@@ -632,12 +642,56 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     }
   }, [snapshot, planLoading, planLoadError, baseDataLoading, baseDataError]);
   const hasUnsavedChanges = initialSnapshot.current !== null && initialSnapshot.current !== snapshot;
+  const priceLines = Object.values(toothDrafts).flat().map(item => ({
+    basePriceMinor: Math.max(0, Math.round((Number(item.price) || 0) * 100)),
+    materials: (item.materials || []).map(material => ({
+      quantity: Math.max(1, Math.round(Number(material.quantity) || 1)),
+      unitSalePriceMinor: Math.max(0, Math.round(Number(material.unitSalePriceMinor) || 0)),
+    })),
+  }));
+  const rawSubtotalMinor = priceLines.reduce(
+    (sum, line) =>
+      sum +
+      line.basePriceMinor +
+      line.materials.reduce((mSum, m) => mSum + m.quantity * m.unitSalePriceMinor, 0),
+    0
+  );
+  const clampedDiscountPercentBps = Math.max(0, Math.min(10000, Math.round((Number(discount) || 0) * 100)));
+  const rawPercentageDiscountMinor = Math.floor((rawSubtotalMinor * clampedDiscountPercentBps + 5000) / 10000);
+  const maxFixedDiscountMinor = Math.max(0, rawSubtotalMinor - rawPercentageDiscountMinor);
+  const clampedFixedDiscountMinor = Math.max(
+    0,
+    Math.min(maxFixedDiscountMinor, Math.round((Number(discountFixed) || 0) * 100))
+  );
+
+  useEffect(() => {
+    const nextNum = Number(discount) || 0;
+    const currentParsed = maskAndClampPercentDiscount(discountText)?.percent ?? 0;
+    if (Math.round(currentParsed * 100) !== Math.round(nextNum * 100)) {
+      setDiscountText(formatPercentDiscountDisplay(nextNum));
+    }
+  }, [discount]);
+
+  useEffect(() => {
+    const nextNum = Number(discountFixed) || 0;
+    const currentParsedMinor = maskAndClampTlDiscount(discountFixedText)?.amountMinor ?? 0;
+    if (currentParsedMinor !== Math.round(nextNum * 100)) {
+      setDiscountFixedText(formatTlAmountDisplay(nextNum));
+    }
+  }, [discountFixed]);
+
+  useEffect(() => {
+    const currentFixedMinor = Math.round((Number(discountFixed) || 0) * 100);
+    if (currentFixedMinor > maxFixedDiscountMinor) {
+      const clampedTl = maxFixedDiscountMinor / 100;
+      setDiscountFixed(clampedTl);
+      setDiscountFixedText(formatTlAmountDisplay(clampedTl));
+    }
+  }, [maxFixedDiscountMinor, discountFixed]);
+
   let pricing: ReturnType<typeof calculateTreatmentPrices> | null = null;
   try {
-    pricing = calculateTreatmentPrices(Object.values(toothDrafts).flat().map(item => ({
-      basePriceMinor: Math.round(item.price * 100),
-      materials: item.materials.map(material => ({ quantity: Number(material.quantity), unitSalePriceMinor: Number(material.unitSalePriceMinor || 0) })),
-    })), Math.round(discount * 100), Math.round(discountFixed * 100));
+    pricing = calculateTreatmentPrices(priceLines, clampedDiscountPercentBps, clampedFixedDiscountMinor);
   } catch { /* Invalid inputs are reported when saving. */ }
 
   // Anatomik Diş Grupları ve Kadranlar
@@ -2200,8 +2254,8 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
       const payload = {
         name: groupName, patientId: targetPatientId, appointmentId: selectedEvent?.id || undefined,
         expectedVersion: planIdentity?.version, idempotencyKey: idempotencyKey.current,
-        consultationNote: planNote, discountPercentBps: Math.round(discount * 100),
-        discountFixedMinor: Math.round(discountFixed * 100),
+        consultationNote: planNote, discountPercentBps: clampedDiscountPercentBps,
+        discountFixedMinor: clampedFixedDiscountMinor,
         metadata: { toothSurfaces, toothSections, defectMarkers, defaultDoctorId, isPeriodic, periodDays: effectivePrimaryPeriodDays, periodDaysList: normalizedPeriodDaysList, notificationChannels: notifyPatient ? notificationChannels(notificationType) : [] }, attachmentIds: planAttachments.map(item => item.id), treatments,
       };
       const response = await fetch(planIdentity ? `/api/dental/treatment-groups/${planIdentity.id}/full` : `/api/dental/patients/${targetPatientId}/treatments/bulk`, {
@@ -2316,7 +2370,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
           identity={planIdentity} patient={{ ...patientInfo, ...contactOverride }} event={effectiveEvent} onEnsurePatient={() => ensurePatientId()} doctors={doctors} shifts={shifts} doctorLeaves={effectiveDoctorLeaves}
           attachments={planAttachments} setAttachments={setPlanAttachments} setUploading={setMediaUploading} onAttachmentSaved={handleAttachmentSaved}
           drafts={toothDrafts} setDrafts={setToothDrafts} selected={selectedTeeth} setSelected={setSelectedTeeth}
-          procedures={procTemplates} setProcedures={setProcTemplates} indications={indTemplates} setIndications={setIndTemplates} indicationIds={indicationIds} setIndicationIds={setIndicationIds} inventory={inventory}
+          procedures={procTemplates} setProcedures={setProcTemplates} indications={indTemplates} setIndications={setIndTemplates} indicationIds={indicationIds} setIndicationIds={setIndicationIds} inventory={selectableInventory}
           add={handleDropTreatment} clickTooth={handleToothClick} jaw={jawSelection} mode={odontogramMode} setMode={handleSetOdontogramMode}
           indicationLinks={indicationLinks} setIndicationLinks={setIndicationLinks}
           onContextMenu={openToothContext} contextMenu={contextMenu} setContextMenu={setContextMenu}
@@ -3757,7 +3811,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                     <select onChange={e => {
                       const itemId = e.target.value;
                       if (!itemId) return;
-                      const item = inventory.find(x => x.id === itemId);
+                      const item = selectableInventory.find(x => x.id === itemId);
                       if (!item) return;
                       if (!activeSelectionMaterials.find(x => x.inventoryItemId === item.id)) {
                         setActiveSelectionMaterials(prev => [...prev, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit }]);
@@ -3765,7 +3819,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       e.target.value = '';
                     }} style={{ ...inputStyle, flex: 1, padding: '6px', fontSize: '0.8rem' }}>
                       <option value="">+ Malzeme Ekle</option>
-                      {inventory.map(inv => <option key={inv.id} value={inv.id}>{inv.name}</option>)}
+                      {selectableInventory.map(inv => <option key={inv.id} value={inv.id}>{inv.name}</option>)}
                     </select>
                   </div>
                   {activeSelectionMaterials.length > 0 && (
@@ -3870,7 +3924,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <select onChange={e => {
                         const itemId = e.target.value;
                         if (!itemId) return;
-                        const item = inventory.find(x => x.id === itemId);
+                        const item = selectableInventory.find(x => x.id === itemId);
                         if (!item) return;
                         if (!newTemplateMaterials.find(x => x.inventoryItemId === item.id)) {
                           setNewTemplateMaterials(prev => [...prev, { inventoryItemId: item.id, name: item.name, quantity: 1, unitCost: item.costPerUnit }]);
@@ -3878,7 +3932,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         e.target.value = '';
                       }} style={{ ...inputStyle, width: 100, padding: '6px', fontSize: '0.8rem' }}>
                         <option value="">+ Malzeme</option>
-                        {inventory.map(inv => <option key={inv.id} value={inv.id}>{inv.name}</option>)}
+                        {selectableInventory.map(inv => <option key={inv.id} value={inv.id}>{inv.name}</option>)}
                       </select>
                     </>
                   )}
@@ -4245,12 +4299,61 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
                         <span>İskonto (%):</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 120 }}>
-                          <input aria-label="Yüzde iskonto" type="number" min="0" max="100" step="0.01" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: '100%', padding: '4px 8px', fontSize: '0.8rem', textAlign: 'right' }} />
+                          <input
+                            aria-label="Yüzde iskonto"
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            value={discountText}
+                            onChange={e => {
+                              const masked = maskAndClampPercentDiscount(e.target.value);
+                              if (!masked) return;
+                              setDiscountText(masked.display);
+                              setDiscount(masked.percent);
+                              const nextPercentBps = Math.max(0, Math.min(10000, Math.round(masked.percent * 100)));
+                              const nextPctDiscMinor = Math.floor((rawSubtotalMinor * nextPercentBps + 5000) / 10000);
+                              const nextMaxFixedMinor = Math.max(0, rawSubtotalMinor - nextPctDiscMinor);
+                              if (Math.round((Number(discountFixed) || 0) * 100) > nextMaxFixedMinor) {
+                                const clampedTl = nextMaxFixedMinor / 100;
+                                setDiscountFixed(clampedTl);
+                                setDiscountFixedText(formatTlAmountDisplay(clampedTl));
+                              }
+                            }}
+                            onBlur={() => setDiscountText(formatPercentDiscountDisplay(discount))}
+                            placeholder="0"
+                            style={{ ...inputStyle, width: '100%', padding: '4px 8px', fontSize: '0.8rem', textAlign: 'right' }}
+                          />
                         </div>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--foreground-2)' }}>
                         <span>Manuel iskonto (₺):</span>
-                        <input aria-label="Manuel iskonto" type="number" min="0" step="0.01" value={discountFixed || ''} onChange={e => setDiscountFixed(Number(e.target.value))} placeholder="0" style={{ ...inputStyle, width: 120, padding: '4px 8px', textAlign: 'right' }} />
+                        <input
+                          aria-label="Manuel iskonto"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={discountFixedText}
+                          onChange={e => {
+                            const input = e.target;
+                            const masked = maskAndClampTlDiscount(input.value, maxFixedDiscountMinor);
+                            if (!masked) return;
+                            const position = (input.value.slice(0, input.selectionStart ?? input.value.length).match(/[\d,]/g) || []).length;
+                            setDiscountFixedText(masked.display);
+                            setDiscountFixed(masked.amountTl);
+                            requestAnimationFrame(() => {
+                              let cursor = 0;
+                              let count = 0;
+                              while (cursor < masked.display.length && count < position) {
+                                if (/[\d,]/.test(masked.display[cursor])) count++;
+                                cursor++;
+                              }
+                              if (document.activeElement === input) input.setSelectionRange(cursor, cursor);
+                            });
+                          }}
+                          onBlur={() => setDiscountFixedText(formatTlAmountDisplay(discountFixed))}
+                          placeholder="0"
+                          style={{ ...inputStyle, width: 120, padding: '4px 8px', textAlign: 'right' }}
+                        />
                       </div>
                       {!pricing && <span role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>Fiyat veya iskonto geçersiz.</span>}
                       <div style={{ height: 1, background: 'var(--glass-border)' }} />
@@ -4520,7 +4623,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                         <select onChange={e => {
                           const itemId = e.target.value;
                           if (!itemId) return;
-                          const item = inventory.find(x => x.id === itemId);
+                          const item = selectableInventory.find(x => x.id === itemId);
                           if (!item) return;
                           setToothDrafts(prev => {
                             const next = { ...prev };
@@ -4537,7 +4640,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                           e.target.value = '';
                         }} style={{ ...inputStyle, width: '100%', padding: '10px 12px', fontSize: '0.9rem', marginBottom: 12 }}>
                           <option value="">+ Malzeme Ekle...</option>
-                          {inventory.map(inv => (
+                          {selectableInventory.map(inv => (
                             <option key={inv.id} value={inv.id}>{inv.name}</option>
                           ))}
                         </select>

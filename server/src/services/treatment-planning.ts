@@ -561,6 +561,7 @@ export async function cancelTreatmentItem(id: string, clinicId: string) {
     const links = await tx.select({ appointmentId: appointmentTreatments.appointmentId }).from(appointmentTreatments).where(eq(appointmentTreatments.treatmentPlanId, id))
     await tx.delete(appointmentTreatments).where(eq(appointmentTreatments.treatmentPlanId, id))
     await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(eq(treatmentPlans.id, id))
+    await tx.execute(sql`DELETE FROM patient_activity_logs WHERE clinic_id = ${clinicId} AND treatment_id = ${id}`).catch(() => {})
     await syncAppointmentTitles(tx, clinicId, links.map(l => l.appointmentId))
     return true
   })
@@ -574,7 +575,15 @@ export async function cancelTreatmentGroup(id: string, clinicId: string) {
     if (!group) return false
     const items = await tx.select().from(treatmentPlans).where(and(eq(treatmentPlans.groupId, id), eq(treatmentPlans.clinicId, clinicId))).for('update')
     const ids = items.map(item => item.id)
-    if (ids.length) await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(inArray(treatmentPlans.id, ids))
+    if (ids.length) {
+      const links = await tx.select({ appointmentId: appointmentTreatments.appointmentId }).from(appointmentTreatments).where(inArray(appointmentTreatments.treatmentPlanId, ids))
+      await tx.delete(appointmentTreatments).where(inArray(appointmentTreatments.treatmentPlanId, ids))
+      await tx.update(treatmentPlans).set({ status: 'cancelled' }).where(inArray(treatmentPlans.id, ids))
+      for (const itemId of ids) {
+        await tx.execute(sql`DELETE FROM patient_activity_logs WHERE clinic_id = ${clinicId} AND treatment_id = ${itemId}`).catch(() => {})
+      }
+      await syncAppointmentTitles(tx, clinicId, links.map(l => l.appointmentId))
+    }
     await tx.update(treatmentGroups).set({ status: 'cancelled' }).where(eq(treatmentGroups.id, id))
     return true
   })

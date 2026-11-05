@@ -4,7 +4,7 @@ import { db } from '../db/client'
 import { auditLog, clinicMemberships, clinics, staffInvitations, users } from '../db/schema'
 import { getSetting, setSetting } from '../db/repositories/settings'
 import type { Config } from '../integrations/managed/model'
-import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
+import { activeConfig, decrypt, getRow, resolveEffectiveConfig } from '../integrations/managed/store'
 import { sendEmail } from './email'
 
 const hashToken = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -125,7 +125,7 @@ export async function hasClinicStaffPermission(
 
 export async function getClinicSmtpStatus(clinicId: string) {
   try {
-    let settings = await activeConfig(clinicId, 'smtp')
+    let settings = await resolveEffectiveConfig(clinicId, 'smtp')
     const row = await getRow(clinicId, 'smtp')
     if (!settings && row?.draft) {
       try {

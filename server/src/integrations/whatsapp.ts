@@ -59,6 +59,17 @@ export function normalizePhone(value: string): string {
   if (!/^[1-9]\d{9,14}$/.test(digits)) throw new Error('Geçerli bir uluslararası telefon numarası gerekli.')
   return `+${digits}`
 }
+export function last10Digits(phone: string | null | undefined): string {
+  if (!phone) return ''
+  const digits = String(phone).replace(/\D/g, '')
+  return digits.length >= 10 ? digits.slice(-10) : digits
+}
+export function phonesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const da = last10Digits(a)
+  const db = last10Digits(b)
+  if (!da || !db) return false
+  return da === db
+}
 export function detectOptOut(text: string): boolean {
   return ['dur', 'durdur', 'stop', 'unsubscribe', 'bildirim istemiyorum', 'mesaj istemiyorum', 'bildirimleri kapat']
     .includes(text.trim().toLocaleLowerCase('tr-TR').replace(/[.!]+$/, ''))
@@ -107,16 +118,45 @@ export function evolutionConnectionState(result: EvolutionQrResponse, fallback =
  * QR generation is asynchronous in Evolution/WhatsApp-Baileys. A newly created
  * or re-opened instance can therefore answer before its PNG has been encoded.
  */
-export async function requestEvolutionQr(creds: WhatsAppCredentials, attempts = 4): Promise<EvolutionQrResult> {
+export async function requestEvolutionQr(creds: WhatsAppCredentials, attempts = 5): Promise<EvolutionQrResult> {
   let connectionState = 'connecting'
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const result = await evolutionRequest<EvolutionQrResponse>(creds, `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
+    let result: EvolutionQrResponse
+    try {
+      result = await evolutionRequest<EvolutionQrResponse>(creds, `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
+    } catch (err) {
+      if (err instanceof EvolutionError && [400, 404].includes(err.status)) {
+        try {
+          result = await evolutionRequest<EvolutionQrResponse>(creds, '/instance/create', {
+            instanceName: creds.instanceName,
+            qrcode: true,
+            integration: 'WHATSAPP-BAILEYS',
+          })
+        } catch (createErr) {
+          if (createErr instanceof EvolutionError && [403, 409].includes(createErr.status)) {
+            result = await evolutionRequest<EvolutionQrResponse>(creds, `/instance/connect/${encodeURIComponent(creds.instanceName)}`)
+          } else {
+            throw createErr
+          }
+        }
+      } else {
+        throw err
+      }
+    }
     if (result.error === true) {
       if (attempt === attempts - 1) throw new Error('Evolution instance bağlantısı henüz hazır değil. Birkaç saniye sonra yeniden deneyin.')
     } else {
       connectionState = evolutionConnectionState(result)
-      const qrcode = normalizeEvolutionQr(result.base64) || normalizeEvolutionQr(result.qrcode?.base64)
+      const rAny = result as any
+      const qrcode =
+        normalizeEvolutionQr(result.base64) ||
+        normalizeEvolutionQr(result.qrcode?.base64) ||
+        normalizeEvolutionQr(rAny?.data?.base64) ||
+        normalizeEvolutionQr(rAny?.data?.qrcode?.base64)
       if (qrcode || connectionState === 'open') return { qrcode, connectionState }
+      if (attempt === 0 && connectionState === 'close') {
+        await evolutionRequest(creds, `/instance/logout/${encodeURIComponent(creds.instanceName)}`, undefined, 'DELETE').catch(() => {})
+      }
     }
     if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, 800))
   }
@@ -137,12 +177,14 @@ export interface IncomingWhatsAppMessage {
 export function parseEvolutionMessages(payload: unknown, now = Date.now()): IncomingWhatsAppMessage[] {
   const p = payload as any
   if (String(p?.event).replace(/[.-]/g, '_').toUpperCase() !== 'MESSAGES_UPSERT') return []
-  const entries = Array.isArray(p.data) ? p.data : [p.data]
+  const rawData = Array.isArray(p.data?.messages) ? p.data.messages : p.data
+  const entries = Array.isArray(rawData) ? rawData : [rawData]
   return entries.flatMap((data: any) => {
     const key = data?.key
-    const remoteJid = key?.remoteJid
+    const remoteJid = typeof key?.remoteJid === 'string' ? key.remoteJid.replace(/:\d+@/, '@') : key?.remoteJid
     if (typeof key?.id !== 'string' || typeof remoteJid !== 'string' || !/^\d+(@s\.whatsapp\.net|@lid)$/.test(remoteJid)) return []
-    const timestamp = Number(data.messageTimestamp?.low ?? data.messageTimestamp) * 1000
+    const rawTs = Number(data.messageTimestamp?.low ?? data.messageTimestamp)
+    const timestamp = Number.isFinite(rawTs) ? (rawTs > 1e12 ? rawTs : rawTs * 1000) : NaN
     if (!Number.isFinite(timestamp) || timestamp < now - 10 * 60_000 || timestamp > now + 60_000) return []
     let message = data.message
     for (let i = 0; i < 3; i++) {
@@ -152,9 +194,11 @@ export function parseEvolutionMessages(payload: unknown, now = Date.now()): Inco
     }
     const text = message?.conversation || message?.extendedTextMessage?.text || message?.buttonsResponseMessage?.selectedDisplayText || message?.listResponseMessage?.title
     if (typeof text !== 'string' || !text.trim() || text.length > 12_000) return []
-    const phoneJid = [remoteJid, key.remoteJidAlt, data.senderPn].find(j => typeof j === 'string' && /^\d+@s\.whatsapp\.net$/.test(j))
+    const phoneJid = [remoteJid, key.remoteJidAlt, data.senderPn, key.senderPn]
+      .map(j => (typeof j === 'string' ? j.replace(/:\d+@/, '@') : j))
+      .find(j => typeof j === 'string' && /^\d+@s\.whatsapp\.net$/.test(j))
     let phone: string | null = null
-    try { if (phoneJid) phone = normalizePhone(phoneJid.split('@')[0]) } catch { /* unresolved sender identity */ }
+    try { if (phoneJid) phone = normalizePhone(phoneJid.split('@')[0].split(':')[0]) } catch { /* unresolved sender identity */ }
     return [{ externalId: key.id, remoteJid: phone ? `${phone.slice(1)}@s.whatsapp.net` : remoteJid, phone, text: text.trim(), fromMe: key.fromMe === true, timestamp }]
   })
 }
@@ -240,9 +284,15 @@ export function parseN8nInboundMessages(payload: unknown, now = Date.now()): Inc
   }
 
   return rawItems.flatMap((item: any): IncomingWhatsAppMessage[] => {
-    const externalId = typeof item?.externalId === 'string' ? item.externalId.trim() : typeof item?.id === 'string' ? item.id.trim() : ''
-    const rawFrom = typeof item?.from === 'string' ? item.from.trim() : typeof item?.phone === 'string' ? item.phone.trim() : ''
-    if (!externalId || !rawFrom) return []
+    const rawFrom =
+      typeof item?.from === 'string'
+        ? item.from.trim()
+        : typeof item?.phone === 'string'
+          ? item.phone.trim()
+          : typeof item?.sender === 'string'
+            ? item.sender.trim()
+            : ''
+    if (!rawFrom) return []
 
     let phone: string
     try {
@@ -256,13 +306,17 @@ export function parseN8nInboundMessages(payload: unknown, now = Date.now()): Inc
         ? item.text
         : typeof item?.text?.body === 'string'
           ? item.text.body
-          : typeof item?.interactiveReply?.title === 'string'
-            ? item.interactiveReply.title
-            : typeof item?.interactive?.button_reply?.title === 'string'
-              ? item.interactive.button_reply.title
-              : typeof item?.interactive?.list_reply?.title === 'string'
-                ? item.interactive.list_reply.title
-                : ''
+          : typeof item?.message === 'string'
+            ? item.message
+            : typeof item?.body === 'string'
+              ? item.body
+              : typeof item?.interactiveReply?.title === 'string'
+                ? item.interactiveReply.title
+                : typeof item?.interactive?.button_reply?.title === 'string'
+                  ? item.interactive.button_reply.title
+                  : typeof item?.interactive?.list_reply?.title === 'string'
+                    ? item.interactive.list_reply.title
+                    : ''
 
     if (typeof rawText !== 'string' || !rawText.trim() || rawText.length > 12_000) return []
 
@@ -274,6 +328,12 @@ export function parseN8nInboundMessages(payload: unknown, now = Date.now()): Inc
       }
     }
     if (tsMs < now - 10 * 60_000 || tsMs > now + 60_000) return []
+
+    const externalId =
+      (typeof item?.externalId === 'string' && item.externalId.trim()) ||
+      (typeof item?.messageId === 'string' && item.messageId.trim()) ||
+      (typeof item?.id === 'string' && item.id.trim()) ||
+      `n8n_${tsMs}_${phone.slice(1)}`
 
     return [{
       externalId,
@@ -342,17 +402,77 @@ export interface N8nMetaConfig {
   sendWebhookUrl: string
   secret: string
   phoneNumberId?: string | null
+  wabaId?: string | null
+  accessToken?: string | null
 }
 
 export class N8nMetaTransport implements WhatsAppTransport {
   readonly provider: WhatsAppProviderType = 'n8n_meta'
   constructor(private readonly config: N8nMetaConfig) {}
 
+  private async sendDirectMetaGraph(payload: Record<string, unknown>): Promise<WhatsAppSendResult> {
+    const phoneNumberId = this.config.phoneNumberId?.trim()
+    const accessToken = this.config.accessToken?.trim()
+    if (!phoneNumberId || !accessToken) {
+      throw new EvolutionError(0, true)
+    }
+    let graphPayload: Record<string, unknown>
+    if (payload.mode === 'template' && payload.template && typeof payload.template === 'object') {
+      const tpl = payload.template as { name: string; language?: string; components?: unknown[] }
+      graphPayload = {
+        messaging_product: 'whatsapp',
+        to: payload.to,
+        type: 'template',
+        template: {
+          name: tpl.name,
+          language: { code: tpl.language || 'tr' },
+          components: tpl.components || [],
+        },
+      }
+    } else if (payload.mode === 'location' && payload.location) {
+      graphPayload = {
+        messaging_product: 'whatsapp',
+        to: payload.to,
+        type: 'location',
+        location: payload.location,
+      }
+    } else {
+      graphPayload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: payload.to,
+        type: 'text',
+        text: { preview_url: false, body: String(payload.text || '') },
+      }
+    }
+    const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(graphPayload),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!res.ok) {
+      throw new EvolutionError(res.status, res.status >= 500)
+    }
+    const data: any = await res.json().catch(() => ({}))
+    const messageId =
+      (typeof data?.messages?.[0]?.id === 'string' && data.messages[0].id.trim()) ||
+      (typeof data?.messageId === 'string' && data.messageId.trim()) ||
+      ''
+    if (!messageId) throw new EvolutionError(200, true)
+    return { messageId }
+  }
+
   private async postToN8n(payload: Record<string, unknown>): Promise<WhatsAppSendResult> {
     const url = validateN8nWebhookUrl(this.config.sendWebhookUrl)
     const rawBody = JSON.stringify({
       clinicId: this.config.clinicId,
       phoneNumberId: this.config.phoneNumberId || undefined,
+      wabaId: this.config.wabaId || undefined,
+      accessToken: this.config.accessToken || undefined,
       ...payload,
     })
     const { timestamp, signature } = signN8nPayload(rawBody, this.config.secret)
@@ -362,6 +482,7 @@ export class N8nMetaTransport implements WhatsAppTransport {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Webhook-Secret': this.config.secret,
           'X-VoiceAI-Timestamp': timestamp,
           'X-VoiceAI-Signature': signature,
         },
@@ -370,9 +491,15 @@ export class N8nMetaTransport implements WhatsAppTransport {
         redirect: 'error',
       })
     } catch {
+      if (this.config.phoneNumberId && this.config.accessToken) {
+        return this.sendDirectMetaGraph(payload)
+      }
       throw new EvolutionError(0, true)
     }
     if (!res.ok) {
+      if (this.config.phoneNumberId && this.config.accessToken) {
+        return this.sendDirectMetaGraph(payload)
+      }
       throw new EvolutionError(res.status, res.status >= 500)
     }
     let data: any = {}

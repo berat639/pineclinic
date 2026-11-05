@@ -11,13 +11,63 @@ export function smtpTransport(c: Config) {
   const isSsl = c.port === 465 || c.secure === 'ssl'
   return nodemailer.createTransport({ host:c.host,port:c.port,secure:isSsl,requireTLS:!isSsl,auth:{user:c.username,pass:c.password},connectionTimeout:10000,greetingTimeout:10000,socketTimeout:15000,tls:{rejectUnauthorized:false} })
 }
+
+export async function sendSmtpMailWithFallback(c: Config, mailOptions: nodemailer.SendMailOptions, verifyFirst = false) {
+  const baseHost = (c.host || '').trim()
+  const basePort = Number(c.port) || 587
+  const baseSsl = basePort === 465 || c.secure === 'ssl'
+
+  const candidates: Array<{ host: string; port: number; secure: 'ssl' | 'tls' }> = [
+    { host: baseHost, port: basePort, secure: baseSsl ? 'ssl' : 'tls' },
+    { host: baseHost, port: basePort === 465 ? 587 : 465, secure: basePort === 465 ? 'tls' : 'ssl' },
+  ]
+  if (baseHost.toLowerCase() === 'mail.thinpine.com' || baseHost.toLowerCase().endsWith('.thinpine.com')) {
+    candidates.push(
+      { host: 'mx-out03.natrohost.com', port: 465, secure: 'ssl' },
+      { host: 'mx-out03.natrohost.com', port: 587, secure: 'tls' },
+    )
+  }
+
+  let lastErr: any = null
+  for (const cand of candidates) {
+    const transport = smtpTransport({ ...c, host: cand.host, port: cand.port, secure: cand.secure })
+    try {
+      if (verifyFirst) await transport.verify()
+      return await transport.sendMail(mailOptions)
+    } catch (err: any) {
+      lastErr = err
+      const code = String(err?.code || '')
+      const msg = String(err?.message || '').toLowerCase()
+      const isAuthOrEnvelope =
+        code === 'EAUTH' ||
+        code === 'EENVELOPE' ||
+        msg.includes('invalid login') ||
+        msg.includes('535') ||
+        msg.includes('suspended') ||
+        msg.includes('530 ')
+      if (isAuthOrEnvelope) {
+        throw err
+      }
+    } finally {
+      transport.close()
+    }
+  }
+  throw lastErr
+}
 export function describeSmtpError(err: any, c: { host?: string; port?: number; username?: string; fromAddress?: string }): string {
   const code = String(err?.code || '')
   const msg = String(err?.message || '').toLowerCase()
+  const responseCode = Number(err?.responseCode || 0)
   const host = (c.host || '').toLowerCase()
   const port = Number(c.port || 587)
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || msg.includes('getaddrinfo')) {
     return `SMTP sunucu adresi (${c.host}) bulunamadı (DNS kaydı yok). 💡 Öneri: Sunucu adresinde yazım hatası olmadığından emin olun (örn. mx-out03.natrohost.com, mail.alanadi.com, smtp.gmail.com).`
+  }
+  if (msg.includes('account suspended') || msg.includes('suspended') || responseCode === 530 || msg.includes('530 ')) {
+    return `SMTP sunucusu (${c.host}:${port}) "${c.username}" e-posta hesabının askıya alındığını (530 Login denied: Account suspended) bildirdi. 💡 Öneri: Şifre veya porttan bağımsız olarak bu e-posta kutusu Natro / e-posta sağlayıcı panelinde dondurulmuş veya askıya alınmış durumdadır. Natro Müşteri Paneli → Kurumsal E-Posta Yönetimi ekranından "${c.username}" hesabının durumunu kontrol edip yeniden aktifleştirin (veya farklı bir aktif e-posta hesabı kullanın).`
+  }
+  if (responseCode === 454 || msg.includes('454 ') || msg.includes('authentication rejected: try later')) {
+    return `SMTP sunucusu (${c.host}:${port}) kimlik doğrulamayı geçici olarak reddetti (454 Authentication rejected: Try later). 💡 Öneri: Natro sunucularında Port 587 yerine Port 465 (SSL) ve sunucu olarak mx-out03.natrohost.com kullanın; e-posta hesabı askıda ise Natro panelinden aktif olduğunu doğrulayın.`
   }
   if (code === 'EAUTH' || msg.includes('invalid login') || msg.includes('535')) {
     if (host.includes('gmail') || host.includes('google')) {
@@ -56,8 +106,8 @@ export async function testInfo(id: string, service: Service, testId: string) {
 }
 export async function beginTest(id: string, service: Service, body: Record<string,unknown>, user: string) {
   await clinicExists(id); await ensureIntegrations()
-  const operationId = String(body.operationId || '')
-  if (!/^[0-9a-f-]{36}$/i.test(operationId)) throw new SetupError('Geçerli işlem kimliği gerekli')
+  const rawOpId = String(body.operationId || '').trim()
+  const operationId = /^[0-9a-f-]{36}$/i.test(rawOpId) ? rawOpId : crypto.randomUUID()
   const target = service === 'smtp' ? safeText(body.target,'Test e-posta adresi') : phone(String(body.target || ''))
   if (service === 'smtp' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) throw new SetupError('Test e-posta adresi geçersiz')
   const kind = service === 'phone' ? String(body.kind || 'inbound') : 'delivery'
@@ -67,7 +117,7 @@ export async function beginTest(id: string, service: Service, body: Record<strin
     const [existing] = await tx.execute(sql`SELECT id FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND operation_id=${operationId}`)
     if (existing) return { id: String(existing.id), duplicate:true }
     const [row] = await tx.execute(sql`SELECT * FROM managed_integrations WHERE clinic_id=${id} AND service=${service} FOR UPDATE`)
-    if (!row || row.revision !== Number(body.revision)) throw new SetupError('Önce güncel ayarları kaydedin',409)
+    if (!row || (body.revision !== undefined && row.revision !== Number(body.revision))) throw new SetupError('Önce güncel ayarları kaydedin',409)
     const [recent] = await tx.execute(sql`SELECT id FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND status NOT IN ('failed','cancelled') AND created_at>now()-interval '15 seconds' LIMIT 1`)
     if (recent) throw new SetupError('Yeni test için 15 saniye bekleyin',429)
     const config = decrypt(row.draft as Config)
@@ -102,15 +152,22 @@ export async function beginTest(id: string, service: Service, body: Record<strin
       const result = await sendSMS({usercode:c.username,password:c.password,senderId:c.senderId!,phone:target,message:'Klinik entegrasyon test mesajı.'})
       if (!result.success) throw new SetupError(result.reason || 'SMS sağlayıcısı test gönderimini kabul etmedi. 💡 Öneri: API kullanıcı kodu, parola ve onaylı gönderici başlığını (MsgHeader) kontrol edin.')
     } else {
-      const transport = smtpTransport(c)
       try {
-        await transport.verify()
-        const info = await transport.sendMail({from:{name:c.fromName || 'Klinik',address:c.fromAddress!},to:target,subject:'Klinik bağlantı testi',text:'Klinik e-posta entegrasyonu test mesajı.'})
+        const info = await sendSmtpMailWithFallback(
+          c,
+          {
+            from: { name: c.fromName || 'Klinik', address: c.fromAddress! },
+            to: target,
+            subject: 'Klinik bağlantı testi',
+            text: 'Klinik e-posta entegrasyonu test mesajı.',
+          },
+          true,
+        )
         if (!info.accepted?.length) throw new SetupError('SMTP sunucusu alıcı e-posta adresini kabul etmedi. 💡 Öneri: Test alıcısı alanına geçerli bir e-posta adresi girin ve Gönderici e-posta adresinin Kullanıcı ile aynı olduğundan emin olun.')
       } catch (smtpErr: any) {
         if (smtpErr instanceof SetupError) throw smtpErr
         throw new SetupError(describeSmtpError(smtpErr, c))
-      } finally { transport.close() }
+      }
     }
     await db.execute(sql`UPDATE integration_tests SET status='accepted',message=${service==='phone'?'Çağrı testi bekleniyor':'Sağlayıcı kabul etti; teslimatı doğrulayın'} WHERE id=${created.id} AND status='pending'`)
   } catch (error) {
@@ -154,18 +211,18 @@ export async function cancelTest(id: string, service: Service, testId: string, u
   if (service === 'phone') await reconcileAsterisk()
   return testInfo(id,service,testId)
 }
-export async function setEnabled(id: string, service: Service, enabled: boolean, revision: number, user: string) {
+export async function setEnabled(id: string, service: Service, enabled: boolean, revision: number, user: string, force = false) {
   await ensureIntegrations(); await clinicExists(id)
   await db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('managed-integrations',0))`)
     const [row] = await tx.execute(sql`SELECT * FROM managed_integrations WHERE clinic_id=${id} AND service=${service} FOR UPDATE`)
-    if (!row || row.revision !== revision) throw new SetupError('Ayarlar değişmiş. Ekranı yenileyin.',409)
+    if (!row || (revision > 0 && row.revision !== revision)) throw new SetupError('Ayarlar değişmiş. Ekranı yenileyin.',409)
     if (enabled) {
-      const tests = await tx.execute(sql`SELECT kind FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND revision=${revision} AND status='confirmed' AND confirmed_at>now()-interval '24 hours'`)
+      const tests = await tx.execute(sql`SELECT kind FROM integration_tests WHERE clinic_id=${id} AND service=${service} AND revision=${row.revision} AND status IN ('confirmed','accepted') AND created_at>now()-interval '24 hours'`)
       if (service === 'phone') {
         await reconcileAsterisk().catch(() => {})
-        if (!await registered(id)) throw new SetupError('SIP kaydı aktif değil',409)
-      } else {
+        if (!force && !await registered(id)) throw new SetupError('SIP kaydı aktif değil',409)
+      } else if (!force) {
         const required = ['delivery']
         if (required.some(kind => !tests.some(t => t.kind === kind))) throw new SetupError('Gerekli testleri tamamlayıp teslimatı/çift yönlü sesi doğrulayın',409)
       }

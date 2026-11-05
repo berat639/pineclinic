@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { toast } from 'react-hot-toast'
-import { Check, RotateCcw } from 'lucide-react'
+import { Check, CheckSquare, RotateCcw } from 'lucide-react'
 import { UPPER_TEETH, LOWER_TEETH } from './ToothChip'
 import { TOOTH_NAMES } from './Odontogram3D'
 
@@ -112,17 +112,69 @@ export const ORDERED_TOOTH_REGIONS: ToothRegionMeta[] = [
   TOOTH_REGION_META['jaw-bone'],
 ]
 
-export function formatToothRegionLabel(region?: string | null): string {
-  if (!region) return ''
-  if (region in TOOTH_REGION_META) {
-    return TOOTH_REGION_META[region as ToothRegion].label
+export const ALL_TOOTH_REGION_IDS: ToothRegion[] = ORDERED_TOOTH_REGIONS.map(r => r.id)
+
+export function normalizeSingleToothRegion(raw?: string | null): ToothRegion | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (trimmed === 'cervical') return 'neck'
+  if (trimmed in TOOTH_REGION_META) return trimmed as ToothRegion
+  return null
+}
+
+/**
+ * Tekil veya virgülle ayrılmış çoklu katman dizgesini ('enamel,pulp,root-canal')
+ * standart sıralı ToothRegion[] dizisine dönüştürür.
+ */
+export function parseToothRegions(raw?: string | string[] | null): ToothRegion[] {
+  if (!raw) return []
+  const tokens = Array.isArray(raw)
+    ? raw.flatMap(item => String(item || '').split(/[,|;]+/))
+    : String(raw).split(/[,|;]+/)
+  const set = new Set<ToothRegion>()
+  for (const tok of tokens) {
+    const norm = normalizeSingleToothRegion(tok)
+    if (norm) set.add(norm)
   }
-  if (region === 'cervical') return 'Boyun (Kole)'
-  return region
+  return ALL_TOOTH_REGION_IDS.filter(id => set.has(id))
+}
+
+/**
+ * Seçili ToothRegion[] dizisini virgülle ayrılmış standart dizgeye ('enamel,dentin') dönüştürür.
+ */
+export function serializeToothRegions(regions: ToothRegion[]): string | null {
+  const set = new Set<ToothRegion>(regions)
+  const ordered = ALL_TOOTH_REGION_IDS.filter(id => set.has(id))
+  return ordered.length > 0 ? ordered.join(',') : null
+}
+
+export function formatToothRegionLabel(region?: string | string[] | null): string {
+  if (!region) return ''
+  const parsed = parseToothRegions(region)
+  if (parsed.length > 0) {
+    return parsed.map(r => TOOTH_REGION_META[r].label).join(', ')
+  }
+  if (typeof region === 'string') {
+    if (region === 'cervical') return 'Boyun (Kole)'
+    return region
+  }
+  return ''
+}
+
+export function formatToothRegionShortLabel(region?: string | string[] | null): string {
+  const parsed = parseToothRegions(region)
+  if (parsed.length === 0) return ''
+  if (parsed.length === ALL_TOOTH_REGION_IDS.length) return `Tümü (${parsed.length})`
+  if (parsed.length <= 2) {
+    return parsed.map(r => TOOTH_REGION_META[r].shortLabel).join(', ')
+  }
+  return `${TOOTH_REGION_META[parsed[0]].shortLabel} +${parsed.length - 1}`
 }
 
 export interface ToothAnatomyProps {
-  value?: ToothRegion | null
+  value?: ToothRegion | string | null
+  selectedRegions?: ToothRegion[]
   onChange?: (region: ToothRegion) => void
   theme?: 'light' | 'dark'
   className?: string
@@ -133,12 +185,18 @@ export interface ToothAnatomyProps {
 
 export function ToothAnatomy({
   value = null,
+  selectedRegions,
   onChange,
   theme = 'light',
   className,
   activeTooth,
   compact = true,
 }: ToothAnatomyProps) {
+  const activeList: ToothRegion[] =
+    Array.isArray(selectedRegions) ? selectedRegions : parseToothRegions(value)
+  const activeSet = new Set<ToothRegion>(activeList)
+  const primarySelected = activeList[0] ?? ''
+
   const select = (target: EventTarget | null, event?: React.SyntheticEvent) => {
     if (!(target instanceof Element)) return
     const region = target.closest<SVGGElement>('[data-region]')
@@ -154,10 +212,11 @@ export function ToothAnatomy({
     <svg
       viewBox={compact ? '210 145 380 560' : '0 0 800 800'}
       role="group"
-      aria-label={activeTooth ? `Diş ${activeTooth} anatomisi; bir bölge seçin` : 'Diş anatomisi; bir bölge seçin'}
+      aria-label={activeTooth ? `Diş ${activeTooth} anatomisi; alt katman seçin` : 'Diş anatomisi; alt katman seçin'}
       className={className}
       data-theme={theme}
-      data-selected={value ?? ''}
+      data-selected={primarySelected}
+      data-selected-all={activeList.join(',')}
       onClick={event => select(event.target, event)}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -183,6 +242,7 @@ export function ToothAnatomy({
         svg[data-theme="dark"] .heading { fill: #e5f4f5; }
         svg[data-theme="dark"] .sub, svg[data-theme="dark"] .small { fill: #a0b8c3; }
         svg[data-theme="dark"] .label { fill: #d1e3e7; }
+        svg [data-region][data-active="true"],
         svg[data-selected="crown"] [data-region="crown"],
         svg[data-selected="neck"] [data-region="neck"],
         svg[data-selected="root"] [data-region="root"],
@@ -193,7 +253,7 @@ export function ToothAnatomy({
         svg[data-selected="gingiva"] [data-region="gingiva"],
         svg[data-selected="jaw-bone"] [data-region="jaw-bone"],
         svg[data-selected="apex"] [data-region="apex"] {
-          filter: drop-shadow(0 0 8px #00a3b6) brightness(0.93);
+          filter: drop-shadow(0 0 8px #00a3b6) brightness(0.92);
           stroke: #0284c7 !important;
           stroke-width: 5px !important;
         }
@@ -228,48 +288,145 @@ export function ToothAnatomy({
           </>
         )}
 
-        <g id="jaw-bone" data-region="jaw-bone" className="layer" role="button" tabIndex={0} aria-label="Alveol çene kemiği">
+        <g
+          id="jaw-bone"
+          data-region="jaw-bone"
+          data-active={activeSet.has('jaw-bone') ? 'true' : undefined}
+          aria-pressed={activeSet.has('jaw-bone')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Alveol çene kemiği"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Çene Kemiği` : 'Çene Kemiği'}</title>
           <path d="M110 408 Q180 393 245 412 Q400 436 555 412 Q620 393 690 408 L690 688 Q600 700 510 690 Q400 704 290 690 Q200 700 110 688 Z" fill="#e9d8bc" stroke="#c8b18f" strokeWidth="2" />
         </g>
         <g fill="none" stroke="#d1bfa4" strokeWidth="2" opacity=".6" pointerEvents="none">
           <path d="M130 455l37 20 29-17 34 20 M137 525l26-17 32 19 31-16 M140 592l35 16 34-19 M570 478l32-18 32 18 35-20 M570 541l26-16 33 17 37-18 M572 608l27-19 35 19 36-20" />
         </g>
-        <g id="root" data-region="root" className="layer" role="button" tabIndex={0} aria-label="Kök">
+        <g
+          id="root"
+          data-region="root"
+          data-active={activeSet.has('root') ? 'true' : undefined}
+          aria-pressed={activeSet.has('root')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Kök"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Kök` : 'Kök'}</title>
           <path d="M282 379 Q276 450 288 519 Q299 593 316 653 Q325 686 341 680 Q354 676 365 624 L392 510 Q399 493 407 510 L435 624 Q446 676 459 680 Q475 686 484 653 Q501 593 512 519 Q524 450 518 379 Z" fill="#c8b394" stroke="#8d7965" strokeWidth="3" />
         </g>
-        <g id="gingiva" data-region="gingiva" className="layer" role="button" tabIndex={0} aria-label="Diş eti">
+        <g
+          id="gingiva"
+          data-region="gingiva"
+          data-active={activeSet.has('gingiva') ? 'true' : undefined}
+          aria-pressed={activeSet.has('gingiva')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Diş eti"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Diş Eti` : 'Diş Eti'}</title>
           <path d="M110 390 Q183 380 246 394 Q271 400 287 385 Q319 409 350 405 L450 405 Q481 409 513 385 Q529 400 554 394 Q617 380 690 390 L690 436 Q617 424 555 444 Q526 454 508 428 Q489 442 460 435 L340 435 Q311 442 292 428 Q274 454 245 444 Q183 424 110 436 Z" fill="#eaa8a4" stroke="#c77d7e" strokeWidth="2.5" />
         </g>
-        <g id="crown" data-region="crown" className="layer" role="button" tabIndex={0} aria-label="Taç">
-          <title>{activeTooth ? `Diş #${activeTooth} · Taç (Kuron)` : 'Taç (Kuron)'}</title>
-          <path d="M285 388 C271 354 253 316 253 269 C253 210 281 160 327 158 C359 157 378 180 400 183 C422 180 441 157 473 158 C519 160 547 210 547 269 C547 316 529 354 515 388 Q400 410 285 388 Z" fill="#edf5f5" stroke="#91aab0" strokeWidth="3" />
-        </g>
-        <g id="enamel" data-region="enamel" className="layer" role="button" tabIndex={0} aria-label="Mine">
+        <g
+          id="enamel"
+          data-region="enamel"
+          data-active={activeSet.has('enamel') ? 'true' : undefined}
+          aria-pressed={activeSet.has('enamel')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Mine"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Mine` : 'Mine'}</title>
           <path fillRule="evenodd" d="M285 388 C271 354 253 316 253 269 C253 210 281 160 327 158 C359 157 378 180 400 183 C422 180 441 157 473 158 C519 160 547 210 547 269 C547 316 529 354 515 388 L503 382 C516 347 529 312 529 270 C529 220 508 180 473 178 C444 177 425 201 400 203 C375 201 356 177 327 178 C292 180 271 220 271 270 C271 312 284 347 297 382 Z" fill="#d9edf0" stroke="#91aab0" strokeWidth="2" />
         </g>
-        <g id="dentin" data-region="dentin" className="layer" role="button" tabIndex={0} aria-label="Dentin">
+        <g
+          id="dentin"
+          data-region="dentin"
+          data-active={activeSet.has('dentin') ? 'true' : undefined}
+          aria-pressed={activeSet.has('dentin')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Dentin"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Dentin` : 'Dentin'}</title>
           <path d="M297 382 C284 347 271 312 271 270 C271 220 292 180 327 178 C356 177 375 201 400 203 C425 201 444 177 473 178 C508 180 529 220 529 270 C529 312 516 347 503 382 C500 450 498 512 470 635 Q464 658 457 654 Q448 651 439 612 L412 483 Q400 447 388 483 L361 612 Q352 651 343 654 Q336 658 330 635 C302 512 300 450 297 382 Z" fill="#f4d7a0" stroke="#d3b075" strokeWidth="2.5" />
         </g>
-        <g id="pulp" data-region="pulp" className="layer" role="button" tabIndex={0} aria-label="Pulpa">
+        <g
+          id="crown"
+          data-region="crown"
+          data-active={activeSet.has('crown') ? 'true' : undefined}
+          aria-pressed={activeSet.has('crown')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Taç"
+        >
+          <title>{activeTooth ? `Diş #${activeTooth} · Taç (Kuron)` : 'Taç (Kuron)'}</title>
+          <path
+            d="M285 388 C271 354 253 316 253 269 C253 210 281 160 327 158 C359 157 378 180 400 183 C422 180 441 157 473 158 C519 160 547 210 547 269 C547 316 529 354 515 388"
+            fill="none"
+            stroke={activeSet.has('crown') ? '#0284c7' : '#91aab0'}
+            strokeWidth={activeSet.has('crown') ? '7' : '3.5'}
+            pointerEvents="stroke"
+          />
+        </g>
+        <g
+          id="pulp"
+          data-region="pulp"
+          data-active={activeSet.has('pulp') ? 'true' : undefined}
+          aria-pressed={activeSet.has('pulp')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Pulpa"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Pulpa` : 'Pulpa'}</title>
           <path d="M349 286 Q351 263 364 259 Q371 258 379 278 Q387 293 400 290 Q413 293 421 278 Q429 258 436 259 Q449 263 451 286 Q457 307 449 326 Q440 349 423 362 Q413 370 411 397 L389 397 Q387 370 377 362 Q360 349 351 326 Q343 307 349 286 Z" fill="#dc7f77" stroke="#b45d5b" strokeWidth="2.5" />
         </g>
-        <g id="root-canal" data-region="root-canal" className="layer" role="button" tabIndex={0} aria-label="Kök kanalları">
+        <g
+          id="root-canal"
+          data-region="root-canal"
+          data-active={activeSet.has('root-canal') ? 'true' : undefined}
+          aria-pressed={activeSet.has('root-canal')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Kök kanalları"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Kök Kanalı` : 'Kök Kanalı'}</title>
           <path d="M389 389 Q391 437 379 478 Q367 523 345 629 Q343 638 347 639 Q351 640 354 630 Q384 533 400 477 Q416 533 446 630 Q449 640 453 639 Q457 638 455 629 Q433 523 421 478 Q409 437 411 389 Z" fill="#dc7f77" stroke="#b45d5b" strokeWidth="2" />
         </g>
-        <g id="apex" data-region="apex" className="layer" role="button" tabIndex={0} aria-label="Kök uçları">
+        <g
+          id="apex"
+          data-region="apex"
+          data-active={activeSet.has('apex') ? 'true' : undefined}
+          aria-pressed={activeSet.has('apex')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Kök uçları"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Kök Ucu` : 'Kök Ucu'}</title>
-          <circle cx="343" cy="667" r="11" fill="#a16b61" stroke="#fff" strokeWidth="2" />
-          <circle cx="457" cy="667" r="11" fill="#a16b61" stroke="#fff" strokeWidth="2" />
+          <circle cx="343" cy="667" r="14" fill="#a16b61" stroke="#fff" strokeWidth="2" />
+          <circle cx="457" cy="667" r="14" fill="#a16b61" stroke="#fff" strokeWidth="2" />
         </g>
-        <g id="neck" data-region="neck" className="layer" role="button" tabIndex={0} aria-label="Boyun">
+        <g
+          id="neck"
+          data-region="neck"
+          data-active={activeSet.has('neck') ? 'true' : undefined}
+          aria-pressed={activeSet.has('neck')}
+          className="layer"
+          role="button"
+          tabIndex={0}
+          aria-label="Boyun"
+        >
           <title>{activeTooth ? `Diş #${activeTooth} · Boyun (Kole)` : 'Boyun (Kole)'}</title>
+          <path d="M283 387 Q400 411 517 387" fill="none" stroke="transparent" strokeWidth="20" />
           <path d="M283 387 Q400 411 517 387" fill="none" stroke="#6f8f96" strokeWidth="5" strokeDasharray="6 5" />
         </g>
       </g>
@@ -302,14 +459,14 @@ export interface ToothAnatomy2DProps {
   selectedIndications?: string[]
   selectedMaterials?: any[]
   theme?: 'light' | 'dark'
-  value?: ToothRegion | null
+  value?: ToothRegion | string | null
   onChange?: (region: ToothRegion) => void
 }
 
 export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
   const [detectedTheme, setDetectedTheme] = useState<'light' | 'dark'>('light')
   const [fallbackTooth, setFallbackTooth] = useState<number>(16)
-  const [localSections, setLocalSections] = useState<Record<number, ToothRegion | null>>({})
+  const [localSectionsMap, setLocalSectionsMap] = useState<Record<number, ToothRegion[]>>({})
   const [dragOverTooth, setDragOverTooth] = useState<number | null>(null)
 
   useEffect(() => {
@@ -326,6 +483,16 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
     })
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (!p.toothSections) return
+    const synced: Record<number, ToothRegion[]> = {}
+    for (const [k, val] of Object.entries(p.toothSections)) {
+      const num = Number(k)
+      if (num) synced[num] = parseToothRegions(val as string)
+    }
+    setLocalSectionsMap(synced)
+  }, [p.toothSections])
 
   const effectiveTheme: 'light' | 'dark' = p.theme || detectedTheme
 
@@ -359,33 +526,56 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
   const draftsMap: Record<string, any[]> = p.drafts || p.toothDrafts || {}
   const sectionsMap: Record<number, string> = p.toothSections || {}
 
-  const getRegionForTooth = (toothNum: number): ToothRegion | null => {
+  const getRegionsForTooth = (toothNum: number): ToothRegion[] => {
     if (toothNum === activeTooth && p.value !== undefined) {
-      return p.value
+      return parseToothRegions(p.value)
     }
-    const raw =
-      localSections[toothNum] !== undefined
-        ? localSections[toothNum]
-        : (sectionsMap[toothNum] as ToothRegion | undefined) || null
-    if (raw && raw in TOOTH_REGION_META) return raw as ToothRegion
-    if (raw === ('cervical' as any)) return 'neck'
-    return null
+    if (localSectionsMap[toothNum] !== undefined) {
+      return localSectionsMap[toothNum]
+    }
+    return parseToothRegions(sectionsMap[toothNum])
   }
 
-  const selectedRegion: ToothRegion | null = getRegionForTooth(activeTooth)
+  const selectedRegions: ToothRegion[] = getRegionsForTooth(activeTooth)
+  const isAllRegionsSelected = selectedRegions.length === ALL_TOOTH_REGION_IDS.length
 
-  const handleSelectToothAndRegion = (toothNum: number, region: ToothRegion) => {
+  const applyRegionsToTooth = (toothNum: number, nextRegions: ToothRegion[]) => {
+    const ordered = ALL_TOOTH_REGION_IDS.filter(id => nextRegions.includes(id))
+    const serialized = serializeToothRegions(ordered)
+    setLocalSectionsMap(prev => ({ ...prev, [toothNum]: ordered }))
+    if (ordered.length > 0) {
+      p.onChange?.(ordered[ordered.length - 1])
+    }
+    p.updateSection?.(toothNum, serialized)
+    p.onUpdateSection?.(toothNum, serialized)
+  }
+
+  const handleToggleToothRegion = (toothNum: number, region: ToothRegion) => {
+    const isSwitchingTooth = toothNum !== activeTooth
     selectSingleTooth(toothNum)
-    setLocalSections(prev => ({ ...prev, [toothNum]: region }))
-    p.onChange?.(region)
-    p.updateSection?.(toothNum, region)
-    p.onUpdateSection?.(toothNum, region)
+    const current = getRegionsForTooth(toothNum)
+    if (isSwitchingTooth && !current.includes(region)) {
+      applyRegionsToTooth(toothNum, [...current, region])
+      return
+    }
+    const next = current.includes(region)
+      ? current.filter(r => r !== region)
+      : [...current, region]
+    applyRegionsToTooth(toothNum, next)
   }
 
-  const handleClearRegion = (toothNum: number) => {
-    setLocalSections(prev => ({ ...prev, [toothNum]: null }))
-    p.updateSection?.(toothNum, null)
-    p.onUpdateSection?.(toothNum, null)
+  const handleSelectAllRegions = (toothNum: number) => {
+    selectSingleTooth(toothNum)
+    const current = getRegionsForTooth(toothNum)
+    if (current.length === ALL_TOOTH_REGION_IDS.length) {
+      applyRegionsToTooth(toothNum, [])
+    } else {
+      applyRegionsToTooth(toothNum, [...ALL_TOOTH_REGION_IDS])
+    }
+  }
+
+  const handleClearRegions = (toothNum: number) => {
+    applyRegionsToTooth(toothNum, [])
   }
 
   const resolveColor = (item: any): string => {
@@ -398,17 +588,20 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
     setDragOverTooth(null)
     const targetEl = event.target instanceof Element ? event.target.closest('[data-region]') : null
     const droppedRegionAttr = targetEl?.getAttribute('data-region') as ToothRegion | null
-    const existingRegion = getRegionForTooth(toothNum)
-    const effectiveRegion: ToothRegion | null =
+    const existingRegions = getRegionsForTooth(toothNum)
+    const nextRegions: ToothRegion[] =
       droppedRegionAttr && droppedRegionAttr in TOOTH_REGION_META
-        ? droppedRegionAttr
-        : existingRegion
+        ? Array.from(new Set([...existingRegions, droppedRegionAttr]))
+        : existingRegions
 
-    if (effectiveRegion) {
-      handleSelectToothAndRegion(toothNum, effectiveRegion)
+    if (nextRegions.length > 0) {
+      selectSingleTooth(toothNum)
+      applyRegionsToTooth(toothNum, nextRegions)
     } else {
       selectSingleTooth(toothNum)
     }
+
+    const serializedSection = serializeToothRegions(nextRegions)
 
     try {
       const rawData =
@@ -419,7 +612,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
       const data = JSON.parse(rawData)
       const payload = {
         ...data,
-        section: effectiveRegion || data.section || undefined,
+        section: serializedSection || data.section || undefined,
       }
       const addFn = p.add || p.onDropTreatment
       if (addFn) {
@@ -439,11 +632,9 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
         ? [LOWER_TEETH]
         : [UPPER_TEETH, LOWER_TEETH]
 
-  const activeRegionMeta = selectedRegion ? TOOTH_REGION_META[selectedRegion] : null
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* 2B Anatomik Diş Kutuları — Her bir diş kutusunda ToothAnatomy SVG yer alır ve yalnızca tek seçim yapılır */}
+      {/* 2B Anatomik Diş Kutuları — Her bir diş kutusunda ToothAnatomy SVG yer alır ve yalnızca tek diş seçimi yapılır */}
       <div
         style={{
           display: 'flex',
@@ -469,8 +660,9 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
               const isSelected = activeTooth === toothNum
               const toothItems: any[] = draftsMap[toothNum] || draftsMap[String(toothNum)] || []
               const activeColors = toothItems.map(item => resolveColor(item)).filter(Boolean)
-              const toothRegion = getRegionForTooth(toothNum)
-              const toothRegionMeta = toothRegion ? TOOTH_REGION_META[toothRegion] : null
+              const toothRegions = getRegionsForTooth(toothNum)
+              const shortBadgeLabel = formatToothRegionShortLabel(toothRegions)
+              const fullRegionLabel = formatToothRegionLabel(toothRegions)
               const isDragTarget = dragOverTooth === toothNum
 
               return (
@@ -494,7 +686,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                       event.preventDefault()
                       const rect = event.currentTarget.getBoundingClientRect()
                       p.onContextMenu(toothNum, {
-                        preventDefault: () => {},
+                        preventDefault: () => { },
                         clientX: rect.left,
                         clientY: rect.bottom,
                       } as any)
@@ -513,7 +705,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                     if (dragOverTooth === toothNum) setDragOverTooth(null)
                   }}
                   onDrop={event => handleDropOnToothBox(toothNum, event)}
-                  title={`Diş #${toothNum}${toothRegionMeta ? ` · Katman: ${toothRegionMeta.label}` : ''}`}
+                  title={`Diş #${toothNum}${fullRegionLabel ? ` · Katmanlar: ${fullRegionLabel}` : ''}`}
                   style={{
                     position: 'relative',
                     display: 'flex',
@@ -583,8 +775,9 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                     }}
                   >
                     <ToothAnatomy
-                      value={toothRegion}
-                      onChange={region => handleSelectToothAndRegion(toothNum, region)}
+                      selectedRegions={toothRegions}
+                      value={toothRegions[0] ?? null}
+                      onChange={region => handleToggleToothRegion(toothNum, region)}
                       theme={effectiveTheme}
                       activeTooth={toothNum}
                       compact={true}
@@ -611,7 +804,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                     >
                       {toothNum}
                     </span>
-                    {toothRegionMeta && (
+                    {shortBadgeLabel && (
                       <span
                         style={{
                           fontSize: 8.5,
@@ -626,7 +819,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                           color: isSelected ? '#1d4ed8' : 'var(--pc-tint-fg)',
                         }}
                       >
-                        {toothRegionMeta.shortLabel}
+                        {shortBadgeLabel}
                       </span>
                     )}
                   </div>
@@ -637,7 +830,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
         ))}
       </div>
 
-      {/* Alt Kompakt Tekil Katman Seçici Çubuğu (Aktif Dişin Anatomik Katmanı) */}
+      {/* Alt Katmanlar (Anatomik) Çoklu Seçici Çubuğu */}
       <div
         style={{
           display: 'flex',
@@ -656,7 +849,18 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
           <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--foreground)' }}>
             Seçili Diş: #{activeTooth} ({TOOTH_NAMES[activeTooth] || `Diş ${activeTooth}`})
           </span>
-          {activeRegionMeta ? (
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: 'var(--pc-blue, #0284c7)',
+            }}
+          >
+            · Alt Katmanlar (Anatomik)
+          </span>
+          {selectedRegions.length > 0 ? (
             <span
               style={{
                 display: 'inline-flex',
@@ -671,32 +875,58 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                 fontWeight: 800,
               }}
             >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: activeRegionMeta.color,
-                }}
-              />
-              <span>Katman: {activeRegionMeta.label}</span>
+              <span>
+                {isAllRegionsSelected
+                  ? `Tüm Katmanlar Seçili (${selectedRegions.length})`
+                  : `Seçili (${selectedRegions.length}): ${formatToothRegionLabel(selectedRegions)}`}
+              </span>
             </span>
           ) : (
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--pc-muted, var(--foreground-2))' }}>
-              · Kutudaki diş kesiti üzerinden veya sağdan katman seçin
+              · Diş kesitinden veya sağdan birden fazla katman ya da tümünü seçebilirsiniz
             </span>
           )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            aria-pressed={isAllRegionsSelected}
+            onClick={() => handleSelectAllRegions(activeTooth)}
+            title="Tüm anatomik alt katmanları seç veya seçimi kaldır"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              borderRadius: 6,
+              fontSize: 10.5,
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: isAllRegionsSelected
+                ? '1px solid #1d4ed8'
+                : '1px solid var(--pc-blue, #0284c7)',
+              background: isAllRegionsSelected
+                ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)'
+                : 'var(--pc-tint)',
+              color: isAllRegionsSelected ? '#ffffff' : 'var(--pc-tint-fg)',
+              boxShadow: isAllRegionsSelected ? 'var(--pc-clay-primary)' : 'var(--pc-clay-pale)',
+            }}
+          >
+            <CheckSquare size={11} style={{ color: isAllRegionsSelected ? '#ffffff' : 'var(--pc-tint-fg)' }} />
+            <span style={{ color: isAllRegionsSelected ? '#ffffff' : 'var(--pc-tint-fg)' }}>
+              {isAllRegionsSelected ? 'Tümü Seçili' : 'Tümünü Seç'}
+            </span>
+          </button>
+
           {ORDERED_TOOTH_REGIONS.map(region => {
-            const isSelected = selectedRegion === region.id
+            const isSelected = selectedRegions.includes(region.id)
             return (
               <button
                 key={region.id}
                 type="button"
                 aria-pressed={isSelected}
-                onClick={() => handleSelectToothAndRegion(activeTooth, region.id)}
+                onClick={() => handleToggleToothRegion(activeTooth, region.id)}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -733,11 +963,11 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
               </button>
             )
           })}
-          {activeRegionMeta && (
+          {selectedRegions.length > 0 && (
             <button
               type="button"
-              onClick={() => handleClearRegion(activeTooth)}
-              title="Katman seçimini kaldır"
+              onClick={() => handleClearRegions(activeTooth)}
+              title="Katman seçimlerini sıfırla"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',

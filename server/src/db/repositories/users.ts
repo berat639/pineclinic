@@ -111,7 +111,6 @@ export async function unassignDoctorFutureAppointments(userId: string, clinicId?
     const conditions = [
       eq(dentalAppointments.doctorId, userId),
       eq(dentalAppointments.isActive, true),
-      gte(dentalAppointments.startTime, startOfToday),
       sql`${dentalAppointments.status} NOT IN ('cancelled', 'completed', 'no_show')`,
     ]
     if (targetClinicId) {

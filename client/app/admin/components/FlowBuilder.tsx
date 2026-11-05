@@ -125,7 +125,7 @@ const PRESET_FIELDS: Array<{
 }> = [
   { value: 'musteri_adi', label: 'Hasta Adı ve Soyadı', type: 'text', desc: 'Adınızı ve soyadınızı alabilir miyim?', group: 'inbound', samples: ['Ahmet Yılmaz', 'Zeynep Kaya'] },
   { value: 'telefon', label: 'Telefon Numarası', type: 'text', desc: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', group: 'inbound', samples: ['05321234567', '05449876543'] },
-  { value: 'sikayet', label: 'Şikayet / Endikasyon', type: 'text', desc: 'Şikayetiniz veya yaptırmak istediğiniz işlem nedir?', group: 'inbound', samples: ['Diş ağrısı ve kontrol', 'İmplant muayenesi', 'Diş taşı temizliği'] },
+  { value: 'sikayet', label: 'Hasta Şikâyeti / Talebi', type: 'text', desc: 'Şikâyetiniz veya randevu talebiniz nedir?', group: 'inbound', samples: ['Diş ağrısı ve kontrol', 'İmplant muayenesi', 'Diş taşı temizliği'] },
   { value: 'tarih', label: 'Randevu Tarihi', type: 'date', desc: 'Hangi tarihe randevu oluşturmak istersiniz?', group: 'inbound', samples: ['2026-11-05', '2026-11-10'] },
   { value: 'saat', label: 'Randevu Saati', type: 'time', desc: 'Saat kaç için randevu istersiniz?', group: 'inbound', samples: ['10:30', '14:00', '16:30'] },
   { value: 'doktor_id', label: 'Doktor Seçimi', type: 'user', desc: 'Hangi doktora gelmek istersiniz?', group: 'inbound', samples: ['Dr. Emre Bey', 'Farketmez'] },
@@ -949,6 +949,471 @@ function ConditionRulesEditor({
   )
 }
 
+interface GeocodeSuggestion {
+  title: string
+  address: string
+  lat: string
+  lng: string
+  locationUrl: string
+}
+
+function WhatsAppLocationAddressPicker({
+  nodeData,
+  updateSelectedNode,
+  inputStyle,
+}: {
+  nodeData: Record<string, any>
+  updateSelectedNode: (patch: Record<string, any>) => void
+  inputStyle: Record<string, any>
+}) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [suggestions, setSuggestions] = useState<GeocodeSuggestion[]>([])
+  const [searchError, setSearchError] = useState('')
+  const [savingClinicLoc, setSavingClinicLoc] = useState(false)
+  const [saveNotice, setSaveNotice] = useState('')
+  const loadedClinicLocRef = useRef(false)
+
+  useEffect(() => {
+    if (loadedClinicLocRef.current) return
+    loadedClinicLocRef.current = true
+    fetch('/api/admin/settings/whatsapp-location')
+      .then(r => (r.ok ? r.json() : null))
+      .then(saved => {
+        if (!saved) return
+        const patch: Record<string, any> = {}
+        if (!nodeData.locationAddress && saved.address) patch.locationAddress = saved.address
+        if (!nodeData.locationTitle && saved.title) patch.locationTitle = saved.title
+        if (!nodeData.locationLat && saved.lat) patch.locationLat = saved.lat
+        if (!nodeData.locationLng && saved.lng) patch.locationLng = saved.lng
+        if (!nodeData.locationUrl && saved.locationUrl) patch.locationUrl = saved.locationUrl
+        if (!nodeData.locationMessage && saved.locationMessage) patch.locationMessage = saved.locationMessage
+        if (Object.keys(patch).length > 0) {
+          updateSelectedNode(patch)
+        }
+      })
+      .catch(() => {})
+  }, [nodeData, updateSelectedNode])
+
+  const persistClinicLocation = async (payload: {
+    address: string
+    title: string
+    lat: string
+    lng: string
+    locationUrl: string
+    locationMessage: string
+  }) => {
+    setSavingClinicLoc(true)
+    setSaveNotice('')
+    try {
+      const res = await fetch('/api/admin/settings/whatsapp-location', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok && data) {
+        if (data.locationUrl && data.locationUrl !== payload.locationUrl) {
+          updateSelectedNode({ locationUrl: data.locationUrl })
+        }
+        setSaveNotice('Klinik konumu kaydedildi.')
+        setTimeout(() => setSaveNotice(''), 3500)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setSavingClinicLoc(false)
+    }
+  }
+
+  const handleAddressSearch = async () => {
+    const q = searchQuery.trim()
+    if (q.length < 2) {
+      setSearchError('Lütfen aranacak mahalle, cadde, ilçe veya klinik adresini yazın.')
+      return
+    }
+    setSearching(true)
+    setSearchError('')
+    setSuggestions([])
+    try {
+      const res = await fetch(`/api/admin/geocode?q=${encodeURIComponent(q)}`)
+      const data = await res.json().catch(() => ({ results: [] }))
+      let list: GeocodeSuggestion[] = Array.isArray(data?.results) ? data.results : []
+
+      if (list.length === 0) {
+        const fallbackRes = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&accept-language=tr&q=${encodeURIComponent(q)}`,
+        )
+        const raw = await fallbackRes.json().catch(() => [])
+        if (Array.isArray(raw)) {
+          list = raw.map((item: any) => {
+            const lat = String(item.lat ?? '')
+            const lng = String(item.lon ?? '')
+            const displayName = String(item.display_name ?? '')
+            const shortTitle = String(item.name || displayName.split(',')[0] || 'Klinik Konumu').trim()
+            return {
+              title: shortTitle,
+              address: displayName,
+              lat,
+              lng,
+              locationUrl:
+                lat && lng
+                  ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
+                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayName)}`,
+            }
+          })
+        }
+      }
+
+      if (list.length === 0) {
+        setSearchError('Eşleşen adres bulunamadı. İlçe veya cadde adını daha açık yazarak tekrar deneyin.')
+      } else {
+        setSuggestions(list)
+      }
+    } catch {
+      setSearchError('Adres araması sırasında bağlantı hatası oluştu.')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const selectSuggestion = (item: GeocodeSuggestion) => {
+    const nextTitle = (nodeData.locationTitle as string) || item.title || 'Klinik Konumu'
+    const nextMsg =
+      (nodeData.locationMessage as string) || '📍 Kliniğimizin konumu ve açık adres bilgileri:'
+    const patch = {
+      locationTitle: nextTitle,
+      locationAddress: item.address,
+      locationLat: item.lat,
+      locationLng: item.lng,
+      locationUrl: item.locationUrl,
+      locationMessage: nextMsg,
+    }
+    updateSelectedNode(patch)
+    setSuggestions([])
+    void persistClinicLocation({
+      title: nextTitle,
+      address: item.address,
+      lat: item.lat,
+      lng: item.lng,
+      locationUrl: item.locationUrl,
+      locationMessage: nextMsg,
+    })
+  }
+
+  const latNum = Number(nodeData.locationLat)
+  const lngNum = Number(nodeData.locationLng)
+  const hasValidCoords =
+    Boolean(nodeData.locationLat && nodeData.locationLng) &&
+    Number.isFinite(latNum) &&
+    Number.isFinite(lngNum)
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        padding: 12,
+        background: 'var(--card-inner)',
+        border: '1.5px solid var(--input-border)',
+        borderRadius: 12,
+        boxShadow: 'var(--pc-neo-subcard)',
+      }}
+    >
+      <div
+        style={{
+          padding: '8px 10px',
+          background: 'var(--flow-success-bg)',
+          border: '1px solid #16a34a',
+          borderRadius: 8,
+          fontSize: 11,
+          color: '#15803d',
+          fontWeight: 700,
+          lineHeight: 1.45,
+        }}
+      >
+        📍 Arayan numaraya kayıtlı klinik konumu WhatsApp mesajı ve harita pini olarak gönderilir.
+      </div>
+
+      {/* Adresten Konum Arama */}
+      <div>
+        <label style={{ fontSize: 11, fontWeight: 800, color: 'var(--foreground)', display: 'block', marginBottom: 5 }}>
+          🔍 Adresten Konum Ara ve Seç
+        </label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void handleAddressSearch()
+              }
+            }}
+            placeholder="Mahalle, cadde, bina no, ilçe / il yazın..."
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <button
+            type="button"
+            disabled={searching}
+            onClick={() => void handleAddressSearch()}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1.5px solid #1d4ed8',
+              background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+              color: '#ffffff',
+              fontWeight: 800,
+              fontSize: 11,
+              cursor: searching ? 'wait' : 'pointer',
+              boxShadow: 'var(--pc-clay-primary)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ color: '#ffffff' }}>{searching ? 'Aranıyor...' : 'Adres Ara'}</span>
+          </button>
+        </div>
+        {searchError && (
+          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 5, fontWeight: 600 }}>
+            {searchError}
+          </div>
+        )}
+      </div>
+
+      {/* Arama Sonuçları Listesi */}
+      {suggestions.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            maxHeight: 210,
+            overflowY: 'auto',
+            padding: 8,
+            background: 'var(--card-bg)',
+            border: '1.5px solid var(--input-border)',
+            borderRadius: 10,
+          }}
+        >
+          <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--foreground-2)' }}>
+            Bulunan Adresler (Seçmek için tıklayın):
+          </div>
+          {suggestions.map((item, idx) => (
+            <button
+              key={`${item.lat}-${item.lng}-${idx}`}
+              type="button"
+              onClick={() => selectSuggestion(item)}
+              style={{
+                textAlign: 'left',
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: '1px solid var(--input-border)',
+                background: 'var(--card-inner)',
+                color: 'var(--foreground)',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
+                boxShadow: 'var(--pc-clay-btn)',
+              }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--foreground)' }}>
+                📍 {item.title}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--foreground-2)', lineHeight: 1.35 }}>
+                {item.address}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Seçilen Konum Detayları */}
+      <div>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+          Konum Başlığı / Klinik Adı
+        </label>
+        <input
+          value={(nodeData.locationTitle as string) || ''}
+          onChange={e => updateSelectedNode({ locationTitle: e.target.value })}
+          placeholder="Örn: Özel Ağız ve Diş Sağlığı Polikliniği"
+          style={inputStyle}
+        />
+      </div>
+
+      <div>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+          Açık Adres
+        </label>
+        <textarea
+          rows={2}
+          value={(nodeData.locationAddress as string) || ''}
+          onChange={e => {
+            const addr = e.target.value
+            const nextPatch: Record<string, any> = { locationAddress: addr }
+            if (!nodeData.locationLat && !nodeData.locationLng && addr.trim()) {
+              nextPatch.locationUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.trim())}`
+            }
+            updateSelectedNode(nextPatch)
+          }}
+          placeholder="Yukarıdan adres arayarak seçin veya açık adresi buraya yazın"
+          style={{ ...inputStyle, resize: 'vertical' }}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+            Enlem (Koordinat)
+          </label>
+          <input
+            value={(nodeData.locationLat as string) || ''}
+            onChange={e => {
+              const lat = e.target.value
+              const lng = (nodeData.locationLng as string) || ''
+              updateSelectedNode({
+                locationLat: lat,
+                ...(lat && lng ? { locationUrl: `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}` } : {}),
+              })
+            }}
+            placeholder="41.0082"
+            style={inputStyle}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+            Boylam (Koordinat)
+          </label>
+          <input
+            value={(nodeData.locationLng as string) || ''}
+            onChange={e => {
+              const lng = e.target.value
+              const lat = (nodeData.locationLat as string) || ''
+              updateSelectedNode({
+                locationLng: lng,
+                ...(lat && lng ? { locationUrl: `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}` } : {}),
+              })
+            }}
+            placeholder="28.9784"
+            style={inputStyle}
+          />
+        </div>
+      </div>
+
+      {hasValidCoords && (
+        <div
+          style={{
+            borderRadius: 8,
+            overflow: 'hidden',
+            border: '1px solid var(--input-border)',
+            background: 'var(--card-bg)',
+          }}
+        >
+          <iframe
+            title="Seçilen Klinik Konumu Harita Önizlemesi"
+            width="100%"
+            height="140"
+            style={{ border: 0, display: 'block' }}
+            loading="lazy"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${lngNum - 0.004}%2C${latNum - 0.0025}%2C${lngNum + 0.004}%2C${latNum + 0.0025}&layer=mapnik&marker=${latNum}%2C${lngNum}`}
+          />
+        </div>
+      )}
+
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)' }}>
+            Harita Bağlantısı
+          </label>
+          {nodeData.locationUrl && (
+            <a
+              href={String(nodeData.locationUrl)}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 10, fontWeight: 800, color: '#2563eb', textDecoration: 'none' }}
+            >
+              Haritada Aç ↗
+            </a>
+          )}
+        </div>
+        <input
+          value={(nodeData.locationUrl as string) || ''}
+          onChange={e => updateSelectedNode({ locationUrl: e.target.value })}
+          placeholder="https://www.google.com/maps?q=..."
+          style={inputStyle}
+        />
+      </div>
+
+      <div>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+          WhatsApp Konum Mesajı
+        </label>
+        <input
+          value={(nodeData.locationMessage as string) || ''}
+          onChange={e => updateSelectedNode({ locationMessage: e.target.value })}
+          placeholder="📍 Kliniğimizin konumu ve açık adres bilgileri:"
+          style={inputStyle}
+        />
+      </div>
+
+      <div>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground-2)', display: 'block', marginBottom: 4 }}>
+          Global Tetikleyici İfadeler
+        </label>
+        <input
+          value={(nodeData.triggerKeywords as string) || ''}
+          onChange={e => updateSelectedNode({ triggerKeywords: e.target.value })}
+          placeholder="konum, adres, yol tarifi, nasıl gelebilirim"
+          style={inputStyle}
+        />
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+        {saveNotice ? (
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#15803d' }}>✓ {saveNotice}</span>
+        ) : (
+          <span style={{ fontSize: 10, color: 'var(--foreground-2)' }}>
+            Seçilen adres klinik konumu olarak kaydedilir.
+          </span>
+        )}
+        <button
+          type="button"
+          disabled={savingClinicLoc}
+          onClick={() =>
+            void persistClinicLocation({
+              title: String(nodeData.locationTitle || ''),
+              address: String(nodeData.locationAddress || ''),
+              lat: String(nodeData.locationLat || ''),
+              lng: String(nodeData.locationLng || ''),
+              locationUrl: String(nodeData.locationUrl || ''),
+              locationMessage: String(
+                nodeData.locationMessage || '📍 Kliniğimizin konumu ve açık adres bilgileri:',
+              ),
+            })
+          }
+          style={{
+            padding: '7px 12px',
+            borderRadius: 8,
+            border: '1.5px solid #1d4ed8',
+            background: 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)',
+            color: '#ffffff',
+            fontWeight: 800,
+            fontSize: 11,
+            cursor: savingClinicLoc ? 'wait' : 'pointer',
+            boxShadow: 'var(--pc-clay-primary)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ color: '#ffffff' }}>
+            {savingClinicLoc ? 'Kaydediliyor...' : 'Konumu Kaydet'}
+          </span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ConditionNode({ id, data, selected }: { id: string; data: ConditionData; selected?: boolean }) {
   const isSim = data._simStatus === 'active'
   const ruleCount = Array.isArray(data.rules) && data.rules.length > 1 ? data.rules.length : 1
@@ -1567,17 +2032,19 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         { id: 'cond_kayitli', type: 'conditionNode', position: { x: 260, y: 130 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Hasta Kayıtlı mı?' } },
         // Hayır (Sağ)
         { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 280 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı öğrenebilir miyim?', required: true } },
-        // Ortak: Gün ve Saat
-        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 420 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
-        { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 550 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
-        { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 680 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
-        { id: 'end', type: 'endNode', position: { x: 260, y: 810 }, data: { label: 'Talebi Onayla ve Bitir', message: 'Randevu talebiniz alınmıştır, sağlıklı günler dileriz.' } },
+        // Ortak: Şikâyet + Gün ve Saat
+        { id: 'field_sikayet', type: 'fieldNode', position: { x: 260, y: 400 }, data: { label: 'Hasta Şikâyeti / Talebi', fieldName: 'sikayet', fieldType: 'text', description: 'Şikâyetiniz veya randevu talebiniz nedir?', required: false } },
+        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 530 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+        { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 660 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
+        { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 790 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+        { id: 'end', type: 'endNode', position: { x: 260, y: 920 }, data: { label: 'Talebi Onayla ve Bitir', message: 'Randevu talebiniz alınmıştır, sağlıklı günler dileriz.' } },
       ]
       const waEdges = decorateEdges([
         { id: 'e_s_c', source: 'start', target: 'cond_kayitli' },
-        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_tarih' },
+        { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet' },
         { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi' },
-        { id: 'e_ad_tar', source: 'field_musteri_adi', target: 'field_tarih' },
+        { id: 'e_ad_sik', source: 'field_musteri_adi', target: 'field_sikayet' },
+        { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
         { id: 'e_tar_saat', source: 'field_tarih', target: 'field_saat' },
         { id: 'e_saat_act', source: 'field_saat', target: 'action_randevu' },
         { id: 'e_act_end', source: 'action_randevu', target: 'end' },
@@ -1599,15 +2066,17 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
         { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'Web Karşılama Mesajı' } },
         { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 260, y: 140 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Randevunuz için adınızı, soyadınızı ve telefon numaranızı alabilir miyim?', required: true } },
         { id: 'field_tel', type: 'fieldNode', position: { x: 260, y: 270 }, data: { label: 'Telefon Numarası', fieldName: 'telefon', fieldType: 'text', description: 'Size ulaşabileceğimiz telefon numaranızı alabilir miyim?', required: true } },
-        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 400 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
-        { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 530 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
-        { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 660 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
-        { id: 'end', type: 'endNode', position: { x: 260, y: 790 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
+        { id: 'field_sikayet', type: 'fieldNode', position: { x: 260, y: 400 }, data: { label: 'Hasta Şikâyeti / Talebi', fieldName: 'sikayet', fieldType: 'text', description: 'Şikâyetiniz veya randevu talebiniz nedir?', required: false } },
+        { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 530 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+        { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 660 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç sizin için uygundur?', required: true } },
+        { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 790 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+        { id: 'end', type: 'endNode', position: { x: 260, y: 920 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
       ]
       const webEdges = decorateEdges([
         { id: 'e_s_ad', source: 'start', target: 'field_musteri_adi' },
         { id: 'e_ad_tel', source: 'field_musteri_adi', target: 'field_tel' },
-        { id: 'e_tel_tar', source: 'field_tel', target: 'field_tarih' },
+        { id: 'e_tel_sik', source: 'field_tel', target: 'field_sikayet' },
+        { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
         { id: 'e_tar_saat', source: 'field_tarih', target: 'field_saat' },
         { id: 'e_saat_act', source: 'field_saat', target: 'action_randevu' },
         { id: 'e_act_end', source: 'action_randevu', target: 'end' },
@@ -1652,17 +2121,18 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
     // fast_phone veya full_asterisk:
     // Asterisk Gelen Aramada telefon numarası (CallerID) zaten bilindiği için tekrar telefon sorulmaz!
-    // Kayıtlı hasta ise doğrudan gün/saat sorulur (1 soru); yeni hasta ise yalnızca Ad Soyad + Gün/Saat sorulur (2 soru).
+    // Kayıtlı hasta ise doğrudan şikâyet ve gün/saat sorulur; yeni hasta ise Ad Soyad + Şikâyet + Gün/Saat sorulur.
     const sampleNodes: Node[] = [
       { id: 'start', type: 'startNode', position: { x: 260, y: 20 }, data: { label: 'Karşılama Mesajı' } },
       { id: 'cond_kayitli', type: 'conditionNode', position: { x: 260, y: 130 }, data: { conditionField: 'kayitli', operator: 'equals', conditionValue: 'true', label: 'Arayan Numara (CallerID) Kayıtlı mı?' } },
       // Hayır dalı (Yeni Hasta — yalnızca Ad Soyad sorulur, numara CallerID'den otomatik alınır!)
       { id: 'field_musteri_adi', type: 'fieldNode', position: { x: 440, y: 270 }, data: { label: 'Hasta Adı ve Soyadı', fieldName: 'musteri_adi', fieldType: 'text', description: 'Adınızı ve soyadınızı alabilir miyim?', required: true } },
-      // Ortak devam (Gün ve Saat tek soruda birleştirilir)
-      { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 410 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
-      { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 540 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
-      { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 670 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
-      { id: 'end', type: 'endNode', position: { x: 260, y: 800 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
+      // Ortak devam (Şikâyet/Talep + Gün ve Saat)
+      { id: 'field_sikayet', type: 'fieldNode', position: { x: 260, y: 400 }, data: { label: 'Hasta Şikâyeti / Talebi', fieldName: 'sikayet', fieldType: 'text', description: 'Şikâyetiniz veya randevu talebiniz nedir?', required: false } },
+      { id: 'field_tarih', type: 'fieldNode', position: { x: 260, y: 530 }, data: { label: 'Randevu Tarihi', fieldName: 'tarih', fieldType: 'date', description: 'Hangi gün ve saat için randevu oluşturmamı istersiniz?', required: true } },
+      { id: 'field_saat', type: 'fieldNode', position: { x: 260, y: 660 }, data: { label: 'Randevu Saati', fieldName: 'saat', fieldType: 'time', description: 'Saat kaç için randevu istersiniz?', required: true } },
+      { id: 'action_randevu', type: 'actionNode', position: { x: 260, y: 790 }, data: { action: 'save_appointment_pending', label: '📝 Randevu Talebi Oluştur (Onay Bekler)' } },
+      { id: 'end', type: 'endNode', position: { x: 260, y: 920 }, data: { label: 'Görüşmeyi Bitir', message: 'Randevu talebiniz alındı, sağlıklı günler dileriz.' } },
       ...(selectedPreset === 'full_asterisk'
         ? [
             {
@@ -1693,9 +2163,10 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
 
     const sampleEdges = decorateEdges([
       { id: 'e_s_c', source: 'start', target: 'cond_kayitli' },
-      { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_tarih' },
+      { id: 'e_c_true', source: 'cond_kayitli', sourceHandle: 'true', target: 'field_sikayet' },
       { id: 'e_c_false', source: 'cond_kayitli', sourceHandle: 'false', target: 'field_musteri_adi' },
-      { id: 'e_ad_tar', source: 'field_musteri_adi', target: 'field_tarih' },
+      { id: 'e_ad_sik', source: 'field_musteri_adi', target: 'field_sikayet' },
+      { id: 'e_sik_tar', source: 'field_sikayet', target: 'field_tarih' },
       { id: 'e_tar_sa', source: 'field_tarih', target: 'field_saat' },
       { id: 'e_sa_act', source: 'field_saat', target: 'action_randevu' },
       { id: 'e_act_end', source: 'action_randevu', target: 'end' },
@@ -3188,18 +3659,11 @@ export default function FlowBuilder({ direction = 'inbound' }: { direction?: 'in
                       )}
 
                       {d.action === 'send_wa_location' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, background: 'var(--flow-success-bg)', border: '1px solid #16a34a', borderRadius: 10 }}>
-                          <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600 }}>
-                            📍 Arayan numaraya kayıtlı klinik konumu Evolution API üzerinden WhatsApp mesajı olarak gönderilir.
-                          </div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--foreground)' }}>Global Tetikleyici İfadeler</label>
-                          <input
-                            value={(d.triggerKeywords as string) || ''}
-                            onChange={e => updateSelectedNode({ triggerKeywords: e.target.value })}
-                            placeholder="konum, adres, yol tarifi, nasıl gelebilirim"
-                            style={inputStyle}
-                          />
-                        </div>
+                        <WhatsAppLocationAddressPicker
+                          nodeData={d}
+                          updateSelectedNode={updateSelectedNode}
+                          inputStyle={inputStyle}
+                        />
                       )}
 
                       {d.action === 'transfer_call' && (

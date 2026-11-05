@@ -8,7 +8,7 @@ import InfoTooltip from './ui/InfoTooltip'
 import KnowledgeDocList, { PAGE_SIZES, type SortDir, type SortKey, type ViewMode } from './knowledge/KnowledgeDocList'
 import KnowledgeDocPreview from './knowledge/KnowledgeDocPreview'
 import { useBackdropDismiss } from '../../../hooks/useBackdropDismiss'
-import { PhoneMaskedInput, normalizeTrPhone } from '@/lib/phone-mask'
+import { PhoneMaskedInput, normalizeTrPhone, formatTrPhoneDisplay } from '@/lib/phone-mask'
 import { TERM_LABELS } from '@/lib/ui-glossary'
 import {
   CALL_DIRECTION_LABELS, CATEGORY_COLORS, CATEGORY_ICONS, CATEGORY_LABEL_MAX, CONTENT_MAX, GREETING_MAX, TITLE_MAX,
@@ -122,44 +122,28 @@ function DocModal({ doc, onClose, onSave, saving, categories }: DocModalProps) {
   const [category, setCategory] = useState(doc?.category || 'genel')
   const [title, setTitle] = useState(doc?.title || '')
   const [content, setContent] = useState(doc?.content || '')
-  const [file, setFile] = useState<File | null>(null)
   const [callDirection, setCallDirection] = useState<CallDirection>(doc?.callDirection || 'both')
   const [active, setActive] = useState(doc?.active !== false)
   const [errors, setErrors] = useState<Errors>({})
-  const [dragging, setDragging] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const contentCheck = validateContent(content)
-  const titleOk = file ? true : validateTitle(title).ok
-  const canSave = !saving && (file ? validateFile(file).ok : titleOk && contentCheck.ok) && (file ? true : titleOk)
-
-  const pickFile = (picked: File | null) => {
-    if (!picked) { setFile(null); return }
-    const check = validateFile(picked)
-    if (!check.ok) { setFile(null); setErrors(prev => ({ ...prev, file: check.error })); return }
-    setErrors(prev => ({ ...prev, file: undefined }))
-    setFile(picked)
-    if (!cleanTitle(title)) setTitle(maskTitle(picked.name.replace(/\.[^.]+$/, '')))
-  }
+  const titleOk = validateTitle(title).ok
+  const canSave = !saving && titleOk && contentCheck.ok
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const next: Errors = {}
-    if (file) {
-      const f = validateFile(file); if (!f.ok) next.file = f.error
-    } else {
-      const t = validateTitle(title); if (!t.ok) next.title = t.error
-      if (!contentCheck.ok) next.content = contentCheck.error
-    }
+    const t = validateTitle(title); if (!t.ok) next.title = t.error
+    if (!contentCheck.ok) next.content = contentCheck.error
     setErrors(next)
     if (Object.keys(next).length) return
     const result = await onSave({
       category,
-      title: cleanTitle(title) || (file ? cleanTitle(file.name.replace(/\.[^.]+$/, '')) : ''),
+      title: cleanTitle(title),
       content: cleanContent(content),
       callDirection,
       active,
-      file: file && !isEdit ? file : null,
+      file: null,
     })
     if (result) setErrors({ [result.field]: result.message })
   }
@@ -175,7 +159,7 @@ function DocModal({ doc, onClose, onSave, saving, categories }: DocModalProps) {
         <>
           <button type="button" className={d.btn} onClick={onClose} disabled={saving}>İptal</button>
           <button type="submit" className={d.btnPrimary} disabled={!canSave}>
-            {saving ? 'Kaydediliyor…' : file ? 'Yükle ve Kaydet' : 'Kaydet'}
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
           </button>
         </>
       )}
@@ -199,54 +183,20 @@ function DocModal({ doc, onClose, onSave, saving, categories }: DocModalProps) {
           <FieldError message={errors.title} />
         </label>
 
-        {!isEdit && (
-          <div>
-            <div className={s.label}>
-              📎 Dosyadan yükle
-              <InfoTooltip title="Desteklenen dosyalar">
-                TXT, MD, CSV, JSON, PDF ve DOCX dosyaları yüklenebilir. Dosya en fazla 10 MB olabilir. Metin dosyadan otomatik çıkarılır.
-              </InfoTooltip>
-            </div>
-            <div
-              className={`${s.drop} ${dragging ? s.dropActive : ''}`}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={e => { e.preventDefault(); setDragging(false); pickFile(e.dataTransfer.files?.[0] ?? null) }}
-              role="button" tabIndex={0}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
-            >
-              {file ? (
-                <>
-                  <strong>{file.name}</strong>
-                  <span className={s.muted}>{Math.max(1, Math.round(file.size / 1024))} KB</span>
-                  <button type="button" className={d.btn} onClick={ev => { ev.stopPropagation(); pickFile(null); if (fileRef.current) fileRef.current.value = '' }}>Dosyayı kaldır</button>
-                </>
-              ) : (
-                <span>Dosyayı buraya bırakın veya seçmek için tıklayın</span>
-              )}
-            </div>
-            <input ref={fileRef} type="file" className={s.hiddenInput} accept=".txt,.md,.csv,.json,.pdf,.docx" onChange={e => pickFile(e.target.files?.[0] ?? null)} />
-            <FieldError message={errors.file} />
-          </div>
-        )}
-
-        {!file && (
-          <label className={s.field}>
-            <span className={s.label}>
-              İçerik
-              <InfoTooltip title="Bu metin ne işe yarar?">
-                Yapay zeka asistan, aramalarda bu metni okuyarak hastalara bilgi verir. Fiyat, çalışma saati, kampanya gibi bilgileri açık ve kısa yazın.
-              </InfoTooltip>
-              <Counter value={content.length} max={CONTENT_MAX} />
-            </span>
-            <textarea className={`${d.input} ${s.textarea} ${errors.content ? s.inputError : ''}`} value={content} rows={5}
-              placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın…"
-              onChange={e => { setContent(maskContent(e.target.value)); setErrors(p => ({ ...p, content: undefined })) }} aria-invalid={!!errors.content} />
-            {!contentCheck.ok && content.length > 0 && !errors.content && <div className={s.hint}>{contentCheck.hint}</div>}
-            <FieldError message={errors.content} />
-          </label>
-        )}
+        <label className={s.field}>
+          <span className={s.label}>
+            İçerik
+            <InfoTooltip title="Bu metin ne işe yarar?">
+              Yapay zeka asistan, aramalarda bu metni okuyarak hastalara bilgi verir. Fiyat, çalışma saati, kampanya gibi bilgileri açık ve kısa yazın.
+            </InfoTooltip>
+            <Counter value={content.length} max={CONTENT_MAX} />
+          </span>
+          <textarea className={`${d.input} ${s.textarea} ${errors.content ? s.inputError : ''}`} value={content} rows={5}
+            placeholder="Bilgi bankasına eklemek istediğiniz içeriği buraya yazın…"
+            onChange={e => { setContent(maskContent(e.target.value)); setErrors(p => ({ ...p, content: undefined })) }} aria-invalid={!!errors.content} />
+          {!contentCheck.ok && content.length > 0 && !errors.content && <div className={s.hint}>{contentCheck.hint}</div>}
+          <FieldError message={errors.content} />
+        </label>
 
         <div>
           <div className={s.label}>
@@ -388,6 +338,7 @@ export default function KnowledgeTab() {
   const [greetingText, setGreetingText] = useState('')
   const [greetingOutboundText, setGreetingOutboundText] = useState('')
   const [outboundCallerId, setOutboundCallerId] = useState('08503096119')
+  const [assignedCallerNumbers, setAssignedCallerNumbers] = useState<string[]>([])
   const [greetingLoading, setGreetingLoading] = useState(true)
   const [greetingSaving, setGreetingSaving] = useState(false)
   const [callerIdSaving, setCallerIdSaving] = useState(false)
@@ -466,10 +417,24 @@ export default function KnowledgeTab() {
         throw new Error(result.error || 'Bilgi bankası yüklenemedi')
       }
       const data = await r.json()
-      setDocs(data.docs || [])
+      const rawDocs = Array.isArray(data.docs) ? (data.docs as KnowledgeDoc[]) : []
+      setDocs(rawDocs.map(doc => {
+        const catLower = (doc.category || '').trim().toLocaleLowerCase('tr-TR')
+        return catLower === 'galeri' || catLower === 'gallery' ? { ...doc, category: 'genel' } : doc
+      }))
       setTotalEmbedded(data.totalEmbedded || 0)
       setNeedsReindexCount(data.needsReindex || 0)
-      if (catRes.ok) setCategories(await catRes.json())
+      if (catRes.ok) {
+        const rawCats = await catRes.json()
+        const filteredCats = Array.isArray(rawCats)
+          ? (rawCats as CategoryDef[]).filter(c => {
+              const s = (c.slug || '').trim().toLocaleLowerCase('tr-TR')
+              const l = (c.label || '').trim().toLocaleLowerCase('tr-TR')
+              return s !== 'galeri' && s !== 'gallery' && l !== 'galeri' && l !== 'gallery'
+            })
+          : []
+        setCategories(filteredCats)
+      }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Bilgi bankası yüklenemedi')
     }
@@ -486,7 +451,11 @@ export default function KnowledgeTab() {
       }
       const callerRes = await fetch('/api/admin/settings/outbound-caller-id')
       if (callerRes.ok) {
-        const callerData = await callerRes.json() as { callerId?: string }
+        const callerData = await callerRes.json() as { callerId?: string; assignedNumbers?: string[] }
+        if (Array.isArray(callerData.assignedNumbers)) {
+          const norms = [...new Set(callerData.assignedNumbers.map(n => normalizeTrPhone(n)).filter(Boolean))]
+          setAssignedCallerNumbers(norms)
+        }
         if (callerData.callerId) setOutboundCallerId(normalizeTrPhone(callerData.callerId))
       }
     } catch { /* varsayılanlar kalır */ }
@@ -674,19 +643,27 @@ export default function KnowledgeTab() {
     setGreetingSaving(false)
   }
 
-  const handleSaveCallerId = async () => {
+  const handleSaveCallerId = async (targetNumber?: string) => {
     if (callerIdSaving) return
-    if (!isCompleteTrPhone(outboundCallerId)) { setGreetingErrors({ callerId: 'Numarayı 11 hane olacak şekilde tam girin.' }); return }
+    const numToSave = typeof targetNumber === 'string' ? normalizeTrPhone(targetNumber) : outboundCallerId
+    if (!isCompleteTrPhone(numToSave)) { setGreetingErrors({ callerId: 'Numarayı 11 hane olacak şekilde tam girin.' }); return }
     setCallerIdSaving(true)
     setGreetingErrors({})
     try {
       const res = await fetch('/api/admin/settings/outbound-caller-id', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callerId: outboundCallerId }),
+        body: JSON.stringify({ callerId: numToSave }),
       })
-      if (res.ok) showToast('✅ Arayan numara kaydedildi')
-      else {
+      if (res.ok) {
+        const savedData = await res.json().catch(() => ({})) as { callerId?: string; assignedNumbers?: string[] }
+        if (savedData.callerId) setOutboundCallerId(normalizeTrPhone(savedData.callerId))
+        else setOutboundCallerId(numToSave)
+        if (Array.isArray(savedData.assignedNumbers)) {
+          setAssignedCallerNumbers([...new Set(savedData.assignedNumbers.map(n => normalizeTrPhone(n)).filter(Boolean))])
+        }
+        showToast('✅ Arayan numara kaydedildi')
+      } else {
         const data = await res.json().catch(() => ({})) as { error?: string }
         setGreetingErrors({ callerId: data.error || 'Kayıt başarısız' })
       }
@@ -906,6 +883,38 @@ export default function KnowledgeTab() {
 
             {!greetingLoading && greetingTab === 'callerid' && (
               <div>
+                {assignedCallerNumbers.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className={s.label}>
+                      Tanımlı Hat Numaraları
+                      <InfoTooltip title="Tanımlı hat numaraları">
+                        Klinik kurulumunda santrale tanımlanan hat numaralarıdır. Üzerine tıklayarak aktif arayan numarayı seçebilirsiniz.
+                      </InfoTooltip>
+                    </div>
+                    <div className={s.chipRow}>
+                      {assignedCallerNumbers.map(num => {
+                        const isSelected = normalizeTrPhone(outboundCallerId) === num
+                        return (
+                          <button
+                            key={num}
+                            type="button"
+                            className={isSelected ? s.chipActive : d.chip}
+                            aria-pressed={isSelected}
+                            disabled={callerIdSaving}
+                            onClick={() => {
+                              setOutboundCallerId(num)
+                              setGreetingErrors({})
+                              void handleSaveCallerId(num)
+                            }}
+                          >
+                            📞 {formatTrPhoneDisplay(num) || num}
+                            {isSelected ? ' · Aktif' : ''}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className={s.label}>
                   Arayan numara
                   <InfoTooltip title="Arayan numara nedir?">
@@ -916,7 +925,7 @@ export default function KnowledgeTab() {
                   className={`${d.input} ${greetingErrors.callerId ? s.inputError : ''}`} />
                 <FieldError message={greetingErrors.callerId} />
                 <div className={s.row} style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-                  <button type="button" className={d.btnPrimary} disabled={callerIdSaving || !isCompleteTrPhone(outboundCallerId)} onClick={handleSaveCallerId}>
+                  <button type="button" className={d.btnPrimary} disabled={callerIdSaving || !isCompleteTrPhone(outboundCallerId)} onClick={() => void handleSaveCallerId()}>
                     {callerIdSaving ? 'Kaydediliyor…' : 'Arayan numarayı kaydet'}
                   </button>
                 </div>

@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { getTreatmentColorTheme } from './FastScheduleModal'
 
 export interface PatientRecordsTimelineProps {
@@ -11,10 +13,11 @@ export interface PatientRecordsTimelineProps {
   activityLogs?: any[]
   doctors?: any[]
   compact?: boolean
+  onRefresh?: () => void
 }
 
 export const RECORD_STATUS_LABELS: Record<string, string> = {
-  scheduled: '🕒 Yanıt Bekliyor (Planlandı)',
+  scheduled: '📅 Planlandı (Teyit Bekliyor)',
   confirmed: '✅ Gelecek (Onaylandı)',
   arrived_unconfirmed: '🚶 Teyitsiz Geldi',
   waiting_in_clinic: '🏥 Klinikte Bekliyor',
@@ -157,12 +160,53 @@ export default function PatientRecordsTimeline({
   activityLogs: externalActivityLogs,
   doctors = [],
   compact = false,
+  onRefresh,
 }: PatientRecordsTimelineProps) {
   const [fetchedProfile, setFetchedProfile] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState<'all' | 'logs' | 'appointments' | 'treatments'>('all')
+  const [deletedTreatmentIds, setDeletedTreatmentIds] = useState<Set<string>>(new Set())
+  const [deletingTreatmentId, setDeletingTreatmentId] = useState<string | null>(null)
 
   const effectiveProfile = externalProfile || fetchedProfile
+
+  const reloadProfile = () => {
+    const targetId = patientId || effectiveProfile?.patient?.id
+    if (targetId) {
+      fetch(`/api/dental/patients/${targetId}/profile`)
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (data && !data.error) {
+            setFetchedProfile(data)
+          }
+        })
+        .catch(() => {})
+    }
+    if (onRefresh) onRefresh()
+  }
+
+  const handleDeleteTreatment = async (treatment: any) => {
+    if (!treatment?.id || deletingTreatmentId) return
+    setDeletingTreatmentId(treatment.id)
+    try {
+      const res = await fetch(`/api/dental/treatments/${treatment.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || 'Tedavi silinemedi')
+      }
+      setDeletedTreatmentIds(prev => {
+        const next = new Set(prev)
+        next.add(treatment.id)
+        return next
+      })
+      toast.success('Tedavi kaydı silindi')
+      reloadProfile()
+    } catch (e: any) {
+      toast.error(e.message || 'Tedavi silinirken hata oluştu')
+    } finally {
+      setDeletingTreatmentId(null)
+    }
+  }
 
   useEffect(() => {
     if (externalProfile) {
@@ -222,6 +266,7 @@ export default function PatientRecordsTimeline({
     const listB = Array.isArray(externalAppointments) ? externalAppointments : []
     for (const item of [...listA, ...listB]) {
       if (item && item.id) {
+        if (item.isActive === false || item.status === 'cancelled') continue
         map.set(item.id, { ...map.get(item.id), ...item })
       }
     }
@@ -236,14 +281,16 @@ export default function PatientRecordsTimeline({
     const listB = Array.isArray(externalTreatments) ? externalTreatments : []
     for (const item of [...listA, ...listB]) {
       if (item && item.id) {
+        if (item.status === 'cancelled' || deletedTreatmentIds.has(item.id)) continue
         map.set(item.id, { ...map.get(item.id), ...item })
       }
     }
     return Array.from(map.values()).sort(
       (a, b) =>
-        new Date(b.plannedDate || b.createdAt || 0).getTime() - new Date(a.plannedDate || a.createdAt || 0).getTime()
+        new Date(b.sessions?.[0]?.startTime || b.createdAt || 0).getTime() -
+        new Date(a.sessions?.[0]?.startTime || a.createdAt || 0).getTime()
     )
-  }, [effectiveProfile?.treatments, externalTreatments])
+  }, [effectiveProfile?.treatments, externalTreatments, deletedTreatmentIds])
 
   const mergedLogs = useMemo(() => {
     const rawLogs: any[] = [
@@ -253,13 +300,30 @@ export default function PatientRecordsTimeline({
     ]
 
     const seenIds = new Set<string>()
+    const seenSignatures = new Set<string>()
     const normalized: any[] = []
 
     for (const log of rawLogs) {
       if (!log) continue
-      const id = String(log.id || `${log.actionType || log.action_type}-${log.createdAt || log.created_at}-${normalized.length}`)
+      const trId = log.treatmentId || log.treatment_id
+      if (trId && deletedTreatmentIds.has(String(trId))) continue
+
+      const id = String(log.id || `${log.actionType || log.action_type || log.event_type}-${log.createdAt || log.created_at}-${normalized.length}`)
       if (seenIds.has(id)) continue
+
+      const evType = String(log.eventType || log.event_type || log.actionType || log.action_type || '').toLowerCase()
+      const oldVal = String(log.oldValue ?? log.old_value ?? log.oldStatus ?? log.old_status ?? '').trim()
+      const newVal = String(log.newValue ?? log.new_value ?? log.newStatus ?? log.new_status ?? '').trim()
+      if ((evType === 'status_changed' || evType === 'treatment_status_changed') && oldVal && newVal && oldVal === newVal) {
+        continue
+      }
+
+      const apptOrTrtKey = String(log.appointmentId || log.appointment_id || trId || log.title || '')
+      const signature = `${evType}|${apptOrTrtKey}|${oldVal}|${newVal}|${log.actorType || log.actor_type || ''}`
+      if (seenSignatures.has(signature)) continue
+
       seenIds.add(id)
+      seenSignatures.add(signature)
       normalized.push(log)
     }
 
@@ -302,7 +366,7 @@ export default function PatientRecordsTimeline({
       (a, b) =>
         new Date(b.createdAt || b.created_at || 0).getTime() - new Date(a.createdAt || a.created_at || 0).getTime()
     )
-  }, [effectiveProfile?.activityLogs, effectiveProfile?.logs, effectiveProfile?.patient?.name, externalActivityLogs, mergedAppointments])
+  }, [effectiveProfile?.activityLogs, effectiveProfile?.logs, effectiveProfile?.patient?.name, externalActivityLogs, mergedAppointments, deletedTreatmentIds])
 
   const counts = {
     all: mergedLogs.length + mergedAppointments.length + mergedTreatments.length,
@@ -331,26 +395,80 @@ export default function PatientRecordsTimeline({
     const actorName = log.actorName || log.actor_name || ''
     const actorBadge = getActorBadgeInfo(actorType, actorName)
 
-    const oldStatus = log.oldStatus || log.old_status || log.previousStatus || log.metadata?.oldStatus
-    const newStatus = log.newStatus || log.new_status || log.status || log.metadata?.newStatus
+    const eventType = String(log.eventType || log.event_type || log.actionType || log.action_type || '').toLowerCase()
+    const rawOldVal = log.oldValue ?? log.old_value ?? null
+    const rawNewVal = log.newValue ?? log.new_value ?? null
 
-    const oldDate = log.oldStartTime || log.old_start_time || log.oldDate || log.metadata?.oldStartTime
-    const newDate = log.newStartTime || log.new_start_time || log.newDate || log.metadata?.newStartTime
+    const isStatusEvent =
+      eventType === 'status_changed' ||
+      eventType === 'treatment_status_changed' ||
+      eventType === 'patient_response'
+    const isDateEvent =
+      eventType === 'datetime_changed' ||
+      eventType === 'rescheduled' ||
+      eventType === 'appointment_created'
+    const isDoctorEvent = eventType === 'doctor_changed'
+
+    const oldStatus =
+      log.oldStatus ||
+      log.old_status ||
+      log.previousStatus ||
+      log.metadata?.oldStatus ||
+      (isStatusEvent ? rawOldVal : null)
+    const newStatus =
+      log.newStatus ||
+      log.new_status ||
+      log.status ||
+      log.metadata?.newStatus ||
+      (isStatusEvent ? rawNewVal : null)
+
+    const oldDate =
+      log.oldStartTime ||
+      log.old_start_time ||
+      log.oldDate ||
+      log.metadata?.oldStartTime ||
+      (isDateEvent ? rawOldVal : null)
+    const newDate =
+      log.newStartTime ||
+      log.new_start_time ||
+      log.newDate ||
+      log.metadata?.newStartTime ||
+      (isDateEvent ? rawNewVal : null)
 
     const oldDoctor =
       log.oldDoctorName ||
       log.old_doctor_name ||
       (log.oldDoctorId || log.old_doctor_id ? doctorNameMap.get(log.oldDoctorId || log.old_doctor_id) : '') ||
-      log.metadata?.oldDoctorName
+      log.metadata?.oldDoctorName ||
+      (isDoctorEvent ? rawOldVal : null)
     const newDoctor =
       log.newDoctorName ||
       log.new_doctor_name ||
       (log.newDoctorId || log.new_doctor_id ? doctorNameMap.get(log.newDoctorId || log.new_doctor_id) : '') ||
-      log.metadata?.newDoctorName
+      log.metadata?.newDoctorName ||
+      (isDoctorEvent ? rawNewVal : null)
 
     const prefDate = log.patientPreferredDate || log.patient_preferred_date || log.preferredDate || log.metadata?.patientPreferredDate
     const responseNote = log.patientResponseNote || log.patient_response_note || log.note || log.reason || log.metadata?.patientResponseNote
-    const description = log.description || log.summary || log.message || log.title || ''
+    const rawTitle = log.description || log.summary || log.message || log.title || ''
+    const eventLabel =
+      eventType === 'treatment_status_changed'
+        ? 'Tedavi Durumu Güncellendi'
+        : eventType === 'status_changed'
+          ? 'Randevu Durumu Güncellendi'
+          : eventType === 'datetime_changed' || eventType === 'rescheduled'
+            ? 'Tarih / Saat Değişikliği'
+            : eventType === 'doctor_changed'
+              ? 'İlgili Doktor Değişikliği'
+              : eventType === 'appointment_created'
+                ? 'Yeni Randevu Oluşturuldu'
+                : eventType === 'patient_response'
+                  ? 'Hasta Bildirim Yanıtı'
+                  : ''
+    const description =
+      eventLabel && rawTitle && rawTitle !== eventLabel
+        ? `${eventLabel} · ${rawTitle}`
+        : rawTitle || eventLabel || 'İşlem / Güncelleme Kaydı'
     const createdAt = log.createdAt || log.created_at || log.timestamp
 
     const oldStatusLabel = oldStatus ? RECORD_STATUS_LABELS[String(oldStatus).toLowerCase()] || oldStatus : null
@@ -513,11 +631,19 @@ export default function PatientRecordsTimeline({
           }`
         : ''
 
-    const actorBadge = appt.intakeSource === 'ai' || appt.intakeSource === 'voice'
-      ? getActorBadgeInfo('system', 'AI Asistan')
-      : appt.patientRespondedAt
-        ? getActorBadgeInfo('patient')
-        : null
+    const rawSource = String(appt.intakeSource || '').trim().toLowerCase()
+    const actorBadge =
+      rawSource === 'phone_ai' || rawSource === 'voice_ai' || rawSource === 'voice' || rawSource === 'phone'
+        ? getActorBadgeInfo('system', 'Sesli Asistan (Telefon)')
+        : rawSource === 'web_ai' || rawSource === 'web'
+          ? getActorBadgeInfo('system', 'Web Asistanı')
+          : rawSource === 'whatsapp_ai' || rawSource === 'whatsapp'
+            ? getActorBadgeInfo('system', 'WhatsApp Asistanı')
+            : rawSource === 'ai'
+              ? getActorBadgeInfo('system', 'Yapay Zeka Asistanı')
+              : appt.patientRespondedAt
+                ? getActorBadgeInfo('patient')
+                : null
 
     return (
       <div
@@ -641,7 +767,8 @@ export default function PatientRecordsTimeline({
     const tTheme = getTreatmentColorTheme(t.color || t.metadata?.color || t.procedureName, idx)
     const docName = resolveDoctorName(t)
     const costVal = Number(t.cost ?? t.price ?? 0)
-    const sessionStart = t.sessions?.[0]?.startTime || t.plannedDate || t.createdAt
+    const sessionStart = t.sessions?.[0]?.startTime || null
+    const isDeleting = deletingTreatmentId === t.id
 
     return (
       <div
@@ -720,6 +847,34 @@ export default function PatientRecordsTimeline({
             >
               {statusLabel}
             </span>
+            {t.id && (
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleDeleteTreatment(t)
+                }}
+                title="Tedavi Kaydını Sil"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '3px 7px',
+                  borderRadius: 6,
+                  border: '1px solid var(--danger, #ef4444)',
+                  background: 'var(--card-inner, #f1f5f9)',
+                  color: 'var(--danger, #ef4444)',
+                  fontSize: '0.67rem',
+                  fontWeight: 700,
+                  cursor: isDeleting ? 'wait' : 'pointer',
+                  opacity: isDeleting ? 0.6 : 1,
+                }}
+              >
+                <Trash2 size={12} />
+                <span>Sil</span>
+              </button>
+            )}
           </div>
         </div>
 

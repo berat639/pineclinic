@@ -46,6 +46,21 @@ export const EMPTY_DICOM_META: DicomMeta = {
   resolution: '—',
 };
 
+const EN_MONTH_MAP: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+export function formatDicomSexLabel(rawSex?: string): string {
+  const s = (rawSex ?? '').trim();
+  if (!s || s === '—') return '—';
+  const upper = s.toUpperCase();
+  if (upper === 'M' || upper === 'MALE' || upper === 'E' || upper === 'ERKEK') return 'Erkek';
+  if (upper === 'F' || upper === 'FEMALE' || upper === 'K' || upper === 'KADIN') return 'Kadın';
+  if (upper === 'O' || upper === 'OTHER' || upper === 'U' || upper === 'UNKNOWN') return 'Belirtilmedi';
+  return s;
+}
+
 /**
  * `dayjs` kullanarak ham veya kısmi tarih/saat dizgelerini kademeli formata dönüştürür:
  * - Sadece yıl varsa: `YYYY`
@@ -54,11 +69,23 @@ export const EMPTY_DICOM_META: DicomMeta = {
  * - Saat + gün, ay ve yıl varsa: `SS:DD · GG.AA.YYYY`
  */
 export function formatDicomDateWithDayjs(rawDate?: string, rawTime?: string): string {
-  const d = (rawDate ?? '').trim();
+  const d = String(rawDate ?? '').trim();
   if (!d || d === '—') return '—';
   // Backend tarafından zaten nokta/orta nokta ile formatlanmışsa (örn. "14.05.1982 (44 yaş)" veya "14:35 · 28.10.2026") koru
   if (/^\d{2}:\d{2}\s*·\s*\d{2}\.\d{2}\.\d{4}/.test(d) || /^\d{2}\.\d{2}\.\d{4}/.test(d) || /^\d{2}\.\d{4}$/.test(d) || /^\d{4}$/.test(d)) {
     return d;
+  }
+
+  const ageSuffixMatch = d.match(/(\(\s*\d+\s*yaş\s*\))/i);
+  const ageSuffix = ageSuffixMatch ? ` ${ageSuffixMatch[1]}` : '';
+
+  // JS Date.prototype.toString() formatı: örn. "Mon Dec 01 2003 00:00:00 GMT+0200 (Türkiye Standart Saati)"
+  const jsDateMatch = d.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\s+(\d{4})\b/i);
+  if (jsDateMatch) {
+    const mm = EN_MONTH_MAP[jsDateMatch[1].slice(0, 3).toLowerCase()] || '01';
+    const dd = jsDateMatch[2].padStart(2, '0');
+    const yyyy = jsDateMatch[3];
+    return `${dd}.${mm}.${yyyy}${ageSuffix}`;
   }
 
   let hhmm = '';
@@ -70,6 +97,12 @@ export function formatDicomDateWithDayjs(rawDate?: string, rawTime?: string): st
     }
   }
 
+  const isoMatch = d.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    const formatted = `${isoMatch[3].padStart(2, '0')}.${isoMatch[2].padStart(2, '0')}.${isoMatch[1]}${ageSuffix}`;
+    return hhmm ? `${hhmm} · ${formatted}` : formatted;
+  }
+
   const digits = d.replace(/\D/g, '');
   if (digits.length === 8) {
     const yyyy = digits.slice(0, 4);
@@ -79,7 +112,7 @@ export function formatDicomDateWithDayjs(rawDate?: string, rawTime?: string): st
     if (dd === '00') return `${mm}.${yyyy}`;
     const parsed = dayjs(digits, 'YYYYMMDD', true);
     if (parsed.isValid()) {
-      const formatted = parsed.format('DD.MM.YYYY');
+      const formatted = `${parsed.format('DD.MM.YYYY')}${ageSuffix}`;
       return hhmm ? `${hhmm} · ${formatted}` : formatted;
     }
   } else if (digits.length === 6) {
@@ -92,7 +125,7 @@ export function formatDicomDateWithDayjs(rawDate?: string, rawTime?: string): st
 
   const fallback = dayjs(d, ['YYYY-MM-DD', 'YYYY.MM.DD', 'DD.MM.YYYY', 'YYYY/MM/DD'], true);
   if (fallback.isValid()) {
-    const formatted = fallback.format('DD.MM.YYYY');
+    const formatted = `${fallback.format('DD.MM.YYYY')}${ageSuffix}`;
     return hhmm ? `${hhmm} · ${formatted}` : formatted;
   }
   return d;
@@ -143,7 +176,7 @@ function decodeDicomMetaHeader(headerVal: string | null, nx: number, ny: number,
       patientName: parsed.patientName || '—',
       patientId: parsed.patientId || '—',
       birthDate: formatDicomDateWithDayjs(parsed.birthDate),
-      sex: parsed.sex || '—',
+      sex: formatDicomSexLabel(parsed.sex),
       studyDate: formatDicomDateWithDayjs(parsed.studyDate),
       device: parsed.device || '—',
       clinic: parsed.clinic || '—',

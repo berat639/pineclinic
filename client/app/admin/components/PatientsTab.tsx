@@ -500,7 +500,7 @@ export default function PatientsTab() {
     }
   }
 
-  const getPatientsWithRecords = (ids: string[]) => patients.filter(patient => ids.includes(patient.id) && ((patient.appointmentCount || 0) > 0 || (patient.paymentCount || 0) > 0))
+  const getPatientsWithRecords = (ids: string[]) => patients.filter(patient => ids.includes(patient.id) && (patient.appointmentCount || 0) > 0)
 
   const openRemovalConfirmation = (ids: string[]) => {
     const patientsWithRecords = getPatientsWithRecords(ids)

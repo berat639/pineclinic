@@ -56,6 +56,8 @@ import {
   resetPromptSection,
   getBranding,
   setBranding,
+  getSetting,
+  setSetting,
 } from './db/repositories/settings'
 import { embedText, getPreWarmEmbedding, getPreWarmedRagContext, buildRagPrompt, PRE_WARM_QUERY, getEmbeddingModel, getEmbeddingDimensions } from './rag'
 import { PROMPT_SECTIONS, PROMPT_SECTION_KEYS, getDefaultPromptValue } from './data/default-prompts'
@@ -613,6 +615,7 @@ const app = new Elysia()
         type: b.type as string | undefined,
         complaint: b.complaint as string | undefined,
         notes: b.notes as string | undefined,
+        title: b.title as string | undefined,
       }, actor)
       if (!updated) { set.status = 404; return { error: 'Not found' } }
       return updated
@@ -1477,27 +1480,72 @@ const app = new Elysia()
   })
 
   // ── Outbound Calls ─────────────────────────────────────────────────────────
-  .post('/api/admin/calls/outbound', async ({ body, set }) => {
-    const b = (body ?? {}) as { phone?: string; to?: string; target?: string }
+  .post('/api/admin/calls/outbound', async ({ body, cookie, request, set }) => {
+    const b = (body ?? {}) as { phone?: string; to?: string; target?: string; patientId?: string }
     const phone = b.phone || b.to || b.target
-    if (!phone) { set.status = 400; return { error: 'phone numarası zorunludur' } }
+    if (!phone && !b.patientId) { set.status = 400; return { error: 'phone numarası zorunludur' } }
     const clinicId = requireClinicId()
     const { db } = await import('./db/client')
-    const { patients } = await import('./db/schema')
-    const { and, eq } = await import('drizzle-orm')
-    const { patientPhoneMatches } = await import('./db/repositories/whatsapp')
-    const { hasPatientConsent } = await import('./services/patient-consent')
-    let matched
+    const { patients, patientConsentPreferences } = await import('./db/schema')
+    const { and, eq, sql } = await import('drizzle-orm')
+    const { hasPatientConsent, grantInClinicPatientConsent } = await import('./services/patient-consent')
+    const digits = String(phone || '').replace(/\D/g, '')
+    const last10 = digits.length >= 10 ? digits.slice(-10) : ''
+
+    let matchedPatient: { id: string; phone: string | null } | undefined
     try {
-      matched = await db.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, clinicId), patientPhoneMatches(phone))).limit(2)
-    } catch { set.status = 400; return { error: 'Telefon numarası geçersiz' } }
-    if (matched.length !== 1 || !await hasPatientConsent(clinicId, matched[0].id, 'assistant_call')) {
-      set.status = 403
-      return { error: 'Hasta eşleşmesi veya doğrulanmış asistan arama izni bulunamadı' }
+      if (b.patientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(b.patientId)) {
+        const rows = await db.select({ id: patients.id, phone: patients.phone }).from(patients).where(and(eq(patients.clinicId, clinicId), eq(patients.id, b.patientId))).limit(1)
+        matchedPatient = rows[0]
+      }
+      if (!matchedPatient && last10.length === 10) {
+        const rows = await db.select({ id: patients.id, phone: patients.phone }).from(patients).where(
+          and(
+            eq(patients.clinicId, clinicId),
+            sql`right(regexp_replace(coalesce(${patients.phone}, ''), '\\D', '', 'g'), 10) = ${last10}`
+          )
+        ).limit(1)
+        matchedPatient = rows[0]
+      }
+    } catch {
+      set.status = 400
+      return { error: 'Telefon numarası geçersiz' }
     }
+
+    const dialPhone = phone || matchedPatient?.phone || ''
+    if (dialPhone.replace(/\D/g, '').length < 10) {
+      set.status = 400
+      return { error: 'Telefon numarası geçersiz' }
+    }
+
+    if (matchedPatient) {
+      const [pref] = await db.select({ status: patientConsentPreferences.status })
+        .from(patientConsentPreferences)
+        .where(and(
+          eq(patientConsentPreferences.clinicId, clinicId),
+          eq(patientConsentPreferences.patientId, matchedPatient.id),
+          eq(patientConsentPreferences.channel, 'assistant_call'),
+        ))
+        .limit(1)
+      if (pref && (pref.status === 'refused' || pref.status === 'revoked')) {
+        set.status = 403
+        return { error: 'Hasta asistan arama iznini reddetmiş veya iptal etmiş' }
+      }
+      const hasConsent = await hasPatientConsent(clinicId, matchedPatient.id, 'assistant_call')
+      if (!hasConsent) {
+        const authUser = await authenticateRequest(cookie.token?.value as string | undefined, request).catch(() => null)
+        if (authUser?.id) {
+          await grantInClinicPatientConsent({
+            patientId: matchedPatient.id,
+            clinicId,
+            userId: authUser.id,
+          }).catch(() => {})
+        }
+      }
+    }
+
     const { initiateOutboundCall } = await import('./services/asterisk-ami')
-    if (!await hasPatientConsent(clinicId, matched[0].id, 'assistant_call')) { set.status = 403; return { error: 'Asistan arama izni yok' } }
-    const res = await initiateOutboundCall(phone, clinicId)
+    const res = await initiateOutboundCall(dialPhone, clinicId)
     if (!res.success) { set.status = 500; return { error: res.message } }
     return { success: true, message: 'Dış arama başlatıldı' }
   })
@@ -1747,6 +1795,115 @@ const app = new Elysia()
     }
   })
 
+  // ── Clinic WhatsApp Location & Address Geocode Settings ──────────────────
+  .get('/api/admin/settings/whatsapp-location', async () => {
+    const [address, title, lat, lng, locationUrl, locationMessage] = await Promise.all([
+      getSetting('whatsapp.location_address'),
+      getSetting('whatsapp.location_title'),
+      getSetting('whatsapp.location_lat'),
+      getSetting('whatsapp.location_lng'),
+      getSetting('whatsapp.location_url'),
+      getSetting('whatsapp.location_message'),
+    ])
+    return {
+      address: address ?? '',
+      title: title ?? '',
+      lat: lat ?? '',
+      lng: lng ?? '',
+      locationUrl: locationUrl ?? '',
+      locationMessage: locationMessage ?? '📍 Kliniğimizin konumu ve açık adres bilgileri:',
+    }
+  })
+
+  .put('/api/admin/settings/whatsapp-location', async ({ body }) => {
+    const input = (body ?? {}) as {
+      address?: string
+      title?: string
+      lat?: string | number
+      lng?: string | number
+      locationUrl?: string
+      locationMessage?: string
+    }
+    const address = String(input.address ?? '').trim()
+    const title = String(input.title ?? '').trim()
+    const lat = input.lat !== undefined && input.lat !== null ? String(input.lat).trim() : ''
+    const lng = input.lng !== undefined && input.lng !== null ? String(input.lng).trim() : ''
+    let locationUrl = String(input.locationUrl ?? '').trim()
+    if (!locationUrl && lat && lng) {
+      locationUrl = `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
+    } else if (!locationUrl && address) {
+      locationUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+    }
+    const locationMessage = String(input.locationMessage ?? '📍 Kliniğimizin konumu ve açık adres bilgileri:').trim()
+
+    await Promise.all([
+      setSetting('whatsapp.location_address', address),
+      setSetting('whatsapp.location_title', title),
+      setSetting('whatsapp.location_lat', lat),
+      setSetting('whatsapp.location_lng', lng),
+      setSetting('whatsapp.location_url', locationUrl),
+      setSetting('whatsapp.location_message', locationMessage),
+    ])
+
+    return {
+      success: true,
+      address,
+      title,
+      lat,
+      lng,
+      locationUrl,
+      locationMessage,
+    }
+  })
+
+  .get('/api/admin/geocode', async ({ query }) => {
+    const q = String((query as Record<string, unknown>)?.q ?? '').trim()
+    if (q.length < 2) return { results: [] }
+    const fetchNominatim = async (countryFilter: boolean) => {
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        addressdetails: '1',
+        limit: '6',
+        'accept-language': 'tr',
+        q,
+      })
+      if (countryFilter) params.set('countrycodes', 'tr')
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+        headers: {
+          'User-Agent': 'VoiceAIClinicPlatform/1.0 (contact@thinpine.com)',
+          'Accept-Language': 'tr-TR,tr;q=0.9',
+        },
+      })
+      if (!res.ok) return []
+      const data = await res.json().catch(() => [])
+      return Array.isArray(data) ? data : []
+    }
+    try {
+      let raw = await fetchNominatim(true)
+      if (raw.length === 0) {
+        raw = await fetchNominatim(false)
+      }
+      const results = raw.map((item: any) => {
+        const lat = String(item.lat ?? '')
+        const lon = String(item.lon ?? '')
+        const displayName = String(item.display_name ?? '')
+        const shortTitle = String(item.name || displayName.split(',')[0] || 'Klinik Konumu').trim()
+        return {
+          title: shortTitle,
+          address: displayName,
+          lat,
+          lng: lon,
+          locationUrl: lat && lon
+            ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}`
+            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayName)}`,
+        }
+      })
+      return { results }
+    } catch {
+      return { results: [] }
+    }
+  })
+
   .put('/api/admin/settings/greeting', async ({ body, set }) => {
     const { greeting, greetingOutbound } = (body ?? {}) as { greeting?: string; greetingOutbound?: string }
     let updatedInbound = undefined
@@ -1772,19 +1929,197 @@ const app = new Elysia()
 
   // ── Outbound Caller ID Settings ──────────────────────────────────────────────
   .get('/api/admin/settings/outbound-caller-id', async () => {
-    const { getOutboundCallerId } = await import('./db/repositories/settings')
-    return { callerId: await getOutboundCallerId() }
+    const clinicId = currentClinicId()
+    const { getSetting, getOutboundCallerId } = await import('./db/repositories/settings')
+    const savedSetting = await getSetting('outbound_caller_id')
+    const assignedNumbers: string[] = []
+    let providerCallerId = ''
+
+    const toLocalPhone = (raw: string): string => {
+      const digits = String(raw || '').replace(/\D/g, '')
+      if (digits.length === 12 && digits.startsWith('90')) return `0${digits.slice(2)}`
+      if (digits.length === 10 && digits.startsWith('5')) return `0${digits}`
+      if (digits.length === 10) return `0${digits}`
+      return digits || raw.trim()
+    }
+
+    if (clinicId) {
+      try {
+        const { getRow, decrypt } = await import('./integrations/managed/store')
+        const { db } = await import('./db/client')
+        const { sql } = await import('drizzle-orm')
+        const row = await getRow(clinicId, 'phone')
+        const activeCfg = row?.active ? decrypt(row.active as any) : null
+        const draftCfg = row?.draft ? decrypt(row.draft as any) : null
+        const cfg = activeCfg || draftCfg
+        if (cfg?.numbers && Array.isArray(cfg.numbers)) {
+          for (const n of cfg.numbers) {
+            const local = toLocalPhone(String(n))
+            if (local && !assignedNumbers.includes(local)) assignedNumbers.push(local)
+          }
+        }
+        if (cfg?.callerId) {
+          providerCallerId = toLocalPhone(String(cfg.callerId))
+          if (providerCallerId && !assignedNumbers.includes(providerCallerId)) {
+            assignedNumbers.unshift(providerCallerId)
+          }
+        }
+        const phoneRows = await db.execute(sql`SELECT phone_number, is_primary FROM clinic_phone_numbers WHERE clinic_id = ${clinicId} ORDER BY is_primary DESC`)
+        for (const pr of phoneRows as any[]) {
+          const local = toLocalPhone(String(pr.phone_number || ''))
+          if (local && !assignedNumbers.includes(local)) assignedNumbers.push(local)
+          if (!providerCallerId && pr.is_primary && local) providerCallerId = local
+        }
+      } catch {}
+    }
+
+    const effectiveCallerId =
+      (savedSetting && (!assignedNumbers.length || assignedNumbers.includes(savedSetting)) ? savedSetting : '') ||
+      providerCallerId ||
+      savedSetting ||
+      assignedNumbers[0] ||
+      (await getOutboundCallerId())
+    return { callerId: effectiveCallerId, assignedNumbers }
   })
 
   .put('/api/admin/settings/outbound-caller-id', async ({ body, set }) => {
     const { callerId } = (body ?? {}) as { callerId?: string }
-    if (!callerId) {
+    if (!callerId || !callerId.trim()) {
       set.status = 400
       return { error: 'Caller ID boş olamaz.' }
     }
+    const cleanCallerId = callerId.trim()
     const { setOutboundCallerId } = await import('./db/repositories/settings')
-    const saved = await setOutboundCallerId(callerId)
+    const saved = await setOutboundCallerId(cleanCallerId)
+
+    const clinicId = currentClinicId()
+    if (clinicId) {
+      try {
+        const { getRow, decrypt, encrypt } = await import('./integrations/managed/store')
+        const { phone: toE164 } = await import('./integrations/managed/model')
+        const { db } = await import('./db/client')
+        const { sql } = await import('drizzle-orm')
+        const e164CallerId = toE164(cleanCallerId)
+        const row = await getRow(clinicId, 'phone')
+        if (row) {
+          const draftCfg = row.draft ? decrypt(row.draft as any) : null
+          const activeCfg = row.active ? decrypt(row.active as any) : null
+          const nextDraft = draftCfg
+            ? encrypt({
+                ...draftCfg,
+                callerId: e164CallerId,
+                numbers: Array.isArray(draftCfg.numbers)
+                  ? (draftCfg.numbers.includes(e164CallerId) ? draftCfg.numbers : [...draftCfg.numbers, e164CallerId])
+                  : [e164CallerId],
+              })
+            : null
+          const nextActive = activeCfg
+            ? encrypt({
+                ...activeCfg,
+                callerId: e164CallerId,
+                numbers: Array.isArray(activeCfg.numbers)
+                  ? (activeCfg.numbers.includes(e164CallerId) ? activeCfg.numbers : [...activeCfg.numbers, e164CallerId])
+                  : [e164CallerId],
+              })
+            : null
+          await db.execute(sql`
+            UPDATE managed_integrations
+            SET draft = COALESCE(${nextDraft ? JSON.stringify(nextDraft) : null}::jsonb, draft),
+                active = CASE WHEN active IS NOT NULL AND ${nextActive ? JSON.stringify(nextActive) : null}::jsonb IS NOT NULL THEN ${nextActive ? JSON.stringify(nextActive) : null}::jsonb ELSE active END,
+                updated_at = now()
+            WHERE clinic_id = ${clinicId} AND service = 'phone'
+          `)
+          await db.execute(sql`UPDATE clinic_phone_numbers SET is_primary = (phone_number = ${e164CallerId}) WHERE clinic_id = ${clinicId}`)
+        }
+      } catch {}
+    }
+
     return { success: true, ...saved }
+  })
+
+  // ── Clinic Integrations (/api/admin/integrations) ───────────────────────────
+  .get('/api/admin/integrations', async () => {
+    const { integrationView } = await import('./integrations/managed/store')
+    return integrationView(requireClinicId(), true)
+  })
+  .put('/api/admin/integrations/:service', async ({ params, body, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { saveConfig } = await import('./integrations/managed/store')
+      return await saveConfig(requireClinicId(), serviceOf(params.service), (body ?? {}) as Record<string, unknown>, user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon ayarları kaydedilemedi.' }
+    }
+  })
+  .post('/api/admin/integrations/:service/test', async ({ params, body, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { beginTest } = await import('./integrations/managed/workflow')
+      return await beginTest(requireClinicId(), serviceOf(params.service), (body ?? {}) as Record<string, unknown>, user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Bağlantı testi başlatılamadı.' }
+    }
+  })
+  .post('/api/admin/integrations/:service/tests/:testId/confirm', async ({ params, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { confirmTest } = await import('./integrations/managed/workflow')
+      return await confirmTest(requireClinicId(), serviceOf(params.service), params.testId, user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Test doğrulaması tamamlanamadı.' }
+    }
+  })
+  .post('/api/admin/integrations/:service/tests/:testId/cancel', async ({ params, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { cancelTest } = await import('./integrations/managed/workflow')
+      return await cancelTest(requireClinicId(), serviceOf(params.service), params.testId, user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Test iptal edilemedi.' }
+    }
+  })
+  .post('/api/admin/integrations/:service/activate', async ({ params, body, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { setEnabled } = await import('./integrations/managed/workflow')
+      const payload = (body ?? {}) as { revision?: number; force?: boolean }
+      return await setEnabled(requireClinicId(), serviceOf(params.service), true, Number(payload.revision || 0), user?.id || 'clinic-admin', payload.force !== false)
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon etkinleştirilemedi.' }
+    }
+  })
+  .post('/api/admin/integrations/:service/deactivate', async ({ params, body, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { setEnabled } = await import('./integrations/managed/workflow')
+      const payload = (body ?? {}) as { revision?: number }
+      return await setEnabled(requireClinicId(), serviceOf(params.service), false, Number(payload.revision || 0), user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon devre dışı bırakılamadı.' }
+    }
+  })
+  .delete('/api/admin/integrations/:service', async ({ params, cookie, request, set }) => {
+    try {
+      const user = await authenticateRequest(cookie.token?.value as string | undefined, request)
+      const { serviceOf } = await import('./integrations/managed/model')
+      const { removeConfig } = await import('./integrations/managed/store')
+      return await removeConfig(requireClinicId(), serviceOf(params.service), user?.id || 'clinic-admin')
+    } catch (err: any) {
+      set.status = err?.status || 400
+      return { error: err?.message || 'Entegrasyon kaldırılamadı.' }
+    }
   })
 
   // ── Connection Mode Settings ─────────────────────────────────────────────────
@@ -2231,12 +2566,30 @@ const app = new Elysia()
     if (!engine) { set.status = 404; return { success: false, message: 'Görüşme bulunamadı veya süresi doldu.' } }
     const input = (body || {}) as { name?: string; args?: Record<string, unknown> }
     const args = input.args || {}
-    if (!['randevuOlustur', 'hastaNotKaydet', 'cagriySonlandir'].includes(String(input.name || ''))) {
+    if (!['randevuOlustur', 'hastaNotKaydet', 'cagriySonlandir', 'aramaAktar', 'whatsappKonumGonder'].includes(String(input.name || ''))) {
       set.status = 400
       return { success: false, message: 'Bu işlem bu görüşmede kullanılamaz.' }
     }
     const step = await engine.accept({ fields: args })
     const action = engine.expectedAction()
+    if (input.name === 'aramaAktar') {
+      const target = String(args.hedef || 'resepsiyon')
+      if (action && ['transfer_call', 'transfer'].includes(action.action)) {
+        await engine.completeAction(action.nodeId, true)
+      }
+      return { success: true, message: `Aramanız ${target} birimine aktarılıyor, lütfen hattan ayrılmayın.` }
+    }
+    if (input.name === 'whatsappKonumGonder') {
+      const phone = String(args.telefon || step.fields?.telefon || '')
+      if (phone) {
+        const { sendLocationToCaller } = await import('./services/voice-whatsapp')
+        await sendLocationToCaller(phone).catch(() => null)
+      }
+      if (action && action.action === 'send_wa_location') {
+        await engine.completeAction(action.nodeId, true)
+      }
+      return { success: true, message: 'Klinik konumu WhatsApp üzerinden paylaşıldı.' }
+    }
     if (input.name === 'hastaNotKaydet') {
       if (!step.success || !action || !['save_patient_note', 'notBirak'].includes(action.action)) {
         return { success: false, message: step.message || step.next?.prompt || 'Not için gerekli bilgiler henüz tamamlanmadı.' }
@@ -2265,7 +2618,8 @@ const app = new Elysia()
     }
     try {
       const { createAssistantAppointment } = await import('./services/assistant-appointments')
-      const appointment = await createAssistantAppointment(args, { sessionId: params.id, clinicId: currentClinicId() || undefined, source: 'web_ai' })
+      const mergedFields = { ...(step.fields || {}), ...args }
+      const appointment = await createAssistantAppointment(mergedFields, { sessionId: params.id, clinicId: currentClinicId() || undefined, source: 'web_ai' })
       await engine.completeAction(action.nodeId, true)
       return { success: true, id: appointment.id, message: `Randevu talebiniz ${appointment.date} ${appointment.time} için alındı.` }
     } catch (error) {
@@ -2305,7 +2659,7 @@ const app = new Elysia()
     const systemPrompt = dateHeader + await buildSystemPrompt(greeting, 'web')
 
     const model = voiceSettings.model
-    const ASTERISK_ONLY_TOOLS = new Set(['cagriySonlandir', 'aramaAktar', 'insanaAktar', 'whatsappKonumGonder'])
+    const ASTERISK_ONLY_TOOLS = new Set(['insanaAktar'])
     const toolDeclarations = prepareLiveToolDeclarations(
       model,
       rawTools.filter(t => !ASTERISK_ONLY_TOOLS.has(t.name || '')),

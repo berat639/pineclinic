@@ -1,5 +1,7 @@
 {
+  "id": "voiceaiMetaWaStat01",
   "name": "VoiceAI — Meta WhatsApp Delivery Status Bridge",
+  "active": true,
   "nodes": [
     {
       "parameters": {
@@ -17,60 +19,17 @@
     },
     {
       "parameters": {
-        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body || $input.first().json;\nconst clinicId = $env.VOICEAI_CLINIC_ID;\nconst secret = $env.VOICEAI_N8N_SECRET;\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst statuses = [];\n\nfor (const entry of entries) {\n  for (const change of (entry.changes || [])) {\n    for (const st of (change.value?.statuses || [])) {\n      if (st.id && st.status) {\n        statuses.push({ providerMessageId: st.id, status: st.status });\n      }\n    }\n  }\n}\n\nif (statuses.length === 0) return [];\n\nconst rawBody = JSON.stringify({ statuses });\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst signature = 'sha256=' + crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');\n\nreturn [{ json: { clinicId, rawBody, timestamp, signature } }];"
-      },
-      "id": "sign-status-update",
-      "name": "Extract & Sign Statuses",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [500, 260]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.VOICEAI_BASE_URL + '/api/whatsapp/n8n/' + $json.clinicId + '/status' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-VoiceAI-Timestamp",
-              "value": "={{ $json.timestamp }}"
-            },
-            {
-              "name": "X-VoiceAI-Signature",
-              "value": "={{ $json.signature }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "string",
-        "body": "={{ $json.rawBody }}",
-        "options": {}
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst baseUrl = ($env.VOICEAI_BASE_URL || 'http://voiceai-server:3001').replace(/\\/+$/, '');\nconst defaultClinicId = $env.VOICEAI_CLINIC_ID || 'auto';\nconst secret = $env.VOICEAI_N8N_SECRET || '';\n\nconst res = await fetch(`${baseUrl}/api/whatsapp/n8n-webhook/${encodeURIComponent(defaultClinicId)}`, {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    ...(secret ? { 'X-Webhook-Secret': secret } : {})\n  },\n  body: JSON.stringify(body)\n});\nconst data = await res.json().catch(() => ({}));\nreturn [{ json: { status: res.status, response: data } }];"
       },
       "id": "forward-status-voiceai",
       "name": "Forward Status to VoiceAI",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [760, 260]
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 260]
     }
   ],
   "connections": {
     "Meta Status Webhook (POST)": {
-      "main": [
-        [
-          {
-            "node": "Extract & Sign Statuses",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract & Sign Statuses": {
       "main": [
         [
           {
@@ -86,4 +45,3 @@
     "executionOrder": "v1"
   }
 }
-

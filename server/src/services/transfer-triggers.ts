@@ -60,9 +60,16 @@ export function buildAutomaticTransferRules(nodes: unknown): AutomaticTransferRu
     const data = asRecord(node?.data)
     if (node?.type !== 'ACTION' || data?.action !== 'transfer_call') continue
 
-    const target = typeof data.transferNumber === 'string' ? data.transferNumber.trim() : ''
-    const rawKeywords = typeof data.triggerKeywords === 'string' ? data.triggerKeywords : ''
-    if (!target) continue
+    const target = (typeof data.transferNumber === 'string' && data.transferNumber.trim())
+      ? data.transferNumber.trim()
+      : (typeof data.transferTarget === 'string' && data.transferTarget.trim())
+        ? data.transferTarget.trim()
+        : 'resepsiyon'
+    const rawKeywords = typeof data.triggerKeywords === 'string'
+      ? data.triggerKeywords
+      : typeof data.triggerPhrases === 'string'
+        ? data.triggerPhrases
+        : ''
 
     // Undefined means enabled so transfer nodes saved before this option was
     // introduced keep the safer, confirmation-first behaviour.
@@ -133,8 +140,22 @@ export function findTransferRuleForRequest(
   if (reasonMatch) return reasonMatch
 
   const normalizedTarget = normalizeTransferText(target)
-  const targetRules = rules.filter(rule => normalizeTransferText(rule.target) === normalizedTarget)
-  return targetRules.find(rule => rule.requiresConfirmation) ?? targetRules[0] ?? null
+  const normalizedTargetPhone = normalizeTransferPhoneNumber(target)
+  const targetRules = rules.filter(rule => {
+    if (normalizeTransferText(rule.target) === normalizedTarget) return true
+    const rulePhone = normalizeTransferPhoneNumber(rule.target)
+    if (rulePhone && normalizedTargetPhone && rulePhone === normalizedTargetPhone) return true
+    return false
+  })
+  if (targetRules.length > 0) {
+    return targetRules.find(rule => rule.requiresConfirmation) ?? targetRules[0] ?? null
+  }
+
+  const uniqueRuleIds = new Set(rules.map(rule => rule.id))
+  if (uniqueRuleIds.size === 1) {
+    return rules.find(rule => rule.requiresConfirmation) ?? rules[0] ?? null
+  }
+  return null
 }
 
 /** Normalize a configured Turkish phone target without silently replacing it. */
@@ -171,7 +192,7 @@ export type TransferConfirmation = 'affirmative' | 'negative' | 'unknown'
 /** Bekleyen aktarım için kısa Türkçe onay/red cevaplarını sınıflandırır. */
 export function classifyTransferConfirmation(text: string): TransferConfirmation {
   const normalized = normalizeTransferText(text)
-  if (/\b(?:hayir|degil|yanlis|vazgectim|istemiyorum)\b/.test(normalized)) return 'negative'
-  if (/\b(?:evet|dogru|aynen|olur|tamam|onayliyorum)\b/.test(normalized)) return 'affirmative'
+  if (/\b(?:hayir|degil|yanlis|vazgectim|istemiyorum|gerek yok|aktarma|baglama)\b/.test(normalized)) return 'negative'
+  if (/\b(?:evet|dogru|aynen|olur|tamam|onayliyorum|isterim|istiyorum|aktarin|aktar|aktarabilirsiniz|baglayin|bagla|baglayabilirsiniz|tabii|tabi|lutfen|memnun olurum|sevinirim|iyi olur|hemen|yonlendirin|gecirin)\b/.test(normalized)) return 'affirmative'
   return 'unknown'
 }

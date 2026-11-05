@@ -174,6 +174,14 @@ export async function createPlatformClinic(
   })
 
   invalidateTenantCache(hostname)
+  try {
+    const { ensureClinicInheritedIntegrations } = await import('../../integrations/managed/store')
+    await ensureClinicInheritedIntegrations(created.id)
+  } catch {}
+  try {
+    const { ensureAutomaticEvolutionConfig } = await import('./whatsapp')
+    await ensureAutomaticEvolutionConfig(created.id)
+  } catch {}
   return {
     id: created.id,
     name: created.name,

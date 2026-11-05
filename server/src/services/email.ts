@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer'
 import type { Config } from '../integrations/managed/model'
-import { activeConfig, decrypt, getRow } from '../integrations/managed/store'
-import { describeSmtpError } from '../integrations/managed/workflow'
+import { resolveEffectiveConfig } from '../integrations/managed/store'
+import { describeSmtpError, sendSmtpMailWithFallback } from '../integrations/managed/workflow'
 import { requireClinicId } from '../tenancy/context'
 
 export interface SendEmailOptions {
@@ -14,43 +14,28 @@ export interface SendEmailOptions {
 
 export async function sendEmail({ clinicId, to, subject, text, html }: SendEmailOptions) {
   const targetClinicId = clinicId || requireClinicId()
-  let settings = await activeConfig(targetClinicId, 'smtp')
-  if (!settings) {
-    const row = await getRow(targetClinicId, 'smtp')
-    if (row?.draft) settings = decrypt(row.draft as Config)
+  let settings: Config | null = await resolveEffectiveConfig(targetClinicId, 'smtp')
+
+  if (!settings && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    const envPort = Number(process.env.SMTP_PORT) || 587
+    settings = {
+      host: process.env.SMTP_HOST,
+      port: envPort,
+      secure: envPort === 465 ? 'ssl' : 'tls',
+      username: process.env.SMTP_USER,
+      password: process.env.SMTP_PASS,
+      fromAddress: process.env.SMTP_FROM || process.env.SMTP_USER,
+      fromName: process.env.DEFAULT_CLINIC_NAME || 'Klinik Sistemi',
+    }
   }
 
   // Kontrol: Ayarlar eksik mi?
   if (!settings?.host || !settings.port || !settings.username || !settings.password) {
-    throw new Error('SMTP bağlantısı etkin değil. 💡 Öneri: Panel → Klinikler ekranından E-posta / SMTP kurulumunu tamamlayın.')
+    throw new Error('SMTP bağlantısı etkin değil. 💡 Öneri: Panel → Entegrasyonlar veya Klinikler ekranından E-posta / SMTP kurulumunu tamamlayın.')
   }
 
-  const port = settings.port
-
-  // Güvenlik (Secure) durumunu belirle
-  const secure = port === 465 || settings.secure === 'ssl'
-
-  // Transport nesnesini oluştur
-  const transporter = nodemailer.createTransport({
-    host: settings.host,
-    port: port,
-    secure: secure,
-    requireTLS: !secure,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    auth: {
-      user: settings.username,
-      pass: settings.password,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-  })
-
   try {
-    // E-postayı gönder
-    const info = await transporter.sendMail({
+    const info = await sendSmtpMailWithFallback(settings, {
       from: `"${settings.fromName || 'Klinik Sistemi'}" <${settings.fromAddress || settings.username}>`,
       to: Array.isArray(to) ? to.join(', ') : to,
       subject,
@@ -62,7 +47,5 @@ export async function sendEmail({ clinicId, to, subject, text, html }: SendEmail
     return info
   } catch (err: any) {
     throw new Error(describeSmtpError(err, settings))
-  } finally {
-    transporter.close()
   }
 }
