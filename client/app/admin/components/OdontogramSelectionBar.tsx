@@ -1,5 +1,5 @@
 import React from 'react'
-import { X } from 'lucide-react'
+import { Trash2, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import styles from './PineTreatmentPlan.module.css'
 
@@ -11,6 +11,11 @@ export interface OdontogramSelectionBarProps {
   resolveProcColor: (item: any) => string
   onToothClick?: (tooth: number, event: React.MouseEvent) => void
   onToothContextMenu?: (tooth: number, event: React.MouseEvent) => void
+  toothSections?: Record<number, string>
+  updateSection?: (tooth: number, section: string | null) => void
+  toothSurfaces?: Record<number, string[]>
+  updateSurfaces?: (tooth: number, surfaces: string[]) => void
+  onClearAllSelections?: () => void
 }
 
 const REGION_LABELS: Record<string, string> = {
@@ -29,6 +34,11 @@ export function OdontogramSelectionBar({
   resolveProcColor,
   onToothClick,
   onToothContextMenu,
+  toothSections,
+  updateSection,
+  toothSurfaces,
+  updateSurfaces,
+  onClearAllSelections,
 }: OdontogramSelectionBarProps) {
   const safeSelected = Array.isArray(selected) ? selected : []
   const safeDrafts = drafts || {}
@@ -70,6 +80,11 @@ export function OdontogramSelectionBar({
   }
 
   const handleDeselectTooth = (tooth: number) => {
+    const hasDrafts = Array.isArray(safeDrafts[String(tooth)]) && safeDrafts[String(tooth)].length > 0
+    if (!hasDrafts) {
+      updateSection?.(tooth, null)
+      updateSurfaces?.(tooth, [])
+    }
     setSelected(prev => prev.filter(n => n !== tooth))
   }
 
@@ -81,11 +96,16 @@ export function OdontogramSelectionBar({
         { icon: '⚠️', id: 'completed-edit-warn' }
       )
     }
+    const currentList = Array.isArray(safeDrafts?.[targetKey]) ? safeDrafts[targetKey] : []
+    const remainingAfterRemove = item?.id
+      ? currentList.filter((row: any) => row.id !== item.id)
+      : currentList.filter((_: any, idx: number) => idx !== itemIndex)
+
     setDrafts((previous: Record<string, any[]>) => {
-      const currentList = Array.isArray(previous?.[targetKey]) ? previous[targetKey] : []
+      const prevList = Array.isArray(previous?.[targetKey]) ? previous[targetKey] : []
       const nextList = item?.id
-        ? currentList.filter((row: any) => row.id !== item.id)
-        : currentList.filter((_: any, idx: number) => idx !== itemIndex)
+        ? prevList.filter((row: any) => row.id !== item.id)
+        : prevList.filter((_: any, idx: number) => idx !== itemIndex)
       const next = { ...previous }
       if (nextList.length > 0) {
         next[targetKey] = nextList
@@ -94,6 +114,63 @@ export function OdontogramSelectionBar({
       }
       return next
     })
+
+    if (remainingAfterRemove.length === 0 && /^[1-4][1-8]$/.test(targetKey)) {
+      const toothNum = Number(targetKey)
+      updateSection?.(toothNum, null)
+      updateSurfaces?.(toothNum, [])
+    }
+  }
+
+  const selectedTeethHasDrafts = safeSelected.some(t => {
+    const list = safeDrafts[String(t)] || []
+    return Array.isArray(list) && list.some((item: any) => !item?.locked)
+  })
+
+  const selectedTeethHasLayersOrSurfaces = safeSelected.some(t => {
+    return Boolean(toothSections?.[t]) || Boolean(toothSurfaces?.[t]?.length)
+  })
+
+  const handleDeleteSelectedTeethItems = () => {
+    if (safeSelected.length === 0) return
+    let touchesCompleted = false
+    for (const t of safeSelected) {
+      const list = safeDrafts[String(t)] || []
+      if (Array.isArray(list) && list.some((row: any) => !row?.locked && (row?.wasCompleted || row?.status === 'completed'))) {
+        touchesCompleted = true
+      }
+    }
+    if (touchesCompleted) {
+      toast(
+        '⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.',
+        { icon: '⚠️', id: 'completed-edit-warn' }
+      )
+    }
+
+    setDrafts((previous: Record<string, any[]>) => {
+      const next = { ...previous }
+      for (const t of safeSelected) {
+        const key = String(t)
+        const list = Array.isArray(next[key]) ? next[key] : []
+        const lockedOnly = list.filter((row: any) => row?.locked)
+        if (lockedOnly.length > 0) {
+          next[key] = lockedOnly
+        } else {
+          delete next[key]
+        }
+      }
+      return next
+    })
+
+    for (const t of safeSelected) {
+      const lockedOnly = (safeDrafts[String(t)] || []).filter((row: any) => row?.locked)
+      if (lockedOnly.length === 0) {
+        updateSection?.(t, null)
+        updateSurfaces?.(t, [])
+      }
+    }
+
+    setSelected([])
   }
 
   return (
@@ -474,30 +551,71 @@ export function OdontogramSelectionBar({
   })}
 
       {safeSelected.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setSelected([])}
+        <div
           style={{
             marginLeft: 'auto',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 4,
-            padding: '3px 8px',
-            borderRadius: 7,
-            border: '1px solid var(--pc-border)',
-            background: 'var(--card-bg)',
-            color: 'var(--pc-tint-fg)',
-            fontSize: 11,
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: 'var(--pc-clay-btn)',
-            whiteSpace: 'nowrap',
+            gap: 5,
             flexShrink: 0,
           }}
         >
-          <X size={11} strokeWidth={2.4} />
-          <span>Seçimi Temizle</span>
-        </button>
+          {(selectedTeethHasDrafts || selectedTeethHasLayersOrSurfaces) && (
+            <button
+              type="button"
+              onClick={handleDeleteSelectedTeethItems}
+              title="Seçili dişlerin işlemlerini ve katmanlarını sil"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 7,
+                border: '1px solid var(--danger, #ef4444)',
+                background: 'var(--card-bg)',
+                color: 'var(--danger, #ef4444)',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: 'var(--pc-clay-btn)',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <Trash2 size={11} strokeWidth={2.3} />
+              <span>Seçilenleri Sil</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (onClearAllSelections) {
+                onClearAllSelections()
+              } else {
+                setSelected([])
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              borderRadius: 7,
+              border: '1px solid var(--pc-border)',
+              background: 'var(--card-bg)',
+              color: 'var(--pc-tint-fg)',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: 'var(--pc-clay-btn)',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            <X size={11} strokeWidth={2.4} />
+            <span>Seçimi Temizle</span>
+          </button>
+        </div>
       )}
     </div>
   )

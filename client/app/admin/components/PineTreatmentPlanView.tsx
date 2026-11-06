@@ -269,15 +269,29 @@ export default function PineTreatmentPlanView(p: any) {
     if (item?.wasCompleted || item?.status === 'completed') {
       toast('⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
     }
+    const remaining = (p.drafts?.[target] || []).filter((row: any) => row.id !== itemId)
     p.setDrafts((previous: any) => {
       const next = { ...previous, [target]: (previous[target] || []).filter((row: any) => row.id !== itemId) }
       if (next[target]?.length === 0) delete next[target]
       return next
     })
+    if (remaining.length === 0 && /^[1-4][1-8]$/.test(target)) {
+      const toothNum = Number(target)
+      p.updateSection?.(toothNum, null)
+      p.updateSurfaces?.(toothNum, [])
+    }
   }
   const removeGroupEntries = (entries: GroupedToothEntry[]) => {
     if (entries.some(e => e.item?.wasCompleted || e.item?.status === 'completed')) {
       toast('⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.', { icon: '⚠️', id: 'completed-edit-warn' })
+    }
+    const emptiedNumericTeeth = new Set<number>()
+    for (const entry of entries) {
+      if (/^[1-4][1-8]$/.test(entry.target)) {
+        const removingIds = new Set(entries.filter(e => e.target === entry.target).map(e => e.item.id))
+        const left = (p.drafts?.[entry.target] || []).filter((row: any) => !removingIds.has(row.id))
+        if (left.length === 0) emptiedNumericTeeth.add(Number(entry.target))
+      }
     }
     p.setDrafts((previous: any) => {
       const next = { ...previous }
@@ -289,6 +303,27 @@ export default function PineTreatmentPlanView(p: any) {
       }
       return next
     })
+    emptiedNumericTeeth.forEach(toothNum => {
+      p.updateSection?.(toothNum, null)
+      p.updateSurfaces?.(toothNum, [])
+    })
+  }
+  const clearAllOdontogramSelections = () => {
+    const candidateTeeth = new Set<number>([
+      ...(Array.isArray(p.selected) ? p.selected.map(Number) : []),
+      ...Object.keys(p.toothSections || {}).map(Number),
+      ...Object.keys(p.toothSurfaces || {}).map(Number),
+    ])
+    candidateTeeth.forEach(toothNum => {
+      if (!Number.isFinite(toothNum) || toothNum <= 0) return
+      const hasDrafts = Array.isArray(p.drafts?.[toothNum]) && p.drafts[toothNum].length > 0
+      const hasStrDrafts = Array.isArray(p.drafts?.[String(toothNum)]) && p.drafts[String(toothNum)].length > 0
+      if (!hasDrafts && !hasStrDrafts) {
+        p.updateSection?.(toothNum, null)
+        p.updateSurfaces?.(toothNum, [])
+      }
+    })
+    p.setSelected?.([])
   }
   const apply = (targets: (number | string)[], proc = selectedProcedure, inds = indications, mats = materials) => {
     const mergedInds = proc ? getLinkedIndicationsForProcedure(indicationLinks, proc, inds) : inds
@@ -1200,7 +1235,7 @@ export default function PineTreatmentPlanView(p: any) {
       <section className={styles.section} aria-label="Odontogram">
         <div className={styles.sectionHeading}><span className={styles.step}>2</span><h2>Odontogram</h2><span className={styles.description}>{p.mode === '2d-anatomical' ? 'Tek diş seçin · Anatomik alt katmanları çoklu veya tümüyle seçin · Sağ tık ile yüzey/katman açın.' : 'Diş seçin · Shift ile aralık seçin · Sağ tık ile işlemleri açın.'}</span>
           <div className={styles.chartActions}>
-            <button className={`${styles.button} ${styles.small}`} type="button" onClick={() => p.setSelected([])}>Seçimi temizle</button>
+            <button className={`${styles.button} ${styles.small}`} type="button" onClick={clearAllOdontogramSelections}>Seçimi temizle</button>
             <select className={styles.select} value={p.jaw} aria-label="Çene seçimi" onChange={event => p.changeJaw(event.target.value)}><option value="all">Tüm ağız</option><option value="upper">Üst çene</option><option value="lower">Alt çene</option></select>
             <div className={styles.segment}>
               <button type="button" className={`${styles.button} ${p.mode === '2d' ? styles.primary : ''}`} aria-pressed={p.mode === '2d'} onClick={() => p.setMode('2d')}>2B Chart</button>
@@ -1217,6 +1252,11 @@ export default function PineTreatmentPlanView(p: any) {
           resolveProcColor={resolveProcColor}
           onToothClick={p.clickTooth}
           onToothContextMenu={p.onContextMenu}
+          toothSections={p.toothSections}
+          updateSection={p.updateSection}
+          toothSurfaces={p.toothSurfaces}
+          updateSurfaces={p.updateSurfaces}
+          onClearAllSelections={clearAllOdontogramSelections}
         />
         {p.mode === '2d' ? (
           <div className={styles.chart}>
@@ -1811,6 +1851,12 @@ export default function PineTreatmentPlanView(p: any) {
       updateSection={p.updateSection}
       openMaterials={setMaterialRow}
       onRemoveDraft={p.onRemoveDraft || ((teeth: number[], draftId?: string, procName?: string) => {
+        const emptiedTeeth: number[] = []
+        teeth.forEach((t: number) => {
+          const tk = String(t)
+          const left = (p.drafts?.[tk] || []).filter((item: any) => draftId ? item.id !== draftId : item.name !== procName)
+          if (left.length === 0) emptiedTeeth.push(t)
+        })
         p.setDrafts((prev: any) => {
           const next = { ...prev }
           teeth.forEach((t: number) => {
@@ -1821,6 +1867,10 @@ export default function PineTreatmentPlanView(p: any) {
             }
           })
           return next
+        })
+        emptiedTeeth.forEach(t => {
+          p.updateSection?.(t, null)
+          p.updateSurfaces?.(t, [])
         })
       })}
       onClearTeethDrafts={p.onClearTeethDrafts || ((teeth: number[]) => {
@@ -1833,6 +1883,10 @@ export default function PineTreatmentPlanView(p: any) {
             }
           })
           return next
+        })
+        teeth.forEach((t: number) => {
+          p.updateSection?.(t, null)
+          p.updateSurfaces?.(t, [])
         })
       })}
     />

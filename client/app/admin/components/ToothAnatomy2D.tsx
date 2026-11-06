@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { toast } from 'react-hot-toast'
-import { Check, CheckSquare, Crosshair, Maximize2, Minimize2, Plus, RotateCcw, ZoomIn } from 'lucide-react'
+import { Check, CheckSquare, Crosshair, Maximize2, Minimize2, Plus, RotateCcw, Trash2, X, ZoomIn } from 'lucide-react'
 import { UPPER_TEETH, LOWER_TEETH } from './ToothChip'
 import { TOOTH_NAMES } from './Odontogram3D'
 
@@ -1130,23 +1130,35 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
       ? p.selectedTeeth
       : []
 
-  // Enforce single-tooth selection when in 2B Anatomik mode
+  // Enforce single-tooth selection when in 2B Anatomik mode (do not force re-select when cleared)
   const activeTooth: number = rawSelected.length > 0 ? Number(rawSelected[0]) : fallbackTooth
   const activeMorphology = getToothRootMorphology(activeTooth)
 
   useEffect(() => {
     if (rawSelected.length > 1) {
       const single = Number(rawSelected[0])
+      setFallbackTooth(single)
       p.setSelected?.([single])
       p.setSelectedTeeth?.([single])
-    } else if (rawSelected.length === 0) {
-      p.setSelected?.([fallbackTooth])
-      p.setSelectedTeeth?.([fallbackTooth])
+    } else if (rawSelected.length === 1 && Number(rawSelected[0]) !== fallbackTooth) {
+      setFallbackTooth(Number(rawSelected[0]))
     }
-  }, [rawSelected.length])
+  }, [rawSelected.length, rawSelected[0]])
 
   const selectSingleTooth = (tooth: number) => {
     setFallbackTooth(tooth)
+    p.setSelected?.([tooth])
+    p.setSelectedTeeth?.([tooth])
+    p.onSelectSingleTooth?.(tooth)
+  }
+
+  const toggleOrSelectSingleTooth = (tooth: number) => {
+    setFallbackTooth(tooth)
+    if (rawSelected.length === 1 && Number(rawSelected[0]) === tooth) {
+      p.setSelected?.([])
+      p.setSelectedTeeth?.([])
+      return
+    }
     p.setSelected?.([tooth])
     p.setSelectedTeeth?.([tooth])
     p.onSelectSingleTooth?.(tooth)
@@ -1225,6 +1237,123 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
 
   const handleClearRegions = (toothNum: number) => {
     applyRegionsToTooth(toothNum, [])
+  }
+
+  const activeToothItems: any[] =
+    draftsMap[activeTooth] || draftsMap[String(activeTooth)] || []
+
+  const hasAnySelectedRegions =
+    selectedRegions.length > 0 ||
+    Object.values(localSectionsMap).some(arr => Array.isArray(arr) && arr.length > 0) ||
+    Object.values(sectionsMap).some(val => Boolean(val && String(val).trim()))
+
+  const handleRemoveProcedureFromTooth = (toothNum: number, item: any, itemIdx: number) => {
+    if (item?.locked) return
+    if (item?.wasCompleted || item?.status === 'completed') {
+      toast(
+        '⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.',
+        { icon: '⚠️', id: 'completed-edit-warn' }
+      )
+    }
+    const targetKey = String(toothNum)
+    const currentList: any[] = Array.isArray(draftsMap[targetKey])
+      ? draftsMap[targetKey]
+      : Array.isArray(draftsMap[toothNum])
+        ? draftsMap[toothNum]
+        : []
+    const nextList = item?.id
+      ? currentList.filter((row: any) => row.id !== item.id)
+      : currentList.filter((_: any, idx: number) => idx !== itemIdx)
+
+    if (p.setDrafts) {
+      p.setDrafts((previous: Record<string, any[]>) => {
+        const prevList = Array.isArray(previous?.[targetKey])
+          ? previous[targetKey]
+          : Array.isArray(previous?.[toothNum])
+            ? previous[toothNum]
+            : []
+        const filtered = item?.id
+          ? prevList.filter((row: any) => row.id !== item.id)
+          : prevList.filter((_: any, idx: number) => idx !== itemIdx)
+        const next = { ...previous }
+        delete next[toothNum as any]
+        if (filtered.length > 0) {
+          next[targetKey] = filtered
+        } else {
+          delete next[targetKey]
+        }
+        return next
+      })
+    }
+
+    if (nextList.length === 0) {
+      applyRegionsToTooth(toothNum, [])
+      p.updateSurfaces?.(toothNum, [])
+      p.onUpdateSurfaces?.(toothNum, [])
+    }
+  }
+
+  const handleDeleteSelectedIn2D = () => {
+    const targetTeeth = Array.from(
+      new Set<number>([
+        ...(rawSelected.length > 0 ? rawSelected.map(Number) : [activeTooth]),
+        ...Object.keys(localSectionsMap).map(Number),
+        ...Object.keys(sectionsMap).map(Number),
+      ])
+    ).filter(n => Number.isFinite(n) && n > 0)
+
+    const teethToRemoveDrafts = rawSelected.length > 0 ? rawSelected.map(Number) : [activeTooth]
+    let removedCompleted = false
+
+    for (const t of teethToRemoveDrafts) {
+      const items: any[] = draftsMap[t] || draftsMap[String(t)] || []
+      if (items.some(row => !row?.locked && (row?.wasCompleted || row?.status === 'completed'))) {
+        removedCompleted = true
+      }
+    }
+
+    if (removedCompleted) {
+      toast(
+        '⚠️ Tamamlanmış bir işlem kaldırıldı. Planı kaydederken onayınız istenecektir.',
+        { icon: '⚠️', id: 'completed-edit-warn' }
+      )
+    }
+
+    if (p.setDrafts) {
+      p.setDrafts((previous: Record<string, any[]>) => {
+        const next = { ...previous }
+        for (const t of teethToRemoveDrafts) {
+          const key = String(t)
+          const list = Array.isArray(next[key])
+            ? next[key]
+            : Array.isArray(next[t as any])
+              ? next[t as any]
+              : []
+          const lockedOnly = list.filter((row: any) => row?.locked)
+          delete next[t as any]
+          if (lockedOnly.length > 0) {
+            next[key] = lockedOnly
+          } else {
+            delete next[key]
+          }
+        }
+        return next
+      })
+    }
+
+    setLocalSectionsMap({})
+    for (const t of targetTeeth) {
+      const lockedDrafts = (draftsMap[t] || draftsMap[String(t)] || []).filter((r: any) => r?.locked)
+      if (lockedDrafts.length === 0) {
+        p.updateSection?.(t, null)
+        p.onUpdateSection?.(t, null)
+        p.updateSurfaces?.(t, [])
+        p.onUpdateSurfaces?.(t, [])
+      }
+    }
+
+    p.setSelected?.([])
+    p.setSelectedTeeth?.([])
   }
 
   const handleApplyActiveTreatmentToRegions = () => {
@@ -1324,7 +1453,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
             }}
           >
             {teeth.map(toothNum => {
-              const isSelected = activeTooth === toothNum
+              const isSelected = rawSelected.includes(toothNum)
               const toothItems: any[] = draftsMap[toothNum] || draftsMap[String(toothNum)] || []
               const activeColors = toothItems.map(item => resolveColor(item)).filter(Boolean)
               const toothRegions = getRegionsForTooth(toothNum)
@@ -1341,7 +1470,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                   aria-pressed={isSelected}
                   data-selected={isSelected ? 'true' : undefined}
                   data-has-draft={activeColors.length > 0 ? 'true' : undefined}
-                  onClick={() => selectSingleTooth(toothNum)}
+                  onClick={() => toggleOrSelectSingleTooth(toothNum)}
                   onKeyDown={event => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
@@ -1698,6 +1827,31 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
               >
                 <RotateCcw size={10} />
                 <span>Sıfırla</span>
+              </button>
+            )}
+
+            {(rawSelected.length > 0 || hasAnySelectedRegions || activeToothItems.length > 0) && (
+              <button
+                type="button"
+                onClick={handleDeleteSelectedIn2D}
+                title="Seçili dişin atanan işlemlerini, katmanlarını ve seçimini sil"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  border: '1px solid var(--danger, #ef4444)',
+                  background: 'var(--card-bg)',
+                  color: 'var(--danger, #ef4444)',
+                  boxShadow: 'var(--pc-clay-btn)',
+                }}
+              >
+                <Trash2 size={11} />
+                <span>Seçilenleri Sil</span>
               </button>
             )}
 
@@ -2070,6 +2224,118 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                   })}
                 </div>
               </div>
+
+              {/* Bu Dişe Atanan Mevcut İşlemler (Silme & İnceleme Çubuğu) */}
+              {activeToothItems.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    background: 'var(--card-inner, var(--pc-surface))',
+                    border: '1px solid var(--pc-border, var(--input-border))',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--foreground)' }}>
+                      #{activeTooth} Atanan İşlemler:
+                    </span>
+                    {activeToothItems.map((item: any, idx: number) => {
+                      const itemColor = resolveColor(item)
+                      const regionText = formatToothRegionShortLabel(item?.section)
+                      return (
+                        <span
+                          key={`${activeTooth}-assigned-${item?.id || idx}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            background: 'var(--card-bg)',
+                            border: '1px solid var(--pc-border, var(--input-border))',
+                            color: 'var(--foreground)',
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              background: itemColor,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span>{item?.name}</span>
+                          {regionText && (
+                            <span
+                              style={{
+                                padding: '0 4px',
+                                borderRadius: 4,
+                                background: 'var(--pc-tint)',
+                                color: 'var(--pc-tint-fg)',
+                                fontSize: 9.5,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {regionText}
+                            </span>
+                          )}
+                          {!item?.locked && (
+                            <button
+                              type="button"
+                              aria-label={`#${activeTooth} ${item?.name} işlemini kaldır`}
+                              title={`${item?.name} işlemini kaldır`}
+                              onClick={() => handleRemoveProcedureFromTooth(activeTooth, item, idx)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 15,
+                                height: 15,
+                                padding: 0,
+                                borderRadius: 4,
+                                border: 0,
+                                background: 'var(--pc-tint)',
+                                color: 'var(--danger, #ef4444)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <X size={11} strokeWidth={2.5} />
+                            </button>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedIn2D}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '4px 9px',
+                      borderRadius: 6,
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      border: '1px solid var(--danger, #ef4444)',
+                      background: 'var(--card-bg)',
+                      color: 'var(--danger, #ef4444)',
+                    }}
+                  >
+                    <Trash2 size={11} />
+                    <span>Seçilenleri Sil</span>
+                  </button>
+                </div>
+              )}
 
               {/* Seçili Tedavi / Endikasyon Varsa Hızlı Uygulama Çubuğu */}
               {(p.selectedProcedure || (Array.isArray(p.selectedIndications) && p.selectedIndications.length > 0)) && (

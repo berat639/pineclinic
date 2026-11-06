@@ -2339,13 +2339,24 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
   };
   const updateSurfaces = (tooth: number, surfaces: string[]) => {
     if ((toothDrafts[tooth] || []).some(item => item.locked)) return;
-    setToothSurfaces(previous => ({ ...previous, [tooth]: surfaces }));
-    setToothDrafts(previous => ({ ...previous, [tooth]: (previous[tooth] || []).map(item => ({ ...item, surface: surfaces.join('') || undefined })) }));
+    setToothSurfaces(previous => {
+      const next = { ...previous };
+      if (surfaces && surfaces.length > 0) next[tooth] = surfaces;
+      else delete next[tooth];
+      return next;
+    });
+    setToothDrafts(previous => {
+      if (!previous[tooth]?.length) return previous;
+      return { ...previous, [tooth]: previous[tooth].map(item => ({ ...item, surface: surfaces.join('') || undefined })) };
+    });
   };
   const updateSection = (tooth: number, section: string | null) => {
     if ((toothDrafts[tooth] || []).some(item => item.locked)) return;
     setToothSections(previous => { const next = { ...previous }; if (section) next[tooth] = section; else delete next[tooth]; return next; });
-    setToothDrafts(previous => ({ ...previous, [tooth]: (previous[tooth] || []).map(item => ({ ...item, section: section || undefined })) }));
+    setToothDrafts(previous => {
+      if (!previous[tooth]?.length) return previous;
+      return { ...previous, [tooth]: previous[tooth].map(item => ({ ...item, section: section || undefined })) };
+    });
   };
 
   const handleAttachmentSaved = (nextAttachments: PlanAttachment[], uploaded?: PlanAttachment) => {
