@@ -34,8 +34,13 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
 
   const headers = new Headers(req.headers)
   for (const [name, value] of Object.entries(getTenantForwardingHeaders(req))) headers.set(name, value)
-  headers.delete('host')
-  headers.delete('connection')
+  // Fetch constructs its own HTTP framing. Forwarding hop-by-hop headers from
+  // the incoming proxy connection (especially transfer-encoding) makes
+  // undici reject the request before it reaches the backend.
+  const connectionHeaders = headers.get('connection')?.split(',') ?? []
+  for (const name of [...connectionHeaders, 'host', 'connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'te', 'trailer', 'upgrade', 'content-length']) {
+    if (name.trim()) headers.delete(name.trim())
+  }
 
   try {
     const options: RequestInit = {
@@ -45,7 +50,8 @@ async function handleProxy(req: NextRequest, proxyPath: string[]) {
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      options.body = await req.arrayBuffer()
+      const body = await req.arrayBuffer()
+      if (body.byteLength > 0) options.body = body
     }
 
     const response = await fetchBackend(targetPath, options)
