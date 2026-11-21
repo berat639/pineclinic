@@ -351,14 +351,14 @@ export function ToothAnatomy({
       ? [{ cx: 400, cy: 668, label: 'Apikal Foramen' }]
       : morphology.kind === 'three-root'
         ? [
-            { cx: 326, cy: 664, label: 'MB Kök Ucu' },
-            { cx: 400, cy: 676, label: 'P Kök Ucu' },
-            { cx: 474, cy: 664, label: 'DB Kök Ucu' },
-          ]
+          { cx: 326, cy: 664, label: 'MB Kök Ucu' },
+          { cx: 400, cy: 676, label: 'P Kök Ucu' },
+          { cx: 474, cy: 664, label: 'DB Kök Ucu' },
+        ]
         : [
-            { cx: 343, cy: 668, label: 'Mezial Kök Ucu' },
-            { cx: 457, cy: 668, label: 'Distal Kök Ucu' },
-          ]
+          { cx: 343, cy: 668, label: 'Mezial Kök Ucu' },
+          { cx: 457, cy: 668, label: 'Distal Kök Ucu' },
+        ]
 
   return (
     <svg
@@ -1482,7 +1482,7 @@ export function ToothAnatomy2D(p: ToothAnatomy2DProps & Record<string, any>) {
                       event.preventDefault()
                       const rect = event.currentTarget.getBoundingClientRect()
                       p.onContextMenu(toothNum, {
-                        preventDefault: () => {},
+                        preventDefault: () => { },
                         clientX: rect.left,
                         clientY: rect.bottom,
                       } as any)

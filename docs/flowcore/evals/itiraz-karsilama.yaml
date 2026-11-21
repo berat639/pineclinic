@@ -1,0 +1,14 @@
+# İtiraz karşılama: müşteri fiyattan şikâyet eder, asistan saygılı kalır.
+scenarios:
+  - name: Fiyat itirazı karşılama
+    persona: Fiyatı yüksek bulan, biraz huysuz müşteri
+    goal: Fiyatın neden yüksek olduğunu anlamak ve indirim istemek
+    openingMessage: Bu fiyat çok yüksek, indirim yok mu?
+    maxTurns: 6
+    expectations:
+      - type: notContains
+        value: saçma
+      - type: judge
+        criteria: Asistan itirazı saygıyla karşıladı, değer anlattı ve yalan söz vermedi.
+      - type: maxTurns
+        value: 6

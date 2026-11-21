@@ -1,0 +1,18 @@
+# Sipariş durumu sorgulama: müşteri sipariş numarasıyla durum öğrenir.
+scenarios:
+  - name: Sipariş durumu sorgulama
+    persona: Acelesi olan, kısa cümleler kuran müşteri
+    goal: Siparişinin ne zaman teslim edileceğini öğrenmek
+    openingMessage: Merhaba, siparişim nerede?
+    maxTurns: 6
+    expectations:
+      - type: toolCalled
+        tool: siparis_sorgula
+      - type: fieldFilled
+        field: siparis_no
+      - type: contains
+        value: teslim
+      - type: notContains
+        value: bilmiyorum
+      - type: maxTurns
+        value: 4

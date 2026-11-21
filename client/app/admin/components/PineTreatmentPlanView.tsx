@@ -129,7 +129,7 @@ export default function PineTreatmentPlanView(p: any) {
         const next = updater(prev)
         try {
           window.localStorage.setItem('voiceai_indication_procedure_links', JSON.stringify(next))
-        } catch {}
+        } catch { }
         return next
       })
     }
@@ -507,7 +507,7 @@ export default function PineTreatmentPlanView(p: any) {
         rec.onerror = null
         rec.onresult = null
         rec.stop()
-      } catch {}
+      } catch { }
     }
   }
 
@@ -630,12 +630,12 @@ export default function PineTreatmentPlanView(p: any) {
         const mappedMats =
           action.materials.length > 0
             ? action.materials.map(m => ({
-                inventoryItemId: m.inventoryItemId,
-                name: m.name,
-                quantity: Number(m.quantity) || 1,
-                unitCost: Number(m.unitCost) || 0,
-                unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
-              }))
+              inventoryItemId: m.inventoryItemId,
+              name: m.name,
+              quantity: Number(m.quantity) || 1,
+              unitCost: Number(m.unitCost) || 0,
+              unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
+            }))
             : (proc?.materials || []).map((m: any) => ({ ...m }))
 
         ctx.setDrafts?.((prev: any) => {
@@ -680,12 +680,12 @@ export default function PineTreatmentPlanView(p: any) {
         const mappedMats =
           action.materials.length > 0
             ? action.materials.map(m => ({
-                inventoryItemId: m.inventoryItemId,
-                name: m.name,
-                quantity: Number(m.quantity) || 1,
-                unitCost: Number(m.unitCost) || 0,
-                unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
-              }))
+              inventoryItemId: m.inventoryItemId,
+              name: m.name,
+              quantity: Number(m.quantity) || 1,
+              unitCost: Number(m.unitCost) || 0,
+              unitSalePriceMinor: Number(m.unitSalePriceMinor) || 0,
+            }))
             : (proc?.materials || []).map((m: any) => ({ ...m }))
 
         const normalizedTargets: (number | string)[] = validTargets.map(t => {

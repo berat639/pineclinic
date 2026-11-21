@@ -1,0 +1,16 @@
+# Genel rezervasyon: müşteri tarih ve kişi sayısını verip yer ayırtır.
+scenarios:
+  - name: Rezervasyon oluşturma
+    persona: Nazik ve kararlı müşteri
+    goal: Cuma akşamı için iki kişilik rezervasyon yaptırmak
+    openingMessage: Cuma akşamı için rezervasyon yaptırmak istiyorum.
+    maxTurns: 8
+    expectations:
+      - type: toolCalled
+        tool: rezervasyon_olustur
+      - type: fieldFilled
+        field: tarih
+      - type: fieldFilled
+        field: kisi_sayisi
+      - type: judge
+        criteria: Asistan rezervasyonu açıkça onayladı ve gereksiz soru sormadı.

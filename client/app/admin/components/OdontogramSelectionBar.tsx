@@ -474,81 +474,81 @@ export function OdontogramSelectionBar({
               const procColor = resolveProcColor ? resolveProcColor(item) : (item?.color || '#0284c7')
               const isCompleted = Boolean(item?.wasCompleted || item?.status === 'completed')
 
-          return (
-            <span
-              key={`${regionKey}-${item?.id || item?.name || idx}-${idx}`}
-              title={`${label} · ${item?.name || 'İşlem'}${isCompleted ? ' (Tamamlandı)' : ''}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '2px 6px',
-                borderRadius: 6,
-                background: 'var(--pc-surface)',
-                border: '1px solid var(--pc-border)',
-                color: 'var(--foreground)',
-                fontSize: 11.5,
-                fontWeight: 650,
-                lineHeight: 1.25,
-                maxWidth: 210,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: procColor,
-                  boxShadow: '0 0 0 1px rgba(15, 23, 42, 0.18)',
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: 'var(--foreground)',
-                }}
-              >
-                {item?.name}
-              </span>
-              {!item?.locked && (
-                <button
-                  type="button"
-                  aria-label={`${label} ${item?.name} işlemini kaldır`}
-                  title={`${item?.name} işlemini kaldır`}
-                  onClick={event => {
-                    event.stopPropagation()
-                    handleRemoveProcedure(regionKey, item, idx)
-                  }}
+              return (
+                <span
+                  key={`${regionKey}-${item?.id || item?.name || idx}-${idx}`}
+                  title={`${label} · ${item?.name || 'İşlem'}${isCompleted ? ' (Tamamlandı)' : ''}`}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 15,
-                    height: 15,
-                    padding: 0,
-                    marginLeft: 1,
-                    borderRadius: 4,
-                    border: 0,
-                    background: 'var(--pc-tint)',
-                    color: 'var(--danger, #ef4444)',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                    lineHeight: 1,
+                    gap: 5,
+                    padding: '2px 6px',
+                    borderRadius: 6,
+                    background: 'var(--pc-surface)',
+                    border: '1px solid var(--pc-border)',
+                    color: 'var(--foreground)',
+                    fontSize: 11.5,
+                    fontWeight: 650,
+                    lineHeight: 1.25,
+                    maxWidth: 210,
                   }}
                 >
-                  <X size={11} strokeWidth={2.5} />
-                </button>
-              )}
-            </span>
-          )
-        })}
-      </div>
-    )
-  })}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: procColor,
+                      boxShadow: '0 0 0 1px rgba(15, 23, 42, 0.18)',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    {item?.name}
+                  </span>
+                  {!item?.locked && (
+                    <button
+                      type="button"
+                      aria-label={`${label} ${item?.name} işlemini kaldır`}
+                      title={`${item?.name} işlemini kaldır`}
+                      onClick={event => {
+                        event.stopPropagation()
+                        handleRemoveProcedure(regionKey, item, idx)
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 15,
+                        height: 15,
+                        padding: 0,
+                        marginLeft: 1,
+                        borderRadius: 4,
+                        border: 0,
+                        background: 'var(--pc-tint)',
+                        color: 'var(--danger, #ef4444)',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        lineHeight: 1,
+                      }}
+                    >
+                      <X size={11} strokeWidth={2.5} />
+                    </button>
+                  )}
+                </span>
+              )
+            })}
+          </div>
+        )
+      })}
 
       {safeSelected.length > 0 && (
         <div

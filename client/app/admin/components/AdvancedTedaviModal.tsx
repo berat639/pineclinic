@@ -107,7 +107,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem('voiceai_indication_procedure_links', JSON.stringify(indicationLinks));
-    } catch {}
+    } catch { }
   }, [indicationLinks]);
   const [jawSelection, setJawSelection] = useState<'all' | 'upper' | 'lower'>('all');
   const [toothSurfaces, setToothSurfaces] = useState<Record<number, string[]>>({});
@@ -251,7 +251,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ patientId: matched.id }),
-              }).catch(() => {});
+              }).catch(() => { });
             }
             return matched.id;
           }
@@ -277,7 +277,7 @@ export default function AdvancedTedaviModal({ selectedEvent, patientInfo, clinic
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ patientId: created.id }),
-            }).catch(() => {});
+            }).catch(() => { });
           }
           return created.id;
         }
