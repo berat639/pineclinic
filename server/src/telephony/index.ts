@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { ConversationLog } from './conversation-log'
 import { StartSensitivity, EndSensitivity, type GoogleGenAI } from '@google/genai'
 
 import { createLiveSession } from '../gemini'
@@ -404,6 +405,7 @@ const MAX_MAX_CALL_SECONDS = 15 * 60
 
 /** Tek bir AudioSocket bağlantısı için durum. */
 interface CallState {
+  conversationLog: ConversationLog
   shortId: string
   info: SharedSessionInfo
   parser: AudioSocketParser
@@ -564,6 +566,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
         }
 
         const state: CallState = {
+          conversationLog: new ConversationLog(shortId),
           shortId,
           info,
           parser: new AudioSocketParser(),
@@ -600,6 +603,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           startWaitMs: 400,
         }
         socket.data = state
+        state.conversationLog.event('çağrı_başladı')
 
         const openMicrophoneAfterGreeting = (reason: string) => {
           if (state.closed || state.hangupPending || state.maxLimitReached || state.greetingCompleted || state.micEnabled || state.micOpenTimer) return
@@ -613,6 +617,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             if (state.closed || state.hangupPending || state.maxLimitReached || state.greetingCompleted || state.micEnabled) return
             state.greetingCompleted = true
             state.micEnabled = true
+            state.conversationLog.event('mikrofon_açıldı', { reason })
             console.log(`[${shortId}] ${reason} — mikrofon açıldı`)
             startSilenceWatch(state, socket)
           }
@@ -626,6 +631,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
 
         const finishOutputTurn = () => {
           if (!state.outputTurnActive) return
+          state.conversationLog.event('asistan_sesi_hatta_gönderimi_bitti', { queuedAudioMs: state.audioQueue.length * PHONE_FRAME_MS })
           if (state.outputTranscript.trim()) {
             state.lastCompletedAiTranscript = state.outputTranscript.trim()
           }
@@ -678,6 +684,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             if (!state.playbackReady && state.audioQueue.length > 0 &&
                 (state.outputTurnComplete || state.audioQueue.length >= requiredBufferFrames)) {
               state.playbackReady = true
+              state.conversationLog.event('asistan_sesi_hatta_başladı', { queuedAudioMs: state.audioQueue.length * PHONE_FRAME_MS, underruns: state.outputUnderruns })
               console.log(
                 `[${shortId}] AI ses oynatma başladı (${state.audioQueue.length * PHONE_FRAME_MS}ms tampon${state.outputUnderruns > 0 ? `, ${state.outputUnderruns}. yeniden tamponlama` : ''})`,
               )
@@ -693,6 +700,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             } else if (state.playbackReady && state.outputTurnActive) {
               state.playbackReady = false
               state.outputUnderruns++
+              state.conversationLog.event('asistan_sesi_tampon_bekliyor', { underruns: state.outputUnderruns })
               console.warn(`[${shortId}] Gemini ses akışı gecikti — ${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms yeniden tamponlanıyor`)
               try { socket.write(silenceFrame); scheduleFrame() } catch { }
             } else if (state.hangupPending && !state.outputTurnActive) {
@@ -843,6 +851,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   onAudio: (pcm) => {
                     if (state.closed) return
                     if (!state.outputTurnActive) {
+                      state.conversationLog.event('asistan_sesi_üretimi_başladı')
                       clearSilenceTimers(state)
                       state.outputTurnActive = true
                       state.outputTurnComplete = false
@@ -866,7 +875,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   onTranscript: (role, text) => {
                     const trimmed = text.trim()
                     if (!trimmed) return
-                    const label = role === 'user' ? 'USER' : 'AI'
+                    state.conversationLog.event('konuşma_metni', {
+                      speaker: role === 'user' ? 'arayan' : 'asistan',
+                      text,
+                      timing: 'transkript_alınma_zamanı',
+                      queuedAudioMs: state.audioQueue.length * PHONE_FRAME_MS,
+                      playbackActive: state.playbackReady,
+                    })
                     // Sessizlik sayacı yalnızca Gemini'nin gerçek kullanıcı
                     // konuşmasını metne çevirdiği anda sıfırlanır. NoiseGate'in
                     // açılması tek başına yeterli değildir; hat paraziti veya
@@ -885,12 +900,12 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                       state.userTranscript = ''
                       state.outputTranscript = `${state.outputTranscript}${text}`.slice(-1_000)
                     }
-                    console.log(`[${shortId}] ${label}: ${trimmed}`)
                   },
                   onInterrupted: () => {
                     // Kapanış aşamasında (maksimum süre dolduğunda veya veda edilirken)
                     // arayanın konuşması veda cümlesini kesmemelidir.
                     if (state.hangupPending || (state.maxLimitReached && !state.micEnabled)) return
+                    state.conversationLog.event('asistan_sözü_kesildi', { discardedAudioMs: state.audioQueue.length * PHONE_FRAME_MS })
                     // Barge-in: müşteri konuştu, Gemini'nin önceki dönüş sesini temizle
                     state.aiSpeaking = false
                     state.outputTurnActive = false
@@ -923,6 +938,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                     clearSilenceTimers(state)
                   },
                   onTurnComplete: () => {
+                    state.conversationLog.event('asistan_üretimi_tamamlandı', { queuedAudioMs: state.audioQueue.length * PHONE_FRAME_MS })
                     const tailFrame = state.outChunker.flush()
                     if (tailFrame) state.audioQueue.push(tailFrame)
                     state.outChunker = new FrameChunker()
@@ -1206,6 +1222,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
           if (ev.type === 'uuid') {
             const channelUuid = ev.uuid
             state.callerId = channelUuid
+            state.conversationLog.event('telefon_kanalı_eşleşti', { channelUuid })
             const reg = callerRegistry.get(channelUuid)
             if (reg) {
               state.callerPhone = reg.phone
@@ -1221,7 +1238,9 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
             // Mikrofon henüz açılmadıysa veya kapanış bekleniyorsa sesi gönderme (yankı loop'unu engellemek için)
             if (!info.session || !state.micEnabled || state.hangupPending) continue
 
-            const { frames, justClosed } = state.noiseGate.process(ev.pcm)
+            const { frames, justClosed, speechStarted } = state.noiseGate.process(ev.pcm)
+            if (speechStarted) state.conversationLog.event('arayan_sesi_algılandı', { assistantAudioActive: state.aiSpeaking })
+            if (justClosed) state.conversationLog.event('arayan_sesi_sustu')
 
             // AI konuşurken: Eğer kullanıcı GERÇEKTEN konuşmuyorsa (NoiseGate kapalı / sadece dip gürültüsü),
             // Gemini'ye paket gönderme (Gemini'nin kendi sesini veya sessizliği kesinti olarak algılamasını önle).
@@ -1263,6 +1282,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 state.semanticTurnHoldTimer = undefined
                 if (state.closed || state.hangupPending || !info.session) return
                 state.userSpeechEndTime = Date.now()
+                state.conversationLog.event('arayan_ses_akışı_sonu_gönderildi')
                 info.session.sendRealtimeInput({
                   audioStreamEnd: true,
                 })
@@ -1294,10 +1314,13 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
       },
 
       close(socket) {
+        socket.data?.conversationLog.end()
         finalize(socket.data, deps)
       },
 
       error(socket, error) {
+        socket.data?.conversationLog.event('bağlantı_hatası', { message: error.message })
+        socket.data?.conversationLog.end()
         console.error(`[${socket.data?.shortId ?? 'tel:?'}] socket error:`, error)
         finalize(socket.data, deps)
       },
