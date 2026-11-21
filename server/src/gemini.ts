@@ -1,3 +1,4 @@
+import { PHONE_CONVERSATION_INSTRUCTION, isConversationRepairOrAside } from './services/conversation-policy'
 import { buildToolDeclarations } from './services/assistant-tool-declarations'
 export { buildToolDeclarations } from './services/assistant-tool-declarations'
 import {
@@ -133,6 +134,8 @@ export async function createLiveSession(
   let transferConfirmationTranscript = ''
   let confirmedTransferRuleId: string | null = null
   let recentUserTranscript = ''
+  let latestUserTurnTranscript = ''
+  let userTranscriptTurnOpen = false
   let currentModelTurnTranscript = ''
   let lastModelTurnTranscript = ''
   let knowledgeCallsInTurn = 0
@@ -796,6 +799,9 @@ export async function createLiveSession(
       return { success: true, sehir, sicaklik: '20°C', durum: 'açık', message: `${sehir}'da hava şu an gayet güzel ve ılıman görünüyor.` }
     }
     if (name === 'cagriySonlandir') {
+      if (options.telephonyChannel && isConversationRepairOrAside(latestUserTurnTranscript)) {
+        return { success: false, message: 'Kullanıcı görüşmeyi kapatmak istemedi; ses/iletişim geri bildirimi verdi veya başka biriyle konuştuğunu belirtti. Konu dışı sayma, kısa kabul et ve dinle; beklerken yeni soru sorma.' }
+      }
       const alreadyClosing = hangupToolCalled
       closingSession = true
       hangupToolCalled = true
@@ -885,7 +891,7 @@ export async function createLiveSession(
       ? '\n\n' + SEMANTIC_TURN_PROMPT_INSTRUCTION
       : '') + (flowEngine
       ? '\n\n' + flowRuntimeInstruction
-      : ''),
+      : '') + (options.telephonyChannel ? '\n\n' + PHONE_CONVERSATION_INSTRUCTION : ''),
   )
   const liveConfig: any = {
     responseModalities: [Modality.AUDIO],
@@ -903,8 +909,8 @@ export async function createLiveSession(
       slidingWindow: { targetTokens: '16000' },
     },
     // Müşterinin ve AI'nın söylediklerini text olarak da al — tanı/log için.
-    inputAudioTranscription: {},
-    outputAudioTranscription: {},
+    inputAudioTranscription: { languageCodes: ['tr-TR'] },
+    outputAudioTranscription: { languageCodes: ['tr-TR'] },
     // Kopuşta resume edebilmek için sunucudan handle iste.
     sessionResumption: {},
     ...(isThinkingModel(options.model) ? {
@@ -983,6 +989,13 @@ export async function createLiveSession(
       // WebSocket açıldı ama Gemini henüz hazır değil — setupComplete bekleniyor.
       onopen: () => {},
       onmessage: async (msg: LiveServerMessage) => {
+        // Araç çağrısı ve transkript aynı pakette gelebilir. Kapatma koruması
+        // önceki tur yerine bu paketteki en yeni kullanıcı sözünü değerlendirsin.
+        const inputText = msg.serverContent?.inputTranscription?.text
+        if (inputText) {
+          latestUserTurnTranscript = (userTranscriptTurnOpen ? latestUserTurnTranscript + inputText : inputText).slice(-1_000)
+          userTranscriptTurnOpen = true
+        }
         // Session resumption handle güncellemesi — kopuşta bununla resume ederiz.
         if (msg.sessionResumptionUpdate) {
           if (msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.newHandle) {
@@ -1060,13 +1073,13 @@ export async function createLiveSession(
           currentModelTurnTranscript = ''
           englishInterceptedInTurn = false
           callbacks.onInterrupted()
-          return
+          // Aynı pakette gelen arayan transkriptini kaybetme.
         }
 
         // Yalnızca gerçek konuşma dökümü (outputTranscription) kontrol edilir.
         // modelTurn.parts içindeki part.text / part.thought alanları Gemini Native Audio'nun
         // İngilizce iç düşünce özeti olduğu için dil kilidine sokulmaz (aksi halde Türkçe konuşurken sesi keser).
-        if (content.outputTranscription?.text) {
+        if (!content.interrupted && content.outputTranscription?.text) {
           currentModelTurnTranscript = `${currentModelTurnTranscript}${content.outputTranscription.text}`.slice(-600)
           if (isEnglishResponseDetected(currentModelTurnTranscript)) {
             triggerEnglishGuard(currentModelTurnTranscript)
@@ -1074,9 +1087,10 @@ export async function createLiveSession(
         }
 
         // Audio parts (ve düşünce olmayan metin parçaları)
-        if (!englishInterceptedInTurn && content.modelTurn?.parts) {
+        if (!content.interrupted && !englishInterceptedInTurn && content.modelTurn?.parts) {
           for (const part of content.modelTurn.parts) {
             if (!englishInterceptedInTurn && part.inlineData?.data) {
+              userTranscriptTurnOpen = false
               callbacks.onAudio(Buffer.from(part.inlineData.data, 'base64'))
             }
           }
@@ -1164,7 +1178,7 @@ export async function createLiveSession(
             }
           }
         }
-        if (!englishInterceptedInTurn && content.outputTranscription?.text) {
+        if (!content.interrupted && !englishInterceptedInTurn && content.outputTranscription?.text) {
           callbacks.onTranscript('model', content.outputTranscription.text)
         }
 

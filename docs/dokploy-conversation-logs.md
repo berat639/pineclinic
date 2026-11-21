@@ -18,3 +18,15 @@ Dokploy'da sunucu servisinin Logs ekranında `[KONUSMA]` arayın. Tek görüşme
 Transkriptin zaman damgası metnin sunucuya ulaştığı andır. Sağlayıcı kelime bazlı ses zamanları vermediği için kelimelerin kesin söylenme/duyulma anı olarak yorumlanmamalıdır. Telefon çıkışı sunucunun Asterisk'e gönderimidir; RTP ve operatör gecikmesi dahil değildir. Kesilmiş asistan yanıtlarının metni, arayanın duymadığı sözcükleri de içerebilir.
 
 Bu kayıtlar konuşma içeriğini içerir; mevcut Dokploy log erişimi ve saklama süresi uygulanır.
+
+## Konuşma algılama düzeltmeleri
+
+Telefon akışı asistan konuşurken de ilk heceler ve sessizlikler dahil sürekli iletilir. Yerel RMS algılaması araya girme kararını vermez; açıkça RMS filtresi seçilmişse süzülen kareler yerine sessizlik gönderilir. Yerel duraksamalar sürekli açık mikrofon için `audioStreamEnd` üretmez.
+
+Telefonun anlamsal modunda başlangıç hassasiyeti düşük, başlangıç doğrulama süresi 300 ms ve varsayılan bitiş sessizliği 750 ms'dir. Anlamı yarım ifadelerde devamı bekleme ve başkasıyla konuşulurken sessiz kalma talimatları uygulanır. İletişim şikâyetleri konu dışı sayılmaz; bu ifadeler nedeniyle yapılan yanlış kapatma aracı çağrıları sunucuda da reddedilir. Açık kullanıcı kapatma talepleri korunur. Bunlar konuşma tanımanın her ses ortamında kusursuz olacağı anlamına gelmez.
+
+Transkriptlerde `tr-TR` dil ipucu kullanılır. Sağlayıcının kesinti mesajıyla aynı pakette gelen arayan transkripti korunur. `konuşma_algılama_ayarları` olayı çağrının etkin ses ayarlarını; `responseAfterLocalSpeechEndMs` ilk asistan sesinin yerel ses kapısı kapanışından ne kadar sonra geldiğini gösterir. Bu değer kelime bazlı veya uçtan uca gecikme ölçümü değildir.
+
+Doğrulama: 58 regresyon testi, sunucu/istemci TypeScript kontrolleri ve gerçek Gemini oturumu. Sentetik Türkçe sesle “Randevu almak istiyorum ama” ardından 1 saniye sessizlik, ardından “Önce bir şey sormam gerekiyor” gönderildiğinde yarım ifadeye erken yanıt alınmadı. Tam ses girdisi gönderildikten yaklaşık 1,5 saniye sonra yanıt başladı; bu tek denemenin sonucudur, operatör hattında süre garantisi değildir.
+
+Dil ipucu ve yerleşik konuşma davranışı için kaynaklar: [Google Live API uygulama önerileri](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api/best-practices), [Google Live API konuşma yetenekleri](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api/configure-gemini-capabilities).

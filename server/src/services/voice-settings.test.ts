@@ -119,7 +119,7 @@ describe('voice-settings validation & prompt registry', () => {
     expect(isEnglishResponseDetected("I'm sorry, I cannot help with that.")).toBe(true)
 
     const phoneCfg = buildRealtimeDetectionConfig('semantic', 'phone')
-    expect(phoneCfg.automaticActivityDetection?.silenceDurationMs).toBe(600)
+    expect(phoneCfg.automaticActivityDetection?.silenceDurationMs).toBe(750)
     const webCfg = buildRealtimeDetectionConfig('semantic', 'web')
     expect(webCfg.automaticActivityDetection?.silenceDurationMs).toBe(700)
   })

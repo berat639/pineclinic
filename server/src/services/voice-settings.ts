@@ -1,3 +1,4 @@
+import { OFF_TOPIC_EXCLUSIONS } from './conversation-policy'
 import { isLiveModel, normalizeThinkingLevel, type ThinkingLevel } from './live-model-profile'
 import type { NoiseFilterMode, TurnDetectionMode } from './turn-detector'
 
@@ -41,9 +42,9 @@ export function buildOffTopicPromptRule(
   const strikes = Math.min(5, Math.max(1, Math.round(Number(maxStrikes) || 2)))
   const msg = (closeMessage || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE).trim() || DEFAULT_OFF_TOPIC_CLOSE_MESSAGE
   if (strikes === 1) {
-    return `KONU DIŞI OTOMATİK VEDA VE KAPATMA KURALI (SINIR: 1 KEZ): Karşı taraf klinik veya randevu dışında alakasız bir konu açar ya da konuyu dağıtırsa sohbeti KESİNLİKLE sürdürme; doğrudan "${msg}" de ve cagriySonlandir aracını çağır.`
+    return `${OFF_TOPIC_EXCLUSIONS}\n\nKONU DIŞI OTOMATİK VEDA VE KAPATMA KURALI (SINIR: 1 KEZ): Karşı taraf klinik veya randevu dışında alakasız bir konu açar ya da konuyu dağıtırsa sohbeti KESİNLİKLE sürdürme; doğrudan "${msg}" de ve cagriySonlandir aracını çağır.`
   }
-  return `KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI (SINIR: ${strikes}. KEZ):
+  return `${OFF_TOPIC_EXCLUSIONS}\n\nKONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI (SINIR: ${strikes}. KEZ):
 1. Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk ${strikes - 1} seferde konuyu açıklamadan nazikçe klinik/randevu işlemine yönlendir: "Bu konuda yardımcı olamıyorum, ancak kliniğimiz veya randevu işlemleriniz konusunda yardımcı olabilirim."
 2. Karşı taraf uyarıya rağmen ${strikes}. kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; aynen "${msg}" de ve hemen cagriySonlandir aracını çağır.`
 }
