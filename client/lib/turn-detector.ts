@@ -441,7 +441,7 @@ const STRICT_ENGLISH_WORDS = new Set([
   'catch', 'moment', 'available', 'availability', 'confirm', 'number', 'phone', 'name', 'date',
   'time', 'sure', 'absolutely', 'currently', 'already', 'still', 'just', 'only', 'also', 'very',
   'much', 'many', 'some', 'any', 'every', 'each', 'other', 'another', 'something', 'anything',
-  'nothing', 'everything',
+  'nothing', 'everything', 'is', 'are', 'was', 'were', 'process', 'complete', 'completed', 'finished',
 ])
 
 const ENGLISH_CONTRACTION_RE =
@@ -451,7 +451,7 @@ const ENGLISH_IMMEDIATE_WORD_RE =
   /\b(?:hello|goodbye|sorry|thanks|welcome|certainly|unfortunately|apologies|excuse\s+me|pardon\s+me)\b/i
 
 const ENGLISH_PHRASE_RE =
-  /\b(?:how\s+can\s+i|how\s+may\s+i|what\s+can\s+i|can\s+i\s+help|may\s+i\s+help|help\s+you|assist\s+you|i\s+am|i\s+can|i\s+will|i\s+would|i\s+have|i\s+need|i\s+understand|would\s+you|could\s+you|do\s+you|did\s+you|are\s+you|will\s+you|thank\s+you|for\s+calling|of\s+course|right\s+now|one\s+moment|just\s+a\s+moment|let\s+me|tell\s+me|give\s+me|your\s+name|your\s+phone|phone\s+number|good\s+morning|good\s+afternoon|good\s+evening|have\s+a\s+nice|have\s+a\s+great|please\s+provide|please\s+wait|please\s+repeat|hear\s+you)\b/i
+  /\b(?:this\s+process\s+is|process\s+is\s+(?:now|complete)|now\s+complete|task\s+is\s+complete|how\s+can\s+i|how\s+may\s+i|what\s+can\s+i|can\s+i\s+help|may\s+i\s+help|help\s+you|assist\s+you|i\s+am|i\s+can|i\s+will|i\s+would|i\s+have|i\s+need|i\s+understand|would\s+you|could\s+you|do\s+you|did\s+you|are\s+you|will\s+you|thank\s+you|for\s+calling|of\s+course|right\s+now|one\s+moment|just\s+a\s+moment|let\s+me|tell\s+me|give\s+me|your\s+name|your\s+phone|phone\s+number|good\s+morning|good\s+afternoon|good\s+evening|have\s+a\s+nice|have\s+a\s+great|please\s+provide|please\s+wait|please\s+repeat|hear\s+you)\b/i
 
 const COMMON_TURKISH_WORDS = new Set([
   'merhaba', 'merhabalar', 'hoş', 'geldiniz', 'nasıl', 'yardımcı', 'olabilirim',
@@ -461,12 +461,24 @@ const COMMON_TURKISH_WORDS = new Set([
   'adınızı', 'soyadınızı', 'numaranızı', 'telefon', 'şikayetiniz', 'işlem',
 ])
 
-/**
- * Modelin ürettiği çıktı transkriptinde (outputTranscription)
- * tamamen İngilizce yanıt üretilip üretilmediğini tespit eder.
- * Türkçe karakter veya Türkçe kelime içeren cümlelerde asla tetiklenmez.
+/** Check each sentence and the suffix after the last Turkish token independently.
+ * A Turkish greeting/farewell must not exempt an appended English sentence.
  */
 export function isEnglishResponseDetected(text: string): boolean {
+  for (const segment of (text || '').split(/[.!?…\n]+/u)) {
+    if (isEnglishSegment(segment)) return true
+    const words = segment.trim().split(/\s+/u)
+    let lastTurkish = -1
+    for (let i = 0; i < words.length; i++) {
+      const token = words[i].toLocaleLowerCase('tr-TR').replace(/[^a-zçğıöşü]/gu, '')
+      if (/[çğıöşü]/u.test(token) || COMMON_TURKISH_WORDS.has(token)) lastTurkish = i
+    }
+    if (lastTurkish >= 0 && isEnglishSegment(words.slice(lastTurkish + 1).join(' '))) return true
+  }
+  return false
+}
+
+function isEnglishSegment(text: string): boolean {
   const cleaned = (text || '').trim()
   if (!cleaned || cleaned.length < 4) return false
 

@@ -167,3 +167,14 @@ describe('Turkish Semantic Turn Detector', () => {
   })
 })
 
+
+// Regression: Turkish text earlier in the same model turn must not exempt an English suffix.
+test('blocks English after a Turkish farewell, including unpunctuated streamed suffixes', () => {
+  const farewell = 'Görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.'
+  expect(isEnglishResponseDetected(farewell + 'This process is now complete.')).toBe(true)
+  expect(isEnglishResponseDetected(farewell + ' This process is ')).toBe(true)
+  expect(isEnglishResponseDetected('Size yardımcı olabilirim This process is now complete.')).toBe(true)
+  expect(isEnglishResponseDetected('İşlem tamamlandı. Your appointment is confirmed.')).toBe(true)
+  expect(isEnglishResponseDetected(farewell)).toBe(false)
+  expect(isEnglishResponseDetected('Welcome isimli salona aktaracağım.')).toBe(false)
+})

@@ -10,10 +10,11 @@ async function harness() {
   const transcripts: Array<[string, string]> = []
   const audio: Buffer[] = []
   const toolResponses: any[] = []
+  const clientContents: any[] = []
   let interruptions = 0
   let hangups = 0
   const transport = {
-    sendClientContent() {}, sendRealtimeInput() {}, close() {},
+    sendClientContent(content: any) { clientContents.push(content) }, sendRealtimeInput() {}, close() {},
     sendToolResponse(response: any) { toolResponses.push(response) },
   }
   const ai = { live: { async connect(options: any) {
@@ -32,7 +33,7 @@ async function harness() {
     dbSessionId: 'conversation-test', systemPrompt: 'Türkçe klinik asistanı.',
     model: 'gemini-3.8-live', telephonyChannel: 'test-channel',
   }))
-  return { receive, config, transcripts, audio, toolResponses, session,
+  return { receive, config, transcripts, audio, toolResponses, clientContents, session,
     get interruptions() { return interruptions }, get hangups() { return hangups } }
 }
 
@@ -71,4 +72,17 @@ describe('Live phone conversation message handling', () => {
       expect(h.hangups).toBe(1)
     } finally { h.session.close() }
   })
+})
+
+
+test('does not generate a language recovery turn after hangup has started', async () => {
+  const h = await harness()
+  try {
+    await h.receive({ serverContent: { inputTranscription: { text: 'Görüşmeyi kapat.' } } })
+    await h.receive({ toolCall: { functionCalls: [{ id: 'close', name: 'cagriySonlandir', args: {} }] } })
+    await Bun.sleep(0)
+    expect(h.hangups).toBe(1)
+    await h.receive({ serverContent: { outputTranscription: { text: 'This process is now complete.' } } })
+    expect(h.clientContents).toHaveLength(0)
+  } finally { h.session.close() }
 })

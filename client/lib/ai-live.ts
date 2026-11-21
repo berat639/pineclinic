@@ -1,3 +1,4 @@
+import { isWebConversationFarewell } from './conversation-closing'
 import { BrowserConversationLog } from './conversation-log'
 import {
   GoogleGenAI,
@@ -26,6 +27,7 @@ export type LiveChatCallbacks = {
   onConnectionChange: (connected: boolean) => void
   onError: (error: string) => void
   onInterrupted: () => void
+  onHangup?: () => void
   onInteractionStatus?: (status: 'IN_PROGRESS' | 'IDLE') => void
   /** Kullanıcının konuşmasının yazıya dökümü (sesli modda). */
   onUserText?: (text: string) => void
@@ -212,6 +214,9 @@ export class AiLiveSession {
   private conversationLog: BrowserConversationLog | null = null
   private audioTurnActive = false
   private micLogged = false
+  private hangupRequested = false
+  private closingOutputBlocked = false
+  private closeMessage?: string
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
@@ -238,6 +243,9 @@ export class AiLiveSession {
       ? new BrowserConversationLog((config.sessionKey || config.flowSession?.token) as string) : null
     this.audioTurnActive = false
     this.micLogged = false
+    this.hangupRequested = false
+    this.closingOutputBlocked = false
+    this.closeMessage = config.offTopicCloseMessage
     const modelName = config.model || 'gemini-3.8-live'
     this.flowSession = config.flowSession
     this.sessionKey = config.flowSession?.token || config.sessionKey
@@ -513,11 +521,27 @@ export class AiLiveSession {
     return handleToolCall(name, args, this.flowSession, this.sessionKey)
   }
 
+  private hasSpokenFarewell(): boolean {
+    return (/[.!?…]\s*$/u.test(this._currentModelTranscript) && isWebConversationFarewell(this._currentModelTranscript, this.closeMessage)) ||
+      isWebConversationFarewell(this._lastAssistantTranscript, this.closeMessage)
+  }
+
+  private finishSpokenFarewell() {
+    if (this.closingOutputBlocked) return
+    this.closingOutputBlocked = true
+    this._sendGuard = true
+    this.callbacks.onHangup?.()
+  }
+
   private triggerEnglishGuard() {
     if (this._englishInterceptedInTurn) return
+    const closing = this.hangupRequested || isWebConversationFarewell(this._currentModelTranscript, this.closeMessage) ||
+      isWebConversationFarewell(this._lastAssistantTranscript, this.closeMessage)
+    this.conversationLog?.event('dil_ihlali_engellendi', { text: this._currentModelTranscript, code: closing ? 'kapanış' : 'yanıt' })
     this._englishInterceptedInTurn = true
     this._currentModelTranscript = ''
     this.callbacks.onInterrupted()
+    if (closing) { this.finishSpokenFarewell(); return }
     if (this._englishRecoveryCount < 4 && this.session && this._isConnected && !this._sendGuard) {
       this._englishRecoveryCount += 1
       try {
@@ -531,11 +555,19 @@ export class AiLiveSession {
 
   private handleMessage(message: LiveServerMessage) {
     // Tool calls
-    if (message.toolCall?.functionCalls?.length) {
+    if (!this.closingOutputBlocked && message.toolCall?.functionCalls?.length) {
       for (const fc of message.toolCall.functionCalls) {
         this.runTool(fc.name ?? '', (fc.args ?? {}) as Record<string, unknown>)
           .then((result) => {
-            if (this.session && this._isConnected) {
+            if (this.session && this._isConnected && !this.closingOutputBlocked) {
+              if (fc.name === 'cagriySonlandir' && result.success === true) {
+                this.hangupRequested = true
+                this.conversationLog?.event('görüşme_kapatma_onaylandı')
+                // Veda zaten ses kuyruğundaysa araca tekrar yanıt gönderme:
+                // bu, modelin yeni bir 'işlem tamamlandı' cümlesi üretmesine yol açar.
+                if (this.hasSpokenFarewell()) { this.finishSpokenFarewell(); return }
+                result = { ...result, message: 'Görüşme sonlandırılıyor. Yalnızca bir kısa Türkçe veda cümlesi söyle. İşlem tamamlandı gibi ek açıklama yapma; ardından sessiz kal.' }
+              }
               try {
                 this.session.sendToolResponse({
                   functionResponses: [{
@@ -551,7 +583,7 @@ export class AiLiveSession {
             }
           })
           .catch(() => {
-            if (this.session && this._isConnected) {
+            if (this.session && this._isConnected && !this.closingOutputBlocked) {
               try {
                 this.session.sendToolResponse({
                   functionResponses: [{
@@ -579,7 +611,7 @@ export class AiLiveSession {
     // Output transcription (text of what AI said in audio mode) — kontrolü
     // ses parçalarından önce yapılır ki İngilizce algılandığı anda ses kesilsin.
     const transcript = (message as any).serverContent?.outputTranscription?.text
-    if (transcript && !this._englishInterceptedInTurn) {
+    if (transcript && !this.closingOutputBlocked && !this._englishInterceptedInTurn) {
       this._currentModelTranscript = `${this._currentModelTranscript}${transcript}`.slice(-600)
       this._currentUserTranscript = ''
       if (isEnglishResponseDetected(this._currentModelTranscript)) {
@@ -591,7 +623,7 @@ export class AiLiveSession {
     }
 
     // Audio parts (modelTurn.parts[].text Native Audio modunda iç düşünce/thought içerdiği için yok sayılır)
-    if (!this._englishInterceptedInTurn && message.serverContent?.modelTurn?.parts) {
+    if (!this.closingOutputBlocked && !this._englishInterceptedInTurn && message.serverContent?.modelTurn?.parts) {
       for (const part of message.serverContent.modelTurn.parts) {
         if (!this._englishInterceptedInTurn && part?.inlineData?.data) {
           if (!this.audioTurnActive) {
@@ -627,11 +659,12 @@ export class AiLiveSession {
       this._currentModelTranscript = ''
       this._currentUserTranscript = ''
       this._englishInterceptedInTurn = false
-      if (!wasEnglishBlocked) {
+      if (this.hangupRequested) this.finishSpokenFarewell()
+      if (!wasEnglishBlocked && !this.closingOutputBlocked) {
         this.callbacks.onTurnComplete()
       }
     }
-    if (message.serverContent?.interrupted) {
+    if (message.serverContent?.interrupted && !this.hangupRequested && !this.closingOutputBlocked) {
       this.audioTurnActive = false
       this.conversationLog?.event('asistan_sözü_kesildi')
       this._currentModelTranscript = ''

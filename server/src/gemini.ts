@@ -972,7 +972,7 @@ export async function createLiveSession(
       englishInterceptedInTurn = true
       console.warn(`[${options.dbSessionId}] [Dil Kilidi] İngilizce yanıt engellendi ve kesildi: "${detectedText}"`)
       callbacks.onInterrupted()
-      if (englishRecoveryCount < 4 && activeSession && !reconnecting && !closedByUser) {
+      if (englishRecoveryCount < 4 && activeSession && !reconnecting && !closedByUser && !closingSession && !hangupToolCalled) {
         englishRecoveryCount++
         try {
           activeSession.sendClientContent({

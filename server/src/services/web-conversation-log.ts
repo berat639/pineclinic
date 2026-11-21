@@ -6,6 +6,7 @@ const EVENTS = new Set([
   'asistan_sesi_alındı', 'asistan_üretimi_tamamlandı', 'asistan_sözü_kesildi',
   'asistan_sesi_oynatmaya_planlandı', 'asistan_sesi_oynatımı_bitti',
   'asistan_sesi_oynatımı_temizlendi', 'bağlantı_hatası', 'çağrı_bitti',
+  'dil_ihlali_engellendi', 'görüşme_kapatma_onaylandı',
 ])
 const TTL_MS = 35 * 60_000
 

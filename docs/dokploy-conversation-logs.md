@@ -49,3 +49,9 @@ Doğrudan bağlantıda:
 `transport: "websocket"` olan eski `/ws` bağlantısında transkript, mikrofon akışının başlaması, asistan sesinin tarayıcıya gönderilmeye başlaması, tur sonu, kesinti, hata ve kapanış sunucuda doğrudan loglanır. Bu yolun sunucu zamanları tarayıcıdaki duyulma anı değildir.
 
 Dağıtımdan sonra açık web sayfasını yenileyerek yeni bir sesli görüşme başlatın. Dokploy backend loglarındaki mevcut `[KONUSMA]` filtresi iki bağlantı yolunu da gösterir.
+
+## Web kapanışında ek İngilizce yanıtın engellenmesi
+
+Türkçe bir vedadan sonra aynı turda gelen İngilizce cümle de dil kontrolünden geçer. Önceki Türkçe metin, sonraki İngilizce parçaya muafiyet sağlamaz. Başarılı kapatma aracı döndüğünde veda zaten söylenmişse araca tekrar yanıt gönderilerek yeni bir model turu başlatılmaz; mevcut ses kuyruğu boşaldıktan sonra web oturumu kapatılır. Veda henüz söylenmemişse tek bir Türkçe veda yanıtına izin verilir. Kapanış sırasında dil ihlali engellenirse yeni bir düzeltme konuşması başlatılmaz.
+
+`görüşme_kapatma_onaylandı` başarılı kapatma aracı sonucunu, `dil_ihlali_engellendi` ise engellenen metni gösterir. Engellenen metin, kullanıcıya oynatılmış bir konuşma kaydı olarak değerlendirilmemelidir.
