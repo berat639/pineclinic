@@ -23,12 +23,46 @@ class MicProcessor extends AudioWorkletProcessor {
     this.voicedStreak = 0;
     this.hangoverFrames = 0;
 
+    // Asistan konuşurken (hoparlör çalarken) yankı/arka plan sesinin asistanı kesmesini önle.
+    this.playbackActive = false;
+    this.bargeStreak = 0;
+    this.bargeHangover = 0;
+
     this.port.onmessage = (event) => {
       const data = event && event.data;
       if (data && data.type === "config" && typeof data.noiseFilter === "boolean") {
         this.noiseFilterEnabled = data.noiseFilter;
       }
+      if (data && data.type === "playback" && typeof data.active === "boolean") {
+        this.playbackActive = data.active;
+        if (!data.active) {
+          this.bargeStreak = 0;
+          this.bargeHangover = 0;
+        }
+      }
     };
+  }
+
+  /**
+   * Asistan konuşurken yalnızca net ve sürekli konuşmayı (≈160 ms) geçirir; yankı,
+   * kısa gürültü ve öksürükler sessizlik karesine çevrilir. Böylece kullanıcı gerçekten
+   * konuşursa araya girebilir ama hoparlör sesi/ortam gürültüsü asistanı kesmez.
+   */
+  applyPlaybackGuard(pcm, rms) {
+    if (!this.playbackActive) return { pcm, blocked: false };
+    const bargeThreshold = Math.max(0.02, this.noiseFloor * 4);
+    if (rms >= bargeThreshold) {
+      this.bargeStreak++;
+    } else {
+      this.bargeStreak = 0;
+    }
+    if (this.bargeStreak >= 8) {
+      this.bargeHangover = 15; // 300 ms
+    } else if (this.bargeHangover > 0) {
+      this.bargeHangover--;
+    }
+    if (this.bargeStreak >= 8 || this.bargeHangover > 0) return { pcm, blocked: false };
+    return { pcm: new Int16Array(CHUNK_SAMPLES), blocked: true };
   }
 
   processFrame(samples) {
@@ -60,12 +94,18 @@ class MicProcessor extends AudioWorkletProcessor {
     const rawLevel = Math.min(rms * 5, 1);
 
     if (!this.noiseFilterEnabled) {
-      const pcm = new Int16Array(CHUNK_SAMPLES);
+      const raw = new Int16Array(CHUNK_SAMPLES);
       for (let i = 0; i < CHUNK_SAMPLES; i++) {
         const s = samples[i];
-        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        raw[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
-      return { pcm, level: rawLevel, rawLevel, suppressed: false };
+      const guarded = this.applyPlaybackGuard(raw, rms);
+      return {
+        pcm: guarded.pcm,
+        level: guarded.blocked ? 0 : rawLevel,
+        rawLevel,
+        suppressed: guarded.blocked,
+      };
     }
 
     const crestFactor = rms > 0.0001 ? peak / rms : 0;
@@ -107,17 +147,18 @@ class MicProcessor extends AudioWorkletProcessor {
     // Konuşma başlangıcındaki ilk hecelerin yutulmaması için yalnızca ani öksürük/darbe
     // seslerini güçlü bastır (0.08), sessiz arka planı ise yumuşak zayıflat (0.65).
     const gain = isImpulseOrCough ? 0.08 : passSpeech ? 1.0 : 0.65;
-    const pcm = new Int16Array(CHUNK_SAMPLES);
+    const filtered = new Int16Array(CHUNK_SAMPLES);
     for (let i = 0; i < CHUNK_SAMPLES; i++) {
       const s = samples[i] * gain;
-      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      filtered[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
+    const guarded = this.applyPlaybackGuard(filtered, rms);
 
     return {
-      pcm,
-      level: passSpeech ? rawLevel : 0,
+      pcm: guarded.pcm,
+      level: passSpeech && !guarded.blocked ? rawLevel : 0,
       rawLevel,
-      suppressed: isImpulseOrCough || (suppressed && !passSpeech),
+      suppressed: guarded.blocked || isImpulseOrCough || (suppressed && !passSpeech),
     };
   }
 

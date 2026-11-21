@@ -419,6 +419,8 @@ export default function Home() {
         await mic.start((pcm) => {
           session.sendAudio(pcm)
         }, (level) => {
+          // Asistan konuşurken mikrofonda yankı korumasını devrede tut
+          mic.setPlaybackActive(!!playerRef.current?.isPlaying)
           if (level >= 0.02) {
             markWebSpeech(
               Math.max(5, liveConfig.callSilenceTimeout ?? 30),

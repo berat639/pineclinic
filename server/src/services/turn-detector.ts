@@ -541,26 +541,35 @@ export function buildRealtimeDetectionConfig(
   channel: 'web' | 'phone' = 'web',
   customSilenceMs?: number,
 ): RealtimeInputConfig {
+  // Tarayıcı: hoparlör yankısı, klavye/öksürük ve arka plan sesleri asistanı kesmesin diye
+  // başlangıç hassasiyeti DÜŞÜK ve en az 300 ms kesintisiz konuşma (prefixPadding) aranır.
+  // Telefon: 8 kHz hat sesi kısık geldiği için başlangıç hassasiyeti YÜKSEK kalır; cümle
+  // ortasındaki doğal duraksamalarda sözün kesilmemesi için bitiş hassasiyeti düşük tutulur.
+  const isPhone = channel === 'phone'
   if (mode === 'standard') {
     return {
       automaticActivityDetection: {
         disabled: false,
-        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+        startOfSpeechSensitivity: isPhone
+          ? StartSensitivity.START_SENSITIVITY_HIGH
+          : StartSensitivity.START_SENSITIVITY_LOW,
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-        prefixPaddingMs: 100,
-        silenceDurationMs: customSilenceMs ?? 260,
+        prefixPaddingMs: isPhone ? 160 : 240,
+        silenceDurationMs: customSilenceMs ? Math.max(300, customSilenceMs) : (isPhone ? 400 : 500),
       },
     }
   }
 
-  const defaultSilence = channel === 'phone' ? 280 : 350
+  const defaultSilence = isPhone ? 600 : 700
   return {
     automaticActivityDetection: {
       disabled: false,
-      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
-      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-      prefixPaddingMs: 120,
-      silenceDurationMs: customSilenceMs ? Math.max(220, customSilenceMs) : defaultSilence,
+      startOfSpeechSensitivity: isPhone
+        ? StartSensitivity.START_SENSITIVITY_HIGH
+        : StartSensitivity.START_SENSITIVITY_LOW,
+      endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+      prefixPaddingMs: isPhone ? 200 : 300,
+      silenceDurationMs: customSilenceMs ? Math.max(400, customSilenceMs) : defaultSilence,
     },
   }
 }

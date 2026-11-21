@@ -137,10 +137,15 @@ function readOutputBufferFrames(): { start: number; rebuffer: number } {
   }
 }
 
-function readVadSilenceDurationMs(): number {
+/**
+ * Telefon için Gemini konuşma sonu sessizlik süresi.
+ * Tanımsız veya eski agresif varsayılanlar (260/300 ms) kullanılıyorsa kanal varsayılanına
+ * (600 ms) bırakılır; 260 ms arayanın cümle ortasındaki duraksamalarında sözü kesiyordu.
+ */
+function readVadSilenceDurationMs(): number | undefined {
   const configured = Number.parseInt(process.env.PHONE_VAD_SILENCE_MS || '', 10)
-  if (!Number.isFinite(configured) || configured === 300) return 260
-  return Math.min(800, Math.max(200, configured))
+  if (!Number.isFinite(configured) || configured === 300 || configured === 260) return undefined
+  return Math.min(1_200, Math.max(400, configured))
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -205,6 +210,15 @@ class NoiseGate {
     this.rmsSum += rms
     if (rms > this.rmsMax) this.rmsMax = rms
 
+    // threshold === 0 (varsayılan): GEÇİRGEN mod. Arayanın sesi her karede Gemini'ye
+    // aktarılır ve konuşma algılamayı Gemini'nin kendi VAD'ı yapar. Kısık 8 kHz hatlarda
+    // adaptif RMS kapısı hiç açılmadığı için arayanın sesi hiç iletilmiyordu.
+    // Yerel adaptif algılama yalnızca `isOpen` bilgisi (AI konuşurken yankı koruması ve
+    // anlamsal tur bekletmesi) için kullanılır; audioStreamEnd üretmez.
+    if (this.threshold === 0) {
+      return this.processPassThrough(frame, chars)
+    }
+
     // Gürültü ve öksürük süzgeci açıkken anlık darbe/öksürük/tıklama patlamalarını süz
     if (this.filterMode === 'rnnoise' && chars.isImpulseLike && this.highStreak < 5) {
       this.suppressedImpulses++
@@ -213,13 +227,7 @@ class NoiseGate {
       return { frames: [], justClosed: false, speechStarted: false }
     }
 
-    // threshold === 0 iken adaptif konuşma eşiği kullan:
-    // Böylece hat dip gürültüsü (RMS ~100-180) AI konuşurken kesinti (barge-in) yaratmaz
-    // ve kullanıcı konuşmayı bitirdiğinde justClosed -> audioStreamEnd tetiklenerek
-    // Gemini'nin saniyelerce beklemeden anında yanıt vermesi sağlanır.
-    const openThreshold = this.threshold > 0
-      ? this.threshold
-      : Math.max(280, Math.min(460, Math.round(this.noiseFloor * 2.2)))
+    const openThreshold = this.threshold
     const sustainThreshold = Math.max(185, Math.round(openThreshold * 0.65))
     const activeThreshold = this.wasOpen ? sustainThreshold : openThreshold
 
@@ -268,6 +276,52 @@ class NoiseGate {
     this.pushPreRoll(frame)
     this.wasOpen = false
     return { frames: [], justClosed: false, speechStarted: false }
+  }
+
+  /** Geçirgen mod: her kare iletilir; yalnızca konuşma dışındaki tekil darbeler sessizleştirilir. */
+  private processPassThrough(
+    frame: Buffer,
+    chars: ReturnType<typeof analyzePcmFrameCharacteristics>,
+  ): { frames: Buffer[]; justClosed: boolean; speechStarted: boolean } {
+    const rms = chars.rms
+    const openThreshold = Math.max(200, Math.min(420, Math.round(this.noiseFloor * 2.2)))
+    const sustainThreshold = Math.max(150, Math.round(openThreshold * 0.65))
+    const isHigh = rms >= (this.wasOpen ? sustainThreshold : openThreshold)
+    if (isHigh) this.highFrames++
+    this.maybeLog()
+
+    // Konuşma sürmüyorken gelen tekil tık/öksürük darbesini sessizlik karesiyle değiştir
+    // (zaman çizelgesi korunur, Gemini'nin VAD zamanlaması bozulmaz).
+    if (
+      this.filterMode === 'rnnoise' &&
+      chars.isImpulseLike &&
+      !this.wasOpen &&
+      this.highStreak === 0 &&
+      chars.crestFactor > 6
+    ) {
+      this.suppressedImpulses++
+      return { frames: [Buffer.alloc(frame.length, 0)], justClosed: false, speechStarted: false }
+    }
+
+    let speechStarted = false
+    if (isHigh) {
+      this.highStreak++
+      if (!this.wasOpen && this.highStreak >= 3) {
+        this.wasOpen = true
+        speechStarted = true
+      }
+      if (this.wasOpen) this.trailingFrames = Math.max(8, this.trailingFramesMax)
+    } else {
+      this.highStreak = 0
+      if (rms < 340) this.noiseFloor = 0.97 * this.noiseFloor + 0.03 * rms
+      if (this.trailingFrames > 0) {
+        this.trailingFrames--
+        if (this.trailingFrames === 0) this.wasOpen = false
+      } else {
+        this.wasOpen = false
+      }
+    }
+    return { frames: [frame], justClosed: false, speechStarted }
   }
 
   private pushPreRoll(frame: Buffer): void {
@@ -485,7 +539,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
     `   NoiseGate: thresh=${gateCfg.threshold} trailing=${gateCfg.trailingFrames}fr preRoll=${gateCfg.preRollFrames}fr`,
   )
   console.log(`   Telefon ses tamponu: başlangıç=${outputBufferFrames.start * PHONE_FRAME_MS}ms yeniden=${outputBufferFrames.rebuffer * PHONE_FRAME_MS}ms`)
-  console.log(`   Gemini VAD konuşma sonu: ${vadSilenceDurationMs}ms`)
+  console.log(`   Gemini VAD konuşma sonu: ${vadSilenceDurationMs ?? 'varsayılan (600)'}ms`)
 
   const server = Bun.listen<CallState>({
     hostname: '0.0.0.0',

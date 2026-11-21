@@ -166,6 +166,15 @@ export class MicrophoneCapture {
     }
   }
 
+  private playbackActive = false;
+
+  /** Asistan sesi çalarken yankı/gürültü kaynaklı araya girmeyi engelleyen korumayı aç/kapat. */
+  setPlaybackActive(active: boolean) {
+    if (this.playbackActive === active) return;
+    this.playbackActive = active;
+    this.workletNode?.port.postMessage({ type: "playback", active });
+  }
+
   async start(
     onChunk: (base64: string) => void,
     onLevel?: (level: number, meta?: { rawLevel?: number; suppressed?: boolean }) => void

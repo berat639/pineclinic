@@ -76,12 +76,19 @@ describe('Turkish Semantic Turn Detector', () => {
   test('builds semantic vs standard realtime detection configs accurately', () => {
     const semanticWeb = buildRealtimeDetectionConfig('semantic', 'web')
     expect(semanticWeb.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
-      StartSensitivity.START_SENSITIVITY_HIGH,
+      StartSensitivity.START_SENSITIVITY_LOW,
     )
     expect(semanticWeb.automaticActivityDetection?.endOfSpeechSensitivity).toBe(
-      EndSensitivity.END_SENSITIVITY_HIGH,
+      EndSensitivity.END_SENSITIVITY_LOW,
     )
-    expect(semanticWeb.automaticActivityDetection?.silenceDurationMs).toBe(350)
+    expect(semanticWeb.automaticActivityDetection?.prefixPaddingMs).toBe(300)
+    expect(semanticWeb.automaticActivityDetection?.silenceDurationMs).toBe(700)
+
+    const semanticPhone = buildRealtimeDetectionConfig('semantic', 'phone')
+    expect(semanticPhone.automaticActivityDetection?.startOfSpeechSensitivity).toBe(
+      StartSensitivity.START_SENSITIVITY_HIGH,
+    )
+    expect(semanticPhone.automaticActivityDetection?.silenceDurationMs).toBe(600)
 
     const standardPhone = buildRealtimeDetectionConfig('standard', 'phone', 300)
     expect(standardPhone.automaticActivityDetection?.startOfSpeechSensitivity).toBe(

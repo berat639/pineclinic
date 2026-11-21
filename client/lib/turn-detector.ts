@@ -502,14 +502,17 @@ export function isEnglishResponseDetected(text: string): boolean {
 export function buildRealtimeDetectionConfig(
   mode: TurnDetectionMode = 'semantic',
 ): RealtimeInputConfig {
+  // Tarayıcı mikrofonu hoparlör yankısını, klavye/öksürük ve arka plan seslerini de duyar.
+  // Başlangıç hassasiyeti DÜŞÜK + en az 300 ms kesintisiz konuşma şartı, asistanın
+  // gereksiz yere araya girilip kesilmesini önler.
   if (mode === 'standard') {
     return {
       automaticActivityDetection: {
         disabled: false,
-        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
         endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
-        prefixPaddingMs: 120,
-        silenceDurationMs: 300,
+        prefixPaddingMs: 240,
+        silenceDurationMs: 500,
       },
     }
   }
@@ -517,10 +520,10 @@ export function buildRealtimeDetectionConfig(
   return {
     automaticActivityDetection: {
       disabled: false,
-      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
       endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-      prefixPaddingMs: 160,
-      silenceDurationMs: 420,
+      prefixPaddingMs: 300,
+      silenceDurationMs: 700,
     },
   }
 }
