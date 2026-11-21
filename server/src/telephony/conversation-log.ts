@@ -25,9 +25,9 @@ export class ConversationLog {
     })}`)
   }
 
-  end(): void {
+  end(details: Record<string, unknown> = {}): void {
     if (this.ended) return
-    this.event('çağrı_bitti')
+    this.event('çağrı_bitti', details)
     this.ended = true
   }
 }

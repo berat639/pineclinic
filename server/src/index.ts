@@ -1,3 +1,5 @@
+import { ConversationLog } from './telephony/conversation-log'
+import { webConversationLogs } from './services/web-conversation-log'
 import { platformIntegrations } from './api/platform-integrations'
 import { whatsappPlugin } from './api/whatsapp'
 import { knowledgePlugin } from './api/knowledge'
@@ -2637,6 +2639,22 @@ const app = new Elysia()
     return { success: true }
   })
 
+  .post('/api/conversation-logs', async ({ body, request, set }) => {
+    const clinicId = currentClinicId()
+    const token = request.headers.get('x-flow-session-key') || ''
+    const { isAuthorizedWebToolSession } = await import('./services/flow-engine')
+    if (!clinicId || !isAuthorizedWebToolSession(clinicId, token)) {
+      set.status = 401
+      return { error: 'Geçerli görüşme oturumu gerekli.' }
+    }
+    if (JSON.stringify(body ?? {}).length > 65_536) {
+      set.status = 413
+      return { error: 'Konuşma kaydı çok büyük.' }
+    }
+    try { return webConversationLogs.ingest(clinicId, token, body) }
+    catch { set.status = 400; return { error: 'Konuşma kaydı kabul edilmedi.' } }
+  })
+
   // ── Direct Mode: Session Config ──────────────────────────────────────────────
   // Client bağlanmadan önce dinamik system prompt, RAG context ve tool declarations alır
   // Web oturumları Asterisk telefon hatlarından (tel_*) tamamen bağımsız ve paralel çalışır.
@@ -2895,7 +2913,12 @@ app.ws('/ws', {
       ws.close()
       return
     }
-    const shortId = randomUUID().slice(0, 8)
+    const shortId = `web_${randomUUID().slice(0, 8)}`
+    const conversationLog = new ConversationLog(shortId)
+    ; (ws.data as any).conversationLog = conversationLog
+    ; (ws.data as any).sessionId = shortId
+    conversationLog.event('çağrı_başladı', { channel: 'web', transport: 'websocket' })
+    let outputActive = false
     console.log(`[${shortId}] Client connected`)
     const startedAt = new Date()
     const startedAtMs = Date.now()
@@ -2954,29 +2977,45 @@ app.ws('/ws', {
       const clinicAi = await getGeminiClient(tenant.clinicId).catch(() => getAI())
 
       const session = await createLiveSession(clinicAi, {
-        onReady: () => { console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
+        onReady: () => { conversationLog.event('bağlantı_hazır', { channel: 'web' }); console.log(`[${shortId}] Gemini Live ready`); ws.send(JSON.stringify({ type: 'ready' })) },
         onAudio: (pcm) => {
+          if (!outputActive) {
+            outputActive = true
+            conversationLog.event('asistan_sesi_tarayıcıya_gönderimi_başladı', { channel: 'web' })
+          }
           ws.send(pcm)
           info.audioChunks.push({ buffer: pcm, offsetMs: Date.now() - startedAtMs })
         },
         onTranscript: (role, text) => {
           const trimmed = text.trim()
           if (trimmed) {
-            const label = role === 'user' ? 'USER' : 'AI'
-            console.log(`[${shortId}] ${label}: ${trimmed}`)
+            conversationLog.event('konuşma_metni', { channel: 'web', speaker: role === 'user' ? 'arayan' : 'asistan', text, timing: 'transkript_alınma_zamanı' })
           }
           ws.send(JSON.stringify({ type: 'transcript', role, text }))
         },
-        onInterrupted: () => ws.send(JSON.stringify({ type: 'interrupted' })),
-        onTurnComplete: () => ws.send(JSON.stringify({ type: 'turn_complete' })),
-        onError: (e) => console.error(`[${shortId}] Gemini error:`, e),
+        onInterrupted: () => {
+          outputActive = false
+          conversationLog.event('asistan_sözü_kesildi', { channel: 'web' })
+          ws.send(JSON.stringify({ type: 'interrupted' }))
+        },
+        onTurnComplete: () => {
+          outputActive = false
+          conversationLog.event('asistan_üretimi_tamamlandı', { channel: 'web' })
+          ws.send(JSON.stringify({ type: 'turn_complete' }))
+        },
+        onError: (e) => {
+          conversationLog.event('bağlantı_hatası', { channel: 'web', code: 'gemini_error' })
+          console.error(`[${shortId}] Gemini error:`, e)
+        },
         onClose: () => {
+          conversationLog.end({ channel: 'web', reason: 'gemini_kapandı' })
           console.log(`[${shortId}] Gemini session closed`)
           sessions.delete(shortId)
           notifyAdmins('session_end', { id: shortId, activeSessions: sessions.size })
         },
       }, { dbSessionId: shortId, systemPrompt, model, voiceName, clinicId: tenant.clinicId, hostname: tenant.hostname, direction: 'web', appointmentSource: 'web_ai' })
 
+      if ((ws.data as any).conversationClosed) { session.close(); return }
       info.session = session
         ; (ws.data as any).sessionId = shortId
       sessions.set(shortId, info)
@@ -2987,6 +3026,7 @@ app.ws('/ws', {
         turnComplete: true,
       })
     } catch (err) {
+      conversationLog.event('bağlantı_hatası', { channel: 'web', code: 'session_start_failed' })
       console.error(`[${shortId}] Session başlatılamadı:`, err)
       ws.send(JSON.stringify({ type: 'error', message: 'Session failed to start' }))
       ws.close()
@@ -3002,6 +3042,10 @@ app.ws('/ws', {
       try { if (JSON.parse(message as string).type === 'pong') return } catch { }
     }
     if (message instanceof Buffer || message instanceof Uint8Array) {
+      if (!(ws.data as any).inputStarted) {
+        ; (ws.data as any).inputStarted = true
+        ; (ws.data as any).conversationLog?.event('mikrofon_akışı_başladı', { channel: 'web' })
+      }
       const buf = Buffer.isBuffer(message) ? message : Buffer.from(message)
       info.session.sendRealtimeInput({
         audio: {
@@ -3016,6 +3060,8 @@ app.ws('/ws', {
   },
 
   async close(ws) {
+    ; (ws.data as any).conversationClosed = true
+    ; (ws.data as any).conversationLog?.end({ channel: 'web', reason: 'tarayıcı_bağlantısı_kapandı' })
     // Timer'ları temizle
     clearInterval((ws.data as any).idleTimer)
     clearInterval((ws.data as any).pingTimer)

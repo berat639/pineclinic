@@ -30,3 +30,22 @@ Transkriptlerde `tr-TR` dil ipucu kullanılır. Sağlayıcının kesinti mesajı
 Doğrulama: 58 regresyon testi, sunucu/istemci TypeScript kontrolleri ve gerçek Gemini oturumu. Sentetik Türkçe sesle “Randevu almak istiyorum ama” ardından 1 saniye sessizlik, ardından “Önce bir şey sormam gerekiyor” gönderildiğinde yarım ifadeye erken yanıt alınmadı. Tam ses girdisi gönderildikten yaklaşık 1,5 saniye sonra yanıt başladı; bu tek denemenin sonucudur, operatör hattında süre garantisi değildir.
 
 Dil ipucu ve yerleşik konuşma davranışı için kaynaklar: [Google Live API uygulama önerileri](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api/best-practices), [Google Live API konuşma yetenekleri](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api/configure-gemini-capabilities).
+
+## Web görüşmeleri
+
+Web sesli görüşmeleri de sunucu stdout'una `[KONUSMA]` önekiyle yazılır. `callId` değeri `web_` ile başlar; `channel: "web"` ile telefon görüşmelerinden ayrılabilir.
+
+Ana web ekranı Gemini'ye doğrudan bağlanır. Bu yolda tarayıcı konuşma parçalarını ve ses oynatma olaylarını mevcut görüşme anahtarıyla `/api/conversation-logs` üzerinden sunucuya küçük, sıralı paketler halinde aktarır. Anahtarlar ve ham ses bu kayıtlara dahil edilmez. Yinelenen paketler sunucuda elenir; ağ sorunu log aktarımını aksatırsa sesli görüşme bekletilmez. Sayfa kapanışındaki aktarım tarayıcının `keepalive` desteği ve ağ bağlantısıyla sınırlıdır.
+
+Doğrudan bağlantıda:
+
+- `timestamp` ve `elapsedMs`: sunucunun olayı aldığı an ve sunucudaki ilk kayıttan geçen süre.
+- `clientTimestamp`, `clientElapsedMs`, `clientSequence`: tarayıcıdaki olay zamanı, görüşme başından geçen monoton süre ve olay sırası. Konuşma ve oynatma zamanlarını karşılaştırırken bu alanları kullanın.
+- `asistan_sesi_alındı`: tarayıcı ilk ses paketini aldı.
+- `asistan_sesi_oynatmaya_planlandı`: Web Audio kuyruğunda ses planlandı; `scheduledDelayMs` planlanan başlangıca kalan süreyi gösterir.
+- `asistan_sesi_oynatımı_bitti`: planlanan ses düğümleri bitti; fiziksel hoparlör/donanım gecikmesi dahil değildir.
+- `asistan_sesi_oynatımı_temizlendi`: kesinti veya kapatma sırasında kalan kuyruk temizlendi; `discardedAudioMs` kalan süreyi gösterir.
+
+`transport: "websocket"` olan eski `/ws` bağlantısında transkript, mikrofon akışının başlaması, asistan sesinin tarayıcıya gönderilmeye başlaması, tur sonu, kesinti, hata ve kapanış sunucuda doğrudan loglanır. Bu yolun sunucu zamanları tarayıcıdaki duyulma anı değildir.
+
+Dağıtımdan sonra açık web sayfasını yenileyerek yeni bir sesli görüşme başlatın. Dokploy backend loglarındaki mevcut `[KONUSMA]` filtresi iki bağlantı yolunu da gösterir.

@@ -13,6 +13,16 @@ export class AudioStreamPlayer {
   private activeSources = new Set<AudioBufferSourceNode>();
   private readonly maxScheduledAheadSeconds = 1.8;
   private readonly initialJitterBufferSeconds = 0.06;
+  private playbackEpoch = 0;
+  private diagnostics?: (event: string, details: { queuedAudioMs?: number; discardedAudioMs?: number; scheduledDelayMs?: number }) => void;
+
+  setDiagnostics(callback: typeof this.diagnostics) { this.diagnostics = callback; }
+
+  private report(event: string, details: { discardedAudioMs?: number; scheduledDelayMs?: number } = {}) {
+    const pendingSeconds = this.pendingChunks.reduce((sum, chunk) => sum + chunk.length / this.audioContext.sampleRate, 0);
+    const queuedAudioMs = Math.round((pendingSeconds + Math.max(0, this.nextStartTime - this.audioContext.currentTime)) * 1000);
+    try { this.diagnostics?.(event, { queuedAudioMs, ...details, ...(event === 'asistan_sesi_oynatımı_temizlendi' ? { discardedAudioMs: queuedAudioMs } : {}) }); } catch { /* Diagnostics never affect playback. */ }
+  }
 
   constructor(sampleRate = 24000) {
     this.audioContext = createAudioContext({ sampleRate });
@@ -74,6 +84,8 @@ export class AudioStreamPlayer {
 
   /** Discard the current assistant turn without losing the user-unlocked context. */
   clear() {
+    if (this.pendingChunks.length || this.activeSources.size) this.report('asistan_sesi_oynatımı_temizlendi');
+    this.playbackEpoch++;
     this.pendingChunks = [];
     for (const source of this.activeSources) {
       try { source.stop() } catch { /* already ended */ }
@@ -129,15 +141,20 @@ export class AudioStreamPlayer {
       const source = this.audioContext.createBufferSource();
       source.buffer = buffer;
       source.connect(this.gainNode);
+      const epoch = this.playbackEpoch;
       source.onended = () => {
+        if (epoch !== this.playbackEpoch) return;
         this.activeSources.delete(source);
         this.drainQueue();
+        if (this.activeSources.size === 0 && this.pendingChunks.length === 0) this.report('asistan_sesi_oynatımı_bitti');
       };
 
       const startTime = Math.max(now + 0.002, this.nextStartTime);
+      const starting = this.activeSources.size === 0;
       source.start(startTime);
       this.nextStartTime = startTime + buffer.duration;
       this.activeSources.add(source);
+      if (starting) this.report('asistan_sesi_oynatmaya_planlandı', { scheduledDelayMs: Math.round((startTime - now) * 1000) });
     }
   }
 }

@@ -394,6 +394,7 @@ export default function Home() {
 
     const session = new AiLiveSession(callbacks)
     sessionRef.current = session
+    player.setDiagnostics((event, details) => session.logPlayback(event, details))
 
     try {
       await session.connect(currentApiKey, liveConfig, mode)

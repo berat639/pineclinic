@@ -1,3 +1,4 @@
+import { BrowserConversationLog } from './conversation-log'
 import {
   GoogleGenAI,
   Modality,
@@ -208,6 +209,9 @@ export class AiLiveSession {
   private _englishRecoveryCount = 0
   private _pendingClientTexts: string[] = []
   private _setupReady = false
+  private conversationLog: BrowserConversationLog | null = null
+  private audioTurnActive = false
+  private micLogged = false
 
   constructor(callbacks: LiveChatCallbacks) {
     this.callbacks = callbacks
@@ -229,6 +233,11 @@ export class AiLiveSession {
   }
 
   async connect(apiKey: string, config: SessionConfig, mode: 'audio' | 'text' = 'audio'): Promise<void> {
+    this.conversationLog?.end()
+    this.conversationLog = mode === 'audio' && !config.toolHandler && (config.sessionKey || config.flowSession?.token)
+      ? new BrowserConversationLog((config.sessionKey || config.flowSession?.token) as string) : null
+    this.audioTurnActive = false
+    this.micLogged = false
     const modelName = config.model || 'gemini-3.8-live'
     this.flowSession = config.flowSession
     this.sessionKey = config.flowSession?.token || config.sessionKey
@@ -285,12 +294,15 @@ export class AiLiveSession {
             },
             onmessage: (message: LiveServerMessage) => {
               if ((message as any).setupComplete) {
+                this.conversationLog?.event('bağlantı_hazır')
                 this._setupReady = true
                 finishConnect()
               }
               this.handleMessage(message)
             },
             onerror: (e: ErrorEvent) => {
+              this.conversationLog?.event('bağlantı_hatası', { code: 'gemini_error' })
+              this.conversationLog?.end()
               console.error('[Live] Error:', e.message || e)
               this._isConnected = false
               this._sendGuard = true
@@ -298,6 +310,8 @@ export class AiLiveSession {
               if (!resolved) { resolved = true; reject(new Error(e.message || 'Failed')) }
             },
             onclose: (e: CloseEvent) => {
+              if (e.code !== 1000) this.conversationLog?.event('bağlantı_hatası', { code: String(e.code) })
+              this.conversationLog?.end()
               this._isConnected = false
               this._sendGuard = true
               this.callbacks.onConnectionChange(false)
@@ -350,6 +364,8 @@ export class AiLiveSession {
           }
         })
         .catch((err) => {
+          this.conversationLog?.event('bağlantı_hatası', { code: 'connect_failed' })
+          this.conversationLog?.end()
           console.error('[Live] Connect failed:', err)
           this._isConnected = false
           if (!resolved) { resolved = true; reject(err) }
@@ -359,6 +375,7 @@ export class AiLiveSession {
 
   sendAudio(base64PCM: string) {
     if (!this.session || !this._isConnected || this._sendGuard) return
+    if (!this.micLogged) { this.micLogged = true; this.conversationLog?.event('mikrofon_akışı_başladı') }
     try {
       this.session.sendRealtimeInput({
         audio: { data: base64PCM, mimeType: 'audio/pcm;rate=16000' },
@@ -465,7 +482,12 @@ export class AiLiveSession {
     }
   }
 
+  logPlayback(event: string, details: { queuedAudioMs?: number; discardedAudioMs?: number; scheduledDelayMs?: number }) {
+    this.conversationLog?.event(event, details)
+  }
+
   disconnect() {
+    this.conversationLog?.end()
     this._isConnected = false
     if (this.session) {
       try { this.session.close() } catch { /* */ }
@@ -563,6 +585,7 @@ export class AiLiveSession {
       if (isEnglishResponseDetected(this._currentModelTranscript)) {
         this.triggerEnglishGuard()
       } else {
+        this.conversationLog?.event('konuşma_metni', { speaker: 'asistan', text: transcript })
         this.callbacks.onText(transcript)
       }
     }
@@ -571,6 +594,10 @@ export class AiLiveSession {
     if (!this._englishInterceptedInTurn && message.serverContent?.modelTurn?.parts) {
       for (const part of message.serverContent.modelTurn.parts) {
         if (!this._englishInterceptedInTurn && part?.inlineData?.data) {
+          if (!this.audioTurnActive) {
+            this.audioTurnActive = true
+            this.conversationLog?.event('asistan_sesi_alındı')
+          }
           this.callbacks.onAudioChunk(part.inlineData.data)
         }
       }
@@ -578,6 +605,7 @@ export class AiLiveSession {
 
     const userTranscript = (message as any).serverContent?.inputTranscription?.text
     if (userTranscript) {
+      this.conversationLog?.event('konuşma_metni', { speaker: 'arayan', text: userTranscript })
       this._currentUserTranscript = `${this._currentUserTranscript} ${userTranscript}`.trim().slice(-500)
       this.callbacks.onUserText?.(userTranscript)
       if (this._turnMode === 'semantic') {
@@ -590,6 +618,8 @@ export class AiLiveSession {
     }
 
     if (message.serverContent?.turnComplete) {
+      this.audioTurnActive = false
+      this.conversationLog?.event('asistan_üretimi_tamamlandı')
       const wasEnglishBlocked = this._englishInterceptedInTurn
       if (!wasEnglishBlocked && this._currentModelTranscript.trim()) {
         this._lastAssistantTranscript = this._currentModelTranscript.trim()
@@ -602,6 +632,8 @@ export class AiLiveSession {
       }
     }
     if (message.serverContent?.interrupted) {
+      this.audioTurnActive = false
+      this.conversationLog?.event('asistan_sözü_kesildi')
       this._currentModelTranscript = ''
       this._englishInterceptedInTurn = false
       this.callbacks.onInterrupted()
