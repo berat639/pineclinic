@@ -85,7 +85,7 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
       const rosterText = await buildClinicRosterAndHoursText()
       if (rosterText) {
         parts.push(
-          `KLİNİK HEKİM KADROSU VE MESAİ BİLGİLERİ (CANLI VERİTABANI):\n${rosterText}\nNot: Müşteri hekimlerimiz, uzmanlık alanları veya çalışma saatlerimiz hakkında soru sorduğunda doğrudan bu bilgileri doğal konuşma dilinde aktar; zaten burada yer alan hekim bilgisi için tekrar tekrar searchKnowledgeBase çağırma.`,
+          `İŞLETME EKİP KADROSU VE MESAİ BİLGİLERİ (CANLI VERİTABANI):\n${rosterText}\nNot: Müşteri uzmanlarımız/hekimlerimiz, uzmanlık alanları veya çalışma saatlerimiz hakkında soru sorduğunda doğrudan bu bilgileri doğal konuşma dilinde aktar; zaten burada yer alan kadro bilgisi için tekrar tekrar searchKnowledgeBase çağırma.`,
         )
       }
     } catch {}
@@ -123,7 +123,7 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
       behaviorLines.push('- Bilinmeyen Soru Davranışı: Bilgi bankasında cevabı olmayan bir soru gelirse hastaNotKaydet aracını kullanarak konuyu bankoya not bırak.')
     }
     if (behaviorLines.length > 0) {
-      parts.push(`KLİNİK AI DAVRANIŞ TERCİHLERİ:\n${behaviorLines.join('\n')}`)
+      parts.push(`İŞLETME AI DAVRANIŞ TERCİHLERİ:\n${behaviorLines.join('\n')}`)
     }
   } catch {}
 
@@ -148,7 +148,7 @@ export async function buildSystemPrompt(greeting: string, direction: string = 'i
     } catch {
       if (!joined.includes('KONU DIŞI ISRAR')) {
         parts.push(
-          'KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI: Karşı taraf klinik veya randevu dışında alakasız bir konu açarsa ilk seferde nazikçe klinik/randevu konusuna yönlendir. Karşı taraf uyarıya rağmen ikinci kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve hemen cagriySonlandir aracını çağır.',
+          'KONU DIŞI ISRAR VE OTOMATİK KAPATMA KURALI: Karşı taraf işletme veya randevu dışında alakasız bir konu açarsa ilk seferde nazikçe işletme/randevu konusuna yönlendir. Karşı taraf uyarıya rağmen ikinci kez konu dışına çıkar veya konuyu dağıtmaya devam ederse sohbeti KESİNLİKLE uzatma; "İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve hemen cagriySonlandir aracını çağır.',
         )
       }
     }

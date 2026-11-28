@@ -1318,6 +1318,69 @@ async function runMigrations() {
   for (const ddl of integrationDDL) await sql.unsafe(ddl)
   for (const ddl of treatmentPlanningDDL) await sql.unsafe(ddl)
 
+  // Tek seferlik idempotent göç: platform_settings (panel?tab=platform-clinics Sistem Talimatları)
+  // ve clinic_settings içindeki eski "klinik" ifadelerini "işletme" olarak güncelle.
+  const promptMigrationKey = 'migration.prompt_klinik_to_isletme_v1'
+  const promptMigrationRow = await sql`
+    SELECT value FROM platform_settings WHERE key = ${promptMigrationKey} LIMIT 1
+  `
+  if (promptMigrationRow[0]?.value !== 'done') {
+    const { replaceKlinikWithIsletmeInPrompt } = await import('../prompts/registry')
+    const { getDefaultPromptValue } = await import('../data/default-prompts')
+    const storedPrompts = await sql<{ key: string; value: string }[]>`
+      SELECT key, value FROM platform_settings WHERE key LIKE 'prompt.%'
+    `
+    for (const row of storedPrompts) {
+      const updated = replaceKlinikWithIsletmeInPrompt(row.value)
+      if (updated === row.value) continue
+      const defaultVal = getDefaultPromptValue(row.key)
+      if (defaultVal && updated.trim() === defaultVal.trim()) {
+        await sql`DELETE FROM platform_settings WHERE key = ${row.key}`
+        await sql`
+          INSERT INTO platform_prompt_history (key, value, action)
+          VALUES (${row.key}, ${defaultVal}, 'reset')
+        `
+      } else {
+        await sql`
+          UPDATE platform_settings SET value = ${updated}, updated_at = now()
+          WHERE key = ${row.key}
+        `
+        await sql`
+          INSERT INTO platform_prompt_history (key, value, action)
+          VALUES (${row.key}, ${updated}, 'update')
+        `
+      }
+    }
+
+    const legacyCloseMappings: Array<[string, string]> = [
+      [
+        'Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+        'İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+      ],
+      [
+        'Klinik veya randevu dışında yardımcı olamadığım için görüşmemizi sonlandırıyorum, iyi günler dilerim.',
+        'İşletme veya randevu dışında yardımcı olamadığım için görüşmemizi sonlandırıyorum, iyi günler dilerim.',
+      ],
+      [
+        'Hattımızı bekleyen hastalarımız için yalnızca klinik işlemlerinde tutabiliyoruz; görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+        'Hattımızı bekleyen müşterilerimiz için yalnızca işletme işlemlerinde tutabiliyoruz; görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+      ],
+    ]
+    for (const [oldMsg, newMsg] of legacyCloseMappings) {
+      await sql`
+        UPDATE clinic_settings
+        SET value = ${newMsg}, updated_at = now()
+        WHERE key = 'ai.off_topic_close_message' AND value = ${oldMsg}
+      `
+    }
+
+    await sql`
+      INSERT INTO platform_settings (key, value, updated_at)
+      VALUES (${promptMigrationKey}, 'done', now())
+      ON CONFLICT (key) DO UPDATE SET value = 'done', updated_at = now()
+    `
+  }
+
   console.log('[Migration] Tamamlandı — şema hazır')
   await sql.end()
 }

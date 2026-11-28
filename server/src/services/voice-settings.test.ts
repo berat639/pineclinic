@@ -47,10 +47,14 @@ describe('voice-settings validation & prompt registry', () => {
     const rule2 = buildOffTopicPromptRule(2, DEFAULT_OFF_TOPIC_CLOSE_MESSAGE)
     expect(rule2).toContain('SINIR: 2. KEZ')
     expect(rule2).toContain(DEFAULT_OFF_TOPIC_CLOSE_MESSAGE)
+    expect(rule2).toContain('işletme')
+    expect(rule2).not.toMatch(/klini[kğ]/iu)
 
     const rule1 = buildOffTopicPromptRule(1, 'Görüşmemizi sonlandırıyorum, iyi günler.')
     expect(rule1).toContain('SINIR: 1 KEZ')
     expect(rule1).toContain('Görüşmemizi sonlandırıyorum, iyi günler.')
+    expect(rule1).toContain('işletme')
+    expect(rule1).not.toMatch(/klini[kğ]/iu)
   })
 
   test('renders prompt template variables and includes all Faz 6 prompt keys', () => {

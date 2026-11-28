@@ -51,7 +51,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       if (end <= start || end.getTime() - start.getTime() > 31 * 86400_000) throw new Error('En fazla 31 günlük bir tarih aralığı belirtin.')
       const slots = await db.select({ start: dentalAppointments.startTime, end: dentalAppointments.endTime }).from(dentalAppointments)
         .where(and(eq(dentalAppointments.clinicId, context.clinicId), gte(dentalAppointments.startTime, start), lt(dentalAppointments.startTime, end), sql`${dentalAppointments.status} <> 'cancelled'`)).limit(300)
-      return { dolu_araliklar: slots, message: 'Yalnızca kayıtlı dolu aralıklar gösterilir; kesin saat için klinik onayı gerekir.' }
+      return { dolu_araliklar: slots, message: 'Yalnızca kayıtlı dolu aralıklar gösterilir; kesin saat için işletme onayı gerekir.' }
     }
     if (name !== 'insanaAktar') {
       if (!context.phone) throw new Error('Gönderici numarası doğrulanamadı. Kişisel işlemler için insanaAktar aracını kullanın.')
@@ -60,7 +60,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
     if (name === 'musteriSorgula' || name === 'gecmisRandevular') {
       const [patient] = await db.select({ id: patients.id, name: patients.name }).from(patients)
         .where(and(eq(patients.clinicId, context.clinicId), patientPhoneMatches(context.phone!))).limit(1)
-      if (!patient) return { kayitli: false, sonuc: 'Bu klinikte kayıtlı hasta bulunamadı.' }
+      if (!patient) return { kayitli: false, sonuc: 'Bu işletmede kayıtlı müşteri bulunamadı.' }
       const history = await db.select({ id: appointments.id, tarih: appointments.date, saat: appointments.time }).from(appointments)
         .where(and(eq(appointments.clinicId, context.clinicId), eq(appointments.phone, context.phone!))).orderBy(desc(appointments.date)).limit(10)
       const calendar = await db.select({ id: dentalAppointments.id, tarih: dentalAppointments.startTime, durum: dentalAppointments.status }).from(dentalAppointments)
@@ -75,7 +75,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
       let result: Record<string, unknown>
       if (name === 'randevuOlustur') {
         const created = await createAssistantAppointment({ ...args, telefon: context.phone }, { sessionId: `wa_${context.messageId}`, clinicId: context.clinicId, source: 'whatsapp_ai' }, tx)
-        result = { success: true, id: created.id, message: `${created.date} ${created.time} için randevu talebi alındı; klinik onayı bekleniyor.` }
+        result = { success: true, id: created.id, message: `${created.date} ${created.time} için randevu talebi alındı; işletme onayı bekleniyor.` }
       } else if (name === 'randevuDurumBildir' || (name === 'randevuGuncelle' && args.durum)) {
         const rawDurum = String(args.durum || '')
         const action = rawDurum === 'confirm' || rawDurum === 'confirmed'
@@ -100,8 +100,8 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
           message: action === 'confirm'
             ? 'Randevunuz onaylandı olarak takvime işlendi.'
             : action === 'postpone'
-              ? 'Erteleme talebiniz klinik takvimine iletildi; ekibimiz yeni saat için sizinle iletişime geçecektir.'
-              : 'Randevunuz iptal edildi ve klinik takviminde güncellendi.',
+              ? 'Erteleme talebiniz işletme takvimine iletildi; ekibimiz yeni saat için sizinle iletişime geçecektir.'
+              : 'Randevunuz iptal edildi ve işletme takviminde güncellendi.',
         }
       } else if (name === 'randevuGuncelle') {
         result = await updateWhatsAppAppointment(tx, args, context.clinicId, context.phone!)
@@ -111,7 +111,7 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
         const [patient] = await tx.select({ id: patients.id }).from(patients).where(and(eq(patients.clinicId, context.clinicId), patientPhoneMatches(context.phone!))).limit(1)
         if (!patient) throw new Error('Hasta kaydı bulunamadı; personele aktarın.')
         await tx.insert(patientNotes).values({ clinicId: context.clinicId, patientId: patient.id, phone: context.phone, content: note, source: 'whatsapp' })
-        result = { success: true, message: 'Not kliniğe iletildi.' }
+        result = { success: true, message: 'Not işletmeye iletildi.' }
       } else {
         await tx.update(whatsappConversations).set({ aiPaused: true }).where(and(eq(whatsappConversations.id, context.conversationId), eq(whatsappConversations.clinicId, context.clinicId)))
         result = { success: true, message: 'Sohbet personel desteğine alındı. Kullanıcıya ekibin buradan devam edeceğini söyle.' }
@@ -121,6 +121,6 @@ export async function executeWhatsAppTool(name: string, args: Record<string, unk
     })
   } catch (error) {
     // Database errors can contain query arguments; return only intentional validation messages.
-    return { success: false, message: error instanceof Error && !('query' in error) && !('code' in error) ? error.message : 'İşlem tamamlanamadı. Klinik personelinden destek isteyin.' }
+    return { success: false, message: error instanceof Error && !('query' in error) && !('code' in error) ? error.message : 'İşlem tamamlanamadı. İşletme personelinden destek isteyin.' }
   }
 }

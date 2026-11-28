@@ -109,8 +109,8 @@ async function seedKnowledgePrompts() {
 async function seedSystemSettings() {
   const clinicId = await getDefaultClinicId()
   const settings = [
-    { key: 'greeting_message', value: 'Merhaba, Pine Klinik asistanınızım. Size nasıl yardımcı olabilirim?' },
-    { key: 'greeting_message_outbound', value: 'Merhaba, ben Pine Klinik asistanıyım. Sizi arıyorum çünkü...' },
+    { key: 'greeting_message', value: 'Merhaba, işletme asistanınızım. Size nasıl yardımcı olabilirim?' },
+    { key: 'greeting_message_outbound', value: 'Merhaba, ben işletme asistanıyım. Sizi arıyorum çünkü...' },
     { key: 'outbound_caller_id', value: '08503096119' },
   ]
   for (const s of settings) {

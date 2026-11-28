@@ -37,10 +37,10 @@ export async function sendLocationToCaller(phone: string): Promise<void> {
   const nodeData = (locNode?.data ?? {}) as Record<string, unknown>
 
   const address = String(nodeData.locationAddress || settingAddress || '').trim()
-  const title = String(nodeData.locationTitle || settingTitle || clinic?.name || 'Klinik Konumu').trim()
+  const title = String(nodeData.locationTitle || settingTitle || clinic?.name || 'İşletme Konumu').trim()
   const latRaw = String(nodeData.locationLat || settingLat || '').trim()
   const lngRaw = String(nodeData.locationLng || settingLng || '').trim()
-  const locationMessage = String(nodeData.locationMessage || settingMsg || '📍 Kliniğimizin konumu ve açık adres bilgileri:').trim()
+  const locationMessage = String(nodeData.locationMessage || settingMsg || '📍 İşletmemizin konumu ve açık adres bilgileri:').trim()
 
   let locationUrl = String(nodeData.locationUrl || settingUrl || '').trim()
   if (!locationUrl && latRaw && lngRaw) {
@@ -49,7 +49,7 @@ export async function sendLocationToCaller(phone: string): Promise<void> {
     locationUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
   }
 
-  if (!locationUrl && !address) throw new Error('Klinik konumu tanımlı değil.')
+  if (!locationUrl && !address) throw new Error('İşletme konumu tanımlı değil.')
   if (!clinic || !clinic.evolutionInstanceName) throw new Error('Aktif WhatsApp bağlantısı bulunamadı.')
 
   const creds = credentialsFor(clinic)

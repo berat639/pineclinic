@@ -302,7 +302,7 @@ export async function createLiveSession(
         }
         return {
           success: true,
-          message: 'Notunuz başarıyla kaydedildi ve klinik bankosuna iletildi. Yetkililerimiz en kısa sürede size dönüş sağlayacaktır.',
+          message: 'Notunuz başarıyla kaydedildi ve işletme bankosuna iletildi. Yetkililerimiz en kısa sürede size dönüş sağlayacaktır.',
         }
       } catch (err) {
         console.error('[hastaNotKaydet] Hata:', err)
@@ -499,7 +499,7 @@ export async function createLiveSession(
         const { dentalAppointments } = await import('./db/schema')
         const { and, eq, gte, sql } = await import('drizzle-orm')
         const clinicId = options.clinicId
-        if (!clinicId) return { success: false, message: 'Klinik bağlamı bulunamadı.' }
+        if (!clinicId) return { success: false, message: 'İşletme bağlamı bulunamadı.' }
         let appointmentId = String(args.randevu_id || '')
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appointmentId)) {
           appointmentId = ''

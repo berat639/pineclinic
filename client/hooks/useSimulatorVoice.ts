@@ -50,7 +50,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'bilgiBankasindaAra',
-    description: 'Kliniğin bilgi bankasında hastanın sorusuyla ilgili bilgi arar.',
+    description: 'İşletmenin bilgi bankasında müşterinin sorusuyla ilgili bilgi arar.',
     parameters: {
       type: Type.OBJECT,
       properties: { sorgu: { type: Type.STRING, description: 'Aranacak soru veya konu.' } },
@@ -105,7 +105,7 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
   {
     name: 'whatsappKonumGonder',
-    description: 'Arayan numaraya kliniğin WhatsApp konumunu gönderir.',
+    description: 'Arayan numaraya işletmenin WhatsApp konumunu gönderir.',
     parameters: {
       type: Type.OBJECT,
       properties: {},
@@ -338,7 +338,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
       if (name === 'whatsappKonumGonder') {
         return {
           success: true,
-          mesaj: 'Simülasyon: Klinik konumu WhatsApp üzerinden gönderildi. Hastaya konumun gönderildiğini söyle.',
+          mesaj: 'Simülasyon: İşletme konumu WhatsApp üzerinden gönderildi. Müşteriye konumun gönderildiğini söyle.',
         }
       }
       if (name === 'musteriSorgula') {
@@ -489,7 +489,7 @@ export function useSimulatorVoice(options: SimulatorVoiceOptions) {
         if (!alive() || !sessionRef.current) return
         try {
           sessionRef.current.sendText(
-            'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Hastaya nazikçe sürenin dolmak üzere olduğunu söyleyip randevu/klinik işlemini hemen toparla.',
+            'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya nazikçe sürenin dolmak üzere olduğunu söyleyip randevu/işletme işlemini hemen toparla.',
           )
         } catch {}
       }, warnMs)

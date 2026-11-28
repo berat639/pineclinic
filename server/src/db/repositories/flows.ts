@@ -700,17 +700,17 @@ export function flowToPromptText(flow: ConversationFlow): string {
   }
 
   if (isMinimalGreetingEndFlow(flow)) {
-    lines.push(`\nMİNİMAL AKIŞ KURALI:\nKarşılama mesajını yalnızca bir kez söyle. Sonra karşı tarafın konuşmasını bekle; kendiliğinden randevu, şikayet, tarih, saat veya başka soru sorma. Karşı taraf klinikle ilgili bir soru sorarsa yalnızca o soruya kısa cevap ver ve yeni konu başlatma. Karşı taraf konu dışına çıkarsa ilk seferde nazikçe klinik/randevu konusuna yönlendir; konu dışına devam ederse "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmeyi sonlandırıyorum, iyi günler." deyip cagriySonlandir aracını çağır.`)
+    lines.push(`\nMİNİMAL AKIŞ KURALI:\nKarşılama mesajını yalnızca bir kez söyle. Sonra karşı tarafın konuşmasını bekle; kendiliğinden randevu, şikayet, tarih, saat veya başka soru sorma. Karşı taraf işletmeyle ilgili bir soru sorarsa yalnızca o soruya kısa cevap ver ve yeni konu başlatma. Karşı taraf konu dışına çıkarsa ilk seferde nazikçe işletme/randevu konusuna yönlendir; konu dışına devam ederse "İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmeyi sonlandırıyorum, iyi günler." deyip cagriySonlandir aracını çağır.`)
   } else {
     const outgoing = edgeMap.get(startNode.id) || []
     if (outgoing.length === 0) {
-      lines.push(`\nGENEL KLİNİK İLETİŞİM VE KONU DIŞI KURALI:
-Karşılama mesajını söyledikten sonra hastanın klinik, tedavi ve randevu sorularına doğal, samimi ve net cevaplar ver. Ancak karşı taraf klinik dışı sohbet açar veya konuyu dağıtıp vakit kaybettirirse:
-1) İlk seferde nazikçe "Size yalnızca kliniğimiz ve randevu işlemleriniz konusunda yardımcı olabilirim, randevu veya bilgi talebiniz var mı?" diyerek konuya yönlendir.
-2) Karşı taraf ikinci kez konu dışına çıkar veya alakasız konuşmaya devam ederse sohbeti KESİNLİKLE uzatma; "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve cagriySonlandir aracını çağır.`)
+      lines.push(`\nGENEL İŞLETME İLETİŞİM VE KONU DIŞI KURALI:
+Karşılama mesajını söyledikten sonra müşterinin işletme, hizmet ve randevu sorularına doğal, samimi ve net cevaplar ver. Ancak karşı taraf işletme dışı sohbet açar veya konuyu dağıtıp vakit kaybettirirse:
+1) İlk seferde nazikçe "Size yalnızca işletmemiz ve randevu işlemleriniz konusunda yardımcı olabilirim, randevu veya bilgi talebiniz var mı?" diyerek konuya yönlendir.
+2) Karşı taraf ikinci kez konu dışına çıkar veya alakasız konuşmaya devam ederse sohbeti KESİNLİKLE uzatma; "İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim." de ve cagriySonlandir aracını çağır.`)
     } else {
       lines.push(`\nGENEL İLETİŞİM VE KONU DIŞI KURALI:
-Akış adımlarını takip ederken karşı taraf klinikle ilgili bir soru sorarsa kısaca yanıtlayıp mevcut akış adımına dön. Karşı taraf klinik dışı bir konu açar veya konuyu dağıtırsa ilk seferde nazikçe mevcut randevu/klinik adımına yönlendir; üst üste ikinci kez konu dışına çıkarsa "Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, iyi günler." deyip cagriySonlandir aracını çağır.`)
+Akış adımlarını takip ederken karşı taraf işletmeyle ilgili bir soru sorarsa kısaca yanıtlayıp mevcut akış adımına dön. Karşı taraf işletme dışı bir konu açar veya konuyu dağıtırsa ilk seferde nazikçe mevcut randevu/işletme adımına yönlendir; üst üste ikinci kez konu dışına çıkarsa "İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmemizi sonlandırıyorum, iyi günler." deyip cagriySonlandir aracını çağır.`)
     }
   }
 

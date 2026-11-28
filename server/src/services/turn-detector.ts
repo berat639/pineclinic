@@ -191,7 +191,7 @@ function detectTurkishIncompleteMorphology(
 
   if (
     lastWord.length >= 5 &&
-    /(?:[ıiuü]m[ıiuü]n|[ıiuü]n[ıiuü]z[ıiuü]n|n[ıiuü]n|(?:kliniğ|doktor|hekim|randevu|tedavi|muayene|diş|eş|kız|oğul|anne|baba|bey|hanım|hoca|uzman|hasta)[ıiuü]n)$/u.test(lastWord)
+    /(?:[ıiuü]m[ıiuü]n|[ıiuü]n[ıiuü]z[ıiuü]n|n[ıiuü]n|(?:kliniğ|işletmen|doktor|hekim|randevu|tedavi|muayene|diş|eş|kız|oğul|anne|baba|bey|hanım|hoca|uzman|hasta)[ıiuü]n)$/u.test(lastWord)
   ) {
     return {
       reason: 'genitive_waiting_head_noun',
@@ -221,7 +221,7 @@ function detectTurkishIncompleteMorphology(
 
   if (
     wordCount >= 2 &&
-    /(?:randevuyu|randevumu|tarihi|saati|dişimi|dişime|kliniğe|doktora|hekime|muayeneye|kontrole|tedaviye|gününe|saatine|haftaya|yarına)$/u.test(lastWord)
+    /(?:randevuyu|randevumu|tarihi|saati|dişimi|dişime|kliniğe|işletmeye|doktora|hekime|muayeneye|kontrole|tedaviye|gününe|saatine|haftaya|yarına)$/u.test(lastWord)
   ) {
     return {
       reason: 'object_dative_accusative_sov',
@@ -491,7 +491,7 @@ const ENGLISH_PHRASE_RE =
 
 const COMMON_TURKISH_WORDS = new Set([
   'merhaba', 'merhabalar', 'hoş', 'geldiniz', 'nasıl', 'yardımcı', 'olabilirim',
-  'randevu', 'klinik', 'kliniğimize', 'hekim', 'doktor', 'hasta', 'tarih', 'saat',
+  'randevu', 'klinik', 'kliniğimize', 'işletme', 'işletmemiz', 'işletmemize', 'işletmemizle', 'hekim', 'doktor', 'hasta', 'tarih', 'saat',
   'gün', 'için', 'size', 'sizi', 'sizin', 'olarak', 'evet', 'hayır', 'tamam',
   'tabii', 'lütfen', 'teşekkür', 'teşekkürler', 'sağlıklı', 'günler', 'iyi',
   'adınızı', 'soyadınızı', 'numaranızı', 'telefon', 'şikayetiniz', 'işlem',

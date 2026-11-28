@@ -144,7 +144,7 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     },
     {
       name: 'searchKnowledgeBase',
-      description: 'Klinik hakkında, doktorlar, hizmetler veya çalışma saatleri hakkında bilgi tabanında arama yapar.',
+      description: 'İşletme hakkında, ekip/uzmanlar, hizmetler veya çalışma saatleri hakkında bilgi tabanında arama yapar.',
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -155,12 +155,12 @@ export async function buildToolDeclarations(direction: string = 'inbound'): Prom
     },
     {
       name: 'hastaNotKaydet',
-      description: 'Hasta randevu oluşturmayıp kliniğe bir not, mesaj veya şikayet iletmek istediğinde bankonun görmesi için not kaydeder.',
+      description: 'Müşteri randevu oluşturmayıp işletmeye bir not, mesaj veya şikayet iletmek istediğinde yetkililerin görmesi için not kaydeder.',
       parameters: {
         type: Type.OBJECT,
         properties: {
           telefon: { type: Type.STRING, description: 'Hastanın telefon numarası' },
-          not: { type: Type.STRING, description: 'Hastanın kliniğe iletmek istediği not veya mesaj' },
+          not: { type: Type.STRING, description: 'Müşterinin işletmeye iletmek istediği not veya mesaj' },
           hasta_adi: { type: Type.STRING, description: 'Hastanın adı ve soyadı (biliniyorsa)' },
         },
         required: ['telefon', 'not'],

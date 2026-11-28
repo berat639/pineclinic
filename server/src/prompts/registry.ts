@@ -8,6 +8,67 @@ export function renderPromptTemplate(template: string, vars: Record<string, stri
 }
 
 /**
+ * Eski "klinik" tabanlı talimat metinlerini Türkçe ek uyumunu koruyarak
+ * "işletme" tabanlı metinlere dönüştürür (tek seferlik platform göçü için).
+ */
+export function replaceKlinikWithIsletmeInPrompt(text: string): string {
+  const rules: Array<[RegExp, string]> = [
+    [/Yardımcı olabileceğim bir klinik işleminiz yoksa/g, 'İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa'],
+    [/Yardımcı olabileceğim bir klinik işleminiz olmadığı için/g, 'İşletmemizle ilgili yardımcı olabileceğim bir işleminiz olmadığı için'],
+    [/yardımcı olabileceğim bir klinik işleminiz yoksa/g, 'işletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa'],
+    [/yardımcı olabileceğim bir klinik işleminiz olmadığı için/g, 'işletmemizle ilgili yardımcı olabileceğim bir işleminiz olmadığı için'],
+    [/Sen bir diş kliniğinin/g, 'Sen bir işletmenin'],
+    [/Diş kliniğinin/g, 'İşletmenin'],
+    [/diş kliniğinin/g, 'işletmenin'],
+    [/Diş kliniği/g, 'İşletme'],
+    [/diş kliniği/g, 'işletme'],
+    [/KLİNİĞİMİZ/g, 'İŞLETMEMİZ'],
+    [/KLİNİĞİN/g, 'İŞLETMENİN'],
+    [/KLİNİĞE/g, 'İŞLETMEYE'],
+    [/Kliniğimizin/g, 'İşletmemizin'],
+    [/kliniğimizin/g, 'işletmemizin'],
+    [/Kliniğimizden/g, 'İşletmemizden'],
+    [/kliniğimizden/g, 'işletmemizden'],
+    [/Kliniğimize/g, 'İşletmemize'],
+    [/kliniğimize/g, 'işletmemize'],
+    [/Kliniğimizde/g, 'İşletmemizde'],
+    [/kliniğimizde/g, 'işletmemizde'],
+    [/Kliniğimiz/g, 'İşletmemiz'],
+    [/kliniğimiz/g, 'işletmemiz'],
+    [/Kliniğinize/g, 'İşletmenize'],
+    [/kliniğinize/g, 'işletmenize'],
+    [/Kliniğinizde/g, 'İşletmenizde'],
+    [/kliniğinizde/g, 'işletmenizde'],
+    [/Kliniğiniz/g, 'İşletmeniz'],
+    [/kliniğiniz/g, 'işletmeniz'],
+    [/Kliniğinin/g, 'İşletmesinin'],
+    [/kliniğinin/g, 'işletmesinin'],
+    [/Kliniğine/g, 'İşletmesine'],
+    [/kliniğine/g, 'işletmesine'],
+    [/Kliniğin/g, 'İşletmenin'],
+    [/kliniğin/g, 'işletmenin'],
+    [/Kliniğe/g, 'İşletmeye'],
+    [/kliniğe/g, 'işletmeye'],
+    [/Kliniği/g, 'İşletmeyi'],
+    [/kliniği/g, 'işletmeyi'],
+    [/Klinikle/g, 'İşletmeyle'],
+    [/klinikle/g, 'işletmeyle'],
+    [/Klinikte/g, 'İşletmede'],
+    [/klinikte/g, 'işletmede'],
+    [/Klinikten/g, 'İşletmeden'],
+    [/klinikten/g, 'işletmeden'],
+    [/KLİNİK/g, 'İŞLETME'],
+    [/Klinik/g, 'İşletme'],
+    [/klinik/g, 'işletme'],
+  ]
+  let out = text
+  for (const [pattern, replacement] of rules) {
+    out = out.replace(pattern, replacement)
+  }
+  return out
+}
+
+/**
  * Çözümleme sırası: platform talimatı (platform_settings: prompt.*) → kod varsayılanı.
  * Klinik bazlı kopyalar (clinic_settings prompt.*) artık okunmaz; veri silinmez.
  */

@@ -105,7 +105,7 @@ function getAI(): GoogleGenAI {
 }
 
 // ── SYSTEM_PROMPT ─────────────────────────────────────────────────────────────
-const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben Pine Clinic asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
+const DEFAULT_GREETING = 'Merhaba, hoş geldiniz! Ben işletme asistanınızım. Size daha iyi yardımcı olabilmem için telefon numaranızı öğrenebilir miyim?'
 
 function signOAuthState(payload: { clinicId: string; hostname: string; returnOrigin: string }): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -1815,7 +1815,7 @@ const app = new Elysia()
       lat: lat ?? '',
       lng: lng ?? '',
       locationUrl: locationUrl ?? '',
-      locationMessage: locationMessage ?? '📍 Kliniğimizin konumu ve açık adres bilgileri:',
+      locationMessage: locationMessage ?? '📍 İşletmemizin konumu ve açık adres bilgileri:',
     }
   })
 
@@ -1838,7 +1838,7 @@ const app = new Elysia()
     } else if (!locationUrl && address) {
       locationUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
     }
-    const locationMessage = String(input.locationMessage ?? '📍 Kliniğimizin konumu ve açık adres bilgileri:').trim()
+    const locationMessage = String(input.locationMessage ?? '📍 İşletmemizin konumu ve açık adres bilgileri:').trim()
 
     await Promise.all([
       setSetting('whatsapp.location_address', address),
@@ -1891,7 +1891,7 @@ const app = new Elysia()
         const lat = String(item.lat ?? '')
         const lon = String(item.lon ?? '')
         const displayName = String(item.display_name ?? '')
-        const shortTitle = String(item.name || displayName.split(',')[0] || 'Klinik Konumu').trim()
+        const shortTitle = String(item.name || displayName.split(',')[0] || 'İşletme Konumu').trim()
         return {
           title: shortTitle,
           address: displayName,
@@ -2592,7 +2592,7 @@ const app = new Elysia()
       if (action && action.action === 'send_wa_location') {
         await engine.completeAction(action.nodeId, true)
       }
-      return { success: true, message: 'Klinik konumu WhatsApp üzerinden paylaşıldı.' }
+      return { success: true, message: 'İşletme konumu WhatsApp üzerinden paylaşıldı.' }
     }
     if (input.name === 'hastaNotKaydet') {
       if (!step.success || !action || !['save_patient_note', 'notBirak'].includes(action.action)) {
@@ -2812,7 +2812,7 @@ const app = new Elysia()
         { sessionId: `direct-${randomUUID().slice(0, 8)}`, clinicId, source: 'web_ai' },
       )
       console.log('[Tools/Appointment]', appointment.id, appointment.customerName)
-      return { success: true, message: `Kontrol randevusu talebiniz alındı; klinik onayı bekleniyor.`, id: appointment.id }
+      return { success: true, message: `Kontrol randevusu talebiniz alındı; işletme onayı bekleniyor.`, id: appointment.id }
     } catch (err) {
       console.error('[Tools/Appointment]', err)
       set.status = 500
@@ -2866,7 +2866,7 @@ const app = new Elysia()
     try {
       const { createPatientNote } = await import('./db/repositories/dental')
       await createPatientNote({ phone, content: name ? `[${name}] ${note}` : note, source: 'web', clinicId })
-      return { success: true, message: 'Notunuz başarıyla kaydedildi ve klinik bankosuna iletildi.' }
+      return { success: true, message: 'Notunuz başarıyla kaydedildi ve işletme bankosuna iletildi.' }
     } catch {
       return { success: false, message: 'Not kaydedilirken bir hata oluştu.' }
     }

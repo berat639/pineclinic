@@ -294,7 +294,7 @@ export async function validateAppointmentWorkingHoursAndLeave(params: {
       const clinicDayIndex = (calendarDate.getUTCDay() + 6) % 7
       if (Array.isArray(workingHours.workingDays) && workingHours.workingDays.length > 0 && !workingHours.workingDays.includes(clinicDayIndex)) {
         const openDaysLabel = workingHours.workingDays.map(d => DAY_NAMES_TR[d] || '').filter(Boolean).join(', ')
-        throw new Error(`Kliniğimiz ${DAY_NAMES_TR[clinicDayIndex]} günleri kapalıdır (Açık günler: ${openDaysLabel}). Lütfen başka bir gün seçin.`)
+        throw new Error(`İşletmemiz ${DAY_NAMES_TR[clinicDayIndex]} günleri kapalıdır (Açık günler: ${openDaysLabel}). Lütfen başka bir gün seçin.`)
       }
     }
 
@@ -309,7 +309,7 @@ export async function validateAppointmentWorkingHoursAndLeave(params: {
       : (reqMin >= startMin && reqMin < endMin)
 
     if (!withinHours) {
-      throw new Error(`Seçilen saat (${time}) kliniğimizin çalışma saatleri (${workingHours.startTime} - ${workingHours.endTime}) dışındadır. Lütfen mesai saatleri içinde bir saat seçin.`)
+      throw new Error(`Seçilen saat (${time}) işletmemizin çalışma saatleri (${workingHours.startTime} - ${workingHours.endTime}) dışındadır. Lütfen mesai saatleri içinde bir saat seçin.`)
     }
   }
 
@@ -385,8 +385,8 @@ export async function getClinicAvailabilityReport(params: {
   ])
 
   const hoursLine = workingHours
-    ? `Klinik Çalışma Saatleri: ${workingHours.startTime} - ${workingHours.endTime}`
-    : 'Klinik Çalışma Saatleri: 08:00 - 20:00'
+    ? `İşletme Çalışma Saatleri: ${workingHours.startTime} - ${workingHours.endTime}`
+    : 'İşletme Çalışma Saatleri: 08:00 - 20:00'
 
   let closedDayWarning = ''
   if (workingHours && targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
@@ -394,7 +394,7 @@ export async function getClinicAvailabilityReport(params: {
     if (Number.isFinite(dt.getTime())) {
       const dayIdx = (dt.getUTCDay() + 6) % 7
       if (workingHours.workingDays.length > 0 && !workingHours.workingDays.includes(dayIdx)) {
-        closedDayWarning = `⚠️ UYARI: Kliniğimiz ${targetDate} (${DAY_NAMES_TR[dayIdx]}) günü kapalıdır.`
+        closedDayWarning = `⚠️ UYARI: İşletmemiz ${targetDate} (${DAY_NAMES_TR[dayIdx]}) günü kapalıdır.`
       }
     }
   }
@@ -422,7 +422,7 @@ export async function getClinicAvailabilityReport(params: {
   if (closedDayWarning) {
     return {
       count: totalCount,
-      sonuc: `${headerParts.join('\n')}\nBu tarihte klinik kapalı olduğu için randevu verilemez.`,
+      sonuc: `${headerParts.join('\n')}\nBu tarihte işletme kapalı olduğu için randevu verilemez.`,
     }
   }
 
@@ -524,5 +524,5 @@ export async function updateWhatsAppAppointment(tx: DbTransaction, args: Record<
   await tx.update(appointments).set({ date, time, data }).where(eq(appointments.id, id))
   const dentalId = (row.data as Record<string, unknown>)._dentalAppointmentId
   if (typeof dentalId === 'string') await tx.update(dentalAppointments).set({ startTime: start, endTime: new Date(start.getTime() + 15 * 60_000), timeConfirmed: false }).where(eq(dentalAppointments.id, dentalId))
-  return { success: true, id, message: `Randevu talebiniz ${date} ${time} olarak güncellendi; klinik onayı bekleniyor.` }
+  return { success: true, id, message: `Randevu talebiniz ${date} ${time} olarak güncellendi; işletme onayı bekleniyor.` }
 }

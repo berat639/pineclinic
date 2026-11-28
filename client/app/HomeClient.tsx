@@ -163,7 +163,7 @@ export default function Home() {
       webMaxWarnTimerRef.current = setTimeout(() => {
         if (!sessionRef.current || webClosingRef.current) return
         sessionRef.current.sendText(
-          `Sistem bildirimi: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya kısaca "Görüşme süremiz dolmak üzere, randevu veya klinik talebinizi hemen tamamlayalım; konu dışı devam edersek görüşmeyi sonlandırmam gerekecek." de.`
+          `Sistem bildirimi: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya kısaca "Görüşme süremiz dolmak üzere, randevu veya işletmemizle ilgili talebinizi hemen tamamlayalım; konu dışı devam edersek görüşmeyi sonlandırmam gerekecek." de.`
         )
       }, warnDelayMs)
     }
@@ -570,7 +570,7 @@ export default function Home() {
             <div>
               <div style={{ color: 'var(--foreground)', fontWeight: 700, fontSize: '0.95rem' }}>Yazılı Asistan</div>
               <div style={{ color: 'var(--foreground-2)', fontSize: '0.8rem', marginTop: 4 }}>
-                {isTextAssistantOpen ? 'Asistan açık, mesajınızı yazabilirsiniz.' : 'Randevu ve klinik sorularınız için sohbeti başlatın.'}
+                {isTextAssistantOpen ? 'Asistan açık, mesajınızı yazabilirsiniz.' : 'Randevu ve işletme sorularınız için sohbeti başlatın.'}
               </div>
             </div>
             <button

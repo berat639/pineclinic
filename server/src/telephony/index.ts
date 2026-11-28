@@ -55,7 +55,7 @@ function isPhoneConversationFarewell(
   if ([
     /\bgörüş(?:meyi|memizi)\s+sonlandır/,
     /\bsüremiz\s+doldu.*sonlandır/,
-    /\bklinik\s+işleminiz\s+(?:yoksa|olmadığı\s+için).*sonlandır/,
+    /\b(?:klinik|işletme\w*)\b.*işleminiz\s+(?:yoksa|olmadığı\s+için).*sonlandır/,
   ].some(pattern => pattern.test(normalized))) {
     return true
   }
@@ -602,7 +602,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                   return vipRecord.greeting
                 }
                 const { getGreeting: fetchGreeting } = await import('../db/repositories/settings')
-                return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben klinik asistanınızım.' : 'Merhaba, hoş geldiniz!')
+                return (await fetchGreeting(direction, state.clinicId)) || (direction === 'outbound' ? 'Merhaba, ben işletme asistanınızım.' : 'Merhaba, hoş geldiniz!')
               })(),
               getPromptTemplate('prompt.phone_channel_rules', state.clinicId).catch(() => ''),
               getPromptTemplate('prompt.flow_priority_rules', state.clinicId).catch(() => ''),
@@ -949,7 +949,7 @@ export async function startTelephony(deps: TelephonyDeps): Promise<{ stop: () =>
                 state.info.session.sendClientContent({
                   turns: [{
                     role: 'user',
-                    parts: [{ text: 'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya nazikçe: "Görüşme süremiz dolmak üzere, randevu veya klinik işleminizi hemen tamamlayalım; farklı bir konu varsa görüşmeyi sonlandırmam gerekecek." de ve işlemi hızla toparla.' }],
+                    parts: [{ text: 'Sistem: Maksimum görüşme süresinin dolmasına 20 saniye kaldı. Kullanıcıya nazikçe: "Görüşme süremiz dolmak üzere, randevu veya işletmemizle ilgili işleminizi hemen tamamlayalım; farklı bir konu varsa görüşmeyi sonlandırmam gerekecek." de ve işlemi hızla toparla.' }],
                   }],
                   turnComplete: true,
                 })

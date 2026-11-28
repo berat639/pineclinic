@@ -23,7 +23,7 @@ export interface SearchKnowledgeOptions {
 const DAY_NAMES_TR = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar']
 
 const DOCTOR_OR_CLINIC_QUERY_RE =
-  /\b(hekim\w*|doktor\w*|uzman\w*|branş\w*|brans\w*|kadro\w*|ortodont\w*|implant\w*|cerrah\w*|pedodont\w*|endodont\w*|protez\w*|periodont\w*|diş\s*hekim\w*|dis\s*hekim\w*|çalışma\s+saat\w*|calisma\s+saat\w*|mesai\w*|kaça\s+kadar|kaca\s+kadar|kaçta\s+açıl\w*|kacta\s+acil\w*|açık\s+mı|acik\s+mi|klinik\w*|kliniğ\w*|pine)\b/iu
+  /\b(hekim\w*|doktor\w*|uzman\w*|branş\w*|brans\w*|kadro\w*|ortodont\w*|implant\w*|cerrah\w*|pedodont\w*|endodont\w*|protez\w*|periodont\w*|diş\s*hekim\w*|dis\s*hekim\w*|çalışma\s+saat\w*|calisma\s+saat\w*|mesai\w*|kaça\s+kadar|kaca\s+kadar|kaçta\s+açıl\w*|kacta\s+acil\w*|açık\s+mı|acik\s+mi|klinik\w*|kliniğ\w*|işletme\w*|isletme\w*|pine)\b/iu
 
 const META_DIALOGUE_DOC_TITLE_RE =
   /^(?:doğal\s+diyalog(?:\s+ve\s+konuşma)?|konuşma\s+kuralları|diyalog\s+kuralları|sistem\s+kuralları)$/iu
@@ -57,17 +57,17 @@ export async function buildClinicRosterAndHoursText(explicitClinicId?: string): 
       const openDays = Array.isArray(workingHours.workingDays) && workingHours.workingDays.length > 0
         ? workingHours.workingDays.map(d => DAY_NAMES_TR[d] || '').filter(Boolean).join(', ')
         : 'Pazartesi - Cumartesi'
-      lines.push(`Klinik Çalışma Günleri ve Saatleri: ${openDays} günleri ${workingHours.startTime} - ${workingHours.endTime} saatleri arasında hizmet vermektedir.`)
+      lines.push(`İşletme Çalışma Günleri ve Saatleri: ${openDays} günleri ${workingHours.startTime} - ${workingHours.endTime} saatleri arasında hizmet vermektedir.`)
     }
 
     if (doctors.length > 0) {
       const docList = doctors
         .map(d => {
-          const spec = d.specialty && d.specialty.trim() ? ` — Uzmanlık / Branş: ${d.specialty.trim()}` : ' — Diş Hekimi'
+          const spec = d.specialty && d.specialty.trim() ? ` — Uzmanlık / Branş: ${d.specialty.trim()}` : ' — Uzman'
           return `• ${d.name}${spec}`
         })
         .join('\n')
-      lines.push(`Kliniğimizde Görev Yapan Hekimlerimiz (${doctors.length} Hekim):\n${docList}`)
+      lines.push(`İşletmemizde Görev Yapan Ekibimiz (${doctors.length} Kişi):\n${docList}`)
     }
 
     const text = lines.join('\n\n')
@@ -101,7 +101,7 @@ export async function searchKnowledge(
         seenIds.add('__live_clinic_roster__')
         allResults.push({
           id: '__live_clinic_roster__',
-          documentName: 'Klinik Hekim Kadrosu ve Çalışma Saatleri',
+          documentName: 'İşletme Kadrosu ve Çalışma Saatleri',
           chunkText: liveRosterText,
           score: 0.99,
         })
@@ -149,7 +149,7 @@ export async function searchKnowledge(
     if (liveRosterText) {
       allResults.push({
         id: '__live_clinic_roster__',
-        documentName: 'Klinik Hekim Kadrosu ve Çalışma Saatleri',
+        documentName: 'İşletme Kadrosu ve Çalışma Saatleri',
         chunkText: liveRosterText,
         score: 0.85,
       })

@@ -147,7 +147,7 @@ export function buildFlowNodePrompt(
       return 'Şimdi hastaNotKaydet aracını çağırarak hastanın notunu veya mesajını kaydet.'
     }
     if (act === 'send_wa_location') {
-      return 'Şimdi whatsappKonumGonder aracını çağırarak kliniğin konumunu arayan numaraya WhatsApp üzerinden gönder.'
+      return 'Şimdi whatsappKonumGonder aracını çağırarak işletmenin konumunu arayan numaraya WhatsApp üzerinden gönder.'
     }
     if (act === 'send_wa_message') {
       const msg = renderFlowTemplate(String(node.data.message || ''), fields)

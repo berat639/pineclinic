@@ -181,7 +181,7 @@ async function handleToolCall(
         return { success: true, message: `Görüşmeniz ${hedef} birimine aktarılıyor, lütfen hattan ayrılmayın.` }
       }
       if (name === 'whatsappKonumGonder') {
-        return { success: true, message: 'Klinik konumu WhatsApp üzerinden paylaşıldı.' }
+        return { success: true, message: 'İşletme konumu WhatsApp üzerinden paylaşıldı.' }
       }
       return { success: true, message: 'Görüşme sonlandırılıyor.' }
     }

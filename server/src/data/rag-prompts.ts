@@ -16,7 +16,7 @@
 import type { KnowledgeCategory } from '../db/repositories/knowledge'
 
 export const RAG_BASE_TEMPLATE = `BİLGİ BANKASI KULLANIMI:
-Yetkili bir klinik asistanı olarak, hastanın sorusuna yalnızca sağlanan bilgi bankası verilerini kullanarak profesyonel ve kısa yanıt ver. Eğer bilgi bankasında gerekli bilgi yoksa kesinlikle tahminde bulunma; hastadan gerekli bilgileri nazikçe iste. Fiyat/tutar sorulduğunda rakam verme, "fiyat bilgisini hekimlerimiz muayene sonrası iletecektir" deyip randevu oluşturmayı teklif et.`
+Yetkili bir işletme asistanı olarak, hastanın sorusuna yalnızca sağlanan bilgi bankası verilerini kullanarak profesyonel ve kısa yanıt ver. Eğer bilgi bankasında gerekli bilgi yoksa kesinlikle tahminde bulunma; hastadan gerekli bilgileri nazikçe iste. Fiyat/tutar sorulduğunda rakam verme, "fiyat bilgisini hekimlerimiz muayene sonrası iletecektir" deyip randevu oluşturmayı teklif et.`
 
 export interface RagPromptDoc {
   category: KnowledgeCategory

@@ -6,20 +6,20 @@ import { checkBrowserAudioSupport, runMicrophoneTest, type BrowserAudioSupport }
 import { evaluateLiveKitTurkishTurn } from '../../../lib/turn-detector'
 
 const DEFAULT_OFF_TOPIC_CLOSE_MESSAGE =
-  'Yardımcı olabileceğim bir klinik işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.'
+  'İşletmemizle ilgili yardımcı olabileceğim bir işleminiz yoksa görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.'
 
 const OFF_TOPIC_MESSAGE_PRESETS: Array<[string, string]> = [
   [
-    'Standart Klinik Veda (Önerilen)',
+    'Standart İşletme Vedası (Önerilen)',
     DEFAULT_OFF_TOPIC_CLOSE_MESSAGE,
   ],
   [
     'Kısa ve Net Kapanış',
-    'Klinik veya randevu dışında yardımcı olamadığım için görüşmemizi sonlandırıyorum, iyi günler dilerim.',
+    'İşletme veya randevu dışında yardımcı olamadığım için görüşmemizi sonlandırıyorum, iyi günler dilerim.',
   ],
   [
     'Resmi Kurumsal Kapanış',
-    'Hattımızı bekleyen hastalarımız için yalnızca klinik işlemlerinde tutabiliyoruz; görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
+    'Hattımızı bekleyen müşterilerimiz için yalnızca işletme işlemlerinde tutabiliyoruz; görüşmemizi sonlandırıyorum, sağlıklı günler dilerim.',
   ],
 ]
 
@@ -285,7 +285,7 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
 
     {tab === 'model' && <div style={{ display: 'grid', gap: 10 }}>
       {([
-        ['gemini-3.8-live', 'Hızlı mod', 'Günlük klinik görüşmelerinde en hızlı ve doğal konuşma sırası.'],
+        ['gemini-3.8-live', 'Hızlı mod', 'Günlük işletme görüşmelerinde en hızlı ve doğal konuşma sırası.'],
         ['gemini-3.8-live-extended-thinking', 'Derin düşünen mod', 'Karmaşık talepleri ve çok adımlı işlemleri arka planda değerlendirir.'],
       ] as const).map(([id, title, description]) => <label key={id} style={{ display: 'block', padding: 13, border: `1.5px solid ${settings.model === id ? '#2563eb' : 'var(--input-border)'}`, borderRadius: 10, background: settings.model === id ? 'var(--pc-pale-bg, var(--card-inner))' : 'var(--card-inner)', boxShadow: 'var(--pc-neo-subcard)', cursor: 'pointer' }}>
         <input type="radio" name="live-model" checked={settings.model === id} onChange={() => patch({ model: id })} style={{ marginRight: 8 }} />
@@ -393,7 +393,7 @@ export default function VoiceAiSettings({ onToast }: { onToast: (message: string
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <strong style={{ fontSize: 12, color: 'var(--foreground)' }}>Konu Dışı Israr (Otomatik Veda ve Kapatma)</strong>
-            <InfoTooltip title="Konu dışı otomatik kapatma nasıl çalışır?">Arayan kişi klinik veya randevu dışında sohbet açıp konuyu dağıttığında asistan önce nazikçe klinik işlemine yönlendirir. Seçtiğiniz sınırda konu dışına çıkmakta ısrar ederse aşağıdaki veda cümlesini söyleyip görüşmeyi (hem telefonda hem webde) otomatik sonlandırır.</InfoTooltip>
+            <InfoTooltip title="Konu dışı otomatik kapatma nasıl çalışır?">Arayan kişi işletme veya randevu dışında sohbet açıp konuyu dağıttığında asistan önce nazikçe işletme işlemine yönlendirir. Seçtiğiniz sınırda konu dışına çıkmakta ısrar ederse aşağıdaki veda cümlesini söyleyip görüşmeyi (hem telefonda hem webde) otomatik sonlandırır.</InfoTooltip>
           </div>
           <span style={{ padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'var(--pc-tint, #e0f2fe)', color: 'var(--pc-tint-fg, #0369a1)', border: '1px solid var(--input-border)', boxShadow: 'var(--pc-clay-pale)' }}>
             {settings.offTopicMaxStrikes === 1 ? '1. konu dışında anında kapatır' : `${settings.offTopicMaxStrikes}. konu dışında veda edip kapatır`}

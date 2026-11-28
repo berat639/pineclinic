@@ -138,15 +138,15 @@ function emptyState(req: FlowSimulationRequest): FlowSimulationResponse {
 async function resolveGreeting(direction: string): Promise<string> {
   try {
     return direction === 'outbound'
-      ? (await getGreeting('outbound')) || 'Merhaba, kliniğimizden memnuniyet anketi için arıyorum.'
-      : (await getGreeting('inbound')) || 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+      ? (await getGreeting('outbound')) || 'Merhaba, işletmemizden memnuniyet anketi için arıyorum.'
+      : (await getGreeting('inbound')) || 'Merhaba, işletmemize hoş geldiniz. Size nasıl yardımcı olabilirim?'
   } catch {
-    return 'Merhaba, kliniğimize hoş geldiniz. Size nasıl yardımcı olabilirim?'
+    return 'Merhaba, işletmemize hoş geldiniz. Size nasıl yardımcı olabilirim?'
   }
 }
 
 const DEFAULT_SIMULATOR_SYSTEM_RULES =
-  'Sen bir diş kliniğinin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.'
+  'Sen bir işletmenin yapay zeka sesli/yazılı asistanısın. Yalnızca Türkçe, doğal, nazik ve kısa (1-3 cümle) yanıt ver.'
 const DEFAULT_SIMULATOR_VOICE_FLOW_RULES =
   'AKIŞ YÖNETİMİ: Karşılama mesajını söyledikten sonra DUR ve hastanın konuşmasını bekle. Hasta konuştuğunda veya her soruya yanıt verdiğinde önce akisBilgisiGuncelle aracını çağır, araçtan gelen sıradaki TEK görevi/soruyu uygula ve tekrar hastanın konuşmasını bekle. Hasta yanıt vermeden asla bir sonraki soruya geçme. Bilgi bankasında aranacak sorular için bilgiBankasindaAra aracını kullan.'
 
@@ -194,7 +194,7 @@ async function buildVoiceConfig(req: FlowSimulationRequest, clinicId: string | u
   const voiceFlowRules = renderPromptTemplate(rawVoiceFlowRules.trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES, {}).trim() || DEFAULT_SIMULATOR_VOICE_FLOW_RULES
   let ragContext = ''
   try {
-    const docs = await retrieveTopK('kliniğin genel bilgileri, çalışma saatleri, hizmetler', 5, direction)
+    const docs = await retrieveTopK('işletmenin genel bilgileri, çalışma saatleri, hizmetler', 5, direction)
     if (docs.length > 0) ragContext = await buildRagPrompt(docs)
   } catch { /* bilgi bankası isteğe bağlı */ }
   const offTopicRule = voiceSettings
@@ -594,10 +594,10 @@ Görev:
       return `Randevu talebiniz (${fields.tarih || 'belirtilen tarih'} ${fields.saat || ''}) başarıyla oluşturuldu.`
     }
     if (act === 'save_patient_note' || act === 'notBirak') {
-      return 'Notunuz kaydedildi ve klinik bankosuna iletildi.'
+      return 'Notunuz kaydedildi ve işletme bankosuna iletildi.'
     }
     if (act === 'send_wa_location') {
-      return 'Klinik konumumuz WhatsApp üzerinden telefonunuza gönderildi.'
+      return 'İşletme konumumuz WhatsApp üzerinden telefonunuza gönderildi.'
     }
     if (act === 'send_wa_message' || act === 'send_sms') {
       return msg || 'Bilgilendirme mesajınız gönderildi.'
